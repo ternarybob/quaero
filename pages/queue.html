@@ -1283,6 +1283,14 @@
                 }
             }));
 
+
+            // Subscribe to server restart events - clear all job state to avoid stale data
+            wsUnsubscribers.push(WebSocketManager.onServerRestart(({ oldInstanceId, newInstanceId }) => {
+                console.log('[Queue] Server restart detected - clearing all job state');
+                window.dispatchEvent(new CustomEvent('jobList:serverRestart', {
+                    detail: { oldInstanceId, newInstanceId }
+                }));
+            }));
             // Subscribe to queue stats updates
             wsUnsubscribers.push(WebSocketManager.subscribe('queue_stats', (payload) => {
                 window.dispatchEvent(new CustomEvent('queueStats:update', {
@@ -1983,6 +1991,7 @@
                 // Step log fetch debouncing - prevents API flooding
                 _stepFetchDebounceTimers: {},  // key: jobId:stepName, value: timer ID
                 _stepFetchInFlight: new Set(), // tracks currently fetching steps
+                _stepFetchPromises: {},        // key: jobId:stepName, value: in-flight Promise
                 _stepFetchDebounceMs: 1000,    // 1 second debounce per user request
 
 
@@ -1994,8 +2003,8 @@
                     window.addEventListener('jobList:load', () => this.loadJobs());
                     window.addEventListener('jobList:render', () => this.renderJobs());
                     window.addEventListener('jobList:updateJob', (e) => this.updateJobInList(e.detail));
-                    // NOTE: jobLog listener REMOVED - architecture uses trigger-based approach
-                    window.addEventListener('jobList:refreshStepEvents', (e) => this.handleRefreshStepEvents(e.detail));
+                    // NOTE: jobLog and handleRefreshStepEvents listeners REMOVED - architecture uses trigger-based approach via refreshStepEvents() (line ~2022)
+                    // See QUEUE_LOGGING.md: "WebSocket events trigger incremental fetch"
                     // Handle child job spawn events - fetch children when new children are created
                     window.addEventListener('jobList:childSpawned', (e) => {
                         const { parent_job_id, child_job_id } = e.detail;
@@ -2021,7 +2030,9 @@
                     // Trigger-based event refresh (from event aggregator)
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
                     // Unified job/step status updates (primary mechanism for step status)
-                    window.addEventListener('jobList:jobUpdate', (e) => this.handleJobUpdate(e.detail));
+                    
+                    // Server restart handler - clear all job state to avoid stale requests
+                    window.addEventListener('jobList:serverRestart', () => this.handleServerRestart());
 
                     // Set initial load flag
                     this.isInitialLoad = true;
@@ -2405,6 +2416,24 @@
                     await Promise.all(promises);
                 },
 
+
+                // Clear all job state when server restarts - prevents stale job ID requests
+                handleServerRestart() {
+                    console.log('[Queue] Handling server restart - clearing all job state');
+                    if (this._pendingStepIds) { this._pendingStepIds.clear(); }
+                    if (this._refreshDebounceTimer) { clearTimeout(this._refreshDebounceTimer); this._refreshDebounceTimer = null; }
+                    if (this._stepEventFetchInFlight) { this._stepEventFetchInFlight.clear(); }
+                    if (this._childFetchInFlight) { this._childFetchInFlight.clear(); }
+                    this.allJobs = [];
+                    this.filteredJobs = [];
+                    this.jobTreeData = {};
+                    this.jobTreeExpandedSteps = {};
+                    this.jobLogs = {};
+                    this.jobLogsLoading = {};
+                    this.jobTreeLoading = {};
+                    this._pendingStepExpansions = {};
+                    this.loadJobs();
+                },
                 async loadJobs() {
                     console.log('[Queue] loadJobs called at', new Date().toISOString());
                     console.log('[Queue] Setting isLoading to true and updating store, current value:', this.isLoading);
@@ -3431,20 +3460,43 @@
                         this.debouncedRefreshParent(job.parent_id);
                     }
 
-                    // If a manager job (no parent_id, has step_job_ids) just completed, load step events
-                    // This handles the case where steps completed during job run but events weren't loaded
                     const completedStatuses = ['completed', 'failed', 'cancelled'];
-                    if (!job.parent_id && job.metadata?.step_job_ids && completedStatuses.includes(update.status)) {
-                        console.log('[Queue] Manager job completed, loading step events for:', job.id.substring(0, 8));
-                        // Load events for all steps in this manager
-                        const stepJobIds = job.metadata.step_job_ids;
-                        for (const [stepName, stepJobId] of Object.entries(stepJobIds)) {
-                            // Check if we already have events for this step
-                            const existingLogs = this.jobLogs[job.id] || [];
-                            const stepLogs = existingLogs.filter(l => l.step_name === stepName);
-                            if (stepLogs.length === 0) {
-                                this.fetchStepEventsById(job.id, stepName, stepJobId);
+                    if (!job.parent_id && completedStatuses.includes(update.status)) {
+                        // If a manager job has step_job_ids, load step events (covers steps that completed before WS triggers)
+                        if (job.metadata?.step_job_ids) {
+                            console.log('[Queue] Manager job completed, loading step events for:', job.id.substring(0, 8));
+                            const stepJobIds = job.metadata.step_job_ids;
+                            for (const [stepName, stepJobId] of Object.entries(stepJobIds)) {
+                                const existingLogs = this.jobLogs[job.id] || [];
+                                const stepLogs = existingLogs.filter(l => l.step_name === stepName);
+                                if (stepLogs.length === 0) {
+                                    this.fetchStepEventsById(job.id, stepName, stepJobId);
+                                }
                             }
+                        }
+
+                        // Ensure the tree view reflects final step expansions even if early WS step status events were missed.
+                        // This avoids clearing the DOM and ensures every step becomes visible/expanded at end of job.
+                        if (this.isJobStepsCollapsed(job.id)) {
+                            this.collapsedJobs[job.id] = false;
+                        }
+                        if (!this.jobTreeData[job.id]) {
+                            await this.loadJobTreeData(job.id);
+                        }
+
+                        await this.fetchJobStructure(job.id);
+
+                        const treeData = this.jobTreeData[job.id];
+                        if (treeData?.steps) {
+                            // Ensure logs are present before rendering completion state (UI tests assert immediately on completion)
+                            const fetches = treeData.steps.map((step, idx) => {
+                                const key = `${job.id}:${idx}`;
+                                if (this.jobTreeExpandedSteps[key] !== false) {
+                                    this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: true };
+                                }
+                                return this.fetchStepLogs(job.id, step.name, idx, true);
+                            });
+                            await Promise.all(fetches);
                         }
                     }
 
@@ -4198,7 +4250,7 @@
 
                     // Skip if already fetching this step
                     if (this._stepFetchInFlight.has(key)) {
-                        return;
+                        return this._stepFetchPromises[key];
                     }
 
                     // Clear existing debounce timer for this step
@@ -4209,14 +4261,16 @@
 
                     // For immediate requests (status changes), fetch now
                     if (immediate) {
-                        this._doFetchStepLogs(jobId, stepName, stepIdx);
-                        return;
+                        const promise = this._doFetchStepLogs(jobId, stepName, stepIdx);
+                        this._stepFetchPromises[key] = promise;
+                        return promise;
                     }
 
                     // Otherwise debounce - wait 1 second before fetching
                     this._stepFetchDebounceTimers[key] = setTimeout(() => {
                         delete this._stepFetchDebounceTimers[key];
-                        this._doFetchStepLogs(jobId, stepName, stepIdx);
+                        const promise = this._doFetchStepLogs(jobId, stepName, stepIdx);
+                        this._stepFetchPromises[key] = promise;
                     }, this._stepFetchDebounceMs);
                 },
 
@@ -4259,6 +4313,7 @@
                     } finally {
                         // Clear in-flight flag
                         this._stepFetchInFlight.delete(key);
+                        delete this._stepFetchPromises[key];
                     }
                 },
 
@@ -4298,15 +4353,10 @@
 
                             treeData.steps.forEach((step, idx) => {
                                 const key = `${jobId}:${idx}`;
-                                // Auto-expand if:
-                                // - Step has activity (running/completed/failed)
-                                // - Backend marked it as expanded
-                                // - Step was in pending expansions (arrived before tree loaded)
-                                // Only skip if user explicitly collapsed (value is false, not undefined)
-                                const shouldExpand = step.expanded ||
-                                    ['running', 'completed', 'failed'].includes(step.status) ||
-                                    pendingExpansions.has(step.name);
-                                if (shouldExpand && this.jobTreeExpandedSteps[key] !== false) {
+                                // Auto-expand ALL steps when tree loads (unless user explicitly collapsed).
+                                // This prevents "fast step" races where a step completes before WS events arrive,
+                                // and keeps the UI consistent: every step shows its logs by default.
+                                if (this.jobTreeExpandedSteps[key] !== false) {
                                     this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: true };
                                     console.log('[Queue] Auto-expanding step on tree load:', step.name, 'status:', step.status, 'wasPending:', pendingExpansions.has(step.name));
                                 }

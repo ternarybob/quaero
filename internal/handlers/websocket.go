@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -47,15 +48,19 @@ type WebSocketHandler struct {
 	jobSpawnThrottler      *rate.Limiter                // Rate limiter for job_spawn events
 	allowedEvents          map[string]bool              // Whitelist of events to broadcast (empty = allow all)
 	unifiedLogAggregator   *events.UnifiedLogAggregator // Unified aggregator for service and step logs
+	serverInstanceID       string                       // Unique ID generated on startup - clients use to detect server restart
 }
 
 func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger, config *common.WebSocketConfig) *WebSocketHandler {
 	h := &WebSocketHandler{
-		logger:       logger,
-		clients:      make(map[*websocket.Conn]bool),
-		clientMutex:  make(map[*websocket.Conn]*sync.Mutex),
-		eventService: eventService,
+		logger:           logger,
+		clients:          make(map[*websocket.Conn]bool),
+		clientMutex:      make(map[*websocket.Conn]*sync.Mutex),
+		eventService:     eventService,
+		serverInstanceID: uuid.New().String(),
 	}
+
+	logger.Info().Str("server_instance_id", h.serverInstanceID).Msg("WebSocket handler initialized with server instance ID")
 
 	// Initialize allowedEvents map (whitelist pattern)
 	// Empty list means allow all events (backward compatible)
@@ -203,14 +208,15 @@ type WSMessage struct {
 }
 
 type StatusUpdate struct {
-	Service       string `json:"service"`
-	Status        string `json:"status"`
-	Database      string `json:"database"`
-	ExtensionAuth string `json:"extensionAuth"`
-	ProjectsCount int    `json:"projectsCount"`
-	IssuesCount   int    `json:"issuesCount"`
-	PagesCount    int    `json:"pagesCount"`
-	LastScrape    string `json:"lastScrape"`
+	Service          string `json:"service"`
+	Status           string `json:"status"`
+	Database         string `json:"database"`
+	ExtensionAuth    string `json:"extensionAuth"`
+	ProjectsCount    int    `json:"projectsCount"`
+	IssuesCount      int    `json:"issuesCount"`
+	PagesCount       int    `json:"pagesCount"`
+	LastScrape       string `json:"lastScrape"`
+	ServerInstanceID string `json:"serverInstanceId"` // Unique ID per server startup - clients clear state on change
 }
 
 type CrawlProgressUpdate struct {
@@ -478,14 +484,15 @@ func (h *WebSocketHandler) BroadcastLog(entry interfaces.LogEntry) {
 // sendStatus sends current status to a specific client
 func (h *WebSocketHandler) sendStatus(conn *websocket.Conn) {
 	status := StatusUpdate{
-		Service:       "ONLINE",
-		Status:        "ONLINE",
-		Database:      "CONNECTED",
-		ExtensionAuth: "WAITING",
-		ProjectsCount: 0,
-		IssuesCount:   0,
-		PagesCount:    0,
-		LastScrape:    "Never",
+		Service:          "ONLINE",
+		Status:           "ONLINE",
+		Database:         "CONNECTED",
+		ExtensionAuth:    "WAITING",
+		ProjectsCount:    0,
+		IssuesCount:      0,
+		PagesCount:       0,
+		LastScrape:       "Never",
+		ServerInstanceID: h.serverInstanceID,
 	}
 
 	msg := WSMessage{

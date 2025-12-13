@@ -20,6 +20,7 @@ const WebSocketManager = (() => {
             this.isConnected = false;
             this.connectTimeout = null;
             this.healthCheckInterval = null;
+            this.serverInstanceId = null; // Track server instance to detect restarts
 
             this.connect();
             this.startHealthCheck();
@@ -95,9 +96,28 @@ const WebSocketManager = (() => {
         handleMessage(message) {
             const { type, payload } = message;
             if (!type) return;
+
+            // Check for server restart via status message with serverInstanceId
+            if (type === 'status' && payload && payload.serverInstanceId) {
+                const newInstanceId = payload.serverInstanceId;
+                if (this.serverInstanceId !== null && this.serverInstanceId !== newInstanceId) {
+                    // Server has restarted - notify subscribers to clear state
+                    console.log('[WSManager] Server restart detected (instance changed from', this.serverInstanceId, 'to', newInstanceId + ')');
+                    if (this.subscribers['_server_restart']) {
+                        this.subscribers['_server_restart'].forEach(cb => { try { cb({ oldInstanceId: this.serverInstanceId, newInstanceId }); } catch (e) {} });
+                    }
+                }
+                this.serverInstanceId = newInstanceId;
+            }
+
             if (this.subscribers[type]) {
                 this.subscribers[type].forEach(cb => { try { cb(payload); } catch (e) {} });
             }
+        }
+
+        // Subscribe to server restart events - callback receives { oldInstanceId, newInstanceId }
+        onServerRestart(callback) {
+            return this.subscribe('_server_restart', callback);
         }
 
         subscribe(messageType, callback) {

@@ -22,7 +22,7 @@ func NewBadgerDB(logger arbor.ILogger, config *common.BadgerConfig) (*BadgerDB, 
 	// If reset_on_startup is enabled, delete the existing database
 	if config.ResetOnStartup {
 		if _, err := os.Stat(config.Path); err == nil {
-			logger.Debug().Str("path", config.Path).Msg("Deleting existing database (reset_on_startup=true)")
+			logger.Info().Str("path", config.Path).Msg("Database reset: deleting existing database (reset_on_startup=true)")
 			if err := os.RemoveAll(config.Path); err != nil {
 				logger.Warn().Err(err).Str("path", config.Path).Msg("Failed to delete database directory")
 			}
