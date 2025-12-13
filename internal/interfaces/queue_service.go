@@ -59,6 +59,7 @@ type LogService interface {
 	GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
+	CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error)
 	// GetAggregatedLogs fetches logs for parent job and optionally all child jobs
 	// Merges logs from all jobs using k-way merge with cursor-based pagination
 	// Returns logs slice and metadata map containing job context for enrichment

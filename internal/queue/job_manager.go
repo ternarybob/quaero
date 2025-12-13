@@ -577,6 +577,28 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 
 		// Publish asynchronously to avoid blocking status updates
 		go func() {
+			// Publish unified job_update event for manager jobs (direct UI status sync).
+			// Avoid broadcasting for child/worker jobs to prevent UI flooding.
+			if jobState.Type == string(models.JobTypeManager) || jobState.Type == string(models.JobTypeParent) {
+				isTerminal := status == string(models.JobStatusCompleted) ||
+					status == string(models.JobStatusFailed) ||
+					status == string(models.JobStatusCancelled)
+
+				jobUpdateEvent := interfaces.Event{
+					Type: interfaces.EventJobUpdate,
+					Payload: map[string]interface{}{
+						"context":      "job",
+						"job_id":       jobID,
+						"status":       status,
+						"refresh_logs": isTerminal,
+						"timestamp":    time.Now().Format(time.RFC3339),
+					},
+				}
+				if err := m.eventService.Publish(ctx, jobUpdateEvent); err != nil {
+					// Log but don't fail
+				}
+			}
+
 			// Always publish status change event (for monitor)
 			if err := m.eventService.Publish(ctx, statusChangeEvent); err != nil {
 				// Log error but don't fail the status update
@@ -858,7 +880,9 @@ func (m *Manager) AddJobLogFull(ctx context.Context, jobID, level, message, step
 		payload := map[string]interface{}{
 			"job_id":     jobID,
 			"manager_id": managerID,
-			"step_name":  stepName,
+			"step_id":    stepID,
+			"parent_id":  parentID,
+			"step_name":  resolvedStepName,
 			"originator": resolvedOriginator,
 			"phase":      phase,
 			"level":      level,

@@ -137,7 +137,15 @@ document.addEventListener('alpine:init', () => {
 
         init() {
             window.debugLog('ServiceLogs', 'Initializing component');
-            this.loadRecentLogs();
+            // Only load initial logs on first component initialization per browser session
+            // Use sessionStorage to persist across page navigations (window variables reset on navigation)
+            // Subsequent page navigations rely on WebSocket triggers to avoid duplicate API calls
+            if (!sessionStorage.getItem('serviceLogsInitialized')) {
+                sessionStorage.setItem('serviceLogsInitialized', 'true');
+                this.loadRecentLogs();
+            } else {
+                window.debugLog('ServiceLogs', 'Skipping initial load (already initialized this session)');
+            }
             this.subscribeToWebSocket();
         },
 

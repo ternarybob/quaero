@@ -219,6 +219,15 @@ func (s *LogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {
 	return int(count), nil
 }
 
+func (s *LogStorage) CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error) {
+	normalizedLevel := normalizeLevel(level)
+	count, err := s.db.Store().Count(&models.LogEntry{}, badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel))
+	if err != nil {
+		return 0, fmt.Errorf("failed to count logs by level: %w", err)
+	}
+	return int(count), nil
+}
+
 func (s *LogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
 	query := badgerhold.Where("JobIDField").Eq(jobID)

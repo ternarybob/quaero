@@ -155,7 +155,6 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize application")
 	}
-	defer application.Close()
 
 	// Create shutdown channel for HTTP endpoint to trigger shutdown
 	shutdownChan := make(chan struct{})
@@ -207,5 +206,27 @@ func main() {
 		logger.Error().Err(err).Msg("Server shutdown failed")
 	}
 
+	// Close application resources with a hard timeout.
+	// During tests, the HTTP server may stop listening before all background goroutines exit;
+	// a hung shutdown leaves Badger files locked and prevents subsequent test runs from starting.
+	closeAppWithTimeout(application, logger, 5*time.Second)
+
 	logger.Info().Msg("Server stopped")
+}
+
+func closeAppWithTimeout(application *app.App, logger arbor.ILogger, timeout time.Duration) {
+	done := make(chan error, 1)
+	go func() {
+		done <- application.Close()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			logger.Error().Err(err).Msg("Application shutdown returned error")
+		}
+	case <-time.After(timeout):
+		logger.Error().Dur("timeout", timeout).Msg("Application shutdown timed out; forcing exit to release file locks")
+		os.Exit(0)
+	}
 }

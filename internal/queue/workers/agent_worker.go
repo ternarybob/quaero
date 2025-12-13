@@ -398,6 +398,8 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Msg("No documents found for agent processing")
+		// Add job log so step shows activity in UI
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Agent step %s (%s): No documents found matching filters - step completed", step.Name, agentType))
 		return stepID, nil
 	}
 

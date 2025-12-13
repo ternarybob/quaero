@@ -731,8 +731,17 @@ func (m *jobMonitor) publishParentJobProgressUpdate(
 		return
 	}
 
-	// Calculate overall status based on child states
-	overallStatus := m.calculateOverallStatus(stats)
+	// Use the authoritative persisted parent job status to avoid UI getting ahead of the API.
+	// We still compute child-based status as a fallback if the job cannot be loaded.
+	overallStatus := ""
+	if jobInterface, err := m.jobMgr.GetJob(ctx, parentJobID); err == nil {
+		if jobState, ok := jobInterface.(*models.QueueJobState); ok {
+			overallStatus = string(jobState.Status)
+		}
+	}
+	if overallStatus == "" {
+		overallStatus = m.calculateOverallStatus(stats)
+	}
 
 	// Get document count from job metadata (default to 0 if error)
 	documentCount, err := m.jobMgr.GetDocumentCount(ctx, parentJobID)
@@ -919,6 +928,25 @@ func (m *jobMonitor) publishStepCompletedEvent(ctx context.Context, jobID string
 	go func() {
 		if err := m.eventService.Publish(ctx, event); err != nil {
 			logger.Warn().Err(err).Msg("Failed to publish step completed event")
+		}
+	}()
+
+	// Also publish unified job_update for real-time tree status sync (avoids UI needing to infer from progress).
+	// This ensures the step status updates without requiring a page refresh or a heavy log payload.
+	jobUpdateEvent := interfaces.Event{
+		Type: interfaces.EventJobUpdate,
+		Payload: map[string]interface{}{
+			"context":      "job_step",
+			"job_id":       jobID,
+			"step_name":    stepName,
+			"status":       "completed",
+			"refresh_logs": true,
+			"timestamp":    time.Now().Format(time.RFC3339),
+		},
+	}
+	go func() {
+		if err := m.eventService.Publish(ctx, jobUpdateEvent); err != nil {
+			logger.Warn().Err(err).Msg("Failed to publish step completed job_update event")
 		}
 	}()
 }

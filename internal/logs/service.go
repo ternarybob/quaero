@@ -59,6 +59,10 @@ func (s *Service) CountLogs(ctx context.Context, jobID string) (int, error) {
 	return s.storage.CountLogs(ctx, jobID)
 }
 
+func (s *Service) CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error) {
+	return s.storage.CountLogsByLevel(ctx, jobID, level)
+}
+
 // GetLogsWithOffset fetches logs with offset-based pagination (delegates to storage)
 // Returns logs in DESC order (newest first) after skipping 'offset' newest logs
 func (s *Service) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {

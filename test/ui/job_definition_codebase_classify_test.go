@@ -3,6 +3,8 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -192,6 +194,290 @@ func (t *APICallTracker) GetServiceLogsCallsBefore(deadline time.Time) int {
 	return n
 }
 
+type httpGetter interface {
+	GET(path string) (*http.Response, error)
+	Logf(format string, args ...interface{})
+}
+
+func apiGetJSON(t *testing.T, h httpGetter, path string, dest interface{}) error {
+	t.Helper()
+
+	resp, err := h.GET(path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+		return fmt.Errorf("failed to decode %s: %w", path, err)
+	}
+
+	return nil
+}
+
+type apiJobTreeStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+type apiJobTreeResponse struct {
+	JobID  string           `json:"job_id"`
+	Status string           `json:"status"`
+	Steps  []apiJobTreeStep `json:"steps"`
+}
+
+type apiJobResponse struct {
+	Status string `json:"status"`
+}
+
+type apiJobTreeLogsStep struct {
+	StepName   string `json:"step_name"`
+	TotalCount int    `json:"total_count"`
+}
+
+type apiJobTreeLogsResponse struct {
+	Steps []apiJobTreeLogsStep `json:"steps"`
+}
+
+func getJobIDFromQueueUI(utc *UITestContext, jobName string) (string, error) {
+	var jobID string
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				if (typeof Alpine === 'undefined') return '';
+				const jobListEl = document.querySelector('[x-data="jobList"]');
+				if (!jobListEl) return '';
+				const component = Alpine.$data(jobListEl);
+				if (!component || !component.allJobs) return '';
+				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+				return job ? job.id : '';
+			})()
+		`, jobName), &jobID),
+	)
+	if err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
+func getUIStepStatusMap(utc *UITestContext) (map[string]string, error) {
+	var stepStatuses map[string]string
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = {};
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const step of treeSteps) {
+					const stepHeader = step.querySelector('.tree-step-header');
+					if (!stepHeader) continue;
+
+					const stepNameEl = step.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const statusEl = stepHeader.querySelector('.tree-step-status');
+					let status = 'unknown';
+					if (statusEl) {
+						if (statusEl.classList.contains('text-warning')) status = 'pending';
+						else if (statusEl.classList.contains('text-primary')) status = 'running';
+						else if (statusEl.classList.contains('text-success')) status = 'completed';
+						else if (statusEl.classList.contains('text-error')) status = 'failed';
+						else if (statusEl.classList.contains('text-gray')) status = 'cancelled';
+					}
+					result[stepName] = status;
+				}
+				return result;
+			})()
+		`, &stepStatuses),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return stepStatuses, nil
+}
+
+func getUIStepLogCountMap(utc *UITestContext) (map[string]int, error) {
+	var stepLogCounts map[string]int
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = {};
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const step of treeSteps) {
+					const stepNameEl = step.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const logsSection = step.querySelector('.tree-step-logs');
+					if (!logsSection) {
+						result[stepName] = 0;
+						continue;
+					}
+
+					const logLines = logsSection.querySelectorAll('.tree-log-line');
+					result[stepName] = logLines ? logLines.length : 0;
+				}
+				return result;
+			})()
+		`, &stepLogCounts),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return stepLogCounts, nil
+}
+
+func assertAPIParentJobStatusMatchesUI(t *testing.T, utc *UITestContext, h httpGetter, jobID string, uiStatus string) {
+	t.Helper()
+	if jobID == "" || uiStatus == "" {
+		return
+	}
+
+	var job apiJobResponse
+	if err := apiGetJSON(t, h, fmt.Sprintf("/api/jobs/%s", jobID), &job); err != nil {
+		t.Errorf("FAIL: Could not get parent job status from API for job_id=%s: %v", jobID, err)
+		return
+	}
+
+	if job.Status != uiStatus {
+		utc.Screenshot(fmt.Sprintf("status_mismatch_parent_%s_api_%s_ui_%s", sanitizeName(jobID), job.Status, uiStatus))
+		t.Errorf("FAIL: Parent job status mismatch: API=%s UI=%s (job_id=%s)", job.Status, uiStatus, jobID)
+	}
+}
+
+func assertAPIStepStatusesMatchUI(t *testing.T, utc *UITestContext, h httpGetter, jobID string) {
+	t.Helper()
+	if jobID == "" {
+		return
+	}
+
+	var tree apiJobTreeResponse
+	if err := apiGetJSON(t, h, fmt.Sprintf("/api/jobs/%s/tree", jobID), &tree); err != nil {
+		t.Errorf("FAIL: Could not get step statuses from API for job_id=%s: %v", jobID, err)
+		return
+	}
+
+	apiStepStatus := make(map[string]string, len(tree.Steps))
+	for _, s := range tree.Steps {
+		apiStepStatus[s.Name] = s.Status
+	}
+
+	uiStepStatus, err := getUIStepStatusMap(utc)
+	if err != nil {
+		t.Errorf("FAIL: Could not get step statuses from UI DOM: %v", err)
+		return
+	}
+
+	for stepName, uiStatus := range uiStepStatus {
+		apiStatus, ok := apiStepStatus[stepName]
+		if !ok {
+			t.Errorf("FAIL: Step '%s' present in UI but missing from API tree response (job_id=%s)", stepName, jobID)
+			continue
+		}
+		if apiStatus != uiStatus {
+			utc.Screenshot(fmt.Sprintf("status_mismatch_step_%s_api_%s_ui_%s", sanitizeName(stepName), apiStatus, uiStatus))
+			t.Errorf("FAIL: Step status mismatch for '%s': API=%s UI=%s (job_id=%s)", stepName, apiStatus, uiStatus, jobID)
+		}
+	}
+}
+
+func assertDisplayedLogCountsMatchAPITotalCountsWhenCompleted(t *testing.T, utc *UITestContext, h httpGetter, jobID string) {
+	t.Helper()
+	if jobID == "" {
+		t.Errorf("FAIL: Cannot assert UI vs API log counts: job_id is empty")
+		return
+	}
+
+	// Read the currently selected tree log level filter from the UI so the API total_count matches what the UI is showing.
+	// Queue UI uses per-job filter values: all | warn | error.
+	var treeLogLevel string
+	_ = chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const jobListEl = document.querySelector('[x-data="jobList"]');
+				if (!jobListEl) return 'all';
+				const component = Alpine.$data(jobListEl);
+				if (!component || !component.getTreeLogLevelFilter) return 'all';
+				return component.getTreeLogLevelFilter(%q) || 'all';
+			})()
+		`, jobID), &treeLogLevel),
+	)
+	if treeLogLevel == "" {
+		treeLogLevel = "all"
+	}
+
+	// Get UI counts for each step, including the "Show X earlier logs" indicator.
+	type stepCounts struct {
+		Shown       int `json:"shown"`
+		EarlierLogs int `json:"earlierLogs"`
+	}
+	var uiCounts map[string]stepCounts
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = {};
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const stepEl of treeSteps) {
+					const stepNameEl = stepEl.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const logsSection = stepEl.querySelector('.tree-step-logs');
+					if (!logsSection) continue;
+
+					const logLines = logsSection.querySelectorAll('.tree-log-line');
+					const shown = logLines ? logLines.length : 0;
+
+					let earlierLogs = 0;
+					const earlierLogsEl = logsSection.querySelector('.tree-logs-show-more');
+					if (earlierLogsEl) {
+						const match = earlierLogsEl.textContent.match(/(\d+)\s*earlier\s*logs?/i);
+						if (match) {
+							earlierLogs = parseInt(match[1], 10);
+						}
+					}
+
+					result[stepName] = { shown, earlierLogs };
+				}
+				return result;
+			})()
+		`, &uiCounts),
+	)
+	if err != nil {
+		t.Errorf("FAIL: Failed to get UI step log counts: %v", err)
+		return
+	}
+
+	for stepName, counts := range uiCounts {
+		var logsResp apiJobTreeLogsResponse
+		path := fmt.Sprintf("/api/jobs/%s/tree/logs?step=%s&limit=1&level=%s", jobID, url.QueryEscape(stepName), url.QueryEscape(treeLogLevel))
+		if err := apiGetJSON(t, h, path, &logsResp); err != nil {
+			t.Errorf("FAIL: Failed to fetch API log counts for step '%s' (job_id=%s): %v", stepName, jobID, err)
+			continue
+		}
+		if len(logsResp.Steps) != 1 {
+			t.Errorf("FAIL: Unexpected API logs response for step '%s' (job_id=%s): expected 1 step, got %d", stepName, jobID, len(logsResp.Steps))
+			continue
+		}
+
+		apiTotal := logsResp.Steps[0].TotalCount
+		uiTotal := counts.Shown + counts.EarlierLogs
+		if uiTotal != apiTotal {
+			utc.Screenshot(fmt.Sprintf("log_count_mismatch_%s_ui_%d_api_%d", sanitizeName(stepName), uiTotal, apiTotal))
+			t.Errorf("FAIL: Step '%s' UI total log count does not match API total_count: UI=%d (shown=%d + earlier=%d) API=%d (job_id=%s, level=%s)",
+				stepName, uiTotal, counts.Shown, counts.EarlierLogs, apiTotal, jobID, treeLogLevel)
+		}
+	}
+}
+
 // StepExpansionTracker tracks step expansion order and log line numbers
 type StepExpansionTracker struct {
 	mu             sync.Mutex
@@ -274,6 +560,7 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 
 	jobName := "Codebase Classify"
 	jobTimeout := MaxJobTestTimeout
+	httpHelper := utc.Env.NewHTTPTestHelperWithTimeout(t, 10*time.Second)
 
 	// Copy job definition to results for reference
 	if err := utc.CopyJobDefinitionToResults("../config/job-definitions/codebase_classify.toml"); err != nil {
@@ -332,7 +619,9 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	utc.Log("Starting job monitoring (NO page refresh)...")
 	startTime := time.Now()
 	progressDeadline := startTime.Add(30 * time.Second)
+	lastAPIVerify := startTime.Add(-30 * time.Second)
 	lastStatus := ""
+	jobID := ""
 	lastProgressLog := time.Now()
 	lastScreenshotTime := time.Now()
 	lastExpansionCheck := time.Now()
@@ -409,12 +698,31 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 			continue
 		}
 
+		// Capture job ID once Alpine has loaded the job list.
+		if jobID == "" {
+			if id, err := getJobIDFromQueueUI(utc, jobName); err == nil && id != "" {
+				jobID = id
+				utc.Log("Captured job_id from UI: %s", jobID)
+			}
+		}
+
 		// Log status changes
 		if currentStatus != lastStatus && currentStatus != "" {
 			elapsed := time.Since(startTime)
 			utc.Log("Status change: %s -> %s (at %v)", lastStatus, currentStatus, elapsed.Round(time.Second))
 			lastStatus = currentStatus
 			utc.FullScreenshot(fmt.Sprintf("status_%s_%s", sanitizeName(jobName), currentStatus))
+		}
+
+		// New assertions:
+		// - Every 30 seconds, compare parent job status (API) vs badge status (UI)
+		// - Every 30 seconds, compare each step status (API) vs UI step status
+		// Fail if there is any mismatch.
+		if jobID != "" && currentStatus != "" && time.Since(lastAPIVerify) >= 30*time.Second {
+			utc.Log("Polling assertion: Verifying API vs UI parent + step statuses (every 30s)...")
+			assertAPIParentJobStatusMatchesUI(t, utc, httpHelper, jobID, currentStatus)
+			assertAPIStepStatusesMatchUI(t, utc, httpHelper, jobID)
+			lastAPIVerify = time.Now()
 		}
 
 		// Check for terminal status
@@ -438,6 +746,7 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	// ===============================
 	// ASSERTIONS
 	// ===============================
+	finalStatus := lastStatus
 	utc.Log("--- Running Assertions ---")
 
 	// Assertion 0: Progressive log updates within first 30 seconds (UAT regression guard)
@@ -474,6 +783,11 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	utc.Log("Assertion 3: Checking all steps have logs (not 'No logs for this step')...")
 	assertAllStepsHaveLogs(t, utc)
 
+	// Assertion 3b: Completed/running steps MUST have logs
+	// This is stricter - specifically checks that completed/running steps have > 0 logs displayed
+	utc.Log("Assertion 3b: Checking completed/running steps have logs...")
+	assertCompletedStepsMustHaveLogs(t, utc)
+
 	// Assertion 4: Log line numbering is correct
 	// - Steps with < 100 logs: sequential 1→N
 	// - Steps with > 100 logs: only latest 100 shown, ordered by latest at bottom
@@ -484,6 +798,15 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	expansionOrder := expansionTracker.GetExpansionOrder()
 	utc.Log("Assertion 5: Step expansion order = %v", expansionOrder)
 	assertAllStepsAutoExpand(t, utc, expansionOrder)
+
+	// Assertion 6: If job completed, UI log lines shown MUST equal API total_count for each step.
+	// This is intentionally strict and expected to fail until the UI supports complete log hydration.
+	if finalStatus == "completed" {
+		utc.Log("Assertion 6: Verifying UI log line count equals API total_count for each step...")
+		assertDisplayedLogCountsMatchAPITotalCountsWhenCompleted(t, utc, httpHelper, jobID)
+	} else {
+		utc.Log("Skipping Assertion 6 (job status=%s)", finalStatus)
+	}
 
 	utc.Log("✓ Codebase Classify job definition test completed with all assertions")
 }
@@ -970,6 +1293,119 @@ func assertAllStepsHaveLogs(t *testing.T, utc *UITestContext) {
 		t.Errorf("FAIL: %d step(s) have no logs: %v", len(stepsWithoutLogs), stepsWithoutLogs)
 	} else {
 		utc.Log("✓ PASS: All steps have logs")
+	}
+}
+
+// assertCompletedStepsMustHaveLogs verifies that completed/running steps have logs.
+// This is a stricter check than assertAllStepsHaveLogs - it specifically validates that
+// steps with status "completed" or "running" MUST have > 0 logs displayed.
+// A completed step showing "No logs for this step" indicates a UI bug.
+func assertCompletedStepsMustHaveLogs(t *testing.T, utc *UITestContext) {
+	// Get both step status and log presence from DOM in one call
+	var stepStatusAndLogs []map[string]interface{}
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = [];
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const step of treeSteps) {
+					const stepHeader = step.querySelector('.tree-step-header');
+					if (!stepHeader) continue;
+
+					const stepNameEl = step.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					// Get status from status element
+					const statusEl = stepHeader.querySelector('.tree-step-status');
+					let status = 'unknown';
+					if (statusEl) {
+						if (statusEl.classList.contains('text-warning')) status = 'pending';
+						else if (statusEl.classList.contains('text-primary')) status = 'running';
+						else if (statusEl.classList.contains('text-success')) status = 'completed';
+						else if (statusEl.classList.contains('text-error')) status = 'failed';
+						else if (statusEl.classList.contains('text-gray')) status = 'cancelled';
+					}
+
+					// Check logs section
+					const logsSection = step.querySelector('.tree-step-logs');
+					let hasLogs = false;
+					let logCount = 0;
+					let reason = 'not_expanded';
+
+					if (logsSection) {
+						// Check for "No logs" message
+						const noLogsMsg = logsSection.querySelector('.tree-step-no-logs, .text-gray');
+						if (noLogsMsg && noLogsMsg.textContent.toLowerCase().includes('no logs')) {
+							reason = 'no_logs_message';
+						} else {
+							// Count log lines
+							const logLines = logsSection.querySelectorAll('.tree-log-line');
+							logCount = logLines.length;
+							if (logCount > 0) {
+								hasLogs = true;
+								reason = 'has_logs';
+							} else {
+								reason = 'empty_logs_section';
+							}
+						}
+					}
+
+					result.push({
+						stepName: stepName,
+						status: status,
+						hasLogs: hasLogs,
+						logCount: logCount,
+						reason: reason
+					});
+				}
+				return result;
+			})()
+		`, &stepStatusAndLogs),
+	)
+	if err != nil {
+		t.Errorf("FAIL: Failed to get step status and logs: %v", err)
+		return
+	}
+
+	if len(stepStatusAndLogs) == 0 {
+		t.Errorf("FAIL: No steps found in DOM")
+		return
+	}
+
+	utc.Log("Checking %d steps: completed/running steps MUST have logs", len(stepStatusAndLogs))
+
+	// Check each step: completed/running steps MUST have logs
+	violationCount := 0
+	for _, step := range stepStatusAndLogs {
+		stepName := step["stepName"].(string)
+		status := step["status"].(string)
+		hasLogs := step["hasLogs"].(bool)
+		reason := step["reason"].(string)
+
+		// Only check completed and running steps
+		if status == "completed" || status == "running" {
+			if !hasLogs {
+				violationCount++
+				t.Errorf("FAIL: Step '%s' has status '%s' but shows NO logs (reason: %s) - completed/running steps MUST have logs",
+					stepName, status, reason)
+			} else {
+				logCount := 0
+				if lc, ok := step["logCount"].(float64); ok {
+					logCount = int(lc)
+				}
+				utc.Log("✓ Step '%s' (%s) has %d logs", stepName, status, logCount)
+			}
+		} else {
+			utc.Log("  Step '%s' has status '%s' (skipped - not completed/running)", stepName, status)
+		}
+	}
+
+	if violationCount > 0 {
+		t.Errorf("FAIL: %d completed/running step(s) have no logs - this is a UI bug", violationCount)
+	} else {
+		utc.Log("✓ PASS: All completed/running steps have logs")
 	}
 }
 

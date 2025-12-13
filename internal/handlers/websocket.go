@@ -1358,13 +1358,16 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		// Route all job logs through the unified aggregator for trigger-based updates
 		// The aggregator will send a refresh_logs trigger, and UI will fetch from /api/logs
 		if h.unifiedLogAggregator != nil {
-			stepName := getString(payload, "step_name")
-			if stepName != "" {
-				// Step logs - record step event for batch triggering
-				stepID := getString(payload, "job_id")
-				if stepID != "" {
-					h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
-				}
+			// Use step_id to aggregate ALL logs for a step (manager -> step -> worker).
+			// This prevents refresh_logs from carrying thousands of worker job IDs and flooding /api/logs.
+			stepID := getString(payload, "step_id")
+			if stepID == "" && getString(payload, "step_name") != "" {
+				// Backward-compatible fallback: older payloads didn't include step_id.
+				stepID = getString(payload, "job_id")
+			}
+
+			if stepID != "" {
+				h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
 			} else {
 				// Non-step job logs - record as service log
 				h.unifiedLogAggregator.RecordServiceLog(ctx)

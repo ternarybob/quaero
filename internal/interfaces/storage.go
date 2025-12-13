@@ -163,6 +163,7 @@ type LogStorage interface {
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
+	CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error)
 
 	// GetLogsWithOffset fetches logs starting from an offset (for pagination)
 	// offset is the number of most recent logs to skip

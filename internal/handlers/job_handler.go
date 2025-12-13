@@ -1503,9 +1503,7 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 			Name:     stepName,
 			Status:   "pending", // Default if no step job found
 			Expanded: false,
-			ChildSummary: &ChildJobSummary{
-				ErrorGroups: []ErrorGroup{},
-			},
+			ChildSummary: nil,
 			Logs: []JobTreeLog{},
 		}
 
@@ -1528,72 +1526,13 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 				step.DurationMs = endTime.Sub(*stepJob.StartedAt).Milliseconds()
 			}
 
-			// Get grandchildren (work items spawned by this step job) for ChildSummary
-			grandchildOpts := &interfaces.JobListOptions{
-				ParentID: stepJob.ID,
-				Limit:    10000,
-				Offset:   0,
-			}
-			grandchildren, err := h.jobStorage.ListJobs(ctx, grandchildOpts)
-			if err != nil {
-				h.logger.Warn().Err(err).Str("step_job_id", stepJob.ID).Msg("Failed to get grandchildren for step")
-			} else {
-				for _, grandchild := range grandchildren {
-					step.ChildSummary.Total++
-					switch grandchild.Status {
-					case models.JobStatusCompleted:
-						step.ChildSummary.Completed++
-					case models.JobStatusFailed:
-						step.ChildSummary.Failed++
-						if grandchild.Error != "" {
-							h.addErrorToGroup(step.ChildSummary, grandchild.Error)
-						}
-					case models.JobStatusCancelled:
-						step.ChildSummary.Cancelled++
-					case models.JobStatusRunning:
-						step.ChildSummary.Running++
-					case models.JobStatusPending:
-						step.ChildSummary.Pending++
-					}
-				}
-			}
-
-			// Get total log count for "Show earlier logs" indicator
-			totalCount, countErr := h.logService.CountLogs(ctx, stepJob.ID)
-			if countErr != nil {
-				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Msg("Failed to count logs for step")
-			} else {
-				step.TotalLogs = totalCount
-			}
-
-			// Get the NEWEST 100 logs for this step job (newest first, then reverse for display)
-			// Using GetLogsWithOffset to get DESC order, limit 100, offset 0 = newest 100
-			stepLogs, err := h.logService.GetLogsWithOffset(ctx, stepJob.ID, 100, 0)
-			if err != nil {
-				h.logger.Warn().Err(err).Str("step_job_id", stepJob.ID).Msg("Failed to get logs for step")
-			} else {
-				// Logs from GetLogsWithOffset are in DESC order (newest first)
-				// Reverse to get ASC order for display (oldest of the newest 100 at top)
-				for i := len(stepLogs) - 1; i >= 0; i-- {
-					step.Logs = append(step.Logs, JobTreeLog{
-						Level: stepLogs[i].Level,
-						Text:  stepLogs[i].Message,
-					})
-				}
-			}
-
-			// Backend-driven expansion: expand if failed, running, has logs, or is current step
-			// This moves expansion logic from frontend to backend for simpler UI
-			hasLogs := len(step.Logs) > 0
+			// Backend-driven expansion: expand if failed, running, or is current step.
+			// This endpoint intentionally does not load logs/child summaries to remain fast;
+			// logs are fetched via `/api/jobs/{id}/tree/logs` and `/api/logs`.
 			isRunning := stepJob.Status == models.JobStatusRunning
 			isFailed := stepJob.Status == models.JobStatusFailed
 			isCurrentStep := stepName == currentStepName
-			step.Expanded = isFailed || isRunning || hasLogs || isCurrentStep
-		}
-
-		// Set child_summary to nil if no grandchildren
-		if step.ChildSummary.Total == 0 {
-			step.ChildSummary = nil
+			step.Expanded = isFailed || isRunning || isCurrentStep
 		}
 
 		steps = append(steps, step)
@@ -1673,14 +1612,37 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
-			if limit > 500 {
-				limit = 500
+			if limit > 20000 {
+				limit = 20000
 			}
 		}
 	}
+	level := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level")))
+	if level == "" {
+		level = "all"
+	}
+	// Normalize aliases
+	switch level {
+	case "warning":
+		level = "warn"
+	case "err":
+		level = "error"
+	}
+	validLevels := map[string]bool{
+		"error": true,
+		"warn":  true,
+		"info":  true,
+		"debug": true,
+		"all":   true,
+	}
+	if !validLevels[level] {
+		http.Error(w, "Invalid log level. Valid levels are: error, warn, info, debug, all", http.StatusBadRequest)
+		return
+	}
 
-	// Get the parent job (manager job)
-	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
+	// Get the parent job (manager job) from storage for authoritative status.
+	// This avoids races where the in-memory runtime state lags behind persisted status.
+	jobInterface, err := h.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
 		http.Error(w, "Job not found", http.StatusNotFound)
 		return
@@ -1771,26 +1733,102 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 			stepLogs.StepID = stepJob.ID
 			stepLogs.Status = string(stepJob.Status)
 
-			// Get total log count first (for pagination indicator)
-			totalCount, countErr := h.logService.CountLogs(ctx, stepJob.ID)
+			// Resolve total_count and newest logs using the same level semantics as /api/logs:
+			// - all/debug: include all levels
+			// - info: include info + warn + error (exclude debug)
+			// - warn: include warn + error
+			// - error: include error only
+			type levelSlice struct {
+				level string
+				logs  []models.LogEntry
+				i     int
+			}
+
+			getIncludedLevels := func(filter string) []string {
+				switch filter {
+				case "error":
+					return []string{"error"}
+				case "warn":
+					return []string{"warn", "error"}
+				case "info":
+					return []string{"info", "warn", "error"}
+				case "debug", "all":
+					return []string{"debug", "info", "warn", "error"}
+				default:
+					return []string{"debug", "info", "warn", "error"}
+				}
+			}
+
+			// Count logs matching the filter.
+			totalCount := 0
+			var countErr error
+			if level == "all" || level == "debug" {
+				totalCount, countErr = h.logService.CountLogs(ctx, stepJob.ID)
+			} else {
+				for _, lv := range getIncludedLevels(level) {
+					// CountLogsByLevel expects exact level; we sum included levels for hierarchical filters.
+					n, err := h.logService.CountLogsByLevel(ctx, stepJob.ID, lv)
+					if err != nil {
+						countErr = err
+						break
+					}
+					totalCount += n
+				}
+			}
 			if countErr != nil {
-				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Msg("Failed to count logs for step")
+				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Str("level", level).Msg("Failed to count logs for step")
 			} else {
 				stepLogs.TotalCount = totalCount
 			}
 
-			// Get the NEWEST logs for this step job (newest first, then reverse for display)
-			logs, err := h.logService.GetLogsWithOffset(ctx, stepJob.ID, limit, 0)
-			if err == nil {
-				// Logs from GetLogsWithOffset are in DESC order (newest first)
-				// Reverse to get ASC order for display (oldest of the newest N at top)
-				for i := len(logs) - 1; i >= 0; i-- {
-					stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
-						LineNumber: logs[i].LineNumber,
-						Level:      logs[i].Level,
-						Text:       logs[i].Message,
-					})
+			// Fetch newest logs matching the filter (bounded by limit).
+			// NOTE: Storage returns DESC order (newest first). We'll reverse for display.
+			var newest []models.LogEntry
+			if level == "all" || level == "debug" {
+				newest, _ = h.logService.GetLogsWithOffset(ctx, stepJob.ID, limit, 0)
+			} else if level == "error" {
+				newest, _ = h.logService.GetLogsByLevel(ctx, stepJob.ID, "error", limit)
+			} else {
+				included := getIncludedLevels(level)
+				parts := make([]levelSlice, 0, len(included))
+				for _, lv := range included {
+					part, err := h.logService.GetLogsByLevel(ctx, stepJob.ID, lv, limit)
+					if err != nil {
+						continue
+					}
+					parts = append(parts, levelSlice{level: lv, logs: part, i: 0})
 				}
+
+				// K-way merge by line number (newest first).
+				merged := make([]models.LogEntry, 0, limit)
+				for len(merged) < limit {
+					bestIdx := -1
+					bestLine := -1
+					for pi := range parts {
+						if parts[pi].i >= len(parts[pi].logs) {
+							continue
+						}
+						ln := parts[pi].logs[parts[pi].i].LineNumber
+						if ln > bestLine {
+							bestLine = ln
+							bestIdx = pi
+						}
+					}
+					if bestIdx < 0 {
+						break
+					}
+					merged = append(merged, parts[bestIdx].logs[parts[bestIdx].i])
+					parts[bestIdx].i++
+				}
+				newest = merged
+			}
+
+			for i := len(newest) - 1; i >= 0; i-- {
+				stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
+					LineNumber: newest[i].LineNumber,
+					Level:      newest[i].Level,
+					Text:       newest[i].Message,
+				})
 			}
 		}
 

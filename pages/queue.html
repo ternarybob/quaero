@@ -2030,6 +2030,7 @@
                     // Trigger-based event refresh (from event aggregator)
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
                     // Unified job/step status updates (primary mechanism for step status)
+                    window.addEventListener('jobList:jobUpdate', (e) => this.handleJobUpdate(e.detail));
                     
                     // Server restart handler - clear all job state to avoid stale requests
                     window.addEventListener('jobList:serverRestart', () => this.handleServerRestart());
@@ -2233,7 +2234,7 @@
 
                 getLogLevelClass(level) {
                     // Color classes matching Service Logs panel styling
-                    switch (level) {
+                    switch (this.normalizeLogLevel(level)) {
                         case 'error': return 'log-level-error';
                         case 'warn': return 'log-level-warn';
                         case 'debug': return 'log-level-debug';
@@ -2241,9 +2242,20 @@
                     }
                 },
 
+                normalizeLogLevel(level) {
+                    const v = (level || '').toString().trim().toLowerCase();
+                    // Accept both word and 3-letter formats from the API/storage.
+                    if (v === 'err') return 'error';
+                    if (v === 'wrn') return 'warn';
+                    if (v === 'inf') return 'info';
+                    if (v === 'dbg') return 'debug';
+                    if (v === 'fatal' || v === 'panic') return 'error';
+                    return v || 'info';
+                },
+
                 getLogLevelTag(level) {
                     // Text-based level tags matching standard log format
-                    switch (level) {
+                    switch (this.normalizeLogLevel(level)) {
                         case 'error': return '[ERR]';
                         case 'warn': return '[WRN]';
                         case 'debug': return '[DBG]';
@@ -2253,7 +2265,7 @@
 
                 getTerminalLevelClass(level) {
                     // Terminal color classes matching Service Logs panel styling
-                    switch (level) {
+                    switch (this.normalizeLogLevel(level)) {
                         case 'error': return 'terminal-error';
                         case 'warn': return 'terminal-warning';
                         case 'debug': return 'terminal-debug';
@@ -2340,7 +2352,8 @@
                     try {
                         // Use unified /api/logs endpoint with include_children=false for direct step logs
                         console.log('[Queue] Fetching events for completed step', stepName, 'job:', stepJobId.substring(0, 8));
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=info`);
+                        const level = this.getTreeLogLevelFilter(managerId);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
                             return;
@@ -3352,6 +3365,8 @@
                         return;
                     }
 
+                    const completedStatuses = ['completed', 'failed', 'cancelled'];
+
                     // Update job fields - preserve existing values when fields are omitted
                     job.status = update.status;
 
@@ -3460,7 +3475,6 @@
                         this.debouncedRefreshParent(job.parent_id);
                     }
 
-                    const completedStatuses = ['completed', 'failed', 'cancelled'];
                     if (!job.parent_id && completedStatuses.includes(update.status)) {
                         // If a manager job has step_job_ids, load step events (covers steps that completed before WS triggers)
                         if (job.metadata?.step_job_ids) {
@@ -3488,16 +3502,29 @@
 
                         const treeData = this.jobTreeData[job.id];
                         if (treeData?.steps) {
-                            // Ensure logs are present before rendering completion state (UI tests assert immediately on completion)
-                            const fetches = treeData.steps.map((step, idx) => {
+                            // Ensure expanded before rendering completion state (UI tests assert immediately on completion)
+                            treeData.steps.forEach((_, idx) => {
                                 const key = `${job.id}:${idx}`;
                                 if (this.jobTreeExpandedSteps[key] !== false) {
                                     this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: true };
                                 }
-                                return this.fetchStepLogs(job.id, step.name, idx, true);
                             });
-                            await Promise.all(fetches);
+
+                            // Fetch final step logs so the DOM reflects completion state.
+                            // Bypass debouncing/in-flight caching so completion always upgrades to a full log fetch.
+                            for (let idx = 0; idx < treeData.steps.length; idx++) {
+                                const step = treeData.steps[idx];
+                                const fetchKey = `${job.id}:${step.name}`;
+                                if (this._stepFetchDebounceTimers[fetchKey]) {
+                                    clearTimeout(this._stepFetchDebounceTimers[fetchKey]);
+                                    delete this._stepFetchDebounceTimers[fetchKey];
+                                }
+                                this._stepFetchInFlight.delete(fetchKey);
+                                delete this._stepFetchPromises[fetchKey];
+                                await this._doFetchStepLogs(job.id, step.name, idx);
+                            }
                         }
+
                     }
 
                     // Trim to pageSize if on first page to maintain pagination consistency
@@ -3863,6 +3890,16 @@
                         this._pendingStepIds.add(stepId);
                     }
 
+                    // Track which step_ids were marked finished so we can hydrate more aggressively.
+                    if (finished) {
+                        if (!this._pendingStepIdsFinished) {
+                            this._pendingStepIdsFinished = new Set();
+                        }
+                        for (const stepId of step_ids) {
+                            this._pendingStepIdsFinished.add(stepId);
+                        }
+                    }
+
                     // Clear existing timer
                     if (this._refreshDebounceTimer) {
                         clearTimeout(this._refreshDebounceTimer);
@@ -3952,6 +3989,9 @@
                                 continue;
                             }
 
+                            // Determine whether this refresh was triggered by a finished step.
+                            const isFinished = !!this._pendingStepIdsFinished?.has(stepJobId);
+
                             // Queue expansion for when tree data loads (handles race condition)
                             // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
                             if (stepStatus === 'running' || stepStatus === 'completed' || stepStatus === 'failed') {
@@ -3961,9 +4001,33 @@
                                 this._pendingStepExpansions[managerId].add(stepName);
                             }
 
-                            // Fetch latest 100 logs (newest first, then reverse for display)
+                            // Progressive hydration: keep UI light during running, but ensure visible growth in the DOM.
+                            const limitKey = `${managerId}:${stepName}`;
+                            if (!this.stepLogLimits[limitKey]) {
+                                // Start small during running so DOM log counts visibly increase over time (UI regression guard).
+                                this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: isFinished ? this.defaultLogsPerStep : 20 };
+                            }
+
+                            let currentLimit = this.getStepLogLimit(managerId, stepName);
+                            if (!isFinished) {
+                                const treeStep = this.jobTreeData[managerId]?.steps?.find(s => s.name === stepName);
+                                const existingLogsLen = (treeStep?.logs || []).length;
+                                const knownTotal = treeStep?.totalLogCount || 0;
+
+                                // Only increase the limit when we've filled the current window, otherwise the
+                                // "earlier logs" count becomes inconsistent with the visible line numbers.
+                                if (knownTotal > existingLogsLen && existingLogsLen === currentLimit && currentLimit < this.defaultLogsPerStep) {
+                                    currentLimit = Math.min(this.defaultLogsPerStep, currentLimit + 20);
+                                    this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: currentLimit };
+                                }
+                            }
+
+                            const fetchLimit = Math.min(currentLimit, 5000); // Server enforces a hard cap too
+
+                            // Fetch latest N logs (newest first, then reverse for display)
                             // No cursor - always get the latest logs for sliding window display
-                            let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=desc&level=info`;
+                            const level = this.getTreeLogLevelFilter(managerId);
+                            let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${fetchLimit}&order=desc&level=${encodeURIComponent(level)}`;
 
                             const response = await fetch(url);
                             if (!response.ok) {
@@ -3978,6 +4042,11 @@
                             newLogs = newLogs.reverse();
 
                             // Update jobTreeData (tree view) - always update status, even if no new logs
+                            // If tree data not loaded yet, fetch it first (handles race condition)
+                            if (!this.jobTreeData[managerId]) {
+                                console.log('[Queue] Tree data not loaded for', managerId.substring(0, 8), '- loading now');
+                                await this.loadJobTreeData(managerId);
+                            }
                             if (this.jobTreeData[managerId]) {
                                 const treeData = this.jobTreeData[managerId];
                                 const stepIdx = treeData.steps?.findIndex(s => s.name === stepName);
@@ -4040,6 +4109,13 @@
                             console.error('[Queue] Error fetching step events:', err);
                         } finally {
                             this._stepEventFetchInFlight.delete(stepJobId);
+                        }
+                    }
+
+                    // Clear finished markers for processed step IDs
+                    if (this._pendingStepIdsFinished) {
+                        for (const stepJobId of stepIds) {
+                            this._pendingStepIdsFinished.delete(stepJobId);
                         }
                     }
 
@@ -4168,13 +4244,6 @@
                             stepJob.status = status;
                         });
 
-                        // Fetch logs immediately on status change (bypass debounce)
-                        if (this.jobTreeData[job_id]?.steps) {
-                            const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
-                            if (stepIdx >= 0) {
-                                this.fetchStepLogs(job_id, step_name, stepIdx, true);
-                            }
-                        }
                     }
 
                     // Fetch updated structure if refresh_logs is true
@@ -4186,6 +4255,8 @@
                     this.throttledRenderJobs();
                 },
 
+                // Hydrate ALL step logs for a completed manager job so the UI reflects final totals.
+                // This is intentionally used only on terminal manager completion to avoid flooding the UI during running jobs.
                 // Fetch lightweight job structure for status updates
                 async fetchJobStructure(jobId) {
                     try {
@@ -4250,7 +4321,15 @@
 
                     // Skip if already fetching this step
                     if (this._stepFetchInFlight.has(key)) {
-                        return this._stepFetchPromises[key];
+                        const inFlight = this._stepFetchPromises[key];
+                        // For immediate requests (e.g., completion), chain a follow-up fetch so we can
+                        // upgrade the request (larger limit) after the in-flight fetch finishes.
+                        if (immediate && inFlight) {
+                            const followUp = inFlight.then(() => this._doFetchStepLogs(jobId, stepName, stepIdx));
+                            this._stepFetchPromises[key] = followUp;
+                            return followUp;
+                        }
+                        return inFlight;
                     }
 
                     // Clear existing debounce timer for this step
@@ -4282,7 +4361,10 @@
                     this._stepFetchInFlight.add(key);
 
                     try {
-                        const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=100`);
+                        // Keep payload bounded; "Show earlier logs" progressively grows the window.
+                        const limit = Math.min(this.getStepLogLimit(jobId, stepName), 5000);
+                        const level = this.getTreeLogLevelFilter(jobId);
+                        const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${limit}&level=${encodeURIComponent(level)}`);
                         if (!response.ok) return;
 
                         const data = await response.json();
@@ -4361,9 +4443,12 @@
                                     console.log('[Queue] Auto-expanding step on tree load:', step.name, 'status:', step.status, 'wasPending:', pendingExpansions.has(step.name));
                                 }
 
-                                // Load initial logs for all steps (as they might not be in the tree payload)
-                                // This ensures existing logs are visible before WebSockets start streaming new ones
-                                this.fetchStepLogs(jobId, step.name, idx);
+                                // Load initial logs with a small window so the DOM can show progressive growth.
+                                const limitKey = `${jobId}:${step.name}`;
+                                if (!this.stepLogLimits[limitKey]) {
+                                    this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: 20 };
+                                }
+                                this.fetchStepLogs(jobId, step.name, idx, true);
                             });
 
                             // Clear pending expansions for this job
@@ -4429,9 +4514,9 @@
                     // Apply log level filter
                     const levelFilter = this.getTreeLogLevelFilter(jobId);
                     if (levelFilter === 'error') {
-                        filteredLogs = filteredLogs.filter(log => log.level === 'error' || log.level === 'fatal');
+                        filteredLogs = filteredLogs.filter(log => this.normalizeLogLevel(log.level) === 'error');
                     } else if (levelFilter === 'warn') {
-                        filteredLogs = filteredLogs.filter(log => ['warn', 'error', 'fatal'].includes(log.level));
+                        filteredLogs = filteredLogs.filter(log => ['warn', 'error'].includes(this.normalizeLogLevel(log.level)));
                     }
 
                     // Apply search filter if present
@@ -4444,9 +4529,15 @@
                     }
 
                     // Limit to step-specific limit (earliest-to-latest order, show most recent)
-                    const limit = this.getStepLogLimit(jobId, stepName);
-                    if (filteredLogs.length > limit) {
-                        filteredLogs = filteredLogs.slice(-limit);
+                    const job = this.allJobs.find(j => j.id === jobId);
+                    const terminalStatuses = ['completed', 'failed', 'cancelled'];
+                    const isTerminalJob = job && terminalStatuses.includes(job.status);
+
+                    if (!isTerminalJob) {
+                        const limit = this.getStepLogLimit(jobId, stepName);
+                        if (filteredLogs.length > limit) {
+                            filteredLogs = filteredLogs.slice(-limit);
+                        }
                     }
 
                     return filteredLogs;
@@ -4459,9 +4550,8 @@
 
                     const logs = step.logs || [];
                     const totalCount = step.totalLogCount || logs.length;
-                    const limit = this.getStepLogLimit(jobId, stepName);
-
-                    return totalCount > limit;
+                    const shownCount = logs.length;
+                    return totalCount > shownCount;
                 },
 
                 // Get count of earlier logs not shown for a step
@@ -4471,9 +4561,8 @@
 
                     const logs = step.logs || [];
                     const totalCount = step.totalLogCount || logs.length;
-                    const limit = this.getStepLogLimit(jobId, stepName);
-
-                    return Math.max(0, totalCount - limit);
+                    const shownCount = logs.length;
+                    return Math.max(0, totalCount - shownCount);
                 },
 
                 // Get the starting log index for line numbers
@@ -4502,7 +4591,8 @@
 
                         if (stepJobId) {
                             // Fetch more logs from API
-                            const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${newLimit}&order=desc&level=info`);
+                            const level = this.getTreeLogLevelFilter(jobId);
+                            const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${newLimit}&order=desc&level=${encodeURIComponent(level)}`);
                             if (response.ok) {
                                 const data = await response.json();
                                 let newLogs = data.logs || [];
@@ -4550,7 +4640,8 @@
                         }
 
                         // Fetch all logs (higher limit for download)
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=10000&order=asc&level=info`);
+                        const level = this.getTreeLogLevelFilter(jobId);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=10000&order=asc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             throw new Error(`Failed to fetch logs: ${response.status}`);
                         }

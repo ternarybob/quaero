@@ -258,13 +258,70 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 	// Fast path: direct job log retrieval when not including children
 	// This avoids the expensive GetAggregatedLogs call with descendant traversal
 	if !includeChildren {
+		type levelSlice struct {
+			logs []models.LogEntry
+			i    int
+		}
+
+		getIncludedLevels := func(filter string) []string {
+			// Match shouldIncludeLevel semantics used for service logs:
+			// - info: INF + WRN + ERR (exclude debug)
+			// - warn: WRN + ERR
+			// - error: ERR
+			// - debug/all: include all levels
+			switch filter {
+			case "error":
+				return []string{"error"}
+			case "warn":
+				return []string{"warn", "error"}
+			case "info":
+				return []string{"info", "warn", "error"}
+			case "debug", "all":
+				return []string{"debug", "info", "warn", "error"}
+			default:
+				return []string{"debug", "info", "warn", "error"}
+			}
+		}
+
+		// Fetch newest logs for this filter (DESC order, newest first).
 		var logEntries []models.LogEntry
 		var err error
-
-		if level == "all" {
+		if level == "all" || level == "debug" {
 			logEntries, err = h.logService.GetLogs(ctx, jobID, limit)
+		} else if level == "error" {
+			logEntries, err = h.logService.GetLogsByLevel(ctx, jobID, "error", limit)
 		} else {
-			logEntries, err = h.logService.GetLogsByLevel(ctx, jobID, level, limit)
+			included := getIncludedLevels(level)
+			parts := make([]levelSlice, 0, len(included))
+			for _, lv := range included {
+				part, partErr := h.logService.GetLogsByLevel(ctx, jobID, lv, limit)
+				if partErr != nil {
+					continue
+				}
+				parts = append(parts, levelSlice{logs: part, i: 0})
+			}
+
+			merged := make([]models.LogEntry, 0, limit)
+			for len(merged) < limit {
+				bestIdx := -1
+				bestLine := -1
+				for pi := range parts {
+					if parts[pi].i >= len(parts[pi].logs) {
+						continue
+					}
+					ln := parts[pi].logs[parts[pi].i].LineNumber
+					if ln > bestLine {
+						bestLine = ln
+						bestIdx = pi
+					}
+				}
+				if bestIdx < 0 {
+					break
+				}
+				merged = append(merged, parts[bestIdx].logs[parts[bestIdx].i])
+				parts[bestIdx].i++
+			}
+			logEntries = merged
 		}
 
 		if err != nil {
@@ -273,10 +330,23 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Get total count for pagination/scrolling indicator
-		totalCount, countErr := h.logService.CountLogs(ctx, jobID)
+		// Get total count for pagination/scrolling indicator (must match filters)
+		totalCount := 0
+		var countErr error
+		if level == "all" || level == "debug" {
+			totalCount, countErr = h.logService.CountLogs(ctx, jobID)
+		} else {
+			for _, lv := range getIncludedLevels(level) {
+				n, err := h.logService.CountLogsByLevel(ctx, jobID, lv)
+				if err != nil {
+					countErr = err
+					break
+				}
+				totalCount += n
+			}
+		}
 		if countErr != nil {
-			h.logger.Warn().Err(countErr).Str("job_id", jobID).Msg("Failed to count logs, using returned count")
+			h.logger.Warn().Err(countErr).Str("job_id", jobID).Str("level", level).Msg("Failed to count logs, using returned count")
 			totalCount = len(logEntries)
 		}
 
