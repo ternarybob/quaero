@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -18,28 +19,37 @@ type WebSocketMessageTracker struct {
 	refreshLogsMessages       []map[string]interface{} // All refresh_logs messages
 	jobScopedRefreshCount     int                      // Count of job-scoped refresh_logs
 	serviceScopedRefreshCount int                      // Count of service-scoped refresh_logs
+	jobScopedStepIDTotal      int                      // Total step_ids observed in job-scoped refresh_logs payloads
+	jobScopedReceivedAt       []time.Time              // Local receive times for job-scoped refresh_logs
+	serviceScopedReceivedAt   []time.Time              // Local receive times for service-scoped refresh_logs
 }
 
 // NewWebSocketMessageTracker creates a new WebSocket message tracker
 func NewWebSocketMessageTracker() *WebSocketMessageTracker {
 	return &WebSocketMessageTracker{
 		refreshLogsMessages: make([]map[string]interface{}, 0),
+		jobScopedReceivedAt: make([]time.Time, 0),
+		serviceScopedReceivedAt: make([]time.Time, 0),
 	}
 }
 
-// AddMessage records a WebSocket message
-func (t *WebSocketMessageTracker) AddMessage(msgType string, payload map[string]interface{}) {
+// AddRefreshLogs records a refresh_logs WebSocket message (notify-pull trigger).
+func (t *WebSocketMessageTracker) AddRefreshLogs(payload map[string]interface{}, receivedAt time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if msgType == "refresh_logs" {
-		t.refreshLogsMessages = append(t.refreshLogsMessages, payload)
-		scope, _ := payload["scope"].(string)
-		if scope == "job" {
-			t.jobScopedRefreshCount++
-		} else if scope == "service" {
-			t.serviceScopedRefreshCount++
+	t.refreshLogsMessages = append(t.refreshLogsMessages, payload)
+	scope, _ := payload["scope"].(string)
+	switch scope {
+	case "job":
+		t.jobScopedRefreshCount++
+		t.jobScopedReceivedAt = append(t.jobScopedReceivedAt, receivedAt)
+		if stepIDs, ok := payload["step_ids"].([]interface{}); ok {
+			t.jobScopedStepIDTotal += len(stepIDs)
 		}
+	case "service":
+		t.serviceScopedRefreshCount++
+		t.serviceScopedReceivedAt = append(t.serviceScopedReceivedAt, receivedAt)
 	}
 }
 
@@ -62,6 +72,124 @@ func (t *WebSocketMessageTracker) GetServiceScopedRefreshCount() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.serviceScopedRefreshCount
+}
+
+// GetJobScopedRefreshStepIDTotal returns the total number of step_ids seen in job-scoped refresh_logs triggers.
+func (t *WebSocketMessageTracker) GetJobScopedRefreshStepIDTotal() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.jobScopedStepIDTotal
+}
+
+func (t *WebSocketMessageTracker) GetJobScopedRefreshCountBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, ts := range t.jobScopedReceivedAt {
+		if ts.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+func (t *WebSocketMessageTracker) GetServiceScopedRefreshCountBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, ts := range t.serviceScopedReceivedAt {
+		if ts.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+type APILogsCall struct {
+	Scope      string
+	URL        string
+	JobID      string
+	ReceivedAt time.Time
+}
+
+// APICallTracker tracks /api/logs calls so we can assert they are gated by WebSocket refresh_logs triggers.
+type APICallTracker struct {
+	mu           sync.Mutex
+	logsCalls    []APILogsCall
+	jobLogsCalls int
+	svcLogsCalls int
+}
+
+func NewAPICallTracker() *APICallTracker {
+	return &APICallTracker{
+		logsCalls: make([]APILogsCall, 0),
+	}
+}
+
+func (t *APICallTracker) AddRequest(requestURL string, receivedAt time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !strings.Contains(requestURL, "/api/logs") {
+		return
+	}
+
+	scope := ""
+	jobID := ""
+	if u, err := url.Parse(requestURL); err == nil {
+		scope = u.Query().Get("scope")
+		jobID = u.Query().Get("job_id")
+	}
+
+	t.logsCalls = append(t.logsCalls, APILogsCall{
+		Scope:      scope,
+		URL:        requestURL,
+		JobID:      jobID,
+		ReceivedAt: receivedAt,
+	})
+
+	switch scope {
+	case "job":
+		t.jobLogsCalls++
+	case "service":
+		t.svcLogsCalls++
+	}
+}
+
+func (t *APICallTracker) GetJobLogsCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.jobLogsCalls
+}
+
+func (t *APICallTracker) GetServiceLogsCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.svcLogsCalls
+}
+
+func (t *APICallTracker) GetJobLogsCallsBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, c := range t.logsCalls {
+		if c.Scope == "job" && c.ReceivedAt.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+func (t *APICallTracker) GetServiceLogsCallsBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, c := range t.logsCalls {
+		if c.Scope == "service" && c.ReceivedAt.Before(deadline) {
+			n++
+		}
+	}
+	return n
 }
 
 // StepExpansionTracker tracks step expansion order and log line numbers
@@ -154,6 +282,7 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 
 	// Create trackers
 	wsTracker := NewWebSocketMessageTracker()
+	apiTracker := NewAPICallTracker()
 	expansionTracker := NewStepExpansionTracker()
 
 	// Enable network tracking via Chrome DevTools Protocol
@@ -161,6 +290,8 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	utc.Log("Enabling network and WebSocket frame tracking...")
 	chromedp.ListenTarget(utc.Ctx, func(ev interface{}) {
 		switch e := ev.(type) {
+		case *network.EventRequestWillBeSent:
+			apiTracker.AddRequest(e.Request.URL, time.Now())
 		case *network.EventWebSocketFrameReceived:
 			// Parse WebSocket frame payload for refresh_logs messages
 			payloadData := e.Response.PayloadData
@@ -171,7 +302,7 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 				}
 				if err := json.Unmarshal([]byte(payloadData), &msg); err == nil {
 					if msg.Type == "refresh_logs" {
-						wsTracker.AddMessage(msg.Type, msg.Payload)
+						wsTracker.AddRefreshLogs(msg.Payload, time.Now())
 					}
 				}
 			}
@@ -200,10 +331,13 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	// Monitor job WITHOUT page refresh - using WebSocket updates
 	utc.Log("Starting job monitoring (NO page refresh)...")
 	startTime := time.Now()
+	progressDeadline := startTime.Add(30 * time.Second)
 	lastStatus := ""
 	lastProgressLog := time.Now()
 	lastScreenshotTime := time.Now()
 	lastExpansionCheck := time.Now()
+	lastDOMProgressCheck := time.Now()
+	domProgressSamples := make([]DOMLogProgressSample, 0, 20)
 
 	for {
 		// Check context
@@ -237,6 +371,19 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 		if time.Since(lastExpansionCheck) >= 2*time.Second {
 			checkStepExpansionState(utc, expansionTracker)
 			lastExpansionCheck = time.Now()
+		}
+
+		// Capture progressive UI log updates during the first 30 seconds.
+		// UAT expects logs to update progressively (not only on status change).
+		if time.Now().Before(progressDeadline) && time.Since(lastDOMProgressCheck) >= 2*time.Second {
+			snap, err := captureDOMLogProgressSnapshot(utc)
+			if err == nil {
+				domProgressSamples = append(domProgressSamples, DOMLogProgressSample{
+					Elapsed:  time.Since(startTime),
+					Snapshot: snap,
+				})
+			}
+			lastDOMProgressCheck = time.Now()
 		}
 
 		// Get current job status via JavaScript (NO page refresh)
@@ -293,6 +440,10 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	// ===============================
 	utc.Log("--- Running Assertions ---")
 
+	// Assertion 0: Progressive log updates within first 30 seconds (UAT regression guard)
+	utc.Log("Assertion 0: Verifying progressive log updates within first 30 seconds...")
+	assertProgressiveLogsWithinWindow(t, utc, domProgressSamples)
+
 	// Assertion 1: WebSocket refresh_logs messages < 40
 	// This tests server-side throttling/debouncing of log refresh triggers
 	// With 10-second intervals and a ~2 minute job, we expect:
@@ -309,6 +460,11 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	} else {
 		utc.Log("✓ PASS: WebSocket refresh_logs messages within limit")
 	}
+
+	// Assertion 1b: /api/logs calls are gated by refresh_logs WebSocket triggers.
+	// If the UI is corrupted by excessive /api/logs polling, this MUST fail.
+	utc.Log("Assertion 1b: Verifying /api/logs calls correlate with refresh_logs triggers...")
+	assertAPILogsCallsAreGatedByRefreshTriggers(t, utc, wsTracker, apiTracker, startTime)
 
 	// Assertion 2: Step icons match parent job icon standard
 	utc.Log("Assertion 2: Checking step icons match parent job icon standard...")
@@ -330,6 +486,143 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 	assertAllStepsAutoExpand(t, utc, expansionOrder)
 
 	utc.Log("✓ Codebase Classify job definition test completed with all assertions")
+}
+
+type DOMLogProgressSnapshot struct {
+	ExpandedSteps []string       `json:"expandedSteps"`
+	StepLogCounts map[string]int `json:"stepLogCounts"`
+	TotalLogLines int            `json:"totalLogLines"`
+}
+
+type DOMLogProgressSample struct {
+	Elapsed  time.Duration
+	Snapshot DOMLogProgressSnapshot
+}
+
+func captureDOMLogProgressSnapshot(utc *UITestContext) (DOMLogProgressSnapshot, error) {
+	var snapshot DOMLogProgressSnapshot
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const stepLogCounts = {};
+				const expandedSteps = [];
+				let totalLogLines = 0;
+
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const stepEl of treeSteps) {
+					const stepNameEl = stepEl.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const logsSection = stepEl.querySelector('.tree-step-logs');
+					if (!logsSection) continue; // Not expanded
+
+					const logLines = logsSection.querySelectorAll('.tree-log-line');
+					const count = logLines ? logLines.length : 0;
+					stepLogCounts[stepName] = count;
+					totalLogLines += count;
+					if (!expandedSteps.includes(stepName)) {
+						expandedSteps.push(stepName);
+					}
+				}
+
+				return { expandedSteps, stepLogCounts, totalLogLines };
+			})()
+		`, &snapshot),
+	)
+	if err != nil {
+		return DOMLogProgressSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func assertProgressiveLogsWithinWindow(t *testing.T, utc *UITestContext, samples []DOMLogProgressSample) {
+	if len(samples) == 0 {
+		t.Errorf("FAIL: No DOM progress samples captured in first 30 seconds - cannot assert progressive updates")
+		return
+	}
+
+	firstExpandedAt := time.Duration(-1)
+	firstLogsAt := time.Duration(-1)
+	firstIncreaseAt := time.Duration(-1)
+
+	prevTotal := -1
+	seenLogs := false
+	for _, s := range samples {
+		if firstExpandedAt < 0 && len(s.Snapshot.ExpandedSteps) > 0 {
+			firstExpandedAt = s.Elapsed
+		}
+
+		if firstLogsAt < 0 && s.Snapshot.TotalLogLines > 0 {
+			firstLogsAt = s.Elapsed
+			seenLogs = true
+			prevTotal = s.Snapshot.TotalLogLines
+			continue
+		}
+
+		if seenLogs && firstIncreaseAt < 0 && s.Snapshot.TotalLogLines > prevTotal {
+			firstIncreaseAt = s.Elapsed
+		}
+		if seenLogs {
+			prevTotal = s.Snapshot.TotalLogLines
+		}
+	}
+
+	utc.Log("Progress samples (first 30s): expanded@%v, firstLogs@%v, firstIncrease@%v",
+		firstExpandedAt, firstLogsAt, firstIncreaseAt)
+
+	if firstExpandedAt < 0 {
+		t.Errorf("FAIL: No steps expanded within first 30 seconds - expected auto-expand during running job")
+	}
+	if firstLogsAt < 0 {
+		t.Errorf("FAIL: No log lines appeared within first 30 seconds - expected progressive log updates during job execution")
+	}
+	if firstIncreaseAt < 0 {
+		t.Errorf("FAIL: Log lines did not increase within first 30 seconds after first logs appeared - expected progressive streaming (not only on status change)")
+	}
+}
+
+func assertAPILogsCallsAreGatedByRefreshTriggers(t *testing.T, utc *UITestContext, wsTracker *WebSocketMessageTracker, apiTracker *APICallTracker, startTime time.Time) {
+	jobRefreshStepIDTotal := wsTracker.GetJobScopedRefreshStepIDTotal()
+	jobRefreshBefore30s := wsTracker.GetJobScopedRefreshCountBefore(startTime.Add(30 * time.Second))
+	serviceRefreshBefore30s := wsTracker.GetServiceScopedRefreshCountBefore(startTime.Add(30 * time.Second))
+
+	jobLogsCalls := apiTracker.GetJobLogsCalls()
+	serviceLogsCalls := apiTracker.GetServiceLogsCalls()
+	jobLogsCallsBefore30s := apiTracker.GetJobLogsCallsBefore(startTime.Add(30 * time.Second))
+	serviceLogsCallsBefore30s := apiTracker.GetServiceLogsCallsBefore(startTime.Add(30 * time.Second))
+
+	utc.Log("refresh_logs triggers: job=%d (step_ids total=%d), service=%d",
+		wsTracker.GetJobScopedRefreshCount(), jobRefreshStepIDTotal, wsTracker.GetServiceScopedRefreshCount())
+	utc.Log("/api/logs calls: job=%d (before30s=%d), service=%d (before30s=%d)",
+		jobLogsCalls, jobLogsCallsBefore30s, serviceLogsCalls, serviceLogsCallsBefore30s)
+
+	// Service logs often do an initial load on page load. Allow 1 extra call beyond triggers.
+	if serviceLogsCalls > wsTracker.GetServiceScopedRefreshCount()+1 {
+		t.Errorf("FAIL: /api/logs?scope=service called %d times but only %d refresh_logs(scope=service) triggers observed (+1 allowed initial load). UI appears to be polling service logs without WebSocket gating.",
+			serviceLogsCalls, wsTracker.GetServiceScopedRefreshCount())
+	}
+
+	// For job-scoped logs, each refresh_logs(scope=job) may contain multiple step_ids, and UI may call /api/logs once per step_id.
+	// Therefore, job /api/logs calls should be bounded by the total step_ids seen in refresh triggers (+small slack for completion hydration).
+	allowedSlack := 3
+	if jobLogsCalls > jobRefreshStepIDTotal+allowedSlack {
+		t.Errorf("FAIL: /api/logs?scope=job called %d times but refresh_logs(scope=job) carried only %d step_ids (+%d slack). UI appears to be polling job logs or refetching excessively.",
+			jobLogsCalls, jobRefreshStepIDTotal, allowedSlack)
+	}
+
+	// Also require that during the first 30 seconds, at least one refresh trigger and at least one API fetch occur.
+	// This guards the UAT failure where logs don't update until a status-change catch-all refresh.
+	if jobRefreshBefore30s == 0 {
+		t.Errorf("FAIL: No refresh_logs(scope=job) triggers received within first 30 seconds - UI cannot refresh step logs progressively")
+	}
+	if jobLogsCallsBefore30s == 0 {
+		t.Errorf("FAIL: No /api/logs?scope=job calls observed within first 30 seconds - logs not being fetched progressively")
+	}
+	if serviceRefreshBefore30s == 0 {
+		utc.Log("Note: No refresh_logs(scope=service) triggers within first 30 seconds (service log streaming may be idle)")
+	}
 }
 
 // checkStepExpansionState checks which steps are currently expanded
