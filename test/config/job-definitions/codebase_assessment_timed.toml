@@ -1,0 +1,47 @@
+# Codebase Assessment (Timed) - focuses on assessment steps with tight intake limits
+id = "codebase_assessment_timed"
+name = "Codebase Assessment (Timed)"
+description = "Assessment job that times each step while limiting local file intake"
+tags = ["assessment", "timed"]
+timeout = "45m"
+enabled = true
+auto_start = false
+
+# PHASE 1: IMPORT & INDEX
+[step.code_map]
+type = "code_map"
+description = "Build a lean code structure map for the local repo"
+project_name = "quaero"
+dir_path = "./"
+max_depth = 6
+exclude_paths = [".git", "node_modules", "vendor", "dist", "build", "target", "bin", "data", "test", ".cache"]
+skip_summarization = true
+
+[step.import_files]
+type = "local_dir"
+description = "Import a limited slice of the local codebase for assessment"
+dir_path = "./"
+tags = ["codebase", "quaero"]
+extensions = [".go", ".md", ".html", ".toml", ".json"]
+exclude_paths = [".git", "node_modules", "vendor", "dist", "build", "target", "bin", "data", "test", ".cache"]
+max_file_size = 524288
+max_files = 60
+
+# PHASE 2: ASSESSMENT
+[step.rule_classify_files]
+type = "agent"
+description = "Rule-based classification of files to avoid LLM latency"
+depends = "import_files"
+agent_type = "rule_classifier"
+tags = ["quaero_assessment", "timed"]
+filter_tags = ["codebase", "quaero"]
+
+[step.component_graph]
+type = "dependency_graph"
+description = "Build a dependency graph from the imported set"
+depends = "rule_classify_files"
+filter_tags = ["codebase", "quaero"]
+
+[error_tolerance]
+max_child_failures = 20
+failure_action = "continue"
