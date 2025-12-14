@@ -27,7 +27,16 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git checkout:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(powershell.exe -Command \"go build -o /tmp/quaero ./cmd/quaero\")",
+      "Bash(powershell.exe -Command \"go test -v -run ''''TestJobDefinitionErrorGenerator'''' ./test/ui/... -timeout 10m\")",
+      "Bash(powershell.exe -Command \"go test -v -run ''''TestJobDefinitionErrorGeneratorErrorTolerance'''' ./test/ui/... -timeout 10m\")",
+      "Bash(powershell.exe -Command \"go build ./...\")",
+      "Bash(powershell.exe -Command \"go build ./test/ui/...\")",
+      "Bash(test:*)",
+      "Bash(powershell.exe -Command \"go test -v -run ''TestJobDefinitionErrorGeneratorLogFiltering'' ./test/ui/... -timeout 10m\")",
+      "Bash(powershell.exe -Command \"go test -v -run ''TestJobDefinitionErrorGeneratorLogFiltering'' ./test/ui/... -timeout 10m -count=2\")",
+      "Bash(powershell.exe -Command \"go test -v -run ''TestJobDefinitionErrorGeneratorLogFiltering'' ./test/ui/... -timeout 10m -count=3\")"
     ],
     "deny": [],
     "ask": []

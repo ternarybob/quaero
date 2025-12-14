@@ -30,6 +30,9 @@ const (
 	WorkerTypeClassify         WorkerType = "classify"          // LLM-based classification of file roles and components
 	WorkerTypeDependencyGraph  WorkerType = "dependency_graph"  // Build dependency graph from extracted metadata
 	WorkerTypeAggregateSummary WorkerType = "aggregate_summary" // Generate summary of all enrichment metadata
+
+	// Testing workers
+	WorkerTypeErrorGenerator WorkerType = "error_generator" // Generates logs with random errors for testing error tolerance
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -39,7 +42,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
 		WorkerTypeSummary, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
-		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary:
+		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary, WorkerTypeErrorGenerator:
 		return true
 	}
 	return false
@@ -70,5 +73,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeClassify,
 		WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary,
+		WorkerTypeErrorGenerator,
 	}
 }

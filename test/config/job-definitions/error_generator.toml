@@ -1,0 +1,47 @@
+# Error Generator Job Definition
+# This job generates log items with random warnings and errors for testing:
+# - Error tolerance configuration (stop job when failure threshold exceeded)
+# - UI status display (INF/WRN/ERR counts in step card header)
+# - Error block display above ongoing logs
+
+id = "error-generator"
+name = "Error Generator"
+description = "Generates random logs with warnings and errors for testing error tolerance"
+tags = ["test", "error-tolerance"]
+schedule = ""
+timeout = "10m"
+enabled = true
+auto_start = false
+
+[step.generate_errors]
+type = "error_generator"
+description = "Generate random logs with INF, WRN, and ERR levels"
+on_error = "continue"
+
+# Number of root-level worker jobs to spawn
+worker_count = 10
+
+# Each worker generates this many log entries
+log_count = 100
+
+# Delay between log entries in milliseconds
+log_delay_ms = 50
+
+# Probability of job failure (0.0 to 1.0)
+# 0.1 = 10% chance each job fails
+failure_rate = 0.1
+
+# Number of child jobs each worker spawns
+child_count = 2
+
+# Maximum depth of child job recursion
+# With child_count=2 and recursion_depth=3:
+# Level 0: 10 workers
+# Level 1: 10 * 2 = 20 children
+# Level 2: 20 * 1 = 20 children (child_count halves at each level)
+# Total jobs: ~50
+recursion_depth = 3
+
+[error_tolerance]
+max_child_failures = 50
+failure_action = "continue"

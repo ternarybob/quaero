@@ -687,7 +687,12 @@
                                                                             <!-- Show More button (when there are earlier logs) -->
                                                                             <template x-if="hasStepEarlierLogs(item.job.id, step.name, stepIndex)">
                                                                                 <div class="tree-logs-show-more">
-                                                                                    <button class="btn btn-sm btn-link" @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)" :disabled="stepLogLoading[item.job.id + ':' + step.name]">
+                                                                                    <button class="btn btn-sm btn-link load-earlier-logs-btn"
+                                                                                        @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)"
+                                                                                        :data-job-id="item.job.id"
+                                                                                        :data-step-name="step.name"
+                                                                                        :data-step-index="stepIndex"
+                                                                                        :disabled="stepLogLoading[item.job.id + ':' + step.name]">
                                                                                         <template x-if="stepLogLoading[item.job.id + ':' + step.name]">
                                                                                             <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
                                                                                         </template>
@@ -1998,6 +2003,18 @@
                 init() {
                     // Initialize timeouts map for debounced parent refreshes
                     this.parentRefreshTimeouts = new Map();
+
+                    // Store reference to 'this' for use in global handlers
+                    const self = this;
+
+                    // Expose global function for loading earlier logs
+                    // This enables programmatic clicks from tests to work correctly
+                    window.loadEarlierLogs = async (jobId, stepName, stepIndex) => {
+                        if (jobId && stepName !== undefined && !isNaN(stepIndex)) {
+                            console.log('[Queue] loadEarlierLogs called:', jobId.substring(0, 8), stepName, stepIndex);
+                            await self.loadMoreStepLogs(jobId, stepName, stepIndex);
+                        }
+                    };
 
                     // Add event listeners for external commands
                     window.addEventListener('jobList:load', () => this.loadJobs());

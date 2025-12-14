@@ -738,6 +738,17 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(aggregateSummaryWorker)
 	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
 
+	// Register Error Generator worker (testing worker for error tolerance validation)
+	errorGeneratorWorker := workers.NewErrorGeneratorWorker(
+		jobMgr,
+		queueMgr,
+		a.Logger,
+		a.EventService,
+	)
+	a.StepManager.RegisterWorker(errorGeneratorWorker)  // Register with StepManager for step routing
+	jobProcessor.RegisterExecutor(errorGeneratorWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", errorGeneratorWorker.GetType().String()).Str("job_type", errorGeneratorWorker.GetWorkerType()).Msg("Error Generator worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize Orchestrator
