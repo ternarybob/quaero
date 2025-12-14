@@ -455,6 +455,20 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 		// Error is already set by worker, just ensure status is updated
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
 
+		// Log failure to parent step job for UI visibility (ERR level)
+		// This ensures failed child jobs appear in the step's log stream
+		parentID := queueJob.GetParentID()
+		if parentID != "" {
+			errMsg := fmt.Sprintf("Job failed: %s (type=%s, duration=%s) error=%v",
+				msg.JobID[:8], msg.Type, failDuration.Round(time.Millisecond), err)
+			if logErr := jp.jobMgr.AddJobLog(jp.ctx, parentID, "error", errMsg); logErr != nil {
+				jp.logger.Warn().Err(logErr).
+					Str("parent_id", parentID).
+					Str("job_id", msg.JobID).
+					Msg("Failed to log job failure to parent")
+			}
+		}
+
 		// Set finished_at timestamp for failed jobs
 		if finishErr := jp.jobMgr.SetJobFinished(jp.ctx, msg.JobID); finishErr != nil {
 			jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")

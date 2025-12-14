@@ -4,6 +4,13 @@
 <head>
     {{template "head.html" .}}
     <title>Queue Management - Quaero</title>
+    <style>
+        /* Ensure dropdown menu opens on focus for testability */
+        .dropdown:focus-within .menu,
+        .dropdown .dropdown-toggle:focus + .menu {
+            display: block !important;
+        }
+    </style>
 </head>
 
 <body>
@@ -193,29 +200,38 @@
                                                             <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                             <i class="fas fa-stream"></i>
                                                             <span class="events-count-text"
-                                                                x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + (getStepLogsTotal(item.job.id, item.step.name) > getStepLogs(item.job.id, item.step.name).length || getStepEventFilter(item.job.id, item.step.name) !== 'all' ? '/' + getStepLogsTotal(item.job.id, item.step.name) : '') + ')'"></span>
+                                                                x-text="'logs: ' + getStepLogs(item.job.id, item.step.name).length + '/' + getStepLogsTotal(item.job.id, item.step.name)"></span>
                                                         </button>
-                                                        <!-- Filter dropdown (only show when expanded) -->
+                                                        <!-- Filter dropdown (only show when expanded) - matching settings-logs.html pattern exactly -->
                                                         <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
-                                                            <div class="dropdown dropdown-right" @click.stop>
-                                                                <a href="#" class="btn btn-sm" :class="getStepEventFilter(item.job.id, item.step.name) !== 'all' ? 'btn-primary' : ''" tabindex="0" style="padding: 0.1rem 0.4rem;">
-                                                                    <i class="fas fa-filter" style="font-size: 0.7rem;"></i>
+                                                            <div class="dropdown">
+                                                                <a href="#" class="btn btn-sm dropdown-toggle" :class="!isAllLevelsSelected(item.job.id, item.step.name) ? 'btn-primary' : ''" tabindex="0">
+                                                                    <i class="fas fa-filter"></i> Filter
                                                                 </a>
-                                                                <ul class="menu" style="min-width: 120px;">
+                                                                <ul class="menu">
                                                                     <li class="menu-item">
-                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'all')" :class="getStepEventFilter(item.job.id, item.step.name) === 'all' ? 'active' : ''">
-                                                                            <i class="fas fa-list"></i> All
-                                                                        </a>
+                                                                        <label class="form-checkbox">
+                                                                            <input type="checkbox" :checked="isLevelSelected(item.job.id, item.step.name, 'debug')" @change="toggleLevelFilter(item.job.id, item.step.name, 'debug')">
+                                                                            <i class="form-icon"></i> Debug
+                                                                        </label>
                                                                     </li>
                                                                     <li class="menu-item">
-                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'warn')" :class="getStepEventFilter(item.job.id, item.step.name) === 'warn' ? 'active' : ''">
-                                                                            <i class="fas fa-exclamation-triangle" style="color: #f0ad4e;"></i> Warn+
-                                                                        </a>
+                                                                        <label class="form-checkbox">
+                                                                            <input type="checkbox" :checked="isLevelSelected(item.job.id, item.step.name, 'info')" @change="toggleLevelFilter(item.job.id, item.step.name, 'info')">
+                                                                            <i class="form-icon"></i> Info
+                                                                        </label>
                                                                     </li>
                                                                     <li class="menu-item">
-                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'error')" :class="getStepEventFilter(item.job.id, item.step.name) === 'error' ? 'active' : ''">
-                                                                            <i class="fas fa-times-circle" style="color: #d9534f;"></i> Error
-                                                                        </a>
+                                                                        <label class="form-checkbox">
+                                                                            <input type="checkbox" :checked="isLevelSelected(item.job.id, item.step.name, 'warn')" @change="toggleLevelFilter(item.job.id, item.step.name, 'warn')">
+                                                                            <i class="form-icon"></i> Warn
+                                                                        </label>
+                                                                    </li>
+                                                                    <li class="menu-item">
+                                                                        <label class="form-checkbox">
+                                                                            <input type="checkbox" :checked="isLevelSelected(item.job.id, item.step.name, 'error')" @change="toggleLevelFilter(item.job.id, item.step.name, 'error')">
+                                                                            <i class="form-icon"></i> Error
+                                                                        </label>
                                                                     </li>
                                                                 </ul>
                                                             </div>
@@ -228,7 +244,7 @@
                                                                 <div class="step-logs-empty" style="color: var(--code-color);">
                                                                     <i class="fas fa-info-circle"></i>
                                                                     <span
-                                                                        x-text="getStepEventFilter(item.job.id, item.step.name) !== 'all' ? 'No ' + getStepEventFilter(item.job.id, item.step.name) + ' events for this step.' : 'No events yet for this step.'"></span>
+                                                                        x-text="!isAllLevelsSelected(item.job.id, item.step.name) ? 'No logs matching filter for this step.' : 'No logs yet for this step.'"></span>
                                                                 </div>
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
@@ -585,33 +601,40 @@
                                                             </span>
                                                         </template>
                                                         <span style="flex: 1;"></span>
-                                                        <input type="text" :value="getTreeSearchFilter(item.job.id)" @input="setTreeSearchFilter(item.job.id, $event.target.value)" placeholder="Filter logs..."
-                                                            style="width: 150px; background: #fff; border: 1px solid #ccc; color: #333; font-family: monospace; font-size: 0.8rem; padding: 0.2rem 0.5rem; border-radius: 3px;">
-                                                        <!-- Log level filter dropdown -->
-                                                        <div class="dropdown dropdown-right" @click.stop>
-                                                            <a href="#" class="btn btn-sm" :class="getTreeLogLevelFilter(item.job.id) !== 'all' ? 'btn-primary' : ''" tabindex="0" style="padding: 0.2rem 0.5rem; background: #fff; border: 1px solid #ccc; color: #333;">
-                                                                <i class="fas fa-filter" style="font-size: 0.8rem;"></i>
+                                                        <!-- Log level filter dropdown with checkboxes (matching settings-logs.html style exactly) -->
+                                                        <div class="dropdown">
+                                                            <a href="#" class="btn btn-sm dropdown-toggle" :class="!isAllLevelsSelected(item.job.id) ? 'btn-primary' : ''" tabindex="0">
+                                                                <i class="fas fa-filter"></i> Filter
                                                             </a>
-                                                            <ul class="menu" style="min-width: 120px;">
+                                                            <ul class="menu">
                                                                 <li class="menu-item">
-                                                                    <a href="#" @click.prevent="setTreeLogLevelFilter(item.job.id, 'all')" :class="getTreeLogLevelFilter(item.job.id) === 'all' ? 'active' : ''">
-                                                                        <i class="fas fa-list"></i> All
-                                                                    </a>
+                                                                    <label class="form-checkbox">
+                                                                        <input type="checkbox" :checked="getTreeLogLevelChecked(item.job.id, 'debug')" @change="toggleTreeLogLevel(item.job.id, 'debug')">
+                                                                        <i class="form-icon"></i> Debug
+                                                                    </label>
                                                                 </li>
                                                                 <li class="menu-item">
-                                                                    <a href="#" @click.prevent="setTreeLogLevelFilter(item.job.id, 'warn')" :class="getTreeLogLevelFilter(item.job.id) === 'warn' ? 'active' : ''">
-                                                                        <i class="fas fa-exclamation-triangle" style="color: #E5C07B;"></i> Warn+
-                                                                    </a>
+                                                                    <label class="form-checkbox">
+                                                                        <input type="checkbox" :checked="getTreeLogLevelChecked(item.job.id, 'info')" @change="toggleTreeLogLevel(item.job.id, 'info')">
+                                                                        <i class="form-icon"></i> Info
+                                                                    </label>
                                                                 </li>
                                                                 <li class="menu-item">
-                                                                    <a href="#" @click.prevent="setTreeLogLevelFilter(item.job.id, 'error')" :class="getTreeLogLevelFilter(item.job.id) === 'error' ? 'active' : ''">
-                                                                        <i class="fas fa-times-circle" style="color: #E06C75;"></i> Error
-                                                                    </a>
+                                                                    <label class="form-checkbox">
+                                                                        <input type="checkbox" :checked="getTreeLogLevelChecked(item.job.id, 'warn')" @change="toggleTreeLogLevel(item.job.id, 'warn')">
+                                                                        <i class="form-icon"></i> Warn
+                                                                    </label>
+                                                                </li>
+                                                                <li class="menu-item">
+                                                                    <label class="form-checkbox">
+                                                                        <input type="checkbox" :checked="getTreeLogLevelChecked(item.job.id, 'error')" @change="toggleTreeLogLevel(item.job.id, 'error')">
+                                                                        <i class="form-icon"></i> Error
+                                                                    </label>
                                                                 </li>
                                                             </ul>
                                                         </div>
                                                         <button class="btn btn-sm" @click.stop="refreshJobTreeData(item.job.id)" style="padding: 0.2rem 0.5rem; background: #fff; border: 1px solid #ccc; color: #333;">
-                                                            <i class="fas fa-sync" :class="jobTreeLoading[item.job.id] ? 'fa-spin' : ''"></i>
+                                                            <i class="fa-solid fa-rotate-right" :class="jobTreeLoading[item.job.id] ? 'fa-spin' : ''"></i>
                                                         </button>
                                                     </div>
 
@@ -659,6 +682,13 @@
                                                                                 'label-error': step.status === 'failed',
                                                                                 'bg-gray': step.status === 'cancelled'
                                                                             }" x-text="step.status"></span>
+                                                                        <!-- Log count display (displayed/total) - total is ALL logs regardless of level filter -->
+                                                                        <template x-if="step.logs && step.logs.length > 0">
+                                                                            <span class="label bg-secondary" style="font-size: 0.65rem; padding: 0.1rem 0.4rem; margin-left: 0.25rem;">
+                                                                                <i class="fas fa-file-lines" style="margin-right: 0.15rem;"></i>
+                                                                                <span x-text="'logs: ' + getFilteredTreeLogs(step.logs, item.job.id, step.name).length + '/' + (step.unfilteredLogCount || step.totalLogCount || step.logs.length)"></span>
+                                                                            </span>
+                                                                        </template>
                                                                         <!-- Download logs button (enabled when step is completed/failed) -->
                                                                         <template x-if="step.status === 'completed' || step.status === 'failed'">
                                                                             <button class="btn btn-sm btn-link step-download-btn" @click.stop="downloadStepLogs(item.job.id, step.name, step.step_id)" title="Download step logs"
@@ -706,8 +736,8 @@
                                                                             <!-- Log lines (limited to step-specific limit, earliest-to-latest) -->
                                                                             <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id, step.name)" :key="logIdx">
                                                                                 <div class="tree-log-line" :class="{ 'log-error': log.level === 'error' }">
-                                                                                    <!-- Line number (from server, falls back to calculated if not available) -->
-                                                                                    <span class="tree-log-num" x-text="log.line_number || (getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1)"></span>
+                                                                                    <!-- Line number: use server line_number when earlier logs exist, otherwise sequential 1→N -->
+                                                                                    <span class="tree-log-num" x-text="hasStepEarlierLogs(item.job.id, step.name, stepIndex) ? (log.line_number || (logIdx + 1)) : (logIdx + 1)"></span>
                                                                                     <!-- Log level badge -->
                                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)" style="margin-right: 0.5rem; font-weight: 500;"></span>
                                                                                     <!-- Log text -->
@@ -1965,6 +1995,8 @@
                 jobTreeExpandedSteps: {},
                 jobTreeSearchFilter: {},
                 treeLogLevelFilter: {},  // Per-job log level filter for tree view (all/warn/error)
+                stepLevelFilters: {},    // Per-step checkbox-based level filters: { "jobId:stepName": { debug: true, info: true, warn: true, error: true } }
+                stepFilterDropdownOpen: {},  // Track dropdown open state for testing: { "jobId:stepName": true/false }
                 collapsedJobs: {}, // Track collapsed state of parent jobs (default expanded)
                 _pendingStepExpansions: {}, // Queue step expansions that arrive before tree data loads
 
@@ -2143,14 +2175,14 @@
                     if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
                         const step = this.jobTreeData[jobId].steps.find(s => s.name === stepName);
                         if (step && step.logs) {
-                            return this.filterLogs(step.logs, this.getStepEventFilter(jobId, stepName));
+                            return this.filterLogsByLevels(step.logs, jobId, stepName);
                         }
                     }
 
                     // Fallback to jobLogs (legacy/flat view support)
                     if (this.jobLogs[jobId]) {
                         const logs = this.jobLogs[jobId].filter(l => l.step_name === stepName);
-                        return this.filterLogs(logs, this.getStepEventFilter(jobId, stepName));
+                        return this.filterLogsByLevels(logs, jobId, stepName);
                     }
 
                     return [];
@@ -2190,20 +2222,151 @@
                     console.log('Set filter', filter, 'for', stepName);
                 },
 
+                // Default step level filter: Info, Warn, Error enabled; Debug disabled
+                getDefaultStepLevelFilter() {
+                    return { debug: false, info: true, warn: true, error: true };
+                },
+
+                // Checkbox-based level filter functions
+                getStepLevelFilters(jobId, stepName) {
+                    const key = `${jobId}:${stepName}`;
+                    return this.stepLevelFilters[key] || this.getDefaultStepLevelFilter();
+                },
+
+                isLevelSelected(jobId, stepName, level) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    return filters[level] !== false;
+                },
+
+                isAllLevelsSelected(jobId, stepName) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    return filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false;
+                },
+
+                toggleLevelFilter(jobId, stepName, level) {
+                    const key = `${jobId}:${stepName}`;
+                    const currentFilters = this.getStepLevelFilters(jobId, stepName);
+                    this.stepLevelFilters[key] = {
+                        ...currentFilters,
+                        [level]: !currentFilters[level]
+                    };
+                    console.log('Toggle level filter', level, 'for', stepName, '-> new state:', this.stepLevelFilters[key]);
+
+                    // Fetch logs with updated level filter from API
+                    this.fetchStepLogsWithLevelFilter(jobId, stepName);
+                },
+
+                // Convert stepLevelFilters to API level parameter
+                getStepLevelFilterApiParam(jobId, stepName) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    // If all are checked, return 'all'
+                    if (filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return 'all';
+                    }
+                    // If only error is checked
+                    if (filters.debug === false && filters.info === false && filters.warn === false && filters.error !== false) {
+                        return 'error';
+                    }
+                    // If warn and error are checked (warn+)
+                    if (filters.debug === false && filters.info === false && filters.warn !== false && filters.error !== false) {
+                        return 'warn';
+                    }
+                    // If info, warn, error are checked (info+)
+                    if (filters.debug === false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return 'info';
+                    }
+                    // Mixed selection - return 'all' and filter client-side
+                    return 'all';
+                },
+
+                // Fetch step logs with current level filter applied
+                async fetchStepLogsWithLevelFilter(jobId, stepName) {
+                    // Find the step job ID from metadata
+                    const job = this.allJobs.find(j => j.id === jobId);
+                    const stepJobId = job?.metadata?.step_job_ids?.[stepName];
+
+                    if (!stepJobId) {
+                        console.warn('[Queue] No step job ID found for', stepName);
+                        return;
+                    }
+
+                    const level = this.getStepLevelFilterApiParam(jobId, stepName);
+                    console.log('[Queue] Fetching logs for step', stepName, 'with level filter:', level);
+
+                    try {
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=200&order=desc&level=${encodeURIComponent(level)}`);
+                        if (!response.ok) {
+                            console.warn('[Queue] Failed to fetch logs with level filter:', response.status);
+                            return;
+                        }
+
+                        const data = await response.json();
+                        let newLogs = data.logs || [];
+                        const totalCount = data.total_count || newLogs.length;
+
+                        // Reverse to get chronological order (we fetched desc, display asc)
+                        newLogs = newLogs.reverse();
+
+                        // Update jobLogs for step panel
+                        if (!this.jobLogs[jobId]) {
+                            this.jobLogs[jobId] = [];
+                        }
+                        this.jobLogs[jobId] = this.jobLogs[jobId].filter(l => l.step_name !== stepName);
+                        const logsWithStepName = newLogs.map(log => ({ ...log, step_name: stepName }));
+                        this.jobLogs[jobId].push(...logsWithStepName);
+
+                        // Also update jobTreeData if available
+                        if (this.jobTreeData[jobId]?.steps) {
+                            const stepIdx = this.jobTreeData[jobId].steps.findIndex(s => s.name === stepName);
+                            if (stepIdx >= 0) {
+                                const newSteps = [...this.jobTreeData[jobId].steps];
+                                newSteps[stepIdx] = {
+                                    ...newSteps[stepIdx],
+                                    logs: newLogs,
+                                    totalLogCount: totalCount
+                                };
+                                this.jobTreeData = {
+                                    ...this.jobTreeData,
+                                    [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
+                                };
+                            }
+                        }
+
+                        console.log('[Queue] Loaded', newLogs.length, 'logs for step', stepName, 'with level filter:', level);
+                    } catch (err) {
+                        console.error('[Queue] Error fetching logs with level filter:', err);
+                    }
+                },
+
+                // Filter logs using checkbox-based level selection
+                filterLogsByLevels(logs, jobId, stepName) {
+                    if (!logs) return [];
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    // If all are selected, return all logs
+                    if (filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return logs;
+                    }
+                    // Filter by selected levels
+                    return logs.filter(log => {
+                        const level = this.normalizeLogLevel(log.level);
+                        return filters[level] !== false;
+                    });
+                },
+
                 // Get logs for a specific step (used in Flat view and legacy compatibility)
                 getStepLogs(jobId, stepName) {
                     // Try to get from Tree data first (preferred)
                     if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
                         const step = this.jobTreeData[jobId].steps.find(s => s.name === stepName);
                         if (step && step.logs) {
-                            return this.filterLogs(step.logs, this.getStepEventFilter(jobId, stepName));
+                            return this.filterLogsByLevels(step.logs, jobId, stepName);
                         }
                     }
 
                     // Fallback to jobLogs (legacy/flat view support)
                     if (this.jobLogs[jobId]) {
                         const logs = this.jobLogs[jobId].filter(l => l.step_name === stepName);
-                        return this.filterLogs(logs, this.getStepEventFilter(jobId, stepName));
+                        return this.filterLogsByLevels(logs, jobId, stepName);
                     }
 
                     return [];
@@ -2247,6 +2410,137 @@
                     // Placeholder: Implement state if needed.
                     // For now, this satisfies the template call.
                     console.log('Set filter', filter, 'for', stepName);
+                },
+
+                // Default step level filter: Info, Warn, Error enabled; Debug disabled (duplicate for second Alpine scope)
+                getDefaultStepLevelFilter() {
+                    return { debug: false, info: true, warn: true, error: true };
+                },
+
+                // Checkbox-based level filter functions (duplicate for second Alpine scope)
+                getStepLevelFilters(jobId, stepName) {
+                    const key = `${jobId}:${stepName}`;
+                    return this.stepLevelFilters[key] || this.getDefaultStepLevelFilter();
+                },
+
+                isLevelSelected(jobId, stepName, level) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    return filters[level] !== false;
+                },
+
+                isAllLevelsSelected(jobId, stepName) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    return filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false;
+                },
+
+                toggleLevelFilter(jobId, stepName, level) {
+                    const key = `${jobId}:${stepName}`;
+                    const currentFilters = this.getStepLevelFilters(jobId, stepName);
+                    this.stepLevelFilters[key] = {
+                        ...currentFilters,
+                        [level]: !currentFilters[level]
+                    };
+                    console.log('Toggle level filter', level, 'for', stepName, '-> new state:', this.stepLevelFilters[key]);
+
+                    // Fetch logs with updated level filter from API
+                    this.fetchStepLogsWithLevelFilter(jobId, stepName);
+                },
+
+                // Convert stepLevelFilters to API level parameter (duplicate for second Alpine scope)
+                getStepLevelFilterApiParam(jobId, stepName) {
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    // If all are checked, return 'all'
+                    if (filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return 'all';
+                    }
+                    // If only error is checked
+                    if (filters.debug === false && filters.info === false && filters.warn === false && filters.error !== false) {
+                        return 'error';
+                    }
+                    // If warn and error are checked (warn+)
+                    if (filters.debug === false && filters.info === false && filters.warn !== false && filters.error !== false) {
+                        return 'warn';
+                    }
+                    // If info, warn, error are checked (info+)
+                    if (filters.debug === false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return 'info';
+                    }
+                    // Mixed selection - return 'all' and filter client-side
+                    return 'all';
+                },
+
+                // Fetch step logs with current level filter applied (duplicate for second Alpine scope)
+                async fetchStepLogsWithLevelFilter(jobId, stepName) {
+                    // Find the step job ID from metadata
+                    const job = this.allJobs.find(j => j.id === jobId);
+                    const stepJobId = job?.metadata?.step_job_ids?.[stepName];
+
+                    if (!stepJobId) {
+                        console.warn('[Queue] No step job ID found for', stepName);
+                        return;
+                    }
+
+                    const level = this.getStepLevelFilterApiParam(jobId, stepName);
+                    console.log('[Queue] Fetching logs for step', stepName, 'with level filter:', level);
+
+                    try {
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=200&order=desc&level=${encodeURIComponent(level)}`);
+                        if (!response.ok) {
+                            console.warn('[Queue] Failed to fetch logs with level filter:', response.status);
+                            return;
+                        }
+
+                        const data = await response.json();
+                        let newLogs = data.logs || [];
+                        const totalCount = data.total_count || newLogs.length;
+
+                        // Reverse to get chronological order (we fetched desc, display asc)
+                        newLogs = newLogs.reverse();
+
+                        // Update jobLogs for step panel
+                        if (!this.jobLogs[jobId]) {
+                            this.jobLogs[jobId] = [];
+                        }
+                        this.jobLogs[jobId] = this.jobLogs[jobId].filter(l => l.step_name !== stepName);
+                        const logsWithStepName = newLogs.map(log => ({ ...log, step_name: stepName }));
+                        this.jobLogs[jobId].push(...logsWithStepName);
+
+                        // Also update jobTreeData if available
+                        if (this.jobTreeData[jobId]?.steps) {
+                            const stepIdx = this.jobTreeData[jobId].steps.findIndex(s => s.name === stepName);
+                            if (stepIdx >= 0) {
+                                const newSteps = [...this.jobTreeData[jobId].steps];
+                                newSteps[stepIdx] = {
+                                    ...newSteps[stepIdx],
+                                    logs: newLogs,
+                                    totalLogCount: totalCount
+                                };
+                                this.jobTreeData = {
+                                    ...this.jobTreeData,
+                                    [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
+                                };
+                            }
+                        }
+
+                        console.log('[Queue] Loaded', newLogs.length, 'logs for step', stepName, 'with level filter:', level);
+                    } catch (err) {
+                        console.error('[Queue] Error fetching logs with level filter:', err);
+                    }
+                },
+
+                // Filter logs using checkbox-based level selection (duplicate for second Alpine scope)
+                filterLogsByLevels(logs, jobId, stepName) {
+                    if (!logs) return [];
+                    const filters = this.getStepLevelFilters(jobId, stepName);
+                    // If all are selected, return all logs
+                    if (filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false) {
+                        return logs;
+                    }
+                    // Filter by selected levels
+                    return logs.filter(log => {
+                        const level = this.normalizeLogLevel(log.level);
+                        return filters[level] !== false;
+                    });
                 },
 
                 getLogLevelClass(level) {
@@ -4395,7 +4689,8 @@
                                 newSteps[stepIdx] = {
                                     ...newSteps[stepIdx],
                                     logs: stepLogs.logs,
-                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length // Store total count from API
+                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length, // Filtered count for pagination
+                                    unfilteredLogCount: stepLogs.unfiltered_count || stepLogs.total_count || stepLogs.logs.length // ALL logs regardless of filter
                                 };
 
                                 this.jobTreeData = {
@@ -4503,16 +4798,70 @@
                     this.jobTreeSearchFilter = { ...this.jobTreeSearchFilter, [jobId]: value };
                 },
 
+                // Get the level filter for API calls (converts checkbox state to API level param)
                 getTreeLogLevelFilter(jobId) {
-                    return this.treeLogLevelFilter[jobId] || 'all';
+                    const filters = this.treeLogLevelFilter[jobId] || this.getDefaultTreeLogLevelFilter();
+
+                    const { debug, info, warn, error } = filters;
+                    // If all are checked, return 'all'
+                    if (debug && info && warn && error) return 'all';
+                    // If only error is checked
+                    if (!debug && !info && !warn && error) return 'error';
+                    // If warn and error are checked (warn+)
+                    if (!debug && !info && warn && error) return 'warn';
+                    // If info, warn, error are checked (info+) - THIS IS THE DEFAULT
+                    if (!debug && info && warn && error) return 'info';
+                    // If debug and higher are checked
+                    if (debug && info && warn && error) return 'all';
+                    // Mixed selection - we need to pass specific levels
+                    // For now, use 'all' and filter client-side
+                    return 'all';
+                },
+
+                // Get checkbox state for a specific level
+                getTreeLogLevelChecked(jobId, level) {
+                    const filters = this.treeLogLevelFilter[jobId] || this.getDefaultTreeLogLevelFilter();
+                    return filters[level] !== false;
+                },
+
+                // Default filter state: Info, Warn, Error enabled; Debug disabled
+                getDefaultTreeLogLevelFilter() {
+                    return { debug: false, info: true, warn: true, error: true };
+                },
+
+                // Toggle a specific log level checkbox
+                toggleTreeLogLevel(jobId, level) {
+                    const currentFilters = this.treeLogLevelFilter[jobId] || this.getDefaultTreeLogLevelFilter();
+                    const newFilters = { ...currentFilters, [level]: !currentFilters[level] };
+                    this.treeLogLevelFilter = { ...this.treeLogLevelFilter, [jobId]: newFilters };
+
+                    console.log('[Queue] toggleTreeLogLevel:', level, '-> new filters:', newFilters);
+
+                    // Refresh logs for all expanded steps from API with new filter
+                    if (this.jobTreeData[jobId]?.steps) {
+                        this.jobTreeData[jobId].steps.forEach((step, idx) => {
+                            const key = `${jobId}:${idx}`;
+                            if (this.jobTreeExpandedSteps[key]) {
+                                console.log('[Queue] Refreshing step logs:', step.name, 'with level filter');
+                                this.fetchStepLogs(jobId, step.name, idx, true);
+                            }
+                        });
+                    }
+                },
+
+                // Check if all levels are selected (used for filter button highlight)
+                isAllLevelsSelected(jobId) {
+                    const filters = this.treeLogLevelFilter[jobId] || this.getDefaultTreeLogLevelFilter();
+                    // All levels selected means debug, info, warn, error are all true
+                    return filters.debug !== false && filters.info !== false && filters.warn !== false && filters.error !== false;
                 },
 
                 setTreeLogLevelFilter(jobId, level) {
                     this.treeLogLevelFilter = { ...this.treeLogLevelFilter, [jobId]: level };
                 },
 
-                // Default maximum logs to display per step in tree view
-                defaultLogsPerStep: 200,
+                // Default maximum logs to display per step in tree view (100 initially, +100 per "Show earlier logs" click)
+                defaultLogsPerStep: 100,
                 // Per-step expanded log limits (key: jobId:stepName, value: current limit)
                 stepLogLimits: {},
                 // Loading state for step log fetching
@@ -4528,20 +4877,21 @@
                     if (!logs) return [];
                     let filteredLogs = logs;
 
-                    // Apply log level filter
-                    const levelFilter = this.getTreeLogLevelFilter(jobId);
-                    if (levelFilter === 'error') {
-                        filteredLogs = filteredLogs.filter(log => this.normalizeLogLevel(log.level) === 'error');
-                    } else if (levelFilter === 'warn') {
-                        filteredLogs = filteredLogs.filter(log => ['warn', 'error'].includes(this.normalizeLogLevel(log.level)));
-                    }
+                    // Apply log level filter based on checkbox state (use default if not set)
+                    const filters = this.treeLogLevelFilter[jobId] || this.getDefaultTreeLogLevelFilter();
 
-                    // Apply search filter if present
-                    const filter = this.getTreeSearchFilter(jobId).toLowerCase();
-                    if (filter) {
+                    // Get which levels are enabled
+                    const enabledLevels = [];
+                    if (filters.debug !== false) enabledLevels.push('debug');
+                    if (filters.info !== false) enabledLevels.push('info');
+                    if (filters.warn !== false) enabledLevels.push('warn');
+                    if (filters.error !== false) enabledLevels.push('error');
+
+                    // If not all levels are enabled, filter
+                    if (enabledLevels.length < 4) {
                         filteredLogs = filteredLogs.filter(log => {
-                            const text = log.text || log.message || '';
-                            return text.toLowerCase().includes(filter);
+                            const normalizedLevel = this.normalizeLogLevel(log.level);
+                            return enabledLevels.includes(normalizedLevel);
                         });
                     }
 
@@ -4589,7 +4939,7 @@
                     return 0;
                 },
 
-                // Load more logs for a step (increases the limit and fetches from API)
+                // Load more logs for a step (increases the limit by 100 and fetches from API)
                 async loadMoreStepLogs(jobId, stepName, stepIndex) {
                     const key = `${jobId}:${stepName}`;
 
@@ -4597,42 +4947,33 @@
                     this.stepLogLoading = { ...this.stepLogLoading, [key]: true };
 
                     try {
-                        // Increase the limit by 200
+                        // Increase the limit by 100 to load more earlier logs
                         const currentLimit = this.getStepLogLimit(jobId, stepName);
-                        const newLimit = currentLimit + 200;
+                        const newLimit = currentLimit + 100;
                         this.stepLogLimits = { ...this.stepLogLimits, [key]: newLimit };
+                        console.log(`[Queue] loadMoreStepLogs: ${stepName} - increasing limit from ${currentLimit} to ${newLimit}`);
 
-                        // Get the step job ID from tree data
-                        const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
-                        const stepJobId = step?.step_id;
+                        // Use the same API pattern as _doFetchStepLogs - /api/jobs/{jobId}/tree/logs
+                        const level = this.getTreeLogLevelFilter(jobId);
+                        const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}`);
 
-                        if (stepJobId) {
-                            // Fetch more logs from API
-                            const level = this.getTreeLogLevelFilter(jobId);
-                            const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${newLimit}&order=desc&level=${encodeURIComponent(level)}`);
-                            if (response.ok) {
-                                const data = await response.json();
-                                let newLogs = data.logs || [];
-                                const totalCount = data.total_count || newLogs.length;
+                        if (response.ok) {
+                            const data = await response.json();
+                            const stepLogs = data.steps?.find(s => s.step_name === stepName);
 
-                                // Reverse to get chronological order
-                                newLogs = newLogs.reverse();
+                            if (stepLogs?.logs && this.jobTreeData[jobId]?.steps) {
+                                const newSteps = [...this.jobTreeData[jobId].steps];
+                                newSteps[stepIndex] = {
+                                    ...newSteps[stepIndex],
+                                    logs: stepLogs.logs,
+                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length
+                                };
+                                this.jobTreeData = {
+                                    ...this.jobTreeData,
+                                    [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
+                                };
 
-                                // Update step logs in tree data
-                                if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
-                                    const newSteps = [...this.jobTreeData[jobId].steps];
-                                    newSteps[stepIndex] = {
-                                        ...newSteps[stepIndex],
-                                        logs: newLogs,
-                                        totalLogCount: totalCount
-                                    };
-                                    this.jobTreeData = {
-                                        ...this.jobTreeData,
-                                        [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
-                                    };
-                                }
-
-                                console.log(`[Queue] Loaded ${newLogs.length}/${totalCount} logs for step ${stepName}`);
+                                console.log(`[Queue] Loaded ${stepLogs.logs.length}/${stepLogs.total_count || stepLogs.logs.length} logs for step ${stepName}`);
                             }
                         }
                     } catch (error) {

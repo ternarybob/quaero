@@ -1694,11 +1694,12 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 
 	// Response structure
 	type StepLogs struct {
-		StepName   string       `json:"step_name"`
-		StepID     string       `json:"step_id,omitempty"`
-		Status     string       `json:"status"`
-		Logs       []JobTreeLog `json:"logs"`
-		TotalCount int          `json:"total_count"` // Total logs available (for pagination)
+		StepName        string       `json:"step_name"`
+		StepID          string       `json:"step_id,omitempty"`
+		Status          string       `json:"status"`
+		Logs            []JobTreeLog `json:"logs"`
+		TotalCount      int          `json:"total_count"`      // Total logs matching level filter (for pagination)
+		UnfilteredCount int          `json:"unfiltered_count"` // Total logs regardless of level filter (for UI display)
 	}
 
 	response := struct {
@@ -1759,11 +1760,19 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 				}
 			}
 
-			// Count logs matching the filter.
+			// Count ALL logs (unfiltered) for UI display
+			unfilteredCount, unfilteredErr := h.logService.CountLogs(ctx, stepJob.ID)
+			if unfilteredErr != nil {
+				h.logger.Warn().Err(unfilteredErr).Str("step_job_id", stepJob.ID).Msg("Failed to count unfiltered logs for step")
+			} else {
+				stepLogs.UnfilteredCount = unfilteredCount
+			}
+
+			// Count logs matching the filter (for pagination)
 			totalCount := 0
 			var countErr error
 			if level == "all" || level == "debug" {
-				totalCount, countErr = h.logService.CountLogs(ctx, stepJob.ID)
+				totalCount = unfilteredCount // Same as unfiltered when no filter applied
 			} else {
 				for _, lv := range getIncludedLevels(level) {
 					// CountLogsByLevel expects exact level; we sum included levels for hierarchical filters.

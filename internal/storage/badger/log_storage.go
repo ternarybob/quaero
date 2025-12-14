@@ -114,6 +114,11 @@ func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.L
 	// Set JobIDField directly (primary indexed field)
 	entry.JobIDField = jobID
 
+	// Normalize level to 3-letter format for consistent storage/query
+	// API uses: "info", "warn", "error", "debug"
+	// Storage uses: "INF", "WRN", "ERR", "DBG"
+	entry.Level = normalizeLevel(entry.Level)
+
 	// Get next per-job line number (1-based, contiguous within each job)
 	entry.LineNumber = s.getNextLineNumber(ctx, jobID)
 
