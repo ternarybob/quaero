@@ -3277,8 +3277,8 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 			lastProgressLog = time.Now()
 		}
 
-		// Screenshot every 30 seconds during execution
-		if time.Since(lastScreenshot) >= 30*time.Second {
+		// Screenshot every 15 seconds during execution (more frequent to capture short jobs)
+		if time.Since(lastScreenshot) >= 15*time.Second {
 			screenshotCount++
 			utc.Screenshot(fmt.Sprintf("monitor_progress_%ds", int(time.Since(startTime).Seconds())))
 			utc.Log("Progress screenshot %d at %v", screenshotCount, time.Since(startTime).Round(time.Second))
@@ -3564,22 +3564,39 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 	assert.Greater(t, displayedCount, 0, "Should display some logs after expand")
 	utc.Log("Logs displayed: %d, total: %d, range: %d-%d", displayedCount, totalCount, firstLine, lastLine)
 
-	// ASSERTION 3: When showing latest logs, the LAST line number should be near the total
-	// With 3600 total logs and showing 100, we should see lines ~3500-3600, NOT lines 1-100
-	// The UI fetches order=desc (newest first) and reverses for display
+	// ASSERTION 3: When showing latest logs, verify via "Show earlier logs" count
+	// Line numbers are PER-JOB (not global), so worker logs have lines 1-1200 each
+	// The "earlier" count should be high (total - displayed) if we're showing latest
 	if totalCount > 100 {
-		// The last line displayed should be within 100 of the total (showing latest logs)
-		// Allow some tolerance for orchestration logs that may have different numbering
-		minExpectedLastLine := totalCount - displayedCount - 50 // Allow 50 line tolerance
-		if minExpectedLastLine < 0 {
-			minExpectedLastLine = 0
+		// Should display limited logs (typically ~100 or configured limit)
+		assert.LessOrEqual(t, displayedCount, 200, "Should display limited logs, not all")
+
+		// The "earlier" count should be roughly (total - displayed)
+		// If earlierCount is high, we're showing the latest logs (there are many earlier ones)
+		expectedEarlierMin := totalCount - displayedCount - 100 // Allow 100 tolerance
+		if expectedEarlierMin < 0 {
+			expectedEarlierMin = 0
 		}
 
-		// Verify we're showing the LATEST logs, not the earliest
-		assert.GreaterOrEqual(t, lastLine, minExpectedLastLine,
-			"Last line should be near total (showing latest logs): lastLine=%d, total=%d, expected >=%d",
-			lastLine, totalCount, minExpectedLastLine)
-		utc.Log("✓ ASSERTION 3 PASSED: Showing latest logs (lastLine=%d of %d total)", lastLine, totalCount)
+		assert.GreaterOrEqual(t, earlierCount, expectedEarlierMin,
+			"Should show latest logs (earlierCount should be high): earlier=%d, total=%d, expected >=%d",
+			earlierCount, totalCount, expectedEarlierMin)
+
+		// Additionally verify worker logs have high line numbers (near logCount per worker)
+		// Line numbers 1000+ indicate we're seeing logs from late in worker execution
+		maxWorkerLineExpected := logCount - 200 // e.g., 1200 - 200 = 1000
+		hasHighWorkerLines := false
+		for _, ln := range lineNumbers {
+			if ln >= maxWorkerLineExpected {
+				hasHighWorkerLines = true
+				break
+			}
+		}
+		assert.True(t, hasHighWorkerLines,
+			"Should have worker logs with high line numbers (>=%d) indicating late execution",
+			maxWorkerLineExpected)
+
+		utc.Log("✓ ASSERTION 3 PASSED: Showing latest logs (earlier=%d, has high line numbers=%v)", earlierCount, hasHighWorkerLines)
 	}
 
 	// ASSERTION 4: Should have "Show earlier logs" button for high volume
