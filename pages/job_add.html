@@ -4,63 +4,6 @@
 <head>
     {{template "head.html" .}}
     <title>Add Job - Quaero</title>
-
-    <style>
-        .editor-container {
-            position: relative;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background: #1e1e1e;
-        }
-
-        #toml-editor {
-            width: 100%;
-            min-height: 400px;
-            padding: 1rem;
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            line-height: 1.5;
-            background: #1e1e1e;
-            color: #d4d4d4;
-            border: none;
-            resize: vertical;
-            tab-size: 4;
-        }
-
-        #toml-editor:focus {
-            outline: 2px solid #007bff;
-            outline-offset: -2px;
-        }
-
-        .validation-message {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            border-radius: 4px;
-        }
-
-        .validation-message.success {
-            background-color: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-        }
-
-        .validation-message.error {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-        }
-
-        .btn-group {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-        }
-
-        #toml-editor:read-only {
-            opacity: 0.7;
-            cursor: not-allowed;
-        }
-    </style>
 </head>
 
 <body>

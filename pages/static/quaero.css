@@ -882,26 +882,7 @@ body.modal-open {
 .log-level-filter {
     width: 140px;
     height: 32px;
-    /* padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-    border-radius: var(--border-radius);
-    border: 1px solid var(--border-color);
-    background-color: var(--content-bg);
-    color: var(--text-primary);
-    margin-right: 0.5rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    cursor: pointer; */
 }
-
-/* .log-level-filter:focus {
-    outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
-}
-
-.log-level-filter:hover {
-    border-color: var(--color-primary);
-}  */
 
 /* Ensure navbar section keeps controls inline */
 .navbar-section {
@@ -1875,9 +1856,7 @@ body.modal-open {
 .column {
     &.menu-sidebar {
         min-height: 50vh;
-        /* min-width: 180px; */
         border-right: 1px solid var(--border-color);
-        /* margin-right: 1rem; */
 
         .nav-item a {
             white-space: nowrap;
@@ -2243,4 +2222,97 @@ body.modal-open {
 .job-steps-toggle:hover {
     background-color: rgba(0, 0, 0, 0.02);
     border-radius: 4px;
+}
+
+/* Document Page Styles (moved from documents.html inline styles)
+   ========================================================================== */
+.document-row {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.document-row:hover {
+    background-color: #f8f9fa;
+}
+
+.detail-row {
+    background-color: #fcfcfc;
+}
+
+.detail-content {
+    padding: 1rem;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+}
+
+/* Ensure code block doesn't overflow table width */
+.detail-content pre {
+    max-height: 60vh;
+    max-width: 90vw;
+    overflow: auto;
+    margin: 0;
+    font-size: 0.7rem;
+    border-radius: 4px;
+}
+
+/* Explicitly target code element to override PrismJS */
+.detail-content pre code {
+    font-size: 0.7rem !important;
+}
+
+/* Dropdown menu display on focus for testability (moved from queue.html) */
+.dropdown:focus-within .menu,
+.dropdown .dropdown-toggle:focus+.menu {
+    display: block !important;
+}
+
+/* Job Add/Edit Page Styles (moved from job_add.html)
+   ========================================================================== */
+.editor-container {
+    position: relative;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #1e1e1e;
+}
+
+#toml-editor {
+    width: 100%;
+    min-height: 400px;
+    padding: 1rem;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: none;
+    resize: vertical;
+    tab-size: 4;
+}
+
+#toml-editor:focus {
+    outline: 2px solid #007bff;
+    outline-offset: -2px;
+}
+
+#toml-editor:read-only {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.validation-message {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-radius: 4px;
+}
+
+.validation-message.success {
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.validation-message.error {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
 }
