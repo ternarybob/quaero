@@ -4302,9 +4302,12 @@
 
                             // Progressive hydration: keep UI light during running, but ensure visible growth in the DOM.
                             const limitKey = `${managerId}:${stepName}`;
-                            if (!this.stepLogLimits[limitKey]) {
+                            if (isFinished) {
+                                // Step finished - always fetch with full limit to get accurate totalLogCount
+                                this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: this.defaultLogsPerStep };
+                            } else if (!this.stepLogLimits[limitKey]) {
                                 // Start small during running so DOM log counts visibly increase over time (UI regression guard).
-                                this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: isFinished ? this.defaultLogsPerStep : 20 };
+                                this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: 20 };
                             }
 
                             let currentLimit = this.getStepLogLimit(managerId, stepName);
@@ -4325,8 +4328,9 @@
 
                             // Fetch latest N logs (newest first, then reverse for display)
                             // No cursor - always get the latest logs for sliding window display
+                            // Use step parameter to route to getStepGroupedLogs (fast path, no child aggregation)
                             const level = this.getTreeLogLevelFilter(managerId);
-                            let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=${fetchLimit}&order=desc&level=${encodeURIComponent(level)}`;
+                            let url = `/api/logs?scope=job&job_id=${stepJobId}&step=${encodeURIComponent(stepName)}&limit=${fetchLimit}&order=desc&level=${encodeURIComponent(level)}`;
 
                             const response = await fetch(url);
                             if (!response.ok) {
@@ -4334,11 +4338,13 @@
                             }
 
                             const data = await response.json();
-                            let newLogs = data.logs || [];
-                            const totalCount = data.total_count || newLogs.length;
+                            // Response format: { steps: [{ step_name, logs, total_count }] }
+                            const stepData = data.steps?.find(s => s.step_name === stepName);
+                            let newLogs = stepData?.logs || [];
+                            const totalCount = stepData?.total_count || newLogs.length;
 
-                            // Reverse logs to get chronological order (we fetched desc, display asc)
-                            newLogs = newLogs.reverse();
+                            // Logs are returned in ASC order from getStepGroupedLogs (already reversed from DESC fetch)
+                            // No additional reversal needed
 
                             // Update jobTreeData (tree view) - always update status, even if no new logs
                             // If tree data not loaded yet, fetch it first (handles race condition)
@@ -4400,7 +4406,12 @@
                                 this.jobLogs[managerId] = [];
                             }
                             this.jobLogs[managerId] = this.jobLogs[managerId].filter(l => l.step_name !== stepName);
-                            const logsWithStepName = newLogs.map(log => ({ ...log, step_name: stepName }));
+                            // Map logs to include both 'text' and 'message' for compatibility
+                            const logsWithStepName = newLogs.map(log => ({
+                                ...log,
+                                step_name: stepName,
+                                message: log.text || log.message // Ensure message field is set for flat view
+                            }));
                             this.jobLogs[managerId].push(...logsWithStepName);
 
                             console.log('[Queue] Loaded', newLogs.length, 'logs for step', stepName);
@@ -4586,17 +4597,8 @@
                                             hasChanges = true;
                                             console.log('[Queue] fetchJobStructure updated step:', stepStatus.name, oldStatus, '->', stepStatus.status);
                                         }
-                                        // Update log count for expanded step indication
-                                        if (stepStatus.log_count > 0 && newSteps[stepIdx].logs) {
-                                            // Only update if we have more logs than before
-                                            if (stepStatus.log_count > newSteps[stepIdx].logs.length) {
-                                                // Trigger log refresh for expanded steps
-                                                const treeStepKey = `${jobId}:${stepIdx}`;
-                                                if (this.jobTreeExpandedSteps[treeStepKey]) {
-                                                    this.fetchStepLogs(jobId, stepStatus.name, stepIdx, true);
-                                                }
-                                            }
-                                        }
+                                        // Note: Log refreshes are handled by WebSocket refresh_logs handler
+                                        // No need to trigger fetchStepLogs here - it would cause duplicate API calls
                                     }
                                 });
                                 // Trigger reactive update with immutable data

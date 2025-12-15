@@ -3674,3 +3674,314 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 	utc.Screenshot("high_volume_generator_completed")
 	utc.Log("✓ High volume generator test completed")
 }
+
+// TestJobDefinitionGeneralUIAssertions is the comprehensive test for generic UI assertions.
+// This test uses the test_job_generator.toml directly and validates all UI behaviors that
+// are NOT specific to a particular job context.
+//
+// Assertions moved from job_definition_codebase_classify_test.go:
+// - Assertion 0: Progressive log streaming (logs update within first 30 seconds)
+// - Assertion 1: WebSocket refresh_logs message throttling (calculated threshold)
+// - Assertion 1b: /api/logs calls are gated by WebSocket triggers
+// - Assertion 2: Step icons match parent job icon standard
+// - Assertion 3: All steps have logs (no "No logs for this step")
+// - Assertion 3b: Completed/running steps MUST have logs
+// - Assertion 4: Log line numbering is monotonic (gaps allowed for filtering)
+// - Assertion 5: All steps auto-expand
+// - Assertion 6: UI log counts match API total_count
+//
+// This test copies the TOML to results directory for reference.
+func TestJobDefinitionGeneralUIAssertions(t *testing.T) {
+	utc := NewUITestContext(t, 10*time.Minute) // 10 min for comprehensive test
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing General UI Assertions with Test Job Generator ---")
+
+	// Copy job definition to results for reference
+	if err := utc.CopyJobDefinitionToResults("../config/job-definitions/test_job_generator.toml"); err != nil {
+		t.Logf("Warning: Failed to copy job definition to results: %v", err)
+	}
+
+	jobName := "Test Job Generator"
+	jobTimeout := 10 * time.Minute
+	httpHelper := utc.Env.NewHTTPTestHelperWithTimeout(t, 10*time.Second)
+
+	// Create trackers for WebSocket and API call monitoring
+	wsTracker := NewWebSocketMessageTracker()
+	apiTracker := NewAPICallTracker()
+	expansionTracker := NewStepExpansionTracker()
+
+	// Enable network tracking via Chrome DevTools Protocol
+	utc.Log("Enabling network and WebSocket frame tracking...")
+	chromedp.ListenTarget(utc.Ctx, func(ev interface{}) {
+		switch e := ev.(type) {
+		case *network.EventRequestWillBeSent:
+			apiTracker.AddRequest(e.Request.URL, time.Now())
+		case *network.EventWebSocketFrameReceived:
+			payloadData := e.Response.PayloadData
+			if strings.Contains(payloadData, "refresh_logs") {
+				var msg struct {
+					Type    string                 `json:"type"`
+					Payload map[string]interface{} `json:"payload"`
+				}
+				if err := json.Unmarshal([]byte(payloadData), &msg); err == nil {
+					if msg.Type == "refresh_logs" {
+						wsTracker.AddRefreshLogs(msg.Payload, time.Now())
+					}
+				}
+			}
+		}
+	})
+
+	// Enable network domain
+	if err := chromedp.Run(utc.Ctx, network.Enable()); err != nil {
+		t.Fatalf("Failed to enable network tracking: %v", err)
+	}
+
+	// Trigger the job - uses fast_generator step only for quicker testing
+	if err := utc.TriggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
+	}
+
+	// Navigate to Queue page for monitoring
+	if err := utc.Navigate(utc.QueueURL); err != nil {
+		t.Fatalf("Failed to navigate to Queue page: %v", err)
+	}
+
+	// Wait for job to appear in queue
+	utc.Log("Waiting for job to appear in queue...")
+	time.Sleep(2 * time.Second)
+
+	// Monitor job WITHOUT page refresh - using WebSocket updates
+	utc.Log("Starting job monitoring (NO page refresh)...")
+	startTime := time.Now()
+	progressDeadline := startTime.Add(30 * time.Second)
+	lastAPIVerify := startTime.Add(-30 * time.Second)
+	lastStatus := ""
+	jobID := ""
+	lastProgressLog := time.Now()
+	lastScreenshotTime := time.Now()
+	lastExpansionCheck := time.Now()
+	lastDOMProgressCheck := time.Now()
+	domProgressSamples := make([]DOMLogProgressSample, 0, 20)
+
+	for {
+		// Check context
+		if err := utc.Ctx.Err(); err != nil {
+			t.Fatalf("Context cancelled: %v", err)
+		}
+
+		// Check timeout
+		if time.Since(startTime) > jobTimeout {
+			utc.Screenshot("general_ui_timeout_" + sanitizeName(jobName))
+			t.Fatalf("Job %s did not complete within %v", jobName, jobTimeout)
+		}
+
+		// Log progress every 10 seconds
+		if time.Since(lastProgressLog) >= 10*time.Second {
+			elapsed := time.Since(startTime)
+			wsMsgs := wsTracker.GetRefreshLogsCount()
+			utc.Log("[%v] Monitoring... (status: %s, WebSocket refresh_logs: %d)",
+				elapsed.Round(time.Second), lastStatus, wsMsgs)
+			lastProgressLog = time.Now()
+		}
+
+		// Take screenshot every 30 seconds
+		if time.Since(lastScreenshotTime) >= 30*time.Second {
+			elapsed := time.Since(startTime)
+			utc.FullScreenshot(fmt.Sprintf("general_ui_monitor_%ds", int(elapsed.Seconds())))
+			lastScreenshotTime = time.Now()
+		}
+
+		// Check step expansion state every 2 seconds
+		if time.Since(lastExpansionCheck) >= 2*time.Second {
+			checkStepExpansionStateForJob(utc, expansionTracker, jobName)
+			lastExpansionCheck = time.Now()
+		}
+
+		// Capture progressive UI log updates during the first 30 seconds
+		if time.Now().Before(progressDeadline) && time.Since(lastDOMProgressCheck) >= 2*time.Second {
+			snap, err := captureDOMLogProgressSnapshot(utc)
+			if err == nil {
+				domProgressSamples = append(domProgressSamples, DOMLogProgressSample{
+					Elapsed:  time.Since(startTime),
+					Snapshot: snap,
+				})
+			}
+			lastDOMProgressCheck = time.Now()
+		}
+
+		// Get current job status via JavaScript (NO page refresh)
+		var currentStatus string
+		err := chromedp.Run(utc.Ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge) return statusBadge.getAttribute('data-status');
+						}
+					}
+					return '';
+				})()
+			`, jobName), &currentStatus),
+		)
+		if err != nil {
+			t.Logf("Warning: failed to get status: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		// Capture job ID once Alpine has loaded the job list
+		if jobID == "" {
+			if id, err := getJobIDFromQueueUI(utc, jobName); err == nil && id != "" {
+				jobID = id
+				utc.Log("Captured job_id from UI: %s", jobID)
+			}
+		}
+
+		// Log status changes
+		if currentStatus != lastStatus && currentStatus != "" {
+			elapsed := time.Since(startTime)
+			utc.Log("Status change: %s -> %s (at %v)", lastStatus, currentStatus, elapsed.Round(time.Second))
+			lastStatus = currentStatus
+			utc.FullScreenshot(fmt.Sprintf("general_ui_status_%s", currentStatus))
+		}
+
+		// API vs UI status assertions every 30 seconds
+		if jobID != "" && currentStatus != "" && time.Since(lastAPIVerify) >= 30*time.Second {
+			utc.Log("Polling assertion: Verifying API vs UI parent + step statuses (every 30s)...")
+			assertAPIParentJobStatusMatchesUI(t, utc, httpHelper, jobID, currentStatus)
+			assertAPIStepStatusesMatchUI(t, utc, httpHelper, jobID)
+			lastAPIVerify = time.Now()
+		}
+
+		// Check for terminal status
+		if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "cancelled" {
+			utc.Log("Job reached terminal status: %s", currentStatus)
+			break
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Final expansion check and log line capture
+	time.Sleep(1 * time.Second)
+	checkStepExpansionStateForJob(utc, expansionTracker, jobName)
+	captureLogLineNumbers(utc, expansionTracker)
+
+	// Take final screenshot
+	utc.FullScreenshot("general_ui_final_state")
+
+	// ===============================
+	// ASSERTIONS
+	// ===============================
+	finalStatus := lastStatus
+	utc.Log("--- Running General UI Assertions ---")
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 0: Progressive log streaming (scaling rate limiter)
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 0: Verifying progressive log updates within first 30 seconds...")
+	assertProgressiveLogsWithinWindow(t, utc, domProgressSamples)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 1: WebSocket message count limit (calculated threshold)
+	// --------------------------------------------------------------------------------
+	totalRefreshLogs := wsTracker.GetRefreshLogsCount()
+	jobRefreshLogs := wsTracker.GetJobScopedRefreshCount()
+	serviceRefreshLogs := wsTracker.GetServiceScopedRefreshCount()
+
+	// Calculate dynamic threshold based on actual job duration
+	jobDuration := time.Since(startTime)
+	jobDurationSeconds := int(jobDuration.Seconds())
+	numSteps := 4 // test_job_generator.toml has 4 steps
+
+	periodicIntervals := (jobDurationSeconds / 10) + 1
+	expectedPeriodic := periodicIntervals * 2
+	expectedStepTriggers := numSteps * 2
+	buffer := 10
+	calculatedThreshold := expectedPeriodic + expectedStepTriggers + buffer
+
+	if calculatedThreshold < 30 {
+		calculatedThreshold = 30
+	}
+
+	utc.Log("Assertion 1: WebSocket refresh_logs messages = %d (job: %d, service: %d)",
+		totalRefreshLogs, jobRefreshLogs, serviceRefreshLogs)
+	utc.Log("  Calculated threshold: %d (duration=%ds, periodic=%d, stepTriggers=%d, buffer=%d)",
+		calculatedThreshold, jobDurationSeconds, expectedPeriodic, expectedStepTriggers, buffer)
+
+	if totalRefreshLogs > calculatedThreshold {
+		t.Errorf("FAIL: WebSocket refresh_logs message count %d > calculated threshold %d", totalRefreshLogs, calculatedThreshold)
+	} else {
+		utc.Log("PASS: WebSocket refresh_logs messages within limit (%d <= %d)", totalRefreshLogs, calculatedThreshold)
+	}
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 1b: /api/logs calls gated by WebSocket triggers
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 1b: Verifying /api/logs calls correlate with refresh_logs triggers...")
+	assertAPILogsCallsAreGatedByRefreshTriggers(t, utc, wsTracker, apiTracker, startTime)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 2: Step icons match parent job icon standard
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 2: Checking step icons match parent job icon standard...")
+	assertStepIconsMatchStandard(t, utc)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 3: All steps have logs
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 3: Checking all steps have logs...")
+	assertAllStepsHaveLogs(t, utc)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 3b: Completed/running steps MUST have logs
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 3b: Checking completed/running steps have logs...")
+	assertCompletedStepsMustHaveLogs(t, utc)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 4: Log line numbering is monotonic
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 4: Checking log line numbering for all steps...")
+	assertLogLineNumberingCorrect(t, utc, expansionTracker)
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 5: All steps auto-expanded
+	// --------------------------------------------------------------------------------
+	expansionOrder := expansionTracker.GetExpansionOrder()
+	utc.Log("Assertion 5: Step expansion order = %v", expansionOrder)
+
+	// Verify all 4 steps from test_job_generator.toml auto-expanded
+	expectedSteps := []string{"fast_generator", "high_volume_generator", "slow_generator", "recursive_generator"}
+	for _, expected := range expectedSteps {
+		found := false
+		for _, actual := range expansionOrder {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("FAIL: Expected step '%s' did not auto-expand", expected)
+		} else {
+			utc.Log("PASS: Step '%s' auto-expanded", expected)
+		}
+	}
+
+	// --------------------------------------------------------------------------------
+	// ASSERTION 6: UI log counts match API total_count
+	// --------------------------------------------------------------------------------
+	if finalStatus == "completed" && jobID != "" {
+		utc.Log("Assertion 6: Verifying UI log line count equals API total_count...")
+		assertDisplayedLogCountsMatchAPITotalCountsWhenCompleted(t, utc, httpHelper, jobID)
+	} else {
+		utc.Log("Skipping Assertion 6 (job status=%s)", finalStatus)
+	}
+
+	utc.Log("General UI assertions test completed with final status: %s", finalStatus)
+}

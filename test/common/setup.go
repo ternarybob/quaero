@@ -164,11 +164,56 @@ type TestEnvironment struct {
 //	"TestSourcesPageLoad" -> "sources" (from sources_test.go)
 //	"TestJobsCreateModal" -> "jobs" (from jobs_test.go)
 //	"TestConfig_Something" -> "config" (from config_test.go)
+//	"TestJobDefinitionCodebaseClassify" -> "job-codebase" (special handling)
+//	"TestJobDefinitionGeneralUIAssertions" -> "job-general" (special handling)
 func extractSuiteName(testName string) string {
 	// Remove "Test" prefix if present
 	remainder := testName
 	if strings.HasPrefix(testName, "Test") {
 		remainder = testName[4:]
+	}
+
+	// Special handling for JobDefinition tests to produce readable names like "job-codebase", "job-general"
+	if strings.HasPrefix(remainder, "JobDefinition") {
+		// Extract the meaningful part after "JobDefinition"
+		afterJobDef := remainder[13:] // len("JobDefinition") = 13
+
+		// Find the first capital letter position in the remainder
+		firstCapital := -1
+		for i := 0; i < len(afterJobDef); i++ {
+			if afterJobDef[i] >= 'A' && afterJobDef[i] <= 'Z' {
+				firstCapital = i
+				break
+			}
+		}
+
+		// Extract the first "word" (up to second capital or end)
+		var jobType string
+		if firstCapital == 0 {
+			// Find second capital
+			secondCapital := -1
+			for i := 1; i < len(afterJobDef); i++ {
+				if afterJobDef[i] >= 'A' && afterJobDef[i] <= 'Z' {
+					secondCapital = i
+					break
+				}
+			}
+			if secondCapital > 0 {
+				jobType = strings.ToLower(afterJobDef[:secondCapital])
+			} else {
+				jobType = strings.ToLower(afterJobDef)
+			}
+		} else if firstCapital > 0 {
+			jobType = strings.ToLower(afterJobDef[:firstCapital])
+		} else {
+			jobType = strings.ToLower(afterJobDef)
+		}
+
+		// Return "job-{type}" format for better readability
+		if jobType != "" {
+			return "job-" + jobType
+		}
+		return "job-definition"
 	}
 
 	// Find all capital letter positions

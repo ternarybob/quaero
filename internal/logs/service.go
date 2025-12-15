@@ -68,6 +68,8 @@ func (s *Service) CountAggregatedLogs(ctx context.Context, parentJobID string, i
 	totalCount := 0
 
 	// Count parent job logs
+	// Storage's CountLogsByLevel now does hierarchical filtering (INFO includes INFO+WARN+ERROR)
+	// so we only call it once with the base level
 	if level == "" || level == "all" || level == "debug" {
 		count, err := s.storage.CountLogs(ctx, parentJobID)
 		if err != nil {
@@ -75,15 +77,12 @@ func (s *Service) CountAggregatedLogs(ctx context.Context, parentJobID string, i
 		}
 		totalCount += count
 	} else {
-		// Count by level(s) based on filter
-		levels := s.getIncludedLevels(level)
-		for _, lvl := range levels {
-			count, err := s.storage.CountLogsByLevel(ctx, parentJobID, lvl)
-			if err != nil {
-				continue
-			}
-			totalCount += count
+		// Count by level - storage handles hierarchical filtering internally
+		count, err := s.storage.CountLogsByLevel(ctx, parentJobID, level)
+		if err != nil {
+			return 0, err
 		}
+		totalCount += count
 	}
 
 	// If including children, collect and count all descendants
@@ -98,14 +97,12 @@ func (s *Service) CountAggregatedLogs(ctx context.Context, parentJobID string, i
 				}
 				totalCount += count
 			} else {
-				levels := s.getIncludedLevels(level)
-				for _, lvl := range levels {
-					count, err := s.storage.CountLogsByLevel(ctx, jobID, lvl)
-					if err != nil {
-						continue
-					}
-					totalCount += count
+				// Count by level - storage handles hierarchical filtering internally
+				count, err := s.storage.CountLogsByLevel(ctx, jobID, level)
+				if err != nil {
+					continue
 				}
+				totalCount += count
 			}
 		}
 	}

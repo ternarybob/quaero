@@ -210,10 +210,26 @@ func (s *LogStorage) GetLogsByLevel(ctx context.Context, jobID string, level str
 	var logs []models.LogEntry
 	// Normalize level to 3-letter format used in storage
 	normalizedLevel := normalizeLevel(level)
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel)
 
-	if err := s.db.Store().Find(&logs, query); err != nil {
+	// Get levels to include based on hierarchical filtering:
+	// - "all" or "DBG" -> all levels (DBG, INF, WRN, ERR)
+	// - "INF" -> INF, WRN, ERR
+	// - "WRN" -> WRN, ERR
+	// - "ERR" -> ERR only
+	includedLevels := getLevelsAtOrAbove(normalizedLevel)
+
+	// Query all logs for this job and filter by level in-memory
+	var allLogs []models.LogEntry
+	query := badgerhold.Where("JobIDField").Eq(jobID)
+	if err := s.db.Store().Find(&allLogs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level: %w", err)
+	}
+
+	// Filter by level
+	for _, log := range allLogs {
+		if _, ok := includedLevels[log.Level]; ok {
+			logs = append(logs, log)
+		}
 	}
 
 	// Sort in-memory to handle logs with/without Sequence field (newest first)
@@ -252,11 +268,24 @@ func (s *LogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {
 
 func (s *LogStorage) CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error) {
 	normalizedLevel := normalizeLevel(level)
-	count, err := s.db.Store().Count(&models.LogEntry{}, badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel))
-	if err != nil {
+
+	// Get levels to include based on hierarchical filtering
+	includedLevels := getLevelsAtOrAbove(normalizedLevel)
+
+	// Query all logs for this job and count by level in-memory
+	var allLogs []models.LogEntry
+	query := badgerhold.Where("JobIDField").Eq(jobID)
+	if err := s.db.Store().Find(&allLogs, query); err != nil {
 		return 0, fmt.Errorf("failed to count logs by level: %w", err)
 	}
-	return int(count), nil
+
+	count := 0
+	for _, log := range allLogs {
+		if _, ok := includedLevels[log.Level]; ok {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *LogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
@@ -287,10 +316,27 @@ func (s *LogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string,
 	var logs []models.LogEntry
 	// Normalize level to 3-letter format used in storage
 	normalizedLevel := normalizeLevel(level)
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel)
 
-	if err := s.db.Store().Find(&logs, query); err != nil {
+	// Get levels to include based on hierarchical filtering:
+	// - "all" or "DBG" -> all levels (DBG, INF, WRN, ERR)
+	// - "INF" -> INF, WRN, ERR
+	// - "WRN" -> WRN, ERR
+	// - "ERR" -> ERR only
+	includedLevels := getLevelsAtOrAbove(normalizedLevel)
+
+	// Query all logs for this job and filter by level in-memory
+	// (badgerhold doesn't support IN queries easily)
+	var allLogs []models.LogEntry
+	query := badgerhold.Where("JobIDField").Eq(jobID)
+	if err := s.db.Store().Find(&allLogs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level with offset: %w", err)
+	}
+
+	// Filter by level
+	for _, log := range allLogs {
+		if _, ok := includedLevels[log.Level]; ok {
+			logs = append(logs, log)
+		}
 	}
 
 	// Sort in-memory to handle logs with/without Sequence field (newest first)
@@ -307,6 +353,24 @@ func (s *LogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string,
 		logs = logs[:limit]
 	}
 	return logs, nil
+}
+
+// getLevelsAtOrAbove returns a set of levels at or above the given level
+// Level hierarchy: DBG < INF < WRN < ERR
+func getLevelsAtOrAbove(level string) map[string]bool {
+	switch level {
+	case "ERR":
+		return map[string]bool{"ERR": true}
+	case "WRN":
+		return map[string]bool{"WRN": true, "ERR": true}
+	case "INF":
+		return map[string]bool{"INF": true, "WRN": true, "ERR": true}
+	case "DBG":
+		return map[string]bool{"DBG": true, "INF": true, "WRN": true, "ERR": true}
+	default:
+		// For unknown levels or "all", include everything
+		return map[string]bool{"DBG": true, "INF": true, "WRN": true, "ERR": true}
+	}
 }
 
 // GetLogsByManagerID retrieves logs for all jobs under a manager

@@ -20,18 +20,24 @@ type LogRefreshTrigger struct {
 // UnifiedLogAggregator batches both service logs and step events using periodic flushing.
 // Instead of pushing each event, it triggers the UI to fetch the latest logs from the API.
 //
-// Triggering Strategy:
-// - Events are batched and triggers fire from periodic flush (every minThreshold)
-// - Immediate trigger when a step finishes (completed/failed/cancelled) - no debounce
-// - Step completions are critical for showing final logs, so they always fire
+// Triggering Strategy (per prompt_12.md):
+// 1. Job start -> refresh all step logs (via status change in job_update)
+// 2. Step start -> refresh step logs (via status change in job_update)
+// 3. Scaling intervals: 1s, 2s, 3s, 4s -> then 10s periodic
+// 4. Step complete -> refresh step logs (immediate via TriggerStepImmediately)
+// 5. Job completion -> refresh all step logs (via status change in job_update)
 //
-// This prevents UI flooding while ensuring step completion triggers always reach the UI.
+// The scaling approach ensures fast initial updates when a step starts logging,
+// then backs off to 10-second intervals for steady-state operation.
 type UnifiedLogAggregator struct {
-	mu            sync.Mutex
-	minThreshold  time.Duration // Minimum time between periodic triggers
-	maxThreshold  time.Duration // Maximum time between triggers (for rate-adaptive)
+	mu               sync.Mutex
+	minThreshold     time.Duration // Base periodic trigger interval (10 seconds)
+	maxThreshold     time.Duration // Maximum time between triggers (for rate-adaptive)
 	serviceThreshold time.Duration // Service log trigger interval
-	rateThreshold int           // Logs per second considered "high rate"
+	rateThreshold    int           // Logs per second considered "high rate"
+
+	// Scaling intervals for progressive updates: 1s, 2s, 3s, 4s, then 10s
+	scalingIntervals []time.Duration
 
 	// Service logs tracking with rate monitoring
 	hasServiceLogs         bool
@@ -44,6 +50,7 @@ type UnifiedLogAggregator struct {
 	stepLogCount        map[string]int       // step_id -> logs since last trigger
 	stepRateWindowStart map[string]time.Time // step_id -> rate window start
 	stepLastTrigger     map[string]time.Time // step_id -> last trigger time
+	stepTriggerCount    map[string]int       // step_id -> number of triggers sent (for scaling)
 	stepFinished        map[string]bool      // step_id -> terminal refresh already sent
 
 	// Single callback for all triggers
@@ -52,8 +59,13 @@ type UnifiedLogAggregator struct {
 	logger arbor.ILogger
 }
 
-// NewUnifiedLogAggregator creates an aggregator with rate-adaptive triggering.
-// The timeThreshold parameter is used as the periodic trigger interval (default: 10 seconds).
+// NewUnifiedLogAggregator creates an aggregator with scaling rate limiting.
+// The timeThreshold parameter is used as the base periodic trigger interval (default: 10 seconds).
+//
+// Scaling strategy (per prompt_12.md):
+// - First 4 triggers use scaling intervals: 1s, 2s, 3s, 4s
+// - Subsequent triggers use the base interval (10s)
+// This ensures fast initial updates when a step starts, then backs off.
 func NewUnifiedLogAggregator(
 	timeThreshold time.Duration,
 	onTrigger func(ctx context.Context, trigger LogRefreshTrigger),
@@ -65,10 +77,12 @@ func NewUnifiedLogAggregator(
 	}
 
 	return &UnifiedLogAggregator{
-		minThreshold:           timeThreshold, // Periodic trigger interval for progressive updates
-		maxThreshold:           timeThreshold, // Max wait for high-rate bursts
-		serviceThreshold:       2 * timeThreshold,
-		rateThreshold:          100,             // Logs/sec considered "high rate" (most batches are high-rate)
+		minThreshold:     timeThreshold, // Base periodic trigger interval (10 seconds)
+		maxThreshold:     timeThreshold, // Max wait for high-rate bursts
+		serviceThreshold: 2 * timeThreshold,
+		rateThreshold:    100, // Logs/sec considered "high rate" (most batches are high-rate)
+		// Scaling intervals: 1s, 2s, 3s, 4s, then 10s (per prompt_12.md)
+		scalingIntervals:       []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second},
 		hasServiceLogs:         false,
 		serviceLogCount:        0,
 		serviceRateWindowStart: time.Time{},
@@ -77,6 +91,7 @@ func NewUnifiedLogAggregator(
 		stepLogCount:           make(map[string]int),
 		stepRateWindowStart:    make(map[string]time.Time),
 		stepLastTrigger:        make(map[string]time.Time),
+		stepTriggerCount:       make(map[string]int),
 		stepFinished:           make(map[string]bool),
 		onTrigger:              onTrigger,
 		logger:                 logger,
@@ -236,8 +251,20 @@ func (a *UnifiedLogAggregator) StartPeriodicFlush(ctx context.Context) {
 	}()
 }
 
-// flushPending triggers refresh for pending events based on rate-adaptive logic.
-// Low rate producers trigger quickly, high rate producers wait longer.
+// getStepThreshold returns the trigger threshold for a step based on its trigger count.
+// Uses scaling intervals for the first 4 triggers: 1s, 2s, 3s, 4s
+// Then falls back to the base minThreshold (10s) for subsequent triggers.
+// This ensures fast initial updates when a step starts logging, then backs off.
+func (a *UnifiedLogAggregator) getStepThreshold(stepID string) time.Duration {
+	triggerCount := a.stepTriggerCount[stepID]
+	if triggerCount < len(a.scalingIntervals) {
+		return a.scalingIntervals[triggerCount]
+	}
+	return a.minThreshold
+}
+
+// flushPending triggers refresh for pending events based on scaling rate limiting.
+// Uses scaling intervals: 1s, 2s, 3s, 4s -> then 10s periodic (per prompt_12.md).
 // NOTE: This function must NOT log anything - logging would trigger another log_event
 // which would set hasServiceLogs=true, creating an infinite loop
 func (a *UnifiedLogAggregator) flushPending(ctx context.Context) {
@@ -267,43 +294,25 @@ func (a *UnifiedLogAggregator) flushPending(ctx context.Context) {
 		}
 	}
 
-	// Check step logs with rate-adaptive timing
+	// Check step logs with scaling rate limiting
+	// Uses scaling intervals: 1s, 2s, 3s, 4s -> then 10s periodic
 	stepIDs := make([]string, 0)
 	for stepID, hasEvents := range a.stepHasEvents {
 		if !hasEvents {
 			continue
 		}
 
-		// Calculate rate for this step
-		windowStart := a.stepRateWindowStart[stepID]
-		windowDuration := now.Sub(windowStart)
-		if windowDuration < 100*time.Millisecond {
-			windowDuration = 100 * time.Millisecond
-		}
-		currentRate := float64(a.stepLogCount[stepID]) / windowDuration.Seconds()
-
-		// Determine if we should flush based on rate
+		// Get the threshold for this step based on how many triggers have been sent
+		threshold := a.getStepThreshold(stepID)
 		timeSinceLastTrigger := now.Sub(a.stepLastTrigger[stepID])
-		shouldFlush := false
 
-		if currentRate < float64(a.rateThreshold) {
-			// Low rate: flush after minThreshold
-			if timeSinceLastTrigger >= a.minThreshold {
-				shouldFlush = true
-			}
-		} else {
-			// High rate: wait up to maxThreshold
-			if timeSinceLastTrigger >= a.maxThreshold {
-				shouldFlush = true
-			}
-		}
-
-		if shouldFlush {
+		if timeSinceLastTrigger >= threshold {
 			stepIDs = append(stepIDs, stepID)
 			a.stepHasEvents[stepID] = false
 			a.stepLogCount[stepID] = 0
 			a.stepRateWindowStart[stepID] = now
 			a.stepLastTrigger[stepID] = now
+			a.stepTriggerCount[stepID]++ // Increment trigger count for scaling
 		}
 	}
 
@@ -326,5 +335,6 @@ func (a *UnifiedLogAggregator) CleanupStep(stepID string) {
 	delete(a.stepLogCount, stepID)
 	delete(a.stepRateWindowStart, stepID)
 	delete(a.stepLastTrigger, stepID)
+	delete(a.stepTriggerCount, stepID)
 	delete(a.stepFinished, stepID)
 }
