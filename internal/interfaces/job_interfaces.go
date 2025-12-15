@@ -76,7 +76,7 @@ type JobWorker interface {
 	Execute(ctx context.Context, job *models.QueueJob) error
 
 	// GetWorkerType returns the job type this worker handles.
-	// Examples: "database_maintenance", "crawler_url", "agent"
+	// Examples: "crawler_url", "agent", "github_log"
 	GetWorkerType() string
 
 	// Validate validates that the queued job is compatible with this worker.

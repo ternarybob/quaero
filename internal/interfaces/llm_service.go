@@ -10,14 +10,6 @@ type LLMMode string
 const (
 	// LLMModeCloud indicates the service uses cloud-based LLM APIs (Google ADK)
 	LLMModeCloud LLMMode = "cloud"
-
-	// LLMModeOffline (DEPRECATED): Indicates local/offline LLM models
-	// No longer supported - use LLMModeCloud instead
-	LLMModeOffline LLMMode = "offline"
-
-	// LLMModeMock (DEPRECATED): Indicates mock responses for testing
-	// No longer supported - tests should use actual Google ADK API
-	LLMModeMock LLMMode = "mock"
 )
 
 // Message represents a single message in a chat conversation

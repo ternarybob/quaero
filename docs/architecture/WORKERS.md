@@ -383,33 +383,6 @@ enable_javascript = true
 
 ---
 
-### Database Maintenance Worker
-
-**File**: `database_maintenance_worker.go`
-
-**Purpose**: Processes database maintenance operations. **Note: Deprecated** - BadgerDB handles maintenance automatically. All operations are no-ops.
-
-**Interfaces**: JobWorker
-
-**Job Type**: `"database_maintenance_operation"`
-
-#### Inputs
-
-**Queue Job Config**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `operation` | string | Yes | "vacuum", "analyze", "reindex", "optimize" |
-
-#### Outputs
-
-None (all operations are no-ops in BadgerDB)
-
-#### Configuration
-
-None required.
-
----
-
 ### Dependency Graph Worker
 
 **File**: `dependency_graph_worker.go`

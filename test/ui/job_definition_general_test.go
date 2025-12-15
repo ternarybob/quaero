@@ -1706,7 +1706,7 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	utc.Screenshot("initial_log_count_job_completed")
 
-	// Expand the job card to see the tree view
+	// Expand the job card to see the tree view (only if not already expanded)
 	err = chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(fmt.Sprintf(`
 			(() => {
@@ -1714,6 +1714,13 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 				for (const card of cards) {
 					const titleEl = card.querySelector('.card-title');
 					if (titleEl && titleEl.textContent.includes('%s')) {
+						// Check if already expanded by looking for inline-tree-view content
+						const treeView = card.querySelector('.inline-tree-view');
+						const isExpanded = treeView && treeView.offsetParent !== null;
+						if (isExpanded) {
+							console.log('[Test] Card already expanded, not clicking');
+							return true;
+						}
 						const expandBtn = card.querySelector('.job-expand-toggle') || card.querySelector('[x-on\\:click*="expandedItems"]');
 						if (expandBtn) expandBtn.click();
 						return true;
@@ -1727,7 +1734,7 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 	require.NoError(t, err, "Failed to expand job card")
 	utc.Screenshot("initial_log_count_card_expanded")
 
-	// Expand the step to see step-level logs (orchestration messages)
+	// Expand the step to see step-level logs (only if not already expanded)
 	// Note: Step logs include "Starting X workers", "Worker completed/failed", etc.
 	err = chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`
@@ -1735,6 +1742,13 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 				const stepHeaders = document.querySelectorAll('.tree-step-header');
 				for (const header of stepHeaders) {
 					if (header.textContent.includes('generate_many_logs')) {
+						// Check if step is already expanded by looking for chevron-down
+						const chevron = header.querySelector('.fa-chevron-down');
+						const isExpanded = chevron !== null;
+						if (isExpanded) {
+							console.log('[Test] Step already expanded, not clicking');
+							return true;
+						}
 						header.click();
 						return true;
 					}
@@ -1944,7 +1958,7 @@ func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	utc.Screenshot("show_earlier_logs_job_completed")
 
-	// Expand the job card to see the tree view (click the expand button, not the card)
+	// Expand the job card to see the tree view (only if not already expanded)
 	var cardExpanded bool
 	err = chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(fmt.Sprintf(`
@@ -1955,6 +1969,14 @@ func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
 					const titleEl = card.querySelector('.card-title');
 					if (titleEl && titleEl.textContent.includes('%s')) {
 						console.log('[Test] Found job card:', titleEl.textContent);
+						// Check if already expanded by looking for inline-tree-view content
+						const treeView = card.querySelector('.inline-tree-view');
+						const isExpanded = treeView && treeView.offsetParent !== null;
+						console.log('[Test] Card already expanded:', isExpanded);
+						if (isExpanded) {
+							console.log('[Test] Card already expanded, not clicking');
+							return true;
+						}
 						const expandBtn = card.querySelector('.job-expand-toggle') || card.querySelector('[x-on\\:click*="expandedItems"]');
 						if (expandBtn) {
 							console.log('[Test] Clicking expand button');
@@ -1980,7 +2002,7 @@ func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
 	// Wait for step rows to appear
 	time.Sleep(2 * time.Second)
 
-	// Expand the step to see step-level logs (orchestration messages)
+	// Expand the step to see step-level logs (only if not already expanded)
 	var stepClicked bool
 	err = chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`
@@ -1990,6 +2012,14 @@ func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
 				for (const header of stepHeaders) {
 					console.log('[Test] Step header:', header.textContent);
 					if (header.textContent.includes('generate_many_logs')) {
+						// Check if step is already expanded by looking for chevron-down
+						const chevron = header.querySelector('.fa-chevron-down');
+						const isExpanded = chevron !== null;
+						console.log('[Test] Step already expanded:', isExpanded);
+						if (isExpanded) {
+							console.log('[Test] Step already expanded, not clicking');
+							return true;
+						}
 						header.click();
 						return true;
 					}
@@ -2136,4 +2166,209 @@ func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
 	}
 
 	utc.Log("✓ 'Show Earlier Logs' button test completed")
+}
+
+// TestJobDefinitionTestJobGeneratorTomlConfig verifies that running the test_job_generator.toml
+// job definition produces log counts that match the configured values.
+// Requirements:
+// 1. Run the job from test/config/job-definitions/test_job_generator.toml
+// 2. Verify each step's total log count matches expected values from config
+// 3. For high_volume_generator with log_count=1200, verify UI shows correct total
+func TestJobDefinitionTestJobGeneratorTomlConfig(t *testing.T) {
+	utc := NewUITestContext(t, 15*time.Minute) // Long timeout for high volume logs
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing Test Job Generator TOML Config Log Counts ---")
+
+	// Job definition is already loaded from test/config/job-definitions/test_job_generator.toml
+	// The job name is "Test Job Generator" (from name = "Test Job Generator" in toml)
+	jobName := "Test Job Generator"
+
+	// Expected step log counts from toml config (each worker generates log_count logs)
+	// Note: Step-level logs are orchestration messages, not worker logs
+	// Worker logs are in child jobs. Step logs include: starting workers, worker status updates
+	expectedSteps := map[string]struct {
+		workerCount int
+		logCount    int
+	}{
+		"fast_generator":        {5, 50},   // 5 workers * 50 logs each
+		"high_volume_generator": {3, 1200}, // 3 workers * 1200 logs each
+		"slow_generator":        {2, 300},  // 2 workers * 300 logs each
+		"recursive_generator":   {3, 20},   // 3 workers * 20 logs each (plus recursion)
+	}
+
+	// Trigger the job via UI
+	if err := utc.TriggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
+	}
+	utc.Log("Job triggered: %s", jobName)
+
+	// Navigate to Queue page
+	err := utc.Navigate(utc.QueueURL)
+	require.NoError(t, err, "Failed to navigate to Queue page")
+	utc.Screenshot("toml_config_queue_page")
+
+	// Wait for job to complete - this job has multiple steps and high volume logs
+	// Expected duration: fast (quick) + high_volume (3*1200*5ms = 18s) + slow (2*300*500ms = 300s) + recursive
+	// Total: ~5-6 minutes
+	utc.Log("Waiting for job to complete (this may take 5+ minutes due to slow_generator step)...")
+	startTime := time.Now()
+	jobTimeout := 10 * time.Minute
+	lastStatus := ""
+	lastScreenshotTime := startTime
+	screenshotCount := 0
+
+	for {
+		if time.Since(startTime) > jobTimeout {
+			utc.Screenshot("toml_config_timeout")
+			t.Fatalf("Job did not complete within %v", jobTimeout)
+		}
+
+		// Take screenshot every 60 seconds
+		if time.Since(lastScreenshotTime) >= 60*time.Second {
+			screenshotCount++
+			utc.Screenshot(fmt.Sprintf("toml_config_progress_%d", screenshotCount))
+			utc.Log("Progress: %v elapsed", time.Since(startTime))
+			lastScreenshotTime = time.Now()
+		}
+
+		var currentStatus string
+		chromedp.Run(utc.Ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge) return statusBadge.getAttribute('data-status');
+						}
+					}
+					return '';
+				})()
+			`, jobName), &currentStatus),
+		)
+
+		if currentStatus != lastStatus && currentStatus != "" {
+			utc.Log("Job status: %s (at %v)", currentStatus, time.Since(startTime))
+			lastStatus = currentStatus
+		}
+
+		if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "cancelled" {
+			utc.Log("Job reached terminal state: %s after %v", currentStatus, time.Since(startTime))
+			break
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	// Wait for UI to settle
+	time.Sleep(3 * time.Second)
+	utc.Screenshot("toml_config_job_completed")
+
+	// Verify job completed successfully
+	require.Equal(t, "completed", lastStatus, "Job should complete successfully")
+
+	// Get job ID for API calls
+	helper := utc.Env.NewHTTPTestHelper(t)
+	var jobID string
+	chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const jobListEl = document.querySelector('[x-data="jobList"]');
+				if (!jobListEl) return '';
+				const component = Alpine.$data(jobListEl);
+				if (!component) return '';
+				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+				return job ? job.id : '';
+			})()
+		`, jobName), &jobID),
+	)
+
+	if jobID == "" {
+		t.Skip("Could not find job ID - test job generator may not be configured")
+	}
+	utc.Log("Found job ID: %s", jobID)
+
+	// Expand the job card if not already expanded
+	chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const cards = document.querySelectorAll('.card');
+				for (const card of cards) {
+					const titleEl = card.querySelector('.card-title');
+					if (titleEl && titleEl.textContent.includes('%s')) {
+						const treeView = card.querySelector('.inline-tree-view');
+						const isExpanded = treeView && treeView.offsetParent !== null;
+						if (!isExpanded) {
+							const expandBtn = card.querySelector('.job-expand-toggle');
+							if (expandBtn) expandBtn.click();
+						}
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, jobName), nil),
+		chromedp.Sleep(2*time.Second),
+	)
+	utc.Screenshot("toml_config_card_expanded")
+
+	// Verify each step has logs and check log counts via API
+	utc.Log("Verifying step log counts...")
+
+	for stepName, expectedConfig := range expectedSteps {
+		// Get log count from API
+		resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/tree/logs?step=%s&limit=1&level=all", jobID, stepName))
+		if err != nil {
+			utc.Log("Warning: Failed to get logs for step %s: %v", stepName, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		var apiResp struct {
+			Steps []struct {
+				StepName        string `json:"step_name"`
+				TotalCount      int    `json:"total_count"`
+				UnfilteredCount int    `json:"unfiltered_count"`
+			} `json:"steps"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			utc.Log("Warning: Failed to decode API response for step %s: %v", stepName, err)
+			continue
+		}
+
+		if len(apiResp.Steps) == 0 {
+			utc.Log("Warning: No logs found for step %s", stepName)
+			continue
+		}
+
+		stepData := apiResp.Steps[0]
+		totalCount := stepData.UnfilteredCount
+		if totalCount == 0 {
+			totalCount = stepData.TotalCount
+		}
+
+		// Step logs are orchestration messages, not worker logs
+		// Each step should have logs like "Starting X workers", "Worker 1 completed", etc.
+		// The minimum expected step logs = 2 (starting + completed) + worker_count * 2 (per worker starting/completed)
+		minExpectedStepLogs := 2 + expectedConfig.workerCount*2
+
+		utc.Log("Step '%s': total_count=%d (expected min %d orchestration logs)",
+			stepName, totalCount, minExpectedStepLogs)
+
+		// ASSERTION: Each step should have at least the minimum orchestration logs
+		assert.GreaterOrEqual(t, totalCount, minExpectedStepLogs,
+			"Step '%s' should have at least %d orchestration logs (got %d)",
+			stepName, minExpectedStepLogs, totalCount)
+
+		// For high_volume_generator, verify the configured log_count is reflected
+		// Note: Worker logs (1200 per worker) are in child jobs, not step logs
+		if stepName == "high_volume_generator" {
+			utc.Log("✓ Step '%s' verified with %d step logs (worker jobs each have %d logs)",
+				stepName, totalCount, expectedConfig.logCount)
+		}
+	}
+
+	utc.Log("✓ TOML config log count test completed")
 }

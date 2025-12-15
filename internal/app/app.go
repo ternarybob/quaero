@@ -388,10 +388,16 @@ func (a *App) initServices() error {
 	// Extract underlying *badger.DB from BadgerHold wrapper
 	badgerDB := badgerStore.Badger()
 
+	visibilityTimeout, err := time.ParseDuration(a.Config.Queue.VisibilityTimeout)
+	if err != nil {
+		visibilityTimeout = 5 * time.Minute // Default to 5 minutes
+		a.Logger.Warn().Str("value", a.Config.Queue.VisibilityTimeout).Msg("Invalid visibility timeout, using default 5m")
+	}
+
 	queueMgr, err := queue.NewBadgerManager(
 		badgerDB,
 		a.Config.Queue.QueueName,
-		parseDuration(a.Config.Queue.VisibilityTimeout),
+		visibilityTimeout,
 		a.Config.Queue.MaxReceive,
 	)
 	if err != nil {
@@ -495,15 +501,6 @@ func (a *App) initServices() error {
 
 	// Set KV storage on JobManager for placeholder resolution
 	jobMgr.SetKVStorage(a.StorageManager.KeyValueStorage())
-
-	// Register database maintenance worker (ARCH-008)
-	// Note: BadgerDB handles maintenance automatically, operations are no-ops
-	dbMaintenanceWorker := workers.NewDatabaseMaintenanceWorker(
-		jobMgr,
-		a.Logger,
-	)
-	jobProcessor.RegisterExecutor(dbMaintenanceWorker)
-	a.Logger.Debug().Msg("Database maintenance worker registered")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -998,65 +995,7 @@ func (a *App) initHandlers() error {
 	}()
 	a.Logger.Debug().Msg("Stale job detector started")
 
-	// Start queue stats broadcaster
-	// TODO Phase 8-11: Re-enable when queue manager is integrated
-	// go func() {
-	// 	ticker := time.NewTicker(5 * time.Second)
-	// 	defer ticker.Stop()
-
-	// 	for {
-	// 		select {
-	// 		case <-ticker.C:
-	// 			// Get queue stats
-	// 			stats, err := a.QueueManager.GetQueueStats(context.Background())
-	// 			if err != nil {
-	// 				a.Logger.Warn().Err(err).Msg("Failed to get queue stats")
-	// 				continue
-	// 			}
-
-	// 			// Broadcast to WebSocket clients
-	// 			update := handlers.QueueStatsUpdate{
-	// 				TotalMessages:    getInt(stats, "total_messages"),
-	// 				PendingMessages:  getInt(stats, "pending_messages"),
-	// 				InFlightMessages: getInt(stats, "in_flight_messages"),
-	// 				QueueName:        getString(stats, "queue_name"),
-	// 				Concurrency:      getInt(stats, "concurrency"),
-	// 				Timestamp:        time.Now(),
-	// 			}
-	// 			a.WSHandler.BroadcastQueueStats(update)
-	// 		case <-a.ctx.Done():
-	// 			a.Logger.Info().Msg("Queue stats broadcaster shutting down")
-	// 			return
-	// 		}
-	// 	}
-	// }()
-	// a.Logger.Info().Msg("Queue stats broadcaster started")
-
 	return nil
-}
-
-// Helper functions for safe type conversion from map[string]interface{}
-func getInt(m map[string]interface{}, key string) int {
-	if val, ok := m[key]; ok {
-		switch v := val.(type) {
-		case int:
-			return v
-		case int64:
-			return int(v)
-		case float64:
-			return int(v)
-		}
-	}
-	return 0
-}
-
-func getString(m map[string]interface{}, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
 }
 
 // Close closes all application resources
@@ -1098,13 +1037,6 @@ func (a *App) Close() error {
 	}
 
 	// Note: QueueManager (goqite) doesn't require explicit stop - it's stateless
-
-	// Shutdown orchestrator (cancels all background polling tasks)
-	// TODO Phase 8-11: Re-enable once Orchestrator is re-integrated
-	// if a.Orchestrator != nil {
-	// 	a.Orchestrator.Shutdown()
-	// 	a.Logger.Info().Msg("Orchestrator shutdown complete")
-	// }
 
 	// Close crawler service
 	if a.CrawlerService != nil {
@@ -1157,12 +1089,4 @@ func (a *App) Close() error {
 	}
 
 	return nil
-}
-
-func parseDuration(s string) time.Duration {
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 5 * time.Minute
-	}
-	return d
 }

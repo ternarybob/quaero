@@ -286,7 +286,7 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, database_maintenance)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary)", step.Type)
 	}
 
 	// Validate error strategy if provided

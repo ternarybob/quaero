@@ -473,14 +473,6 @@ func (h *WebSocketHandler) BroadcastAuth(authData *interfaces.AuthData) {
 	}
 }
 
-// BroadcastLog is DEPRECATED - logs are now published via EventService
-// This method kept for backward compatibility but should not be called directly
-// LogService publishes "log_event" which WebSocket subscribes to
-func (h *WebSocketHandler) BroadcastLog(entry interfaces.LogEntry) {
-	// No-op: Logs now flow through EventService
-	// LogService consumer publishes "log_event" -> WebSocket subscribes
-}
-
 // sendStatus sends current status to a specific client
 func (h *WebSocketHandler) sendStatus(conn *websocket.Conn) {
 	status := StatusUpdate{
@@ -546,12 +538,6 @@ func (h *WebSocketHandler) StartStatusBroadcaster() {
 			}
 		}
 	}()
-}
-
-// SendLog is DEPRECATED - use logger with correlation ID instead
-// Logs should go through: logger.WithCorrelationId(jobID) -> LogService -> EventService -> WebSocket
-func (h *WebSocketHandler) SendLog(level, message string) {
-	// No-op: Use logger with correlation ID instead
 }
 
 // GetRecentLogsHandler returns recent logs from the last 5 minutes as JSON
@@ -903,15 +889,6 @@ func (h *WebSocketHandler) BroadcastJobUpdate(jobID, context, stepName, status s
 			h.logger.Warn().Err(err).Msg("Failed to send job update to client")
 		}
 	}
-}
-
-// StreamCrawlerJobLog is DEPRECATED - use logger with correlation ID instead
-// Crawler logs should go through: jobLogger.WithCorrelationId(jobID).Info(msg) -> LogService -> EventService -> WebSocket
-func (h *WebSocketHandler) StreamCrawlerJobLog(jobID, level, message string, metadata map[string]interface{}) {
-	// No-op: Use logger with correlation ID instead
-	// Services should call: jobLogger := logger.WithCorrelationId(jobID)
-	// Then: jobLogger.Info().Msg(message)
-	// LogService will handle filtering and event publishing
 }
 
 // SubscribeToCrawlerEvents subscribes to crawler progress events
@@ -1317,31 +1294,6 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			}
 		}
 
-		return nil
-	})
-
-	// Subscribe to crawler job log events for real-time log streaming
-	h.eventService.Subscribe("crawler_job_log", func(ctx context.Context, event interfaces.Event) error {
-		payload, ok := event.Payload.(map[string]interface{})
-		if !ok {
-			h.logger.Warn().Msg("Invalid crawler job log event payload type")
-			return nil
-		}
-
-		jobID := getString(payload, "job_id")
-		level := getString(payload, "level")
-		message := getString(payload, "message")
-
-		// Extract metadata if present
-		var metadata map[string]interface{}
-		if metadataRaw, ok := payload["metadata"]; ok {
-			if metadataMap, ok := metadataRaw.(map[string]interface{}); ok {
-				metadata = metadataMap
-			}
-		}
-
-		// Stream the log message
-		h.StreamCrawlerJobLog(jobID, level, message, metadata)
 		return nil
 	})
 

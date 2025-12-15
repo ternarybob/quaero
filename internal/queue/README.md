@@ -35,13 +35,11 @@ internal/queue/
 │   ├── transform_manager.go
 │   ├── reindex_manager.go
 │   ├── places_search_manager.go
-│   └── database_maintenance_manager.go
 ├── workers/               # JobWorker implementations
 │   ├── job_processor.go   # Routes jobs to appropriate workers
 │   ├── crawler_worker.go
 │   ├── agent_worker.go
-│   ├── github_log_worker.go
-│   └── database_maintenance_worker.go
+│   └── github_log_worker.go
 └── state/                 # Runtime state tracking
     ├── monitor.go         # Job progress monitoring
     ├── progress.go        # Progress tracking
@@ -84,7 +82,6 @@ Managers create parent jobs and orchestrate workflows. Each manager handles a sp
 | `TransformManager` | `"transform"` | Document transformation |
 | `ReindexManager` | `"reindex"` | Search index rebuilding |
 | `PlacesSearchManager` | `"places_search"` | Google Places API searches |
-| `DatabaseMaintenanceManager` | `"database_maintenance"` | DB optimization operations |
 
 ### Workers (JobWorker Interface)
 
@@ -95,7 +92,6 @@ Workers execute individual jobs dequeued from the queue:
 | `CrawlerWorker` | `"crawler"` | Executes web crawling |
 | `AgentWorker` | `"agent"` | Executes AI agent processing |
 | `GitHubLogWorker` | `"github_log"` | Executes GitHub log fetching |
-| `DatabaseMaintenanceWorker` | `"database_maintenance_operation"` | Executes DB maintenance |
 | `JobProcessor` | (router) | Routes jobs to appropriate workers |
 
 ### State Tracking (Mutable)

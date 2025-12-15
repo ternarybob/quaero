@@ -42,11 +42,6 @@ type AggregatedJobMeta struct {
 	ParentID string `json:"parent_id"` // Parent job ID (empty for parent jobs)
 }
 
-// WebSocketHandler interface for broadcasting log entries
-type WebSocketHandler interface {
-	BroadcastLog(entry LogEntry)
-}
-
 // LogService manages log storage operations only
 type LogService interface {
 	AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error

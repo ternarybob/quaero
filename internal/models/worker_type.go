@@ -18,10 +18,9 @@ const (
 	WorkerTypeGitHubRepo          WorkerType = "github_repo"
 	WorkerTypeGitHubActions       WorkerType = "github_actions"
 	WorkerTypeGitHubGit           WorkerType = "github_git" // Clone repository via git instead of API
-	WorkerTypeTransform           WorkerType = "transform"
-	WorkerTypeReindex             WorkerType = "reindex"
-	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
-	WorkerTypeLocalDir            WorkerType = "local_dir" // Local directory indexing (full content)
+	WorkerTypeTransform WorkerType = "transform"
+	WorkerTypeReindex   WorkerType = "reindex"
+	WorkerTypeLocalDir  WorkerType = "local_dir" // Local directory indexing (full content)
 	WorkerTypeCodeMap             WorkerType = "code_map"  // Hierarchical code structure analysis
 	WorkerTypeSummary             WorkerType = "summary"   // Corpus summary generation from tagged documents
 
@@ -40,9 +39,9 @@ func (w WorkerType) IsValid() bool {
 	switch w {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
-		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
-		WorkerTypeSummary, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
-		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary, WorkerTypeTestJobGenerator:
+		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
+		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
+		WorkerTypeAggregateSummary, WorkerTypeTestJobGenerator:
 		return true
 	}
 	return false
@@ -65,7 +64,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeGitHubGit,
 		WorkerTypeTransform,
 		WorkerTypeReindex,
-		WorkerTypeDatabaseMaintenance,
 		WorkerTypeLocalDir,
 		WorkerTypeCodeMap,
 		WorkerTypeSummary,

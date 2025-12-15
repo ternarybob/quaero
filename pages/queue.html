@@ -7,7 +7,7 @@
     <style>
         /* Ensure dropdown menu opens on focus for testability */
         .dropdown:focus-within .menu,
-        .dropdown .dropdown-toggle:focus + .menu {
+        .dropdown .dropdown-toggle:focus+.menu {
             display: block !important;
         }
     </style>
@@ -199,8 +199,7 @@
                                                         <button class="btn btn-sm step-events-btn" :data-events-count="getStepLogs(item.job.id, item.step.name).length" @click.stop="toggleStepLogsExpand(item.job.id, item.step.name)">
                                                             <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                             <i class="fas fa-stream"></i>
-                                                            <span class="events-count-text"
-                                                                x-text="'logs: ' + getStepLogs(item.job.id, item.step.name).length + '/' + getStepLogsTotal(item.job.id, item.step.name)"></span>
+                                                            <span class="events-count-text" x-text="'logs: ' + getStepLogs(item.job.id, item.step.name).length + '/' + getStepLogsTotal(item.job.id, item.step.name)"></span>
                                                         </button>
                                                         <!-- Filter dropdown (only show when expanded) - matching settings-logs.html pattern exactly -->
                                                         <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
@@ -243,8 +242,7 @@
                                                             <template x-if="getStepLogs(item.job.id, item.step.name).length === 0">
                                                                 <div class="step-logs-empty" style="color: var(--code-color);">
                                                                     <i class="fas fa-info-circle"></i>
-                                                                    <span
-                                                                        x-text="!isAllLevelsSelected(item.job.id, item.step.name) ? 'No logs matching filter for this step.' : 'No logs yet for this step.'"></span>
+                                                                    <span x-text="!isAllLevelsSelected(item.job.id, item.step.name) ? 'No logs matching filter for this step.' : 'No logs yet for this step.'"></span>
                                                                 </div>
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
@@ -633,7 +631,7 @@
                                                                 </li>
                                                             </ul>
                                                         </div>
-                                                        <button class="btn btn-sm" @click.stop="refreshJobTreeData(item.job.id)" style="padding: 0.2rem 0.5rem; background: #fff; border: 1px solid #ccc; color: #333;">
+                                                        <button class="btn btn-sm" @click.stop="refreshJobTreeData(item.job.id)">
                                                             <i class="fa-solid fa-rotate-right" :class="jobTreeLoading[item.job.id] ? 'fa-spin' : ''"></i>
                                                         </button>
                                                     </div>
@@ -686,7 +684,8 @@
                                                                         <template x-if="step.logs && step.logs.length > 0">
                                                                             <span class="label bg-secondary" style="font-size: 0.65rem; padding: 0.1rem 0.4rem; margin-left: 0.25rem;">
                                                                                 <i class="fas fa-file-lines" style="margin-right: 0.15rem;"></i>
-                                                                                <span x-text="'logs: ' + getFilteredTreeLogs(step.logs, item.job.id, step.name).length + '/' + (step.unfilteredLogCount || step.totalLogCount || step.logs.length)"></span>
+                                                                                <span
+                                                                                    x-text="'logs: ' + getFilteredTreeLogs(step.logs, item.job.id, step.name).length + '/' + (step.unfilteredLogCount || step.totalLogCount || step.logs.length)"></span>
                                                                             </span>
                                                                         </template>
                                                                         <!-- Download logs button (enabled when step is completed/failed) -->
@@ -717,12 +716,8 @@
                                                                             <!-- Show More button (when there are earlier logs) -->
                                                                             <template x-if="hasStepEarlierLogs(item.job.id, step.name, stepIndex)">
                                                                                 <div class="tree-logs-show-more">
-                                                                                    <button class="btn btn-sm btn-link load-earlier-logs-btn"
-                                                                                        @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)"
-                                                                                        :data-job-id="item.job.id"
-                                                                                        :data-step-name="step.name"
-                                                                                        :data-step-index="stepIndex"
-                                                                                        :disabled="stepLogLoading[item.job.id + ':' + step.name]">
+                                                                                    <button class="btn btn-sm btn-link load-earlier-logs-btn" @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)" :data-job-id="item.job.id"
+                                                                                        :data-step-name="step.name" :data-step-index="stepIndex" :disabled="stepLogLoading[item.job.id + ':' + step.name]">
                                                                                         <template x-if="stepLogLoading[item.job.id + ':' + step.name]">
                                                                                             <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
                                                                                         </template>
@@ -2080,7 +2075,7 @@
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
                     // Unified job/step status updates (primary mechanism for step status)
                     window.addEventListener('jobList:jobUpdate', (e) => this.handleJobUpdate(e.detail));
-                    
+
                     // Server restart handler - clear all job state to avoid stale requests
                     window.addEventListener('jobList:serverRestart', () => this.handleServerRestart());
 
