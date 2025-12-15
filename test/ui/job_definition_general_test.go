@@ -14,6 +14,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1490,44 +1491,74 @@ func assertLogCountDisplayFormat(t *testing.T, utc *UITestContext, helper *commo
 
 	// Verify against API - the total in UI should match unfiltered_count from API
 	if jobID != "" {
-		for _, stepInfo := range stepLogCounts {
-			stepName := stepInfo["stepName"].(string)
-			uiTotal := int(stepInfo["total"].(float64))
+		// First, get step job IDs from tree endpoint
+		treeResp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/tree", jobID))
+		if err != nil {
+			utc.Log("Warning: failed to get tree data: %v", err)
+		} else {
+			defer treeResp.Body.Close()
 
-			// Call API with level=all to get unfiltered count
-			resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/tree/logs?step=%s&limit=1&level=all", jobID, stepName))
-			if err != nil {
-				utc.Log("Warning: failed to get API unfiltered count for step '%s': %v", stepName, err)
-				continue
-			}
-			defer resp.Body.Close()
-
-			var apiResp struct {
+			var treeData struct {
 				Steps []struct {
-					StepName        string `json:"step_name"`
-					TotalCount      int    `json:"total_count"`
-					UnfilteredCount int    `json:"unfiltered_count"`
+					StepID string `json:"step_id"`
+					Name   string `json:"name"`
 				} `json:"steps"`
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-				utc.Log("Warning: failed to decode API response for step '%s': %v", stepName, err)
-				continue
-			}
-
-			if len(apiResp.Steps) > 0 {
-				apiTotal := apiResp.Steps[0].UnfilteredCount
-				if apiTotal == 0 {
-					apiTotal = apiResp.Steps[0].TotalCount // Fallback if unfiltered_count not set
+			if err := json.NewDecoder(treeResp.Body).Decode(&treeData); err != nil {
+				utc.Log("Warning: failed to decode tree data: %v", err)
+			} else {
+				// Build step name -> step ID map
+				stepIDMap := make(map[string]string)
+				for _, step := range treeData.Steps {
+					stepIDMap[step.Name] = step.StepID
 				}
 
-				// Allow some tolerance for timing (logs might be added between UI render and API call)
-				tolerance := 5
-				if uiTotal < apiTotal-tolerance || uiTotal > apiTotal+tolerance {
-					t.Errorf("FAIL: Step '%s' UI total (%d) doesn't match API unfiltered_count (%d, tolerance=%d)",
-						stepName, uiTotal, apiTotal, tolerance)
-				} else {
-					utc.Log("✓ Step '%s': UI total (%d) matches API unfiltered_count (%d)",
-						stepName, uiTotal, apiTotal)
+				for _, stepInfo := range stepLogCounts {
+					stepName := stepInfo["stepName"].(string)
+					uiTotal := int(stepInfo["total"].(float64))
+
+					stepJobID, ok := stepIDMap[stepName]
+					if !ok || stepJobID == "" {
+						utc.Log("Warning: no step_id found for step '%s'", stepName)
+						continue
+					}
+
+					// Call unified /api/logs endpoint with step job ID
+					resp, err := helper.GET(fmt.Sprintf("/api/logs?scope=job&job_id=%s&step=%s&limit=1&level=all", stepJobID, url.QueryEscape(stepName)))
+					if err != nil {
+						utc.Log("Warning: failed to get API unfiltered count for step '%s': %v", stepName, err)
+						continue
+					}
+					defer resp.Body.Close()
+
+					var apiResp struct {
+						Steps []struct {
+							StepName        string `json:"step_name"`
+							TotalCount      int    `json:"total_count"`
+							UnfilteredCount int    `json:"unfiltered_count"`
+						} `json:"steps"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+						utc.Log("Warning: failed to decode API response for step '%s': %v", stepName, err)
+						continue
+					}
+
+					if len(apiResp.Steps) > 0 {
+						apiTotal := apiResp.Steps[0].UnfilteredCount
+						if apiTotal == 0 {
+							apiTotal = apiResp.Steps[0].TotalCount // Fallback if unfiltered_count not set
+						}
+
+						// Allow some tolerance for timing (logs might be added between UI render and API call)
+						tolerance := 5
+						if uiTotal < apiTotal-tolerance || uiTotal > apiTotal+tolerance {
+							t.Errorf("FAIL: Step '%s' UI total (%d) doesn't match API unfiltered_count (%d, tolerance=%d)",
+								stepName, uiTotal, apiTotal, tolerance)
+						} else {
+							utc.Log("✓ Step '%s': UI total (%d) matches API unfiltered_count (%d)",
+								stepName, uiTotal, apiTotal)
+						}
+					}
 				}
 			}
 		}
@@ -2317,56 +2348,86 @@ func TestJobDefinitionTestJobGeneratorTomlConfig(t *testing.T) {
 	// Verify each step has logs and check log counts via API
 	utc.Log("Verifying step log counts...")
 
-	for stepName, expectedConfig := range expectedSteps {
-		// Get log count from API
-		resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/tree/logs?step=%s&limit=1&level=all", jobID, stepName))
-		if err != nil {
-			utc.Log("Warning: Failed to get logs for step %s: %v", stepName, err)
-			continue
-		}
-		defer resp.Body.Close()
+	// First, get step job IDs from tree endpoint
+	treeResp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/tree", jobID))
+	if err != nil {
+		utc.Log("Warning: failed to get tree data: %v", err)
+	} else {
+		defer treeResp.Body.Close()
 
-		var apiResp struct {
+		var treeData struct {
 			Steps []struct {
-				StepName        string `json:"step_name"`
-				TotalCount      int    `json:"total_count"`
-				UnfilteredCount int    `json:"unfiltered_count"`
+				StepID string `json:"step_id"`
+				Name   string `json:"name"`
 			} `json:"steps"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-			utc.Log("Warning: Failed to decode API response for step %s: %v", stepName, err)
-			continue
-		}
+		if err := json.NewDecoder(treeResp.Body).Decode(&treeData); err != nil {
+			utc.Log("Warning: failed to decode tree data: %v", err)
+		} else {
+			// Build step name -> step ID map
+			stepIDMap := make(map[string]string)
+			for _, step := range treeData.Steps {
+				stepIDMap[step.Name] = step.StepID
+			}
 
-		if len(apiResp.Steps) == 0 {
-			utc.Log("Warning: No logs found for step %s", stepName)
-			continue
-		}
+			for stepName, expectedConfig := range expectedSteps {
+				stepJobID, ok := stepIDMap[stepName]
+				if !ok || stepJobID == "" {
+					utc.Log("Warning: no step_id found for step '%s'", stepName)
+					continue
+				}
 
-		stepData := apiResp.Steps[0]
-		totalCount := stepData.UnfilteredCount
-		if totalCount == 0 {
-			totalCount = stepData.TotalCount
-		}
+				// Get log count from API using unified /api/logs endpoint
+				resp, err := helper.GET(fmt.Sprintf("/api/logs?scope=job&job_id=%s&step=%s&limit=1&level=all", stepJobID, url.QueryEscape(stepName)))
+				if err != nil {
+					utc.Log("Warning: Failed to get logs for step %s: %v", stepName, err)
+					continue
+				}
+				defer resp.Body.Close()
 
-		// Step logs are orchestration messages, not worker logs
-		// Each step should have logs like "Starting X workers", "Worker 1 completed", etc.
-		// The minimum expected step logs = 2 (starting + completed) + worker_count * 2 (per worker starting/completed)
-		minExpectedStepLogs := 2 + expectedConfig.workerCount*2
+				var apiResp struct {
+					Steps []struct {
+						StepName        string `json:"step_name"`
+						TotalCount      int    `json:"total_count"`
+						UnfilteredCount int    `json:"unfiltered_count"`
+					} `json:"steps"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+					utc.Log("Warning: Failed to decode API response for step %s: %v", stepName, err)
+					continue
+				}
 
-		utc.Log("Step '%s': total_count=%d (expected min %d orchestration logs)",
-			stepName, totalCount, minExpectedStepLogs)
+				if len(apiResp.Steps) == 0 {
+					utc.Log("Warning: No logs found for step %s", stepName)
+					continue
+				}
 
-		// ASSERTION: Each step should have at least the minimum orchestration logs
-		assert.GreaterOrEqual(t, totalCount, minExpectedStepLogs,
-			"Step '%s' should have at least %d orchestration logs (got %d)",
-			stepName, minExpectedStepLogs, totalCount)
+				stepData := apiResp.Steps[0]
+				totalCount := stepData.UnfilteredCount
+				if totalCount == 0 {
+					totalCount = stepData.TotalCount
+				}
 
-		// For high_volume_generator, verify the configured log_count is reflected
-		// Note: Worker logs (1200 per worker) are in child jobs, not step logs
-		if stepName == "high_volume_generator" {
-			utc.Log("✓ Step '%s' verified with %d step logs (worker jobs each have %d logs)",
-				stepName, totalCount, expectedConfig.logCount)
+				// Step logs are orchestration messages, not worker logs
+				// Each step should have logs like "Starting X workers", "Worker 1 completed", etc.
+				// The minimum expected step logs = 2 (starting + completed) + worker_count * 2 (per worker starting/completed)
+				minExpectedStepLogs := 2 + expectedConfig.workerCount*2
+
+				utc.Log("Step '%s': total_count=%d (expected min %d orchestration logs)",
+					stepName, totalCount, minExpectedStepLogs)
+
+				// ASSERTION: Each step should have at least the minimum orchestration logs
+				assert.GreaterOrEqual(t, totalCount, minExpectedStepLogs,
+					"Step '%s' should have at least %d orchestration logs (got %d)",
+					stepName, minExpectedStepLogs, totalCount)
+
+				// For high_volume_generator, verify the configured log_count is reflected
+				// Note: Worker logs (1200 per worker) are in child jobs, not step logs
+				if stepName == "high_volume_generator" {
+					utc.Log("✓ Step '%s' verified with %d step logs (worker jobs each have %d logs)",
+						stepName, totalCount, expectedConfig.logCount)
+				}
+			}
 		}
 	}
 

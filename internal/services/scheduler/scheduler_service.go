@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 3rd November 2025 7:37:30 am
+// Last Modified: Sunday, 15th December 2025
 // Modified By: Bob McAllan
+// Reverted to use robfig/cron (backed out go-quartz)
 // -----------------------------------------------------------------------
 
 package scheduler
@@ -18,8 +19,6 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/crawler"
-	// TODO Phase 8-11: Re-enable once job executor is re-integrated
-	// "github.com/ternarybob/quaero/internal/services/jobs"
 )
 
 // jobEntry represents a registered job with metadata
@@ -30,14 +29,14 @@ type jobEntry struct {
 	handler     func() error
 	enabled     bool
 	autoStart   bool
-	cronID      cron.EntryID
+	entryID     cron.EntryID // robfig/cron entry ID
 	lastRun     *time.Time
 	nextRun     *time.Time
 	isRunning   bool
 	lastError   string
 }
 
-// Service implements SchedulerService interface
+// Service implements SchedulerService interface using robfig/cron
 type Service struct {
 	eventService   interfaces.EventService
 	crawlerService *crawler.Service        // For shutdown coordination
@@ -67,14 +66,13 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 }
 
 // NewServiceWithDB creates a new scheduler service with database persistence
-// TODO Phase 8-11: Re-enable proper jobExecutor type once job system is re-integrated
 func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, kvStorage interfaces.KeyValueStorage, crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
 	return &Service{
 		eventService:   eventService,
 		crawlerService: crawlerService,
 		jobStorage:     jobStorage,
 		jobDefStorage:  jobDefStorage,
-		jobExecutor:    jobExecutor, // Temporarily accepts nil during queue refactor
+		jobExecutor:    jobExecutor,
 		cron:           cron.New(),
 		logger:         logger,
 		kvStorage:      kvStorage,
@@ -88,36 +86,39 @@ func (s *Service) Start(cronExpr string) error {
 		return fmt.Errorf("scheduler already running")
 	}
 
+	if s.cron == nil {
+		return fmt.Errorf("scheduler not initialized")
+	}
+
 	if cronExpr == "" {
 		cronExpr = "*/1 * * * *" // Default: every 1 minute
 	}
 
 	// Load job definitions from storage and register them BEFORE checking for legacy task
-	// This ensures we don't add the legacy task if job definitions exist
 	if err := s.LoadJobDefinitions(); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to load job definitions from storage")
-		// Non-critical error - continue starting scheduler
 	}
 
 	// Only add legacy scheduled task if no jobs are registered after loading definitions
-	// This prevents duplicate collection when using the new job system
 	s.jobMu.Lock()
 	hasDefaultJobs := len(s.jobs) > 0
 	s.jobMu.Unlock()
 
 	if !hasDefaultJobs {
-		_, err := s.cron.AddFunc(cronExpr, s.runScheduledTask)
-		if err != nil {
-			return fmt.Errorf("failed to add cron job: %w", err)
+		// Register legacy scheduled task
+		if err := s.RegisterJob("legacy_collection", cronExpr, "Legacy scheduled collection task", false, s.runScheduledTask); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to register legacy scheduled task")
+		} else {
+			s.logger.Debug().
+				Str("cron_expr", cronExpr).
+				Msg("Legacy scheduled task enabled (no job definitions registered)")
 		}
-		s.logger.Debug().
-			Str("cron_expr", cronExpr).
-			Msg("Legacy scheduled task enabled (no job definitions registered)")
 	} else {
 		s.logger.Debug().
 			Msg("Legacy scheduled task disabled (job definitions are registered)")
 	}
 
+	// Start the cron scheduler
 	s.cron.Start()
 	s.running = true
 
@@ -128,7 +129,7 @@ func (s *Service) Start(cronExpr string) error {
 		s.logger.Debug().Msg("Stale job detector started (5 minute interval)")
 	}
 
-	s.logger.Info().Msg("Scheduler started")
+	s.logger.Info().Msg("Scheduler started (robfig/cron)")
 
 	// Execute auto-start jobs in background
 	go s.executeAutoStartJobs()
@@ -147,7 +148,6 @@ func (s *Service) Stop() error {
 		if len(runningJobIDs) > 0 {
 			s.logger.Info().Int("count", len(runningJobIDs)).Msg("Cancelling running crawler jobs")
 
-			// Cancel each job
 			for _, jobID := range runningJobIDs {
 				if err := s.crawlerService.CancelJob(jobID); err != nil {
 					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to cancel job")
@@ -185,7 +185,11 @@ func (s *Service) Stop() error {
 		s.logger.Debug().Msg("Stale job detector stopped")
 	}
 
-	s.cron.Stop()
+	// Stop cron scheduler
+	if s.cron != nil {
+		ctx := s.cron.Stop()
+		<-ctx.Done() // Wait for running jobs to complete
+	}
 	s.running = false
 
 	s.logger.Info().Msg("Scheduler stopped")
@@ -249,6 +253,10 @@ func (s *Service) RegisterJob(name string, schedule string, description string, 
 		return fmt.Errorf("invalid schedule: %w", err)
 	}
 
+	if s.cron == nil {
+		return fmt.Errorf("scheduler not initialized")
+	}
+
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 
@@ -256,7 +264,7 @@ func (s *Service) RegisterJob(name string, schedule string, description string, 
 		return fmt.Errorf("job %s already registered", name)
 	}
 
-	// Create job entry
+	// Create job entry for tracking
 	entry := &jobEntry{
 		name:        name,
 		schedule:    schedule,
@@ -266,27 +274,97 @@ func (s *Service) RegisterJob(name string, schedule string, description string, 
 		autoStart:   autoStart,
 	}
 
-	// Add to cron scheduler with wrapper
-	cronID, err := s.cron.AddFunc(schedule, func() {
-		s.executeJob(name)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add job to cron: %w", err)
+	// Create wrapper function that updates job status
+	wrappedHandler := func() {
+		s.executeJobHandler(name)
 	}
 
-	entry.cronID = cronID
+	// Add to cron scheduler
+	entryID, err := s.cron.AddFunc(schedule, wrappedHandler)
+	if err != nil {
+		return fmt.Errorf("failed to add cron job: %w", err)
+	}
+
+	entry.entryID = entryID
 	s.jobs[name] = entry
 
 	s.logger.Debug().
 		Str("job_name", name).
 		Str("schedule", schedule).
-		Msg("Job registered")
+		Int("entry_id", int(entryID)).
+		Msg("Job registered with robfig/cron")
 
 	return nil
 }
 
+// executeJobHandler is called by cron and wraps the actual job execution
+func (s *Service) executeJobHandler(name string) {
+	s.jobMu.Lock()
+	entry, exists := s.jobs[name]
+	if !exists {
+		s.jobMu.Unlock()
+		return
+	}
+
+	// Check if enabled
+	if !entry.enabled {
+		s.jobMu.Unlock()
+		return
+	}
+
+	// Mark as running
+	entry.isRunning = true
+	handler := entry.handler
+	s.jobMu.Unlock()
+
+	// Execute the handler
+	startTime := time.Now()
+	err := handler()
+
+	// Update status after execution
+	completionTime := time.Now()
+	s.jobMu.Lock()
+	if entry, exists := s.jobs[name]; exists {
+		entry.isRunning = false
+		entry.lastRun = &completionTime
+		if err != nil {
+			entry.lastError = err.Error()
+		} else {
+			entry.lastError = ""
+		}
+	}
+	s.jobMu.Unlock()
+
+	// Log execution result
+	if err != nil {
+		s.logger.Error().
+			Str("job_name", name).
+			Err(err).
+			Dur("duration", time.Since(startTime)).
+			Msg("Job execution failed")
+	} else {
+		s.logger.Debug().
+			Str("job_name", name).
+			Dur("duration", time.Since(startTime)).
+			Msg("Job execution completed successfully")
+	}
+
+	// Persist lastRun timestamp
+	s.jobMu.Lock()
+	if entry, exists := s.jobs[name]; exists {
+		if saveErr := s.saveJobSettings(name, entry.schedule, entry.description, entry.enabled, entry.lastRun); saveErr != nil {
+			s.logger.Warn().Err(saveErr).Msg("Failed to persist job lastRun timestamp")
+		}
+	}
+	s.jobMu.Unlock()
+}
+
 // EnableJob enables a disabled job
 func (s *Service) EnableJob(name string) error {
+	if s.cron == nil {
+		return fmt.Errorf("scheduler not initialized")
+	}
+
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 
@@ -299,15 +377,17 @@ func (s *Service) EnableJob(name string) error {
 		return nil // Already enabled
 	}
 
-	// Add back to cron scheduler
-	cronID, err := s.cron.AddFunc(entry.schedule, func() {
-		s.executeJob(name)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add job to cron: %w", err)
+	// Re-add to cron scheduler
+	wrappedHandler := func() {
+		s.executeJobHandler(name)
 	}
 
-	entry.cronID = cronID
+	entryID, err := s.cron.AddFunc(entry.schedule, wrappedHandler)
+	if err != nil {
+		return fmt.Errorf("failed to re-add cron job: %w", err)
+	}
+
+	entry.entryID = entryID
 	entry.enabled = true
 
 	s.logger.Debug().
@@ -324,6 +404,10 @@ func (s *Service) EnableJob(name string) error {
 
 // DisableJob disables an enabled job
 func (s *Service) DisableJob(name string) error {
+	if s.cron == nil {
+		return fmt.Errorf("scheduler not initialized")
+	}
+
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 
@@ -337,7 +421,7 @@ func (s *Service) DisableJob(name string) error {
 	}
 
 	// Remove from cron scheduler
-	s.cron.Remove(entry.cronID)
+	s.cron.Remove(entry.entryID)
 	entry.enabled = false
 
 	s.logger.Debug().
@@ -359,6 +443,10 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 		return fmt.Errorf("invalid schedule: %w", err)
 	}
 
+	if s.cron == nil {
+		return fmt.Errorf("scheduler not initialized")
+	}
+
 	s.jobMu.Lock()
 	defer s.jobMu.Unlock()
 
@@ -367,40 +455,30 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 		return fmt.Errorf("job %s not found", name)
 	}
 
-	// If job is enabled, remove from cron and re-add with new schedule
+	// Remove old entry from cron
 	if entry.enabled {
-		// Remove old cron entry
-		s.cron.Remove(entry.cronID)
-
-		// Add with new schedule
-		cronID, err := s.cron.AddFunc(schedule, func() {
-			s.executeJob(name)
-		})
-		if err != nil {
-			// Restore old schedule if new one fails
-			oldCronID, restoreErr := s.cron.AddFunc(entry.schedule, func() {
-				s.executeJob(name)
-			})
-			if restoreErr != nil {
-				s.logger.Error().
-					Str("job_name", name).
-					Err(restoreErr).
-					Msg("Failed to restore old schedule after update failure")
-				entry.enabled = false
-			} else {
-				entry.cronID = oldCronID
-			}
-			return fmt.Errorf("failed to update job schedule: %w", err)
-		}
-
-		entry.cronID = cronID
+		s.cron.Remove(entry.entryID)
 	}
 
-	// Update schedule in job entry
-	entry.schedule = schedule
+	// Create wrapper function
+	wrappedHandler := func() {
+		s.executeJobHandler(name)
+	}
 
-	// Note: nextRun will be computed on-demand by GetJobStatus()
-	// No need to iterate cron.Entries() here to avoid holding jobMu during iteration
+	// Add with new schedule
+	entryID, err := s.cron.AddFunc(schedule, wrappedHandler)
+	if err != nil {
+		return fmt.Errorf("failed to update cron job: %w", err)
+	}
+
+	// Update entry
+	entry.schedule = schedule
+	entry.entryID = entryID
+
+	// If job was disabled, remove from cron again
+	if !entry.enabled {
+		s.cron.Remove(entryID)
+	}
 
 	s.logger.Debug().
 		Str("job_name", name).
@@ -416,7 +494,6 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 }
 
 // UpdateJob updates job settings (description, schedule, enabled status)
-// Use nil pointers to skip updating specific fields
 func (s *Service) UpdateJob(name string, description, schedule *string, enabled *bool) error {
 	s.jobMu.Lock()
 	entry, exists := s.jobs[name]
@@ -458,7 +535,6 @@ func (s *Service) UpdateJob(name string, description, schedule *string, enabled 
 	}
 
 	// If only description was updated, persist it manually
-	// (schedule and enabled changes are already persisted by their respective methods)
 	if description != nil && schedule == nil && enabled == nil {
 		s.jobMu.Lock()
 		if err := s.saveJobSettings(name, entry.schedule, entry.description, entry.enabled, entry.lastRun); err != nil {
@@ -482,15 +558,12 @@ func (s *Service) GetJobStatus(name string) (*interfaces.JobStatus, error) {
 		return nil, fmt.Errorf("job %s not found", name)
 	}
 
-	// Get next run time from cron
+	// Get next run time from cron entry
 	var nextRun *time.Time
-	if entry.enabled {
-		for _, cronEntry := range s.cron.Entries() {
-			if cronEntry.ID == entry.cronID {
-				next := cronEntry.Next
-				nextRun = &next
-				break
-			}
+	if entry.enabled && s.cron != nil {
+		cronEntry := s.cron.Entry(entry.entryID)
+		if !cronEntry.Next.IsZero() {
+			nextRun = &cronEntry.Next
 		}
 	}
 
@@ -509,7 +582,7 @@ func (s *Service) GetJobStatus(name string) (*interfaces.JobStatus, error) {
 
 // GetAllJobStatuses returns all job statuses
 func (s *Service) GetAllJobStatuses() map[string]*interfaces.JobStatus {
-	// Copy job names while holding lock to avoid concurrent map iteration
+	// Copy job names while holding lock
 	s.jobMu.Lock()
 	names := make([]string, 0, len(s.jobs))
 	for name := range s.jobs {
@@ -517,7 +590,7 @@ func (s *Service) GetAllJobStatuses() map[string]*interfaces.JobStatus {
 	}
 	s.jobMu.Unlock()
 
-	// Build statuses without holding lock (GetJobStatus has its own locking)
+	// Build statuses without holding lock
 	statuses := make(map[string]*interfaces.JobStatus)
 	for _, name := range names {
 		status, err := s.GetJobStatus(name)
@@ -604,7 +677,7 @@ func (s *Service) executeJob(name string) {
 			Str("job_name", name).
 			Err(err).
 			Dur("duration", time.Since(now)).
-			Msg("❌ Job execution failed")
+			Msg("Job execution failed")
 	} else {
 		entry.lastError = ""
 		s.logger.Debug().
@@ -628,7 +701,7 @@ func (s *Service) executeJob(name string) {
 }
 
 // runScheduledTask executes the scheduled collection and embedding pipeline (legacy)
-func (s *Service) runScheduledTask() {
+func (s *Service) runScheduledTask() error {
 	// Panic recovery to prevent service crash
 	defer func() {
 		if r := recover(); r != nil {
@@ -647,7 +720,7 @@ func (s *Service) runScheduledTask() {
 	if s.isProcessing {
 		s.logger.Debug().Msg(">>> SCHEDULER: Mutex already locked, skipping this cycle")
 		s.mu.Unlock()
-		return
+		return nil
 	}
 	s.isProcessing = true
 	s.mu.Unlock()
@@ -680,11 +753,12 @@ func (s *Service) runScheduledTask() {
 		s.logger.Error().
 			Err(err).
 			Msg(">>> SCHEDULER: FAILED - Collection event publish error")
-		return
+		return err
 	}
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
 	s.logger.Debug().Msg("Collection completed successfully")
+	return nil
 }
 
 // JobSettings represents persisted job configuration
@@ -735,7 +809,6 @@ func (s *Service) saveJobSettings(name string, schedule string, description stri
 }
 
 // LoadJobSettings loads job settings from KV storage and applies them
-// Should be called after jobs are registered but before scheduler starts
 func (s *Service) LoadJobSettings() error {
 	if s.kvStorage == nil {
 		s.logger.Debug().Msg("No KV storage available, skipping job settings load")
@@ -743,9 +816,6 @@ func (s *Service) LoadJobSettings() error {
 	}
 
 	ctx := context.Background()
-	// List all keys, filter for job_settings prefix
-	// This is inefficient if KV store is huge, but fine for typical config size
-	// Ideally KV storage would support prefix scan
 	allKeys, err := s.kvStorage.GetAll(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load job settings: %w", err)
@@ -766,7 +836,6 @@ func (s *Service) LoadJobSettings() error {
 
 		name := settings.JobName
 		if name == "" {
-			// Fallback to extracting name from key if not in JSON (legacy support)
 			name = strings.TrimPrefix(key, "job_settings:")
 		}
 
@@ -827,9 +896,6 @@ func (s *Service) LoadJobSettings() error {
 }
 
 // LoadJobDefinitions loads job definitions from storage and registers them with the scheduler.
-// This method should be called after RegisterJob for hardcoded jobs but before Start.
-// Job definitions are registered alongside hardcoded jobs in the scheduler.
-// Returns error if storage query fails, but continues on individual registration failures.
 func (s *Service) LoadJobDefinitions() error {
 	// Graceful degradation if dependencies not available
 	if s.jobDefStorage == nil || s.jobExecutor == nil {
@@ -854,7 +920,6 @@ func (s *Service) LoadJobDefinitions() error {
 	registeredCount := 0
 	onDemandCount := 0
 	for _, jobDef := range jobDefs {
-		// Create local copy to avoid closure capture issues
 		jd := jobDef
 
 		s.logger.Debug().
@@ -886,12 +951,7 @@ func (s *Service) LoadJobDefinitions() error {
 		// Create handler closure that captures the job definition
 		handler := func() error {
 			execCtx := context.Background()
-			// TODO Phase 8-11: Re-enable when job executor is re-integrated
-			// For scheduled jobs, we don't need status or post-job callbacks since they're not parent jobs
-			// Pass nil callbacks - job-level events are still published via EventJobProgress
-			// _, err := s.jobExecutor.Execute(execCtx, jd, nil, nil)
-			// return err
-			_ = execCtx // Suppress unused variable
+			_ = execCtx
 			s.logger.Warn().Str("job_id", jd.ID).Msg("Job executor temporarily disabled during queue refactor")
 			return fmt.Errorf("job executor not available during queue refactor")
 		}
@@ -919,12 +979,11 @@ func (s *Service) LoadJobDefinitions() error {
 // CleanupOrphanedJobs marks orphaned running jobs as failed after service restart
 func (s *Service) CleanupOrphanedJobs() error {
 	if s.jobStorage == nil {
-		return nil // No job storage available
+		return nil
 	}
 
 	ctx := context.Background()
 
-	// Get all jobs with status "running"
 	runningJobs, err := s.jobStorage.GetJobsByStatus(ctx, "running")
 	if err != nil {
 		return fmt.Errorf("failed to get running jobs: %w", err)
@@ -936,7 +995,6 @@ func (s *Service) CleanupOrphanedJobs() error {
 
 	s.logger.Debug().Int("count", len(runningJobs)).Msg("Cleaning up orphaned jobs from previous run")
 
-	// Mark each as failed
 	cleanedCount := 0
 	for _, job := range runningJobs {
 		if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", "Service restarted while job was running"); err != nil {
@@ -946,7 +1004,7 @@ func (s *Service) CleanupOrphanedJobs() error {
 		}
 	}
 
-	s.logger.Warn().Int("count", cleanedCount).Msg("⚠️  Orphaned jobs cleaned up (service was likely not shutdown gracefully)")
+	s.logger.Warn().Int("count", cleanedCount).Msg("Orphaned jobs cleaned up (service was likely not shutdown gracefully)")
 	return nil
 }
 
@@ -958,7 +1016,6 @@ func (s *Service) DetectStaleJobs() error {
 
 	ctx := context.Background()
 
-	// Get jobs with heartbeat older than 10 minutes
 	staleJobs, err := s.jobStorage.GetStaleJobs(ctx, 10)
 	if err != nil {
 		return fmt.Errorf("failed to get stale jobs: %w", err)
@@ -970,31 +1027,25 @@ func (s *Service) DetectStaleJobs() error {
 
 	s.logger.Warn().Int("count", len(staleJobs)).Msg("Detected stale jobs (no heartbeat for 10+ minutes)")
 
-	// Mark each as failed
 	for _, job := range staleJobs {
 		reason := "Job stale (no heartbeat for 10+ minutes)"
 
-		// Try to fail job via crawler service first to update in-memory state
 		failedViaService := false
 		if s.crawlerService != nil {
 			if err := s.crawlerService.FailJob(job.ID, reason); err != nil {
-				// Job not in crawler's active jobs, will fall back to direct storage update
 				s.logger.Debug().Err(err).Str("job_id", job.ID).Msg("Job not in crawler memory, updating storage directly")
 			} else {
-				// Successfully failed via crawler service (in-memory + storage updated)
 				failedViaService = true
 				s.logger.Debug().Str("job_id", job.ID).Msg("Marked stale job as failed (via crawler service)")
 			}
 		}
 
-		// Fallback to direct storage update if not handled by crawler service
 		if !failedViaService {
 			if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", reason); err != nil {
 				s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update stale job status")
 			} else {
 				s.logger.Debug().Str("job_id", job.ID).Msg("Marked stale job as failed (via storage)")
 
-				// Emit progress event for UI update
 				if s.eventService != nil {
 					event := interfaces.Event{
 						Type: interfaces.EventCrawlProgress,
@@ -1015,7 +1066,6 @@ func (s *Service) DetectStaleJobs() error {
 
 // staleJobDetectorLoop runs periodically to detect and mark stale jobs
 func (s *Service) staleJobDetectorLoop() {
-	// Panic recovery to prevent service crash from stale job detector errors
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error().
@@ -1041,7 +1091,6 @@ func (s *Service) TriggerJob(name string) error {
 		return fmt.Errorf("job %s not found", name)
 	}
 
-	// Check if already running
 	if entry.isRunning {
 		s.jobMu.Unlock()
 		return fmt.Errorf("job %s is already running", name)

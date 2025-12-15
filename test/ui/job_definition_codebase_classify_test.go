@@ -456,9 +456,34 @@ func assertDisplayedLogCountsMatchAPITotalCountsWhenCompleted(t *testing.T, utc 
 		return
 	}
 
+	// Get step job IDs from tree endpoint
+	var treeData struct {
+		Steps []struct {
+			StepID string `json:"step_id"`
+			Name   string `json:"name"`
+		} `json:"steps"`
+	}
+	treePath := fmt.Sprintf("/api/jobs/%s/tree", jobID)
+	if err := apiGetJSON(t, h, treePath, &treeData); err != nil {
+		t.Errorf("FAIL: Failed to get tree data for job '%s': %v", jobID, err)
+		return
+	}
+
+	// Build step name -> step ID map
+	stepIDMap := make(map[string]string)
+	for _, step := range treeData.Steps {
+		stepIDMap[step.Name] = step.StepID
+	}
+
 	for stepName, counts := range uiCounts {
+		stepJobID, ok := stepIDMap[stepName]
+		if !ok || stepJobID == "" {
+			t.Errorf("FAIL: No step_id found for step '%s' (job_id=%s)", stepName, jobID)
+			continue
+		}
+
 		var logsResp apiJobTreeLogsResponse
-		path := fmt.Sprintf("/api/jobs/%s/tree/logs?step=%s&limit=1&level=%s", jobID, url.QueryEscape(stepName), url.QueryEscape(treeLogLevel))
+		path := fmt.Sprintf("/api/logs?scope=job&job_id=%s&step=%s&limit=1&level=%s", stepJobID, url.QueryEscape(stepName), url.QueryEscape(treeLogLevel))
 		if err := apiGetJSON(t, h, path, &logsResp); err != nil {
 			t.Errorf("FAIL: Failed to fetch API log counts for step '%s' (job_id=%s): %v", stepName, jobID, err)
 			continue

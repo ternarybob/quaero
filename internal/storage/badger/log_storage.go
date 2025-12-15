@@ -18,19 +18,23 @@ import (
 // logSequence is a global counter to ensure unique log keys even within the same nanosecond
 var logSequence uint64
 
-// jobLineCounters tracks per-job line number counters
-// Key: jobID, Value: pointer to uint64 counter
-var jobLineCounters sync.Map
+// stepLineCounters tracks per-step line number counters
+// Key: step_id (or jobID as fallback), Value: pointer to uint64 counter
+// All workers logging to the same step share one counter for sequential line numbers
+var stepLineCounters sync.Map
 
 // sortLogsAsc sorts logs in ascending order (oldest first)
-// Uses LineNumber as primary key for per-job sorting, falls back to Sequence for cross-job
+// For logs from the same step, sorts by LineNumber (per-step sequential ordering)
+// For logs from different steps, sorts by Sequence (global timestamp ordering)
 func sortLogsAsc(logs []models.LogEntry) {
 	sort.SliceStable(logs, func(i, j int) bool {
-		// Both have LineNumber - compare by LineNumber (per-job ordering)
-		if logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
+		// If both logs are from the same step, use LineNumber for proper ordering
+		stepI := logs[i].GetContext(models.LogCtxStepID)
+		stepJ := logs[j].GetContext(models.LogCtxStepID)
+		if stepI != "" && stepI == stepJ && logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
 			return logs[i].LineNumber < logs[j].LineNumber
 		}
-		// Fall back to Sequence for cross-job or legacy logs
+		// For cross-step logs, use Sequence (timestamp-based global ordering)
 		if logs[i].Sequence != "" && logs[j].Sequence != "" {
 			return logs[i].Sequence < logs[j].Sequence
 		}
@@ -40,14 +44,17 @@ func sortLogsAsc(logs []models.LogEntry) {
 }
 
 // sortLogsDesc sorts logs in descending order (newest first)
-// Uses LineNumber as primary key for per-job sorting, falls back to Sequence for cross-job
+// For logs from the same step, sorts by LineNumber (per-step sequential ordering)
+// For logs from different steps, sorts by Sequence (global timestamp ordering)
 func sortLogsDesc(logs []models.LogEntry) {
 	sort.SliceStable(logs, func(i, j int) bool {
-		// Both have LineNumber - compare by LineNumber (per-job ordering)
-		if logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
+		// If both logs are from the same step, use LineNumber for proper ordering
+		stepI := logs[i].GetContext(models.LogCtxStepID)
+		stepJ := logs[j].GetContext(models.LogCtxStepID)
+		if stepI != "" && stepI == stepJ && logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
 			return logs[i].LineNumber > logs[j].LineNumber
 		}
-		// Fall back to Sequence for cross-job or legacy logs
+		// For cross-step logs, use Sequence (timestamp-based global ordering)
 		if logs[i].Sequence != "" && logs[j].Sequence != "" {
 			return logs[i].Sequence > logs[j].Sequence
 		}
@@ -70,37 +77,41 @@ func NewLogStorage(db *BadgerDB, logger arbor.ILogger) interfaces.LogStorage {
 	}
 }
 
-// getNextLineNumber returns the next line number for a job (1-based, atomically incremented)
-// On first call for a job, it queries the DB to find the current max LineNumber
-func (s *LogStorage) getNextLineNumber(ctx context.Context, jobID string) int {
+// getNextLineNumber returns the next line number for a step (1-based, atomically incremented)
+// Uses step_id as counter key so all workers in the same step share sequential line numbers.
+// Falls back to jobID if no step_id is available.
+// On first call for a step, it queries the DB to find the current max LineNumber.
+func (s *LogStorage) getNextLineNumber(ctx context.Context, counterKey string) int {
 	// Try to get existing counter
-	if counterPtr, ok := jobLineCounters.Load(jobID); ok {
+	if counterPtr, ok := stepLineCounters.Load(counterKey); ok {
 		return int(atomic.AddUint64(counterPtr.(*uint64), 1))
 	}
 
-	// First access for this job - need to initialize from DB
-	// Query to find max LineNumber for this job
-	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID)
-	if err := s.db.Store().Find(&logs, query); err != nil {
+	// First access for this step - need to initialize from DB
+	// Query all logs and filter by step_id in context (badgerhold can't query map fields)
+	var allLogs []models.LogEntry
+	if err := s.db.Store().Find(&allLogs, badgerhold.Where("JobIDField").Ne("")); err != nil {
 		// On error, start from 1
 		var counter uint64 = 1
-		jobLineCounters.Store(jobID, &counter)
+		stepLineCounters.Store(counterKey, &counter)
 		return 1
 	}
 
-	// Find max LineNumber
+	// Find max LineNumber for logs with matching step_id
 	var maxLineNumber uint64 = 0
-	for _, log := range logs {
-		if uint64(log.LineNumber) > maxLineNumber {
-			maxLineNumber = uint64(log.LineNumber)
+	for _, log := range allLogs {
+		logStepID := log.GetContext(models.LogCtxStepID)
+		if logStepID == counterKey || (logStepID == "" && log.JobIDField == counterKey) {
+			if uint64(log.LineNumber) > maxLineNumber {
+				maxLineNumber = uint64(log.LineNumber)
+			}
 		}
 	}
 
 	// Initialize counter at maxLineNumber (next call will increment to max+1)
 	// Use LoadOrStore to handle race condition where another goroutine initialized first
 	newCounter := maxLineNumber
-	actual, loaded := jobLineCounters.LoadOrStore(jobID, &newCounter)
+	actual, loaded := stepLineCounters.LoadOrStore(counterKey, &newCounter)
 	if loaded {
 		// Another goroutine initialized first, use their counter
 		return int(atomic.AddUint64(actual.(*uint64), 1))
@@ -119,8 +130,16 @@ func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.L
 	// Storage uses: "INF", "WRN", "ERR", "DBG"
 	entry.Level = normalizeLevel(entry.Level)
 
-	// Get next per-job line number (1-based, contiguous within each job)
-	entry.LineNumber = s.getNextLineNumber(ctx, jobID)
+	// Determine counter key: use step_id for per-step sequential line numbers
+	// All workers in the same step share one counter for proper interleaved ordering
+	// Falls back to jobID if no step context is available
+	counterKey := entry.GetContext(models.LogCtxStepID)
+	if counterKey == "" {
+		counterKey = jobID
+	}
+
+	// Get next per-step line number (1-based, contiguous within each step)
+	entry.LineNumber = s.getNextLineNumber(ctx, counterKey)
 
 	// Generate unique key using timestamp + atomic sequence counter
 	// This ensures uniqueness even when multiple logs are written within the same nanosecond
@@ -211,9 +230,16 @@ func (s *LogStorage) DeleteLogs(ctx context.Context, jobID string) error {
 	if err := s.db.Store().DeleteMatching(&models.LogEntry{}, badgerhold.Where("JobIDField").Eq(jobID)); err != nil {
 		return fmt.Errorf("failed to delete logs: %w", err)
 	}
-	// Clear the line number counter for this job
-	jobLineCounters.Delete(jobID)
+	// Clear line number counters that might be associated with this job
+	// Note: Counter is keyed by step_id, but we also try jobID as fallback
+	stepLineCounters.Delete(jobID)
 	return nil
+}
+
+// ClearStepLineCounter clears the line number counter for a step.
+// Call this when a step is deleted or reset to ensure fresh line numbering.
+func (s *LogStorage) ClearStepLineCounter(stepID string) {
+	stepLineCounters.Delete(stepID)
 }
 
 func (s *LogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {

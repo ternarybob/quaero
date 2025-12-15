@@ -55,6 +55,18 @@
 
 set -e
 
+# Detect WSL and use Windows Go if native Go not available
+if ! command -v go &> /dev/null; then
+    if [[ -f "/mnt/c/Program Files/Go/bin/go.exe" ]]; then
+        GO_CMD="/mnt/c/Program Files/Go/bin/go.exe"
+    else
+        echo "Go not found. Please install Go or ensure Windows Go is accessible."
+        exit 1
+    fi
+else
+    GO_CMD="go"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -118,7 +130,8 @@ BIN_DIR="$PROJECT_ROOT/bin"
 OUTPUT_PATH="$BIN_DIR/quaero"
 
 # Detect OS for executable extension
-if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
+# Check for Windows environments: MSYS, Cygwin, native Windows, or WSL using Windows Go
+if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$GO_CMD" == *".exe"* ]]; then
     OUTPUT_PATH="$BIN_DIR/quaero.exe"
     MCP_OUTPUT_PATH="$BIN_DIR/quaero-mcp/quaero-mcp.exe"
 else
@@ -385,7 +398,7 @@ stop_quaero_service "$SERVER_PORT"
 # Tidy dependencies
 echo -e "${YELLOW}Tidying dependencies...${NC}"
 cd "$PROJECT_ROOT"
-go mod tidy
+"$GO_CMD" mod tidy
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to tidy dependencies!${NC}"
     exit 1
@@ -393,7 +406,7 @@ fi
 
 # Download dependencies
 echo -e "${YELLOW}Downloading dependencies...${NC}"
-go mod download
+"$GO_CMD" mod download
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to download dependencies!${NC}"
     exit 1
@@ -405,9 +418,9 @@ LDFLAGS="-X $MODULE.Version=$VERSION -X $MODULE.Build=$BUILD -X $MODULE.GitCommi
 
 # Build the Go application
 echo -e "${YELLOW}Building quaero...${NC}"
-echo -e "${GRAY}Build command: go build -ldflags=\"$LDFLAGS\" -o $OUTPUT_PATH ./cmd/quaero${NC}"
+echo -e "${GRAY}Build command: $GO_CMD build -ldflags=\"$LDFLAGS\" -o $OUTPUT_PATH ./cmd/quaero${NC}"
 
-go build -ldflags="$LDFLAGS" -o "$OUTPUT_PATH" ./cmd/quaero
+"$GO_CMD" build -ldflags="$LDFLAGS" -o "$OUTPUT_PATH" ./cmd/quaero
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Build failed!${NC}"
@@ -426,9 +439,9 @@ echo -e "${GREEN}Main executable built: $OUTPUT_PATH${NC}"
 echo -e "${YELLOW}Building quaero-mcp...${NC}"
 mkdir -p "$BIN_DIR/quaero-mcp"
 
-echo -e "${GRAY}Build command: go build -ldflags=\"$LDFLAGS\" -o $MCP_OUTPUT_PATH ./cmd/quaero-mcp${NC}"
+echo -e "${GRAY}Build command: $GO_CMD build -ldflags=\"$LDFLAGS\" -o $MCP_OUTPUT_PATH ./cmd/quaero-mcp${NC}"
 
-go build -ldflags="$LDFLAGS" -o "$MCP_OUTPUT_PATH" ./cmd/quaero-mcp
+"$GO_CMD" build -ldflags="$LDFLAGS" -o "$MCP_OUTPUT_PATH" ./cmd/quaero-mcp
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}MCP server build failed!${NC}"

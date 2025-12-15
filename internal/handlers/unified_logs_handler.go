@@ -255,6 +255,13 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 		order = "desc"
 	}
 
+	// Step filter - when provided, returns step-grouped results for step log display
+	stepFilter := r.URL.Query().Get("step")
+	if stepFilter != "" {
+		h.getStepGroupedLogs(w, r, jobID, stepFilter, level, limit, order)
+		return
+	}
+
 	// Fast path: direct job log retrieval when not including children
 	// This avoids the expensive GetAggregatedLogs call with descendant traversal
 	if !includeChildren {
@@ -435,12 +442,8 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 		enrichedLogs = append(enrichedLogs, enrichedLog)
 	}
 
-	// Apply ordering
-	if order == "desc" {
-		for i, j := 0, len(enrichedLogs)-1; i < j; i, j = i+1, j-1 {
-			enrichedLogs[i], enrichedLogs[j] = enrichedLogs[j], enrichedLogs[i]
-		}
-	}
+	// NOTE: GetAggregatedLogs already returns logs in the requested order
+	// No additional reversal needed - the k-way merge respects the 'order' parameter
 
 	// Get total count for pagination/display
 	totalCount, err := h.logService.CountAggregatedLogs(ctx, jobID, includeChildren, level)
@@ -496,4 +499,99 @@ func (h *UnifiedLogsHandler) shouldIncludeLevel(logLevel, filterLevel string) bo
 
 	// Include if log level >= filter level
 	return logPrio >= filterPrio
+}
+
+// StepLog represents a log entry in step-grouped response
+type StepLog struct {
+	LineNumber int    `json:"line_number"`
+	Level      string `json:"level"`
+	Text       string `json:"text"`
+}
+
+// StepLogsResponse represents step-grouped logs response
+type StepLogsResponse struct {
+	StepName        string    `json:"step_name"`
+	StepID          string    `json:"step_id,omitempty"`
+	Status          string    `json:"status"`
+	Logs            []StepLog `json:"logs"`
+	TotalCount      int       `json:"total_count"`      // Total logs matching level filter
+	UnfilteredCount int       `json:"unfiltered_count"` // Total logs regardless of filter
+}
+
+// getStepGroupedLogs returns logs grouped by step for step-level log retrieval
+// Response format: { "job_id": "...", "steps": [{ "step_name": "...", "logs": [...], "total_count": N, "unfiltered_count": N }] }
+func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.Request, jobID, stepFilter, level string, limit int, order string) {
+	ctx := r.Context()
+
+	// Get aggregated logs for this job (including children which are worker jobs)
+	logEntries, _, _, err := h.logService.GetAggregatedLogs(ctx, jobID, true, level, limit, "", order)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get step logs")
+		if errors.Is(err, logs.ErrJobNotFound) {
+			http.Error(w, "Job not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Count total logs matching filter
+	totalCount, countErr := h.logService.CountAggregatedLogs(ctx, jobID, true, level)
+	if countErr != nil {
+		h.logger.Warn().Err(countErr).Str("job_id", jobID).Msg("Failed to count logs")
+		totalCount = len(logEntries)
+	}
+
+	// Count unfiltered logs (all levels)
+	unfilteredCount, unfilteredErr := h.logService.CountAggregatedLogs(ctx, jobID, true, "all")
+	if unfilteredErr != nil {
+		h.logger.Warn().Err(unfilteredErr).Str("job_id", jobID).Msg("Failed to count unfiltered logs")
+		unfilteredCount = totalCount
+	}
+
+	// Convert to step logs format
+	// Logs from GetAggregatedLogs are already in the requested order
+	// For ASC display, we want oldest first (line 1, 2, 3...)
+	// If order=desc was requested, we got newest first - reverse for ASC display
+	stepLogs := make([]StepLog, 0, len(logEntries))
+	if order == "desc" {
+		// Reverse to get ASC order for display (line numbers should be ascending)
+		for i := len(logEntries) - 1; i >= 0; i-- {
+			stepLogs = append(stepLogs, StepLog{
+				LineNumber: logEntries[i].LineNumber,
+				Level:      logEntries[i].Level,
+				Text:       logEntries[i].Message,
+			})
+		}
+	} else {
+		// Already in ASC order
+		for _, log := range logEntries {
+			stepLogs = append(stepLogs, StepLog{
+				LineNumber: log.LineNumber,
+				Level:      log.Level,
+				Text:       log.Message,
+			})
+		}
+	}
+
+	// Build response with step-grouped logs
+	response := struct {
+		JobID string             `json:"job_id"`
+		Steps []StepLogsResponse `json:"steps"`
+	}{
+		JobID: jobID,
+		Steps: []StepLogsResponse{
+			{
+				StepName:        stepFilter,
+				StepID:          jobID,
+				Status:          "completed", // TODO: Get actual status from job storage if needed
+				Logs:            stepLogs,
+				TotalCount:      totalCount,
+				UnfilteredCount: unfilteredCount,
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

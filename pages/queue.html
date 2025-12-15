@@ -4660,10 +4660,19 @@
                     this._stepFetchInFlight.add(key);
 
                     try {
+                        // Get step job ID from tree data - the API needs the step job ID, not parent job ID
+                        const treeData = this.jobTreeData[jobId];
+                        const stepJobId = treeData?.steps?.[stepIdx]?.step_id;
+                        if (!stepJobId) {
+                            console.warn('[Queue] No step_id found for step', stepName, 'at index', stepIdx);
+                            return;
+                        }
+
                         // Keep payload bounded; "Show earlier logs" progressively grows the window.
                         const limit = Math.min(this.getStepLogLimit(jobId, stepName), 5000);
                         const level = this.getTreeLogLevelFilter(jobId);
-                        const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${limit}&level=${encodeURIComponent(level)}`);
+                        // Use unified /api/logs endpoint with step parameter for step-grouped results
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&step=${encodeURIComponent(stepName)}&limit=${limit}&level=${encodeURIComponent(level)}&order=desc`);
                         if (!response.ok) return;
 
                         const data = await response.json();
@@ -4970,15 +4979,23 @@
                     this.stepLogLoading = { ...this.stepLogLoading, [key]: true };
 
                     try {
+                        // Get step job ID from tree data - the API needs the step job ID, not parent job ID
+                        const treeData = this.jobTreeData[jobId];
+                        const stepJobId = treeData?.steps?.[stepIndex]?.step_id;
+                        if (!stepJobId) {
+                            console.warn('[Queue] loadMoreStepLogs: No step_id found for step', stepName, 'at index', stepIndex);
+                            return;
+                        }
+
                         // Increase the limit by 100 to load more earlier logs
                         const currentLimit = this.getStepLogLimit(jobId, stepName);
                         const newLimit = currentLimit + 100;
                         this.stepLogLimits = { ...this.stepLogLimits, [key]: newLimit };
                         console.log(`[Queue] loadMoreStepLogs: ${stepName} - increasing limit from ${currentLimit} to ${newLimit}`);
 
-                        // Use the same API pattern as _doFetchStepLogs - /api/jobs/{jobId}/tree/logs
+                        // Use unified /api/logs endpoint with step parameter for step-grouped results
                         const level = this.getTreeLogLevelFilter(jobId);
-                        const url = `/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}`;
+                        const url = `/api/logs?scope=job&job_id=${stepJobId}&step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}&order=desc`;
                         console.log('[Queue] loadMoreStepLogs: Fetching from', url);
                         const response = await fetch(url);
 
