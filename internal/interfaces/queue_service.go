@@ -55,6 +55,9 @@ type LogService interface {
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
 	CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error)
+	// CountAggregatedLogs returns the total count of logs for a job and optionally all its descendants
+	// Used to get total log count when include_children=true
+	CountAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string) (int, error)
 	// GetAggregatedLogs fetches logs for parent job and optionally all child jobs
 	// Merges logs from all jobs using k-way merge with cursor-based pagination
 	// Returns logs slice and metadata map containing job context for enrichment

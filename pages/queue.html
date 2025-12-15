@@ -2282,7 +2282,7 @@
                     console.log('[Queue] Fetching logs for step', stepName, 'with level filter:', level);
 
                     try {
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=200&order=desc&level=${encodeURIComponent(level)}`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=200&order=desc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch logs with level filter:', response.status);
                             return;
@@ -2472,7 +2472,7 @@
                     console.log('[Queue] Fetching logs for step', stepName, 'with level filter:', level);
 
                     try {
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=200&order=desc&level=${encodeURIComponent(level)}`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=200&order=desc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch logs with level filter:', response.status);
                             return;
@@ -2649,10 +2649,10 @@
                     this._stepEventFetchInFlight.add(stepJobId);
 
                     try {
-                        // Use unified /api/logs endpoint with include_children=false for direct step logs
+                        // Use unified /api/logs endpoint with include_children=true to include worker logs
                         console.log('[Queue] Fetching events for completed step', stepName, 'job:', stepJobId.substring(0, 8));
                         const level = this.getTreeLogLevelFilter(managerId);
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=${encodeURIComponent(level)}`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=100&order=asc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
                             return;
@@ -4326,7 +4326,7 @@
                             // Fetch latest N logs (newest first, then reverse for display)
                             // No cursor - always get the latest logs for sliding window display
                             const level = this.getTreeLogLevelFilter(managerId);
-                            let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${fetchLimit}&order=desc&level=${encodeURIComponent(level)}`;
+                            let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=${fetchLimit}&order=desc&level=${encodeURIComponent(level)}`;
 
                             const response = await fetch(url);
                             if (!response.ok) {
@@ -5030,9 +5030,9 @@
                             return;
                         }
 
-                        // Fetch all logs (higher limit for download)
+                        // Fetch all logs including children (higher limit for download)
                         const level = this.getTreeLogLevelFilter(jobId);
-                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=10000&order=asc&level=${encodeURIComponent(level)}`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=true&limit=10000&order=asc&level=${encodeURIComponent(level)}`);
                         if (!response.ok) {
                             throw new Error(`Failed to fetch logs: ${response.status}`);
                         }

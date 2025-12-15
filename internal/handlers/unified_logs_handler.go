@@ -442,12 +442,21 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Get total count for pagination/display
+	totalCount, err := h.logService.CountAggregatedLogs(ctx, jobID, includeChildren, level)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to count aggregated logs, using returned count")
+		totalCount = len(enrichedLogs)
+	}
+	h.logger.Debug().Str("job_id", jobID).Bool("include_children", includeChildren).Int("total_count", totalCount).Int("enriched_count", len(enrichedLogs)).Msg("Aggregated logs total count")
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"scope":            "job",
 		"job_id":           jobID,
 		"logs":             enrichedLogs,
 		"count":            len(enrichedLogs),
+		"total_count":      totalCount,
 		"limit":            limit,
 		"order":            order,
 		"level":            level,

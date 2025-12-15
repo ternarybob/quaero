@@ -53,6 +53,11 @@ func (m *MockLogStorage) CountLogs(ctx context.Context, jobID string) (int, erro
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockLogStorage) CountLogsByLevel(ctx context.Context, jobID string, level string) (int, error) {
+	args := m.Called(ctx, jobID, level)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockLogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID, limit, offset)
 	if logs, ok := args.Get(0).([]models.LogEntry); ok {

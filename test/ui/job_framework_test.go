@@ -449,6 +449,16 @@ type JobDefinitionTestConfig struct {
 	AllowFailure      bool          // If true, don't fail test if job fails
 }
 
+// SaveToResults saves content to a file in the test results directory
+func (utc *UITestContext) SaveToResults(filename string, content string) error {
+	destPath := filepath.Join(utc.Env.ResultsDir, filename)
+	if err := os.WriteFile(destPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to save %s to results: %w", filename, err)
+	}
+	utc.Log("✓ Saved to results: %s", destPath)
+	return nil
+}
+
 // CopyJobDefinitionToResults copies the job definition TOML to test results directory
 func (utc *UITestContext) CopyJobDefinitionToResults(jobDefPath string) error {
 	utc.Log("Copying job definition: %s", jobDefPath)

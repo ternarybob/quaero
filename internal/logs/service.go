@@ -63,6 +63,72 @@ func (s *Service) CountLogsByLevel(ctx context.Context, jobID string, level stri
 	return s.storage.CountLogsByLevel(ctx, jobID, level)
 }
 
+// CountAggregatedLogs returns the total count of logs for a job and optionally all its descendants
+func (s *Service) CountAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string) (int, error) {
+	totalCount := 0
+
+	// Count parent job logs
+	if level == "" || level == "all" || level == "debug" {
+		count, err := s.storage.CountLogs(ctx, parentJobID)
+		if err != nil {
+			return 0, err
+		}
+		totalCount += count
+	} else {
+		// Count by level(s) based on filter
+		levels := s.getIncludedLevels(level)
+		for _, lvl := range levels {
+			count, err := s.storage.CountLogsByLevel(ctx, parentJobID, lvl)
+			if err != nil {
+				continue
+			}
+			totalCount += count
+		}
+	}
+
+	// If including children, collect and count all descendants
+	if includeChildren {
+		metadata := make(map[string]*interfaces.AggregatedJobMeta)
+		descendants := s.collectAllDescendants(ctx, parentJobID, metadata)
+		for _, jobID := range descendants {
+			if level == "" || level == "all" || level == "debug" {
+				count, err := s.storage.CountLogs(ctx, jobID)
+				if err != nil {
+					continue
+				}
+				totalCount += count
+			} else {
+				levels := s.getIncludedLevels(level)
+				for _, lvl := range levels {
+					count, err := s.storage.CountLogsByLevel(ctx, jobID, lvl)
+					if err != nil {
+						continue
+					}
+					totalCount += count
+				}
+			}
+		}
+	}
+
+	return totalCount, nil
+}
+
+// getIncludedLevels returns the log levels included by a filter
+func (s *Service) getIncludedLevels(filter string) []string {
+	switch filter {
+	case "error":
+		return []string{"error"}
+	case "warn":
+		return []string{"warn", "error"}
+	case "info":
+		return []string{"info", "warn", "error"}
+	case "debug", "all":
+		return []string{"debug", "info", "warn", "error"}
+	default:
+		return []string{"debug", "info", "warn", "error"}
+	}
+}
+
 // GetLogsWithOffset fetches logs with offset-based pagination (delegates to storage)
 // Returns logs in DESC order (newest first) after skipping 'offset' newest logs
 func (s *Service) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {

@@ -1734,103 +1734,25 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 			stepLogs.StepID = stepJob.ID
 			stepLogs.Status = string(stepJob.Status)
 
-			// Resolve total_count and newest logs using the same level semantics as /api/logs:
-			// - all/debug: include all levels
-			// - info: include info + warn + error (exclude debug)
-			// - warn: include warn + error
-			// - error: include error only
-			type levelSlice struct {
-				level string
-				logs  []models.LogEntry
-				i     int
-			}
-
-			getIncludedLevels := func(filter string) []string {
-				switch filter {
-				case "error":
-					return []string{"error"}
-				case "warn":
-					return []string{"warn", "error"}
-				case "info":
-					return []string{"info", "warn", "error"}
-				case "debug", "all":
-					return []string{"debug", "info", "warn", "error"}
-				default:
-					return []string{"debug", "info", "warn", "error"}
-				}
-			}
-
-			// Count ALL logs (unfiltered) for UI display
-			unfilteredCount, unfilteredErr := h.logService.CountLogs(ctx, stepJob.ID)
+			// Count ALL logs (unfiltered) for UI display - includes child job logs
+			unfilteredCount, unfilteredErr := h.logService.CountAggregatedLogs(ctx, stepJob.ID, true, "all")
 			if unfilteredErr != nil {
 				h.logger.Warn().Err(unfilteredErr).Str("step_job_id", stepJob.ID).Msg("Failed to count unfiltered logs for step")
 			} else {
 				stepLogs.UnfilteredCount = unfilteredCount
 			}
 
-			// Count logs matching the filter (for pagination)
-			totalCount := 0
-			var countErr error
-			if level == "all" || level == "debug" {
-				totalCount = unfilteredCount // Same as unfiltered when no filter applied
-			} else {
-				for _, lv := range getIncludedLevels(level) {
-					// CountLogsByLevel expects exact level; we sum included levels for hierarchical filters.
-					n, err := h.logService.CountLogsByLevel(ctx, stepJob.ID, lv)
-					if err != nil {
-						countErr = err
-						break
-					}
-					totalCount += n
-				}
-			}
+			// Count logs matching the filter (for pagination) - includes child job logs
+			totalCount, countErr := h.logService.CountAggregatedLogs(ctx, stepJob.ID, true, level)
 			if countErr != nil {
 				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Str("level", level).Msg("Failed to count logs for step")
 			} else {
 				stepLogs.TotalCount = totalCount
 			}
 
-			// Fetch newest logs matching the filter (bounded by limit).
-			// NOTE: Storage returns DESC order (newest first). We'll reverse for display.
-			var newest []models.LogEntry
-			if level == "all" || level == "debug" {
-				newest, _ = h.logService.GetLogsWithOffset(ctx, stepJob.ID, limit, 0)
-			} else if level == "error" {
-				newest, _ = h.logService.GetLogsByLevel(ctx, stepJob.ID, "error", limit)
-			} else {
-				included := getIncludedLevels(level)
-				parts := make([]levelSlice, 0, len(included))
-				for _, lv := range included {
-					part, err := h.logService.GetLogsByLevel(ctx, stepJob.ID, lv, limit)
-					if err != nil {
-						continue
-					}
-					parts = append(parts, levelSlice{level: lv, logs: part, i: 0})
-				}
-
-				// K-way merge by line number (newest first).
-				merged := make([]models.LogEntry, 0, limit)
-				for len(merged) < limit {
-					bestIdx := -1
-					bestLine := -1
-					for pi := range parts {
-						if parts[pi].i >= len(parts[pi].logs) {
-							continue
-						}
-						ln := parts[pi].logs[parts[pi].i].LineNumber
-						if ln > bestLine {
-							bestLine = ln
-							bestIdx = pi
-						}
-					}
-					if bestIdx < 0 {
-						break
-					}
-					merged = append(merged, parts[bestIdx].logs[parts[bestIdx].i])
-					parts[bestIdx].i++
-				}
-				newest = merged
-			}
+			// Fetch newest logs matching the filter (bounded by limit) - includes child job logs.
+			// NOTE: GetAggregatedLogs returns logs in ASC order by default. We request DESC for newest first.
+			newest, _, _, _ := h.logService.GetAggregatedLogs(ctx, stepJob.ID, true, level, limit, "", "desc")
 
 			for i := len(newest) - 1; i >= 0; i-- {
 				stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
