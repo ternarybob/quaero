@@ -32,7 +32,7 @@ const (
 	WorkerTypeAggregateSummary WorkerType = "aggregate_summary" // Generate summary of all enrichment metadata
 
 	// Testing workers
-	WorkerTypeErrorGenerator WorkerType = "error_generator" // Generates logs with random errors for testing error tolerance
+	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -42,7 +42,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
 		WorkerTypeSummary, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
-		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary, WorkerTypeErrorGenerator:
+		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary, WorkerTypeTestJobGenerator:
 		return true
 	}
 	return false
@@ -73,6 +73,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeClassify,
 		WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary,
-		WorkerTypeErrorGenerator,
+		WorkerTypeTestJobGenerator,
 	}
 }

@@ -4755,10 +4755,10 @@
                                     console.log('[Queue] Auto-expanding step on tree load:', step.name, 'status:', step.status, 'wasPending:', pendingExpansions.has(step.name));
                                 }
 
-                                // Load initial logs with a small window so the DOM can show progressive growth.
+                                // Load initial logs - show at least 100 logs for better visibility
                                 const limitKey = `${jobId}:${step.name}`;
                                 if (!this.stepLogLimits[limitKey]) {
-                                    this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: 20 };
+                                    this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: 100 };
                                 }
                                 this.fetchStepLogs(jobId, step.name, idx, true);
                             });
@@ -4782,7 +4782,29 @@
 
                 toggleTreeStep(jobId, stepIndex) {
                     const key = `${jobId}:${stepIndex}`;
-                    this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: !this.jobTreeExpandedSteps[key] };
+                    const wasExpanded = this.jobTreeExpandedSteps[key];
+                    this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: !wasExpanded };
+
+                    // Per QUEUE_UI.md: fetch logs when expanding a step
+                    if (!wasExpanded) {
+                        const treeData = this.jobTreeData[jobId];
+                        if (treeData?.steps?.[stepIndex]) {
+                            const step = treeData.steps[stepIndex];
+                            // Set initial log limit if not already set
+                            const limitKey = `${jobId}:${step.name}`;
+                            if (!this.stepLogLimits[limitKey]) {
+                                this.stepLogLimits = { ...this.stepLogLimits, [limitKey]: 100 };
+                            }
+                            this.fetchStepLogs(jobId, step.name, stepIndex, true);
+                        } else {
+                            // Tree data not loaded yet - mark expansion as pending and load tree data
+                            console.log('[Queue] toggleTreeStep: tree data not ready, loading for job:', jobId.substring(0, 8));
+                            this._pendingStepExpansions = this._pendingStepExpansions || {};
+                            this._pendingStepExpansions[jobId] = this._pendingStepExpansions[jobId] || new Set();
+                            this._pendingStepExpansions[jobId].add(stepIndex);
+                            this.loadJobTreeData(jobId);
+                        }
+                    }
                 },
 
                 isTreeStepExpanded(jobId, stepIndex) {
@@ -4941,7 +4963,20 @@
 
                 // Load more logs for a step (increases the limit by 100 and fetches from API)
                 async loadMoreStepLogs(jobId, stepName, stepIndex) {
+                    console.log('[Queue] loadMoreStepLogs called:', { jobId: jobId?.substring(0, 8), stepName, stepIndex });
+
+                    if (!jobId || stepName === undefined) {
+                        console.error('[Queue] loadMoreStepLogs: Missing required parameters');
+                        return;
+                    }
+
                     const key = `${jobId}:${stepName}`;
+
+                    // Prevent duplicate calls while loading
+                    if (this.stepLogLoading[key]) {
+                        console.log('[Queue] loadMoreStepLogs: Already loading, skipping');
+                        return;
+                    }
 
                     // Mark as loading
                     this.stepLogLoading = { ...this.stepLogLoading, [key]: true };
@@ -4955,31 +4990,41 @@
 
                         // Use the same API pattern as _doFetchStepLogs - /api/jobs/{jobId}/tree/logs
                         const level = this.getTreeLogLevelFilter(jobId);
-                        const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}`);
+                        const url = `/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}`;
+                        console.log('[Queue] loadMoreStepLogs: Fetching from', url);
+                        const response = await fetch(url);
 
                         if (response.ok) {
                             const data = await response.json();
+                            console.log('[Queue] loadMoreStepLogs: API response received, steps:', data.steps?.length);
                             const stepLogs = data.steps?.find(s => s.step_name === stepName);
 
                             if (stepLogs?.logs && this.jobTreeData[jobId]?.steps) {
                                 const newSteps = [...this.jobTreeData[jobId].steps];
+                                const oldLogCount = newSteps[stepIndex]?.logs?.length || 0;
                                 newSteps[stepIndex] = {
                                     ...newSteps[stepIndex],
                                     logs: stepLogs.logs,
-                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length
+                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length,
+                                    unfilteredCount: stepLogs.unfiltered_count || stepLogs.total_count || stepLogs.logs.length
                                 };
                                 this.jobTreeData = {
                                     ...this.jobTreeData,
                                     [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
                                 };
 
-                                console.log(`[Queue] Loaded ${stepLogs.logs.length}/${stepLogs.total_count || stepLogs.logs.length} logs for step ${stepName}`);
+                                console.log(`[Queue] loadMoreStepLogs: Updated ${stepName} from ${oldLogCount} to ${stepLogs.logs.length} logs (total: ${stepLogs.total_count || stepLogs.logs.length})`);
+                            } else {
+                                console.warn('[Queue] loadMoreStepLogs: No matching step found in response for', stepName);
                             }
+                        } else {
+                            console.error('[Queue] loadMoreStepLogs: API error', response.status, response.statusText);
                         }
                     } catch (error) {
-                        console.error('[Queue] Failed to load more logs:', error);
+                        console.error('[Queue] loadMoreStepLogs: Exception:', error);
                     } finally {
                         this.stepLogLoading = { ...this.stepLogLoading, [key]: false };
+                        console.log('[Queue] loadMoreStepLogs: Complete for', stepName);
                     }
                 },
 

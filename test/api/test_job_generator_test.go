@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Error Generator API Tests
-// Tests for error tolerance, UI status display, and error block logging
+// Test Job Generator API Tests
+// Tests for logging, error tolerance, UI status display, and job hierarchy
 // -----------------------------------------------------------------------
 
 package api
@@ -16,18 +16,18 @@ import (
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// createErrorGeneratorJobDefinition creates an error generator job definition for testing
-func createErrorGeneratorJobDefinition(t *testing.T, helper *common.HTTPTestHelper, id string, workerCount, logCount int, failureRate float64, maxChildFailures int) string {
+// createTestJobGeneratorJobDefinition creates a test job generator job definition for testing
+func createTestJobGeneratorJobDefinition(t *testing.T, helper *common.HTTPTestHelper, id string, workerCount, logCount int, failureRate float64, maxChildFailures int) string {
 	body := map[string]interface{}{
 		"id":          id,
-		"name":        "Error Generator Test",
+		"name":        "Test Job Generator Test",
 		"type":        "custom",
 		"enabled":     true,
-		"description": "Test error generator for error tolerance validation",
+		"description": "Test job generator for error tolerance validation",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate random logs with INF, WRN, and ERR levels",
 				"on_error":    "continue",
 				"config": map[string]interface{}{
@@ -47,20 +47,20 @@ func createErrorGeneratorJobDefinition(t *testing.T, helper *common.HTTPTestHelp
 	}
 
 	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create error generator job definition")
+	require.NoError(t, err, "Failed to create test job generator job definition")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		t.Logf("Failed to create error generator job definition: status %d", resp.StatusCode)
+		t.Logf("Failed to create test job generator job definition: status %d", resp.StatusCode)
 		return ""
 	}
 
-	t.Logf("Created error generator job definition: id=%s", id)
+	t.Logf("Created test job generator job definition: id=%s", id)
 	return id
 }
 
-// TestErrorGeneratorJobDefinitionCreation tests that error_generator job definitions can be created
-func TestErrorGeneratorJobDefinitionCreation(t *testing.T) {
+// TestTestJobGeneratorJobDefinitionCreation tests that test_job_generator job definitions can be created
+func TestTestJobGeneratorJobDefinitionCreation(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -69,19 +69,19 @@ func TestErrorGeneratorJobDefinitionCreation(t *testing.T) {
 
 	helper := env.NewHTTPTestHelper(t)
 
-	defID := fmt.Sprintf("test-error-gen-%d", time.Now().UnixNano())
+	defID := fmt.Sprintf("test-job-gen-%d", time.Now().UnixNano())
 
-	// Create a simple error generator job definition
+	// Create a simple test job generator job definition
 	body := map[string]interface{}{
 		"id":          defID,
-		"name":        "Error Generator Test",
+		"name":        "Test Job Generator Test",
 		"type":        "custom",
 		"enabled":     true,
-		"description": "Test error generator for API validation",
+		"description": "Test job generator for API validation",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate random logs",
 				"on_error":    "continue",
 				"config": map[string]interface{}{
@@ -97,7 +97,7 @@ func TestErrorGeneratorJobDefinitionCreation(t *testing.T) {
 	}
 
 	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create error generator job definition")
+	require.NoError(t, err, "Failed to create test job generator job definition")
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusCreated, resp.StatusCode, "Should create job definition successfully")
@@ -114,14 +114,14 @@ func TestErrorGeneratorJobDefinitionCreation(t *testing.T) {
 	require.NoError(t, err, "Failed to parse job definition response")
 
 	assert.Equal(t, defID, result["id"], "Job definition ID should match")
-	assert.Equal(t, "Error Generator Test", result["name"], "Job definition name should match")
+	assert.Equal(t, "Test Job Generator Test", result["name"], "Job definition name should match")
 
 	// Cleanup
 	deleteJobDefinition(t, helper, defID)
 }
 
-// TestErrorToleranceJobStopping tests that jobs stop when max_child_failures threshold is exceeded
-func TestErrorToleranceJobStopping(t *testing.T) {
+// TestTestJobGeneratorErrorToleranceJobStopping tests that jobs stop when max_child_failures threshold is exceeded
+func TestTestJobGeneratorErrorToleranceJobStopping(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -142,8 +142,8 @@ func TestErrorToleranceJobStopping(t *testing.T) {
 		"description": "Test error tolerance threshold",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate jobs with high failure rate",
 				"on_error":    "continue",
 				"config": map[string]interface{}{
@@ -199,8 +199,8 @@ func TestErrorToleranceJobStopping(t *testing.T) {
 	deleteJobDefinition(t, helper, defID)
 }
 
-// TestUIStatusDisplayLogCounts tests that the UI API returns log level counts
-func TestUIStatusDisplayLogCounts(t *testing.T) {
+// TestTestJobGeneratorUIStatusDisplayLogCounts tests that the UI API returns log level counts
+func TestTestJobGeneratorUIStatusDisplayLogCounts(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -220,8 +220,8 @@ func TestUIStatusDisplayLogCounts(t *testing.T) {
 		"description": "Test log level count display",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate logs with various levels",
 				"on_error":    "continue",
 				"config": map[string]interface{}{
@@ -307,8 +307,8 @@ func TestUIStatusDisplayLogCounts(t *testing.T) {
 	deleteJobDefinition(t, helper, defID)
 }
 
-// TestErrorBlockDisplayAboveLogs tests that error logs can be filtered and displayed separately
-func TestErrorBlockDisplayAboveLogs(t *testing.T) {
+// TestTestJobGeneratorErrorBlockDisplayAboveLogs tests that error logs can be filtered and displayed separately
+func TestTestJobGeneratorErrorBlockDisplayAboveLogs(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -328,8 +328,8 @@ func TestErrorBlockDisplayAboveLogs(t *testing.T) {
 		"description": "Test error log filtering",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate logs including errors",
 				"on_error":    "continue",
 				"config": map[string]interface{}{
@@ -434,8 +434,8 @@ func TestErrorBlockDisplayAboveLogs(t *testing.T) {
 	deleteJobDefinition(t, helper, defID)
 }
 
-// TestErrorGeneratorRecursiveChildren tests that error generator creates recursive child jobs
-func TestErrorGeneratorRecursiveChildren(t *testing.T) {
+// TestTestJobGeneratorRecursiveChildren tests that test job generator creates recursive child jobs
+func TestTestJobGeneratorRecursiveChildren(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -455,8 +455,8 @@ func TestErrorGeneratorRecursiveChildren(t *testing.T) {
 		"description": "Test recursive child job creation",
 		"steps": []map[string]interface{}{
 			{
-				"name":        "generate_errors",
-				"type":        "error_generator",
+				"name":        "generate_jobs",
+				"type":        "test_job_generator",
 				"description": "Generate jobs with recursive children",
 				"on_error":    "continue",
 				"config": map[string]interface{}{

@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Error Generator Worker - Worker for testing error tolerance and logging
-// - DefinitionWorker: Creates error generator jobs for testing
+// Test Job Generator Worker - Worker for testing logging, error tolerance, and job hierarchy
+// - DefinitionWorker: Creates test job generator jobs for testing
 // - JobWorker: Generates logs with random warnings/errors and creates recursive children
 // -----------------------------------------------------------------------
 
@@ -18,27 +18,27 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// ErrorGeneratorWorker generates logs with random warnings/errors for testing error tolerance.
+// TestJobGeneratorWorker generates logs with random warnings/errors for testing.
 // Implements both DefinitionWorker (for job definition steps) and JobWorker (for queue execution).
-type ErrorGeneratorWorker struct {
+type TestJobGeneratorWorker struct {
 	jobMgr       *queue.Manager
 	queueMgr     interfaces.QueueManager
 	logger       arbor.ILogger
 	eventService interfaces.EventService
 }
 
-// Compile-time assertions: ErrorGeneratorWorker implements both interfaces
-var _ interfaces.DefinitionWorker = (*ErrorGeneratorWorker)(nil)
-var _ interfaces.JobWorker = (*ErrorGeneratorWorker)(nil)
+// Compile-time assertions: TestJobGeneratorWorker implements both interfaces
+var _ interfaces.DefinitionWorker = (*TestJobGeneratorWorker)(nil)
+var _ interfaces.JobWorker = (*TestJobGeneratorWorker)(nil)
 
-// NewErrorGeneratorWorker creates a new error generator worker
-func NewErrorGeneratorWorker(
+// NewTestJobGeneratorWorker creates a new test job generator worker
+func NewTestJobGeneratorWorker(
 	jobMgr *queue.Manager,
 	queueMgr interfaces.QueueManager,
 	logger arbor.ILogger,
 	eventService interfaces.EventService,
-) *ErrorGeneratorWorker {
-	return &ErrorGeneratorWorker{
+) *TestJobGeneratorWorker {
+	return &TestJobGeneratorWorker{
 		jobMgr:       jobMgr,
 		queueMgr:     queueMgr,
 		logger:       logger,
@@ -46,25 +46,25 @@ func NewErrorGeneratorWorker(
 	}
 }
 
-// GetWorkerType returns "error_generator" - the job type this worker handles
-func (w *ErrorGeneratorWorker) GetWorkerType() string {
-	return "error_generator"
+// GetWorkerType returns "test_job_generator" - the job type this worker handles
+func (w *TestJobGeneratorWorker) GetWorkerType() string {
+	return "test_job_generator"
 }
 
 // Validate validates that the queue job is compatible with this worker
-func (w *ErrorGeneratorWorker) Validate(job *models.QueueJob) error {
-	if job.Type != "error_generator" {
-		return fmt.Errorf("invalid job type: expected error_generator, got %s", job.Type)
+func (w *TestJobGeneratorWorker) Validate(job *models.QueueJob) error {
+	if job.Type != "test_job_generator" {
+		return fmt.Errorf("invalid job type: expected test_job_generator, got %s", job.Type)
 	}
 	return nil
 }
 
-// Execute executes an error generator job with the following behavior:
+// Execute executes a test job generator job with the following behavior:
 // 1. Generate log items with configurable delays
 // 2. Randomly generate INFO, WARN, and ERROR level logs
 // 3. Optionally spawn child jobs (some of which may fail)
 // 4. Fail based on configured failure_rate probability
-func (w *ErrorGeneratorWorker) Execute(ctx context.Context, job *models.QueueJob) error {
+func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	parentID := job.GetParentID()
 	if parentID == "" {
 		parentID = job.ID
@@ -87,14 +87,14 @@ func (w *ErrorGeneratorWorker) Execute(ctx context.Context, job *models.QueueJob
 		Int("child_count", childCount).
 		Int("recursion_depth", recursionDepth).
 		Int("current_depth", currentDepth).
-		Msg("Starting error generator job execution")
+		Msg("Starting test job generator execution")
 
 	// Update job status to running
 	if err := w.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
 		jobLogger.Warn().Err(err).Msg("Failed to update job status to running")
 	}
 
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Error generator starting: %d logs, %dms delay, %.0f%% failure rate", logCount, logDelay, failureRate*100))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Test job generator starting: %d logs, %dms delay, %.0f%% failure rate", logCount, logDelay, failureRate*100))
 
 	// Generate logs with configured distribution
 	infoCount := 0
@@ -175,13 +175,13 @@ func (w *ErrorGeneratorWorker) Execute(ctx context.Context, job *models.QueueJob
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Error generator completed successfully: %d children spawned", childJobsCreated))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Test job generator completed successfully: %d children spawned", childJobsCreated))
 
 	return nil
 }
 
-// spawnChildJob creates and enqueues a child error generator job
-func (w *ErrorGeneratorWorker) spawnChildJob(ctx context.Context, parentJob *models.QueueJob, childIndex int, maxDepth int) (string, error) {
+// spawnChildJob creates and enqueues a child test job generator job
+func (w *TestJobGeneratorWorker) spawnChildJob(ctx context.Context, parentJob *models.QueueJob, childIndex int, maxDepth int) (string, error) {
 	// Create child job configuration - each child has slightly different settings
 	childConfig := map[string]interface{}{
 		"log_count":       getConfigIntWithDefault(parentJob.Config, "log_count", 10) / 2,      // Half the logs
@@ -203,8 +203,8 @@ func (w *ErrorGeneratorWorker) spawnChildJob(ctx context.Context, parentJob *mod
 	// Create child queue job
 	childJob := models.NewQueueJobChild(
 		parentJob.GetParentID(), // All children reference the same root parent
-		"error_generator",
-		fmt.Sprintf("Error Generator Child %d", childIndex+1),
+		"test_job_generator",
+		fmt.Sprintf("Test Job Generator Child %d", childIndex+1),
 		childConfig,
 		childMetadata,
 		parentJob.Depth+1,
@@ -255,13 +255,13 @@ func (w *ErrorGeneratorWorker) spawnChildJob(ctx context.Context, parentJob *mod
 // DEFINITIONWORKER INTERFACE METHODS
 // ============================================================================
 
-// GetType returns WorkerTypeErrorGenerator for the DefinitionWorker interface
-func (w *ErrorGeneratorWorker) GetType() models.WorkerType {
-	return models.WorkerTypeErrorGenerator
+// GetType returns WorkerTypeTestJobGenerator for the DefinitionWorker interface
+func (w *TestJobGeneratorWorker) GetType() models.WorkerType {
+	return models.WorkerTypeTestJobGenerator
 }
 
-// Init performs the initialization phase for an error generator step
-func (w *ErrorGeneratorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+// Init performs the initialization phase for a test job generator step
+func (w *TestJobGeneratorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -283,15 +283,15 @@ func (w *ErrorGeneratorWorker) Init(ctx context.Context, step models.JobStep, jo
 		Float64("failure_rate", failureRate).
 		Int("child_count", childCount).
 		Int("recursion_depth", recursionDepth).
-		Msg("Initializing error generator worker")
+		Msg("Initializing test job generator worker")
 
 	// Create work items for each worker to spawn
 	workItems := make([]interfaces.WorkItem, workerCount)
 	for i := 0; i < workerCount; i++ {
 		workItems[i] = interfaces.WorkItem{
 			ID:   fmt.Sprintf("worker-%d", i+1),
-			Name: fmt.Sprintf("Error Generator Worker %d", i+1),
-			Type: "error_generator",
+			Name: fmt.Sprintf("Test Job Generator Worker %d", i+1),
+			Type: "test_job_generator",
 			Config: map[string]interface{}{
 				"worker_index":    i,
 				"log_count":       logCount,
@@ -320,14 +320,14 @@ func (w *ErrorGeneratorWorker) Init(ctx context.Context, step models.JobStep, jo
 	}, nil
 }
 
-// CreateJobs creates error generator jobs for the step
-func (w *ErrorGeneratorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+// CreateJobs creates test job generator jobs for the step
+func (w *TestJobGeneratorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize error generator worker: %w", err)
+			return "", fmt.Errorf("failed to initialize test job generator worker: %w", err)
 		}
 	}
 
@@ -343,43 +343,43 @@ func (w *ErrorGeneratorWorker) CreateJobs(ctx context.Context, step models.JobSt
 	if len(initResult.WorkItems) == 0 {
 		w.logger.Warn().
 			Str("step_name", step.Name).
-			Msg("No work items for error generator")
-		w.jobMgr.AddJobLog(ctx, stepID, "info", "No error generator jobs to create")
+			Msg("No work items for test job generator")
+		w.jobMgr.AddJobLog(ctx, stepID, "info", "No test job generator jobs to create")
 		return stepID, nil
 	}
 
 	w.logger.Info().
 		Str("step_name", step.Name).
 		Int("worker_count", len(initResult.WorkItems)).
-		Msg("Creating error generator jobs")
+		Msg("Creating test job generator jobs")
 
 	// Create and enqueue jobs for each work item
 	jobIDs := make([]string, 0, len(initResult.WorkItems))
 	for _, workItem := range initResult.WorkItems {
-		jobID, err := w.createErrorGeneratorJob(ctx, workItem, stepID, step.Name, managerID)
+		jobID, err := w.createTestJobGeneratorJob(ctx, workItem, stepID, step.Name, managerID)
 		if err != nil {
-			w.logger.Warn().Err(err).Str("work_item_id", workItem.ID).Msg("Failed to create error generator job")
+			w.logger.Warn().Err(err).Str("work_item_id", workItem.ID).Msg("Failed to create test job generator job")
 			continue
 		}
 		jobIDs = append(jobIDs, jobID)
 	}
 
 	if len(jobIDs) == 0 {
-		return "", fmt.Errorf("failed to create any error generator jobs for step %s", step.Name)
+		return "", fmt.Errorf("failed to create any test job generator jobs for step %s", step.Name)
 	}
 
 	w.logger.Info().
 		Str("step_name", step.Name).
 		Int("jobs_created", len(jobIDs)).
-		Msg("Error generator jobs created and enqueued")
+		Msg("Test job generator jobs created and enqueued")
 
-	w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Created %d error generator jobs", len(jobIDs)))
+	w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Created %d test job generator jobs", len(jobIDs)))
 
 	return stepID, nil
 }
 
-// createErrorGeneratorJob creates and enqueues a single error generator job
-func (w *ErrorGeneratorWorker) createErrorGeneratorJob(ctx context.Context, workItem interfaces.WorkItem, parentJobID, stepName, managerID string) (string, error) {
+// createTestJobGeneratorJob creates and enqueues a single test job generator job
+func (w *TestJobGeneratorWorker) createTestJobGeneratorJob(ctx context.Context, workItem interfaces.WorkItem, parentJobID, stepName, managerID string) (string, error) {
 	// Create job config from work item config
 	jobConfig := workItem.Config
 
@@ -393,11 +393,11 @@ func (w *ErrorGeneratorWorker) createErrorGeneratorJob(ctx context.Context, work
 	// Create queue job
 	queueJob := models.NewQueueJobChild(
 		parentJobID,
-		"error_generator",
+		"test_job_generator",
 		workItem.Name,
 		jobConfig,
 		metadata,
-		0, // Initial depth for root error generator jobs
+		0, // Initial depth for root test job generator jobs
 	)
 
 	// Validate queue job
@@ -441,13 +441,13 @@ func (w *ErrorGeneratorWorker) createErrorGeneratorJob(ctx context.Context, work
 	return queueJob.ID, nil
 }
 
-// ReturnsChildJobs returns true since error generator creates child jobs
-func (w *ErrorGeneratorWorker) ReturnsChildJobs() bool {
+// ReturnsChildJobs returns true since test job generator creates child jobs
+func (w *TestJobGeneratorWorker) ReturnsChildJobs() bool {
 	return true
 }
 
-// ValidateConfig validates step configuration for error generator type
-func (w *ErrorGeneratorWorker) ValidateConfig(step models.JobStep) error {
+// ValidateConfig validates step configuration for test job generator type
+func (w *TestJobGeneratorWorker) ValidateConfig(step models.JobStep) error {
 	// All configuration is optional with sensible defaults
 	if step.Config != nil {
 		// Validate failure_rate is between 0 and 1
@@ -476,36 +476,38 @@ func (w *ErrorGeneratorWorker) ValidateConfig(step models.JobStep) error {
 // HELPER FUNCTIONS
 // ============================================================================
 
-// getConfigIntWithDefault retrieves an int value from config with a default fallback
+// getConfigIntWithDefault extracts an int value from a config map with a default
 func getConfigIntWithDefault(config map[string]interface{}, key string, defaultVal int) int {
 	if config == nil {
 		return defaultVal
 	}
-	if val, ok := config[key].(float64); ok {
-		return int(val)
-	}
-	if val, ok := config[key].(int); ok {
-		return val
-	}
-	if val, ok := config[key].(int64); ok {
-		return int(val)
+	if val, ok := config[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
 	}
 	return defaultVal
 }
 
-// getConfigFloatWithDefault retrieves a float64 value from config with a default fallback
+// getConfigFloatWithDefault extracts a float64 value from a config map with a default
 func getConfigFloatWithDefault(config map[string]interface{}, key string, defaultVal float64) float64 {
 	if config == nil {
 		return defaultVal
 	}
-	if val, ok := config[key].(float64); ok {
-		return val
-	}
-	if val, ok := config[key].(int); ok {
-		return float64(val)
-	}
-	if val, ok := config[key].(int64); ok {
-		return float64(val)
+	if val, ok := config[key]; ok {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
 	}
 	return defaultVal
 }

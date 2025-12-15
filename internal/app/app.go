@@ -738,16 +738,16 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(aggregateSummaryWorker)
 	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
 
-	// Register Error Generator worker (testing worker for error tolerance validation)
-	errorGeneratorWorker := workers.NewErrorGeneratorWorker(
+	// Register Test Job Generator worker (testing worker for logging, error tolerance, and job hierarchy validation)
+	testJobGeneratorWorker := workers.NewTestJobGeneratorWorker(
 		jobMgr,
 		queueMgr,
 		a.Logger,
 		a.EventService,
 	)
-	a.StepManager.RegisterWorker(errorGeneratorWorker)  // Register with StepManager for step routing
-	jobProcessor.RegisterExecutor(errorGeneratorWorker) // Register with JobProcessor for job execution
-	a.Logger.Debug().Str("step_type", errorGeneratorWorker.GetType().String()).Str("job_type", errorGeneratorWorker.GetWorkerType()).Msg("Error Generator worker registered")
+	a.StepManager.RegisterWorker(testJobGeneratorWorker)  // Register with StepManager for step routing
+	jobProcessor.RegisterExecutor(testJobGeneratorWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", testJobGeneratorWorker.GetType().String()).Str("job_type", testJobGeneratorWorker.GetWorkerType()).Msg("Test Job Generator worker registered")
 
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
