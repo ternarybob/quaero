@@ -2,7 +2,55 @@
 # -----------------------------------------------------------------------
 # Build Script for Quaero (Linux/macOS)
 # -----------------------------------------------------------------------
-# Bash equivalent of build.ps1
+# Simplified: 2025-11-08
+# Removed backward compatibility parameters (-Clean, -Verbose, -Release,
+# -ResetDatabase, -Environment, -Version)
+# See docs/simplify-build-script/ for migration guide
+# -----------------------------------------------------------------------
+#
+# SYNOPSIS
+#     Build script for Quaero
+#
+# DESCRIPTION
+#     This script builds Quaero for local development and testing.
+#
+#     Four operations supported:
+#     1. Default build (no parameters) - Builds executable silently, no deployment
+#     2. --deploy - Builds and deploys all files to bin directory (stops service if running)
+#     3. --run - Builds, deploys, and starts application in background
+#     4. --web - Deploys only pages directory and restarts application (no build, no version update)
+#
+# PARAMETERS
+#     --deploy    Deploy all required files to bin directory after building
+#                 (config, pages, Chrome extension, job definitions)
+#                 Stops any running service before deployment
+#
+#     --run       Build, deploy, and run the application in the background
+#                 Automatically triggers deployment before starting the service
+#
+#     --web       Deploy only the pages directory and restart the application
+#                 Does not build or update version - for rapid frontend development
+#                 Stops service, copies pages, restarts service
+#
+# EXAMPLES
+#     ./build.sh
+#         Build quaero executable only (no deployment, silent on success)
+#
+#     ./build.sh --deploy
+#         Build and deploy all files to bin directory (stops service if running)
+#
+#     ./build.sh --run
+#         Build, deploy, and start the application in the background
+#
+#     ./build.sh --web
+#         Deploy only pages directory and restart application (for rapid frontend iteration)
+#
+# NOTES
+#     Default build operation does NOT increment version number, only updates build timestamp.
+#     Version number must be manually incremented in .version file when needed.
+#
+#     For advanced operations removed in simplification (clean, database reset, etc.),
+#     see docs/simplify-build-script/migration-guide.md
 # -----------------------------------------------------------------------
 
 set -e
@@ -20,6 +68,22 @@ RUN=false
 DEPLOY=false
 WEB=false
 
+show_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --deploy, -deploy    Build and deploy all files to bin directory"
+    echo "  --run, -run          Build, deploy, and start the application"
+    echo "  --web, -web          Deploy only pages and restart (no build)"
+    echo "  --help, -h           Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                   Build only (no deployment)"
+    echo "  $0 --deploy          Build and deploy files"
+    echo "  $0 --run             Build, deploy, and run"
+    echo "  $0 --web             Quick pages deploy and restart"
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         -run|--run)
@@ -34,9 +98,13 @@ while [[ $# -gt 0 ]]; do
             WEB=true
             shift
             ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
-            echo "Usage: $0 [-run] [-deploy] [-web]"
+            show_help
             exit 1
             ;;
     esac
@@ -89,30 +157,72 @@ get_server_port() {
     echo "$port"
 }
 
-# Function to stop Quaero service
+# Function to stop Quaero service gracefully
 stop_quaero_service() {
     local port=$1
-    local pids=$(pgrep -f "quaero" 2>/dev/null || true)
+    local pids
+    local http_shutdown_succeeded=false
+    local max_attempts=3
+    local timeout
+    local elapsed=0
+    local check_interval=0.5
+
+    pids=$(pgrep -f "quaero" 2>/dev/null || true)
 
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}Stopping existing Quaero process(es)...${NC}"
 
-        # Try HTTP shutdown first
+        # Try HTTP shutdown first with retries
         echo -e "${GRAY}  Attempting HTTP graceful shutdown on port $port...${NC}"
-        curl -s -X POST "http://localhost:$port/api/shutdown" --connect-timeout 5 >/dev/null 2>&1 || true
+
+        for attempt in $(seq 1 $max_attempts); do
+            if curl -s -X POST "http://localhost:$port/api/shutdown" --connect-timeout 5 >/dev/null 2>&1; then
+                echo -e "${GRAY}  HTTP shutdown request sent successfully${NC}"
+                http_shutdown_succeeded=true
+                break
+            else
+                if [ $attempt -lt $max_attempts ]; then
+                    sleep 0.5
+                else
+                    echo -e "${GRAY}  HTTP shutdown not available (server may not be responding)${NC}"
+                fi
+            fi
+        done
 
         # Wait for graceful shutdown
-        sleep 2
-
-        # Check if still running
-        pids=$(pgrep -f "quaero" 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            echo -e "${GRAY}  Force stopping remaining processes...${NC}"
-            pkill -f "quaero" 2>/dev/null || true
-            sleep 1
+        if [ "$http_shutdown_succeeded" = true ]; then
+            timeout=12
+        else
+            timeout=5
         fi
 
-        echo -e "${GREEN}  Service stopped${NC}"
+        while pgrep -f "quaero" >/dev/null 2>&1 && [ "$elapsed" -lt "$timeout" ]; do
+            sleep $check_interval
+            elapsed=$((elapsed + 1))
+
+            if [ "$http_shutdown_succeeded" = true ] && [ "$elapsed" -eq 5 ]; then
+                echo -e "${GRAY}  Still waiting for graceful shutdown...${NC}"
+            fi
+        done
+
+        # Check if processes exited gracefully
+        pids=$(pgrep -f "quaero" 2>/dev/null || true)
+
+        if [ -n "$pids" ]; then
+            if [ "$http_shutdown_succeeded" = true ]; then
+                echo -e "${YELLOW}  Process(es) did not exit gracefully within ${timeout}s, forcing termination...${NC}"
+            fi
+            pkill -f "quaero" 2>/dev/null || true
+            sleep 0.5
+
+            if pgrep -f "quaero" >/dev/null 2>&1; then
+                echo -e "${YELLOW}  Warning: Some processes may still be running${NC}"
+            else
+                echo -e "${YELLOW}  Process(es) force-stopped${NC}"
+            fi
+        else
+            echo -e "${GREEN}  Process(es) stopped gracefully${NC}"
+        fi
     else
         echo -e "${GRAY}No Quaero process found running${NC}"
     fi
@@ -192,39 +302,47 @@ deploy_files() {
 # Limit old log files
 limit_log_files
 
-# Handle -web parameter (quick pages deploy)
+# Handle --web parameter early (skip build, version update, and most deployment)
 if [ "$WEB" = true ]; then
     echo -e "${CYAN}Quaero Web Deployment${NC}"
     echo -e "${CYAN}=====================${NC}"
     echo -e "${YELLOW}Deploying pages directory and restarting application...${NC}"
 
+    CONFIG_PATH="$BIN_DIR/quaero.toml"
+
     # Verify executable exists
     if [ ! -f "$OUTPUT_PATH" ]; then
-        echo -e "${RED}Quaero executable not found: $OUTPUT_PATH. Run ./build.sh first.${NC}"
+        echo -e "${RED}Quaero executable not found: $OUTPUT_PATH. Run ./build.sh first to create it.${NC}"
         exit 1
     fi
 
     # Get server port and stop service
     SERVER_PORT=$(get_server_port)
+
+    # Stop Quaero service
+    echo -e "${YELLOW}Stopping Quaero service...${NC}"
     stop_quaero_service "$SERVER_PORT"
 
-    # Deploy pages only
+    # Deploy pages directory only
     echo -e "${YELLOW}Deploying pages directory...${NC}"
     if [ -d "$PROJECT_ROOT/pages" ]; then
         rm -rf "$BIN_DIR/pages"
         cp -r "$PROJECT_ROOT/pages" "$BIN_DIR/pages"
         echo -e "${GREEN}  Pages deployed successfully${NC}"
     else
-        echo -e "${RED}Pages directory not found${NC}"
+        echo -e "${RED}Pages directory not found: $PROJECT_ROOT/pages${NC}"
         exit 1
     fi
 
     # Restart application
     echo -e "${YELLOW}Starting application...${NC}"
     cd "$BIN_DIR"
-    "$OUTPUT_PATH" -c "$BIN_DIR/quaero.toml" &
+    "$OUTPUT_PATH" -c "$CONFIG_PATH" &
 
+    echo ""
     echo -e "${GREEN}==== Web Deployment Complete ====${NC}"
+    echo -e "${CYAN}Pages deployed and application restarted${NC}"
+    echo -e "${GRAY}No build or version update performed${NC}"
     exit 0
 fi
 
@@ -324,21 +442,24 @@ fi
 
 echo -e "${GREEN}MCP server built: $MCP_OUTPUT_PATH${NC}"
 
-# Handle deployment
+# Handle deployment and execution based on parameters
 if [ "$RUN" = true ] || [ "$DEPLOY" = true ]; then
-    echo -e "${YELLOW}Deploying files...${NC}"
+    # Deploy files to bin directory
     deploy_files "$PROJECT_ROOT" "$BIN_DIR"
-    echo -e "${GREEN}Files deployed${NC}"
 
     if [ "$RUN" = true ]; then
+        # Start application in background
+        echo ""
         echo -e "${YELLOW}==== Starting Application ====${NC}"
+
+        CONFIG_PATH="$BIN_DIR/quaero.toml"
         cd "$BIN_DIR"
-        "$OUTPUT_PATH" -c "$BIN_DIR/quaero.toml" &
+        "$OUTPUT_PATH" -c "$CONFIG_PATH" &
+
         echo -e "${GREEN}Application started in background${NC}"
         echo -e "${CYAN}Command: quaero -c quaero.toml${NC}"
         echo -e "${GRAY}Config: bin/quaero.toml${NC}"
-        echo -e "${YELLOW}Use 'pkill quaero' to stop${NC}"
+        echo -e "${YELLOW}Use 'pkill quaero' or send SIGTERM to stop gracefully${NC}"
+        echo -e "${YELLOW}Check bin/logs/ for application logs${NC}"
     fi
 fi
-
-echo -e "${GREEN}==== Build Complete ====${NC}"

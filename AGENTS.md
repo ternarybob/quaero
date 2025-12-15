@@ -21,20 +21,84 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) when working with code in this repository.
 
-## CRITICAL: BUILD AND TEST
+## CRITICAL: OS DETECTION AND COMMAND EXECUTION
 
 **Failure to follow these instructions will result in your removal from the project.**
 
-### Build Instructions (Windows ONLY)
+### Operating System Detection (MANDATORY)
 
-**Building, compiling, and running the application MUST be done using:**
-- `.\scripts\build.ps1`
-- `.\scripts\build.ps1 -Deploy`
-- `.\scripts\build.ps1 -Run`
-- **ONLY exception:** `go build` for compile tests (no output binary)
+**BEFORE executing ANY shell command, you MUST determine the operating system:**
 
-**Build Commands:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ OS DETECTION CHECKLIST                                          │
+│                                                                  │
+│ 1. Check context/environment information for OS indicators      │
+│ 2. Look for shell type: powershell, bash, zsh, cmd              │
+│ 3. Check path separators: \ = Windows, / = Unix/Linux/macOS     │
+│ 4. Check workspace path format:                                 │
+│    - C:\... or D:\... = Windows                                 │
+│    - /home/... or /Users/... = Unix/Linux/macOS                 │
+│                                                                  │
+│ WHEN IN DOUBT: Ask the user which OS they are running           │
+└─────────────────────────────────────────────────────────────────┘
+```
 
+### OS-Specific Command Reference
+
+| Task | Windows (PowerShell) | Linux/macOS (Bash) |
+|------|---------------------|-------------------|
+| Build | `.\scripts\build.ps1` | `./scripts/build.sh` |
+| Build + Deploy | `.\scripts\build.ps1 -Deploy` | `./scripts/build.sh --deploy` |
+| Build + Run | `.\scripts\build.ps1 -Run` | `./scripts/build.sh --run` |
+| Run tests | `go test -v ./test/...` | `go test -v ./test/...` |
+| List directory | `Get-ChildItem` or `dir` | `ls -la` |
+| Create directory | `New-Item -ItemType Directory -Path "dir"` or `mkdir dir` | `mkdir -p dir` |
+| Remove file | `Remove-Item file` | `rm file` |
+| Remove directory | `Remove-Item -Recurse dir` | `rm -rf dir` |
+| Environment variable | `$env:VAR_NAME` | `$VAR_NAME` |
+| Set env variable | `$env:VAR_NAME = "value"` | `export VAR_NAME="value"` |
+| Path separator | `\` | `/` |
+| Check port | `netstat -an \| findstr :8085` | `lsof -i :8085` or `netstat -an \| grep 8085` |
+| Kill process | `Stop-Process -Name quaero` | `pkill quaero` or `kill $(pgrep quaero)` |
+| Find files | `Get-ChildItem -Recurse -Filter "*.go"` | `find . -name "*.go"` |
+| File content | `Get-Content file.txt` | `cat file.txt` |
+
+### Command Execution Rules
+
+**NEVER do this:**
+```bash
+# ❌ WRONG: Using bash commands on Windows
+./scripts/build.sh          # Won't work on Windows
+rm -rf ./bin                 # Won't work on Windows
+export VAR=value             # Won't work on Windows PowerShell
+
+# ❌ WRONG: Using PowerShell commands on Linux/macOS
+.\scripts\build.ps1          # Won't work on Linux/macOS
+Remove-Item -Recurse bin     # Won't work on Linux/macOS
+$env:VAR = "value"           # Won't work on Linux/macOS bash
+```
+
+**ALWAYS do this:**
+```
+# ✅ CORRECT: Detect OS first, then use appropriate commands
+
+# If Windows detected:
+.\scripts\build.ps1 -Run
+
+# If Linux/macOS detected:
+./scripts/build.sh --run
+```
+
+---
+
+## BUILD AND TEST INSTRUCTIONS
+
+### Build Instructions
+
+**Building, compiling, and running the application MUST be done using the appropriate script for your OS:**
+
+#### Windows (PowerShell)
 ```powershell
 # Development build (silent, no deployment, no version increment)
 .\scripts\build.ps1
@@ -46,10 +110,24 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 .\scripts\build.ps1 -Run
 ```
 
+#### Linux/macOS (Bash)
+```bash
+# Development build
+./scripts/build.sh
+
+# Deploy files to bin directory
+./scripts/build.sh --deploy
+
+# Build, deploy, and run
+./scripts/build.sh --run
+```
+
+**ONLY exception for direct `go` commands:** `go build` for compile tests (no output binary)
+
 **Important Notes:**
 - **Default build (no parameters)** - Builds executable silently, does NOT increment version, does NOT deploy files
 - **Version management** - Version number in `.version` file is NEVER auto-incremented, only build timestamp updates
-- **Deployment** - Use `-Deploy` or `-Run` to copy files (config, pages, Chrome extension) to bin/
+- **Deployment** - Use `-Deploy`/`--deploy` or `-Run`/`--run` to copy files (config, pages, Chrome extension) to bin/
 - **Removed parameters** - `-Clean`, `-Verbose`, `-Release`, `-ResetDatabase` removed for simplicity. See `docs/simplify-build-script/migration-guide.md` for alternatives
 
 ### Testing Instructions
@@ -57,8 +135,13 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 **CRITICAL: The test runner handles EVERYTHING automatically - do NOT run build scripts or start the service manually!**
 
 **IMPORTANT: Do NOT create temporary files for testing or building (e.g., run_test.ps1, test_compile.go, etc.). Always use the official build and test commands:**
-- **Build**: `.\scripts\build.ps1`
-- **Test**: `go test` commands directly
+
+| OS | Build Command | Test Command |
+|----|---------------|--------------|
+| Windows | `.\scripts\build.ps1` | `go test -v ./test/...` |
+| Linux/macOS | `./scripts/build.sh` | `go test -v ./test/...` |
+
+**Note:** Go test commands are cross-platform and work the same on all operating systems.
 
 ## Project Overview
 
@@ -1106,7 +1189,9 @@ Updated automatically by build scripts.
 ### Server Won't Start
 
 Check:
-1. Port availability: `netstat -an | findstr :8085`
+1. Port availability:
+   - Windows: `netstat -an | findstr :8085`
+   - Linux/macOS: `lsof -i :8085` or `netstat -an | grep 8085`
 2. Config file exists and is valid
 3. Database path is writable
 4. Logs in console output
