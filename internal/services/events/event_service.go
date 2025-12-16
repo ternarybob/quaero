@@ -82,9 +82,12 @@ func (s *Service) Publish(ctx context.Context, event interfaces.Event) error {
 	s.mu.RUnlock()
 
 	if len(handlers) == 0 {
-		s.logger.Debug().
-			Str("event_type", string(event.Type)).
-			Msg("No subscribers for event")
+		// Only log "no subscribers" for events not in blacklist (prevents noisy startup logs)
+		if !nonLoggableEvents[event.Type] {
+			s.logger.Debug().
+				Str("event_type", string(event.Type)).
+				Msg("No subscribers for event")
+		}
 		return nil
 	}
 
@@ -125,9 +128,12 @@ func (s *Service) PublishSync(ctx context.Context, event interfaces.Event) error
 		Msg("*** EVENT SERVICE: Read lock released, handlers retrieved")
 
 	if len(handlers) == 0 {
-		s.logger.Debug().
-			Str("event_type", string(event.Type)).
-			Msg("*** EVENT SERVICE: No subscribers for event - returning")
+		// Only log "no subscribers" for events not in blacklist (prevents noisy startup logs)
+		if !nonLoggableEvents[event.Type] {
+			s.logger.Debug().
+				Str("event_type", string(event.Type)).
+				Msg("*** EVENT SERVICE: No subscribers for event - returning")
+		}
 		return nil
 	}
 

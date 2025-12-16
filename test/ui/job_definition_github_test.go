@@ -1,3 +1,6 @@
+// job_definition_github_test.go - GitHub job execution tests
+// Tests GitHub Repository Collector and GitHub Actions Log Collector jobs
+
 package ui
 
 import (

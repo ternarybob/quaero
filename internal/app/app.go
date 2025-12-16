@@ -129,6 +129,7 @@ type App struct {
 	HybridScraperHandler *handlers.HybridScraperHandler
 	DevOpsHandler        *handlers.DevOpsHandler
 	UnifiedLogsHandler   *handlers.UnifiedLogsHandler
+	SSELogsHandler       *handlers.SSELogsHandler
 }
 
 // New initializes the application with all dependencies
@@ -867,6 +868,10 @@ func (a *App) initHandlers() error {
 	// Initialize unified logs handler (single endpoint for service and job logs)
 	a.UnifiedLogsHandler = handlers.NewUnifiedLogsHandler(a.LogService, a.Logger)
 	a.Logger.Debug().Msg("Unified logs handler initialized")
+
+	// Initialize SSE logs handler (real-time log streaming via Server-Sent Events)
+	a.SSELogsHandler = handlers.NewSSELogsHandler(a.LogService, a.EventService, a.Logger)
+	a.Logger.Debug().Msg("SSE logs handler initialized")
 
 	// Initialize config handler with ConfigService for dynamic key injection
 	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)

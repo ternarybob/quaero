@@ -724,8 +724,8 @@
                                                                             <!-- Log lines (limited to step-specific limit, earliest-to-latest) -->
                                                                             <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id, step.name)" :key="logIdx">
                                                                                 <div class="tree-log-line" :class="{ 'log-error': log.level === 'error' }">
-                                                                                    <!-- Line number: use server line_number when earlier logs exist, otherwise sequential 1→N -->
-                                                                                    <span class="tree-log-num" x-text="hasStepEarlierLogs(item.job.id, step.name, stepIndex) ? (log.line_number || (logIdx + 1)) : (logIdx + 1)"></span>
+                                                                                    <!-- Line number: always use server-provided line_number for accurate ordering -->
+                                                                                    <span class="tree-log-num" x-text="log.line_number || (logIdx + 1)"></span>
                                                                                     <!-- Log level badge -->
                                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)" style="margin-right: 0.5rem; font-weight: 500;"></span>
                                                                                     <!-- Log text -->
@@ -1410,25 +1410,9 @@
                 }));
             }));
 
-            // Subscribe to refresh_logs trigger (from UnifiedLogAggregator)
-            wsUnsubscribers.push(WebSocketManager.subscribe('refresh_logs', (payload) => {
-                const { scope, step_ids, timestamp, finished } = payload;
-                if (scope === 'job' && step_ids && step_ids.length > 0) {
-                    console.log('[Queue] Received refresh_logs trigger (scope=job) for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
-                    window.dispatchEvent(new CustomEvent('jobList:refreshStepEvents', {
-                        detail: { step_ids, timestamp, finished }
-                    }));
-                }
-            }));
-
-            // Legacy: Subscribe to old refresh_step_events trigger
-            wsUnsubscribers.push(WebSocketManager.subscribe('refresh_step_events', (payload) => {
-                const { step_ids, timestamp, finished } = payload;
-                console.log('[Queue] Received legacy refresh_step_events trigger for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
-                window.dispatchEvent(new CustomEvent('jobList:refreshStepEvents', {
-                    detail: { step_ids, timestamp, finished }
-                }));
-            }));
+            // NOTE: refresh_logs and refresh_step_events subscriptions REMOVED
+            // SSE streaming replaces WebSocket signal-then-fetch pattern
+            // Logs are now streamed directly via /api/logs/stream endpoint
 
             // Subscribe to manager progress events (from ManagerMonitor)
             wsUnsubscribers.push(WebSocketManager.subscribe('manager_progress', (payload) => {
@@ -1466,6 +1450,7 @@
 
             // Subscribe to job_update events (unified job/step status updates)
             // This is the primary mechanism for real-time step status updates
+            // Logs are streamed via SSE, not fetched on job_update
             wsUnsubscribers.push(WebSocketManager.subscribe('job_update', (payload) => {
                 window.dispatchEvent(new CustomEvent('jobList:jobUpdate', {
                     detail: {
@@ -1473,15 +1458,14 @@
                         job_id: payload.job_id,
                         step_name: payload.step_name,
                         status: payload.status,
-                        refresh_logs: payload.refresh_logs,
                         timestamp: payload.timestamp
                     }
                 }));
             }));
 
-            // NOTE: job_log subscription REMOVED - architecture uses trigger-based approach
-            // WebSocket sends only 'refresh_logs' triggers, UI fetches logs from /api/logs
-            // This prevents heavy WebSocket load when jobs produce 5000+ log entries
+            // NOTE: Logs are streamed via SSE endpoint /api/logs/stream
+            // Each expanded job connects to SSE and receives real-time log updates
+            // No more signal-then-fetch pattern via WebSocket
 
             console.log('[Queue] Subscribed to', wsUnsubscribers.length, 'WebSocket message types');
         }
@@ -1993,6 +1977,9 @@
                 expandedStepLogs: {},
                 jobLogs: {}, // Stores logs for all jobs (legacy + tree support)
 
+                // SSE streaming state
+                jobSSEConnected: {}, // Track SSE connection status per job
+
                 // Loading state
                 isLoading: false,
                 loadError: null,
@@ -2060,12 +2047,11 @@
                     // WebSocket real-time updates
                     window.addEventListener('jobList:recalculateStats', () => this.recalculateStats());
                     window.addEventListener('jobList:updateJobProgress', (e) => this.updateJobProgress(e.detail));
-                    // NOTE: jobLog listener REMOVED - logs fetched via API on refresh_logs trigger
+                    // NOTE: Logs now streamed via SSE - no more WebSocket log events
                     // Step hierarchy progress updates
                     window.addEventListener('jobList:updateStepProgress', (e) => this.updateStepProgress(e.detail));
                     window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
-                    // Trigger-based event refresh (from event aggregator)
-                    window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
+                    // NOTE: refreshStepEvents listener REMOVED - SSE streaming replaces trigger-based fetching
                     // Unified job/step status updates (primary mechanism for step status)
                     window.addEventListener('jobList:jobUpdate', (e) => this.handleJobUpdate(e.detail));
 
@@ -2732,6 +2718,11 @@
                 // Clear all job state when server restarts - prevents stale job ID requests
                 handleServerRestart() {
                     console.log('[Queue] Handling server restart - clearing all job state');
+                    // Disconnect all SSE streams
+                    if (typeof QueueSSEManager !== 'undefined') {
+                        QueueSSEManager.disconnectAll();
+                    }
+                    this.jobSSEConnected = {};
                     if (this._pendingStepIds) { this._pendingStepIds.clear(); }
                     if (this._refreshDebounceTimer) { clearTimeout(this._refreshDebounceTimer); this._refreshDebounceTimer = null; }
                     if (this._stepEventFetchInFlight) { this._stepEventFetchInFlight.clear(); }
@@ -4172,14 +4163,15 @@
                     this.throttledRenderJobs();
                 },
 
-                // Debounced step event refresh - collects step_ids and processes after delay
-                // This prevents API flooding when many refresh_logs triggers arrive rapidly
+                // DEPRECATED: Step event refresh - replaced by SSE streaming
+                // These fields are kept for backwards compatibility but are no longer actively used
+                // Logs are now streamed in real-time via /api/logs/stream SSE endpoint
                 _pendingStepIds: new Set(),
                 _refreshDebounceTimer: null,
-                _refreshDebounceMs: 500, // Wait 500ms for more triggers before fetching
+                _refreshDebounceMs: 500,
 
-                // Refresh step events from API (triggered by refresh_logs WebSocket message)
-                // Uses debouncing to batch multiple triggers together
+                // DEPRECATED: Refresh step events from API (was triggered by refresh_logs WebSocket message)
+                // This function is no longer used - SSE streaming replaces the signal-then-fetch pattern
                 async refreshStepEvents(detail) {
                     const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
@@ -4475,10 +4467,11 @@
                 },
 
                 // Handle unified job_update events for real-time UI status sync
-                // This is the primary mechanism for step status updates (bypasses log aggregator)
+                // This is the primary mechanism for step status updates
+                // Logs are streamed via SSE, not triggered by status updates
                 // context: "job" for overall job status, "job_step" for step-level status
                 async handleJobUpdate(update) {
-                    const { context, job_id, step_name, status, refresh_logs } = update;
+                    const { context, job_id, step_name, status } = update;
 
                     if (context === 'job') {
                         // Update overall job status
@@ -4556,10 +4549,8 @@
 
                     }
 
-                    // Fetch updated structure if refresh_logs is true
-                    if (refresh_logs) {
-                        await this.fetchJobStructure(job_id);
-                    }
+                    // NOTE: refresh_logs check REMOVED - logs are now streamed via SSE
+                    // Structure updates happen automatically through SSE status events
 
                     // Re-render to show updated status
                     this.throttledRenderJobs();
@@ -4718,6 +4709,12 @@
                     // Load tree data when expanding (not collapsed)
                     if (!newState && !this.jobTreeData[jobId]) {
                         this.loadJobTreeData(jobId);
+                    } else if (!newState && this.jobTreeData[jobId]) {
+                        // Re-connect SSE when expanding (if not already connected)
+                        this.connectJobSSE(jobId);
+                    } else if (newState) {
+                        // Disconnect SSE when collapsing
+                        this.disconnectJobSSE(jobId);
                     }
                     this.renderJobs();
                 },
@@ -4765,6 +4762,9 @@
                             // Clear pending expansions for this job
                             delete this._pendingStepExpansions[jobId];
                         }
+
+                        // Connect SSE stream for real-time log updates
+                        this.connectJobSSE(jobId);
                     } catch (error) {
                         console.error('[Queue] Failed to load job tree:', error);
                     } finally {
@@ -4777,6 +4777,163 @@
                     delete this.jobTreeData[jobId];
                     this.jobTreeData = { ...this.jobTreeData };
                     this.loadJobTreeData(jobId);
+                },
+
+                // SSE stream management for real-time log streaming
+                connectJobSSE(jobId) {
+                    // Skip if already connected
+                    if (this.jobSSEConnected[jobId]) {
+                        return;
+                    }
+
+                    // Check if QueueSSEManager is available
+                    if (typeof QueueSSEManager === 'undefined') {
+                        console.warn('[Queue] QueueSSEManager not loaded, skipping SSE connection');
+                        return;
+                    }
+
+                    console.log('[Queue] Connecting SSE stream for job:', jobId.substring(0, 8));
+
+                    const self = this;
+                    QueueSSEManager.connectJob(jobId, {
+                        limit: 100,
+                        onLogs: (data) => {
+                            self.handleSSELogs(jobId, data);
+                        },
+                        onStatus: (data) => {
+                            self.handleSSEStatus(jobId, data);
+                        },
+                        onConnect: () => {
+                            console.log('[Queue] SSE connected for job:', jobId.substring(0, 8));
+                            self.jobSSEConnected = { ...self.jobSSEConnected, [jobId]: true };
+                        },
+                        onDisconnect: () => {
+                            console.log('[Queue] SSE disconnected for job:', jobId.substring(0, 8));
+                            self.jobSSEConnected = { ...self.jobSSEConnected, [jobId]: false };
+                        },
+                        onError: (err) => {
+                            console.error('[Queue] SSE error for job:', jobId.substring(0, 8), err);
+                        }
+                    });
+                },
+
+                disconnectJobSSE(jobId) {
+                    if (typeof QueueSSEManager !== 'undefined') {
+                        console.log('[Queue] Disconnecting SSE stream for job:', jobId.substring(0, 8));
+                        QueueSSEManager.disconnectJob(jobId);
+                        this.jobSSEConnected = { ...this.jobSSEConnected, [jobId]: false };
+                    }
+                },
+
+                // Handle incoming SSE log events
+                handleSSELogs(jobId, data) {
+                    console.log('[Queue] SSE handleSSELogs called for job:', jobId.substring(0, 8), 'raw data:', JSON.stringify(data).substring(0, 500));
+
+                    if (!data.logs || !Array.isArray(data.logs) || data.logs.length === 0) {
+                        console.log('[Queue] SSE no logs in data, returning early');
+                        return;
+                    }
+
+                    console.log('[Queue] SSE processing', data.logs.length, 'logs');
+
+                    // Group logs by step name
+                    const logsByStep = {};
+                    for (const log of data.logs) {
+                        const stepName = log.step_name || 'unknown';
+                        console.log('[Queue] SSE log entry:', { level: log.level, step_name: stepName, line_number: log.line_number, msg: log.message?.substring(0, 30) });
+                        if (!logsByStep[stepName]) {
+                            logsByStep[stepName] = [];
+                        }
+                        logsByStep[stepName].push(log);
+                    }
+
+                    console.log('[Queue] SSE logs grouped by step:', Object.keys(logsByStep), 'counts:', Object.fromEntries(Object.entries(logsByStep).map(([k,v]) => [k, v.length])));
+
+                    // Update jobTreeData for each step
+                    if (!this.jobTreeData[jobId]?.steps) {
+                        console.log('[Queue] SSE no treeData for job:', jobId.substring(0, 8), 'available keys:', Object.keys(this.jobTreeData));
+                        return;
+                    }
+
+                    const treeData = this.jobTreeData[jobId];
+                    console.log('[Queue] SSE treeData has', treeData.steps.length, 'steps:', treeData.steps.map(s => s.name));
+                    let hasChanges = false;
+
+                    for (const [stepName, newLogs] of Object.entries(logsByStep)) {
+                        const stepIdx = treeData.steps.findIndex(s => s.name === stepName);
+                        console.log('[Queue] SSE matching step:', { stepName, stepIdx, treeSteps: treeData.steps.map(s => s.name) });
+
+                        if (stepIdx < 0) {
+                            console.warn('[Queue] SSE step NOT FOUND:', stepName, '- available steps:', treeData.steps.map(s => s.name));
+                            continue;
+                        }
+
+                        const currentStep = treeData.steps[stepIdx];
+                        const existingLogs = currentStep.logs || [];
+                        console.log('[Queue] SSE current step has', existingLogs.length, 'existing logs');
+
+                        // Merge new logs, avoiding duplicates using line_number as primary key
+                        // line_number is server-assigned and unique per step
+                        const existingLineNumbers = new Set(existingLogs.map(l => l.line_number).filter(n => n > 0));
+                        const uniqueNewLogs = newLogs.filter(l => {
+                            if (l.line_number > 0) {
+                                return !existingLineNumbers.has(l.line_number);
+                            }
+                            // Fallback for logs without line_number (shouldn't happen with new backend)
+                            return !existingLogs.some(e => e.timestamp === l.timestamp && e.message === l.message);
+                        });
+                        console.log('[Queue] SSE unique new logs:', uniqueNewLogs.length, 'of', newLogs.length, 'total');
+
+                        if (uniqueNewLogs.length > 0) {
+                            hasChanges = true;
+                            const mergedLogs = [...existingLogs, ...uniqueNewLogs];
+                            // Sort by line_number - server now provides sequential line numbers for all logs
+                            mergedLogs.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
+                            console.log('[Queue] SSE merged logs:', { step: stepName, newCount: uniqueNewLogs.length, totalCount: mergedLogs.length });
+
+                            const newSteps = [...treeData.steps];
+                            newSteps[stepIdx] = {
+                                ...currentStep,
+                                logs: mergedLogs,
+                                // Use step's actual log count, not job's total count
+                                // data.meta.total_count is the JOB total, not per-step
+                                totalLogCount: mergedLogs.length
+                            };
+                            treeData.steps = newSteps;
+                        } else {
+                            console.log('[Queue] SSE all logs were duplicates for step:', stepName);
+                        }
+                    }
+
+                    if (hasChanges) {
+                        console.log('[Queue] SSE triggering Alpine reactivity update');
+                        // Trigger Alpine reactivity
+                        this.jobTreeData = { ...this.jobTreeData, [jobId]: { ...treeData } };
+                    } else {
+                        console.log('[Queue] SSE no changes to apply');
+                    }
+                },
+
+                // Handle incoming SSE status events
+                handleSSEStatus(jobId, data) {
+                    if (data.steps && Array.isArray(data.steps) && this.jobTreeData[jobId]?.steps) {
+                        const treeData = this.jobTreeData[jobId];
+                        let hasChanges = false;
+
+                        for (const stepStatus of data.steps) {
+                            const stepIdx = treeData.steps.findIndex(s => s.name === stepStatus.name);
+                            if (stepIdx >= 0 && treeData.steps[stepIdx].status !== stepStatus.status) {
+                                hasChanges = true;
+                                const newSteps = [...treeData.steps];
+                                newSteps[stepIdx] = { ...newSteps[stepIdx], status: stepStatus.status };
+                                treeData.steps = newSteps;
+                            }
+                        }
+
+                        if (hasChanges) {
+                            this.jobTreeData = { ...this.jobTreeData, [jobId]: { ...treeData } };
+                        }
+                    }
                 },
 
                 toggleTreeStep(jobId, stepIndex) {

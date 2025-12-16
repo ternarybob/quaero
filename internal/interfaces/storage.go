@@ -157,7 +157,8 @@ type JobDefinitionStorage interface {
 // ORDERING: GetLogs() and GetLogsByLevel() return logs in newest-first order (DESC).
 // This matches typical web UI expectations where recent activity appears first.
 type LogStorage interface {
-	AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error
+	// AppendLog stores a log entry and returns the assigned line number
+	AppendLog(ctx context.Context, jobID string, entry models.LogEntry) (lineNumber int, err error)
 	AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error
 	GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error)
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error)

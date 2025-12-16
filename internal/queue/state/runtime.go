@@ -198,13 +198,14 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	now := time.Now()
 	entry := models.LogEntry{
-		Timestamp:     now.Format("15:04:05"),
+		Timestamp:     now.Format("15:04:05.000"),
 		FullTimestamp: now.Format(time.RFC3339),
 		Level:         level,
 		Message:       message,
 		Context:       map[string]string{models.LogCtxJobID: jobID},
 	}
-	return m.logStorage.AppendLog(ctx, jobID, entry)
+	_, err := m.logStorage.AppendLog(ctx, jobID, entry)
+	return err
 }
 
 // AddJobError adds an error message to the job's status_report

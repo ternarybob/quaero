@@ -1,0 +1,145 @@
+/**
+ * SSE Log Streaming - Additional Styles
+ * Extends quaero.css terminal styles for SSE log components
+ */
+
+/* SSE Connection Status Indicator */
+.sse-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.sse-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #6c757d;
+    transition: background-color 0.3s ease;
+}
+
+.sse-status-dot.connected {
+    background-color: #1f883d;
+    animation: pulse-connected 2s infinite;
+}
+
+.sse-status-dot.disconnected {
+    background-color: #d1242f;
+}
+
+@keyframes pulse-connected {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Log counts display */
+.log-counts {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.log-counts .total {
+    font-weight: 600;
+}
+
+/* Auto-scroll toggle button state */
+.btn-auto-scroll.active {
+    background-color: var(--color-primary);
+    color: white;
+}
+
+/* SSE Log Panel Header */
+.sse-log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 0.5rem;
+}
+
+.sse-log-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.sse-log-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Log line with line numbers */
+.terminal-line-numbered {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.terminal-line-number {
+    color: #8b949e;
+    min-width: 3ch;
+    text-align: right;
+    user-select: none;
+    opacity: 0.7;
+}
+
+/* Streaming indicator animation */
+.streaming-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background-color: #1f883d;
+    border-radius: 50%;
+    margin-left: 0.5rem;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
+/* Filter controls for SSE logs */
+.sse-filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.sse-filter-controls select {
+    height: 28px;
+    font-size: 0.75rem;
+    padding: 0 0.5rem;
+}
+
+/* Reconnecting overlay */
+.sse-reconnecting {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.8rem;
+    z-index: 10;
+}
+
+.sse-reconnecting .spinner {
+    margin-right: 0.5rem;
+}

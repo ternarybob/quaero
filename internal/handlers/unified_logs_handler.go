@@ -258,7 +258,7 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 	// Step filter - when provided, returns step-grouped results for step log display
 	stepFilter := r.URL.Query().Get("step")
 	if stepFilter != "" {
-		h.getStepGroupedLogs(w, r, jobID, stepFilter, level, limit, order)
+		h.getStepGroupedLogs(w, r, jobID, stepFilter, level, limit, order, includeChildren)
 		return
 	}
 
@@ -520,14 +520,14 @@ type StepLogsResponse struct {
 
 // getStepGroupedLogs returns logs grouped by step for step-level log retrieval
 // Response format: { "job_id": "...", "steps": [{ "step_name": "...", "logs": [...], "total_count": N, "unfiltered_count": N }] }
-func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.Request, jobID, stepFilter, level string, limit int, order string) {
+// includeChildren: when true, includes logs from child/worker jobs (slower but complete)
+func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.Request, jobID, stepFilter, level string, limit int, order string, includeChildren bool) {
 	ctx := r.Context()
 
-	// Get logs for this step job only (NOT including children/descendants)
-	// Using includeChildren=false prevents expensive k-way merge over many child jobs
-	// which can cause timeouts for agent steps that spawn hundreds of worker jobs.
-	// Step jobs log their own progress; child worker job logs are separate.
-	logEntries, _, _, err := h.logService.GetAggregatedLogs(ctx, jobID, false, level, limit, "", order)
+	// Get logs for this step job, optionally including children/descendants
+	// Note: includeChildren=true can be slow for steps with many worker jobs (k-way merge)
+	// The caller controls this via query parameter to balance completeness vs performance
+	logEntries, _, _, err := h.logService.GetAggregatedLogs(ctx, jobID, includeChildren, level, limit, "", order)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get step logs")
 		if errors.Is(err, logs.ErrJobNotFound) {
@@ -538,15 +538,15 @@ func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Count total logs matching filter (step job only, not descendants)
-	totalCount, countErr := h.logService.CountAggregatedLogs(ctx, jobID, false, level)
+	// Count total logs matching filter (includes children if requested)
+	totalCount, countErr := h.logService.CountAggregatedLogs(ctx, jobID, includeChildren, level)
 	if countErr != nil {
 		h.logger.Warn().Err(countErr).Str("job_id", jobID).Msg("Failed to count logs")
 		totalCount = len(logEntries)
 	}
 
-	// Count unfiltered logs (all levels, step job only)
-	unfilteredCount, unfilteredErr := h.logService.CountAggregatedLogs(ctx, jobID, false, "all")
+	// Count unfiltered logs (all levels, same includeChildren setting)
+	unfilteredCount, unfilteredErr := h.logService.CountAggregatedLogs(ctx, jobID, includeChildren, "all")
 	if unfilteredErr != nil {
 		h.logger.Warn().Err(unfilteredErr).Str("job_id", jobID).Msg("Failed to count unfiltered logs")
 		unfilteredCount = totalCount

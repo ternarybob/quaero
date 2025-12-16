@@ -39,5 +39,10 @@
 <script src="/static/websocket-manager.js"></script>
 <script src="/static/common.js"></script>
 
+<!-- SSE Log Streaming - Load BEFORE Alpine so components are available -->
+<link rel="stylesheet" href="/static/css/log-stream.css">
+<script src="/static/js/log-stream.js"></script>
+<script src="/static/js/log-components.js"></script>
+
 <!-- Alpine.js - Load AFTER component definitions -->
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>

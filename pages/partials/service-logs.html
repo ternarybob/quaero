@@ -1,12 +1,16 @@
-<div class="card" x-data="serviceLogs">
+<div class="card" x-data="sseServiceLogs" x-init="init()" @beforeunload.window="destroy()">
 
     <div class="card-header">
         <header class="navbar">
             <section class="navbar-section">
                 <h2>Service Logs</h2>
+                <span class="sse-status ml-2">
+                    <span class="sse-status-dot" :class="connected ? 'connected' : 'disconnected'"></span>
+                    <span x-text="connected ? 'Connected' : 'Disconnected'"></span>
+                </span>
             </section>
             <section class="navbar-section">
-                <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'" :class="autoScroll ? 'btn-primary' : ''">
                     <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                 </button>
                 <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
@@ -20,7 +24,7 @@
     </div>
 
     <div class="card-body">
-        <!-- Logs are filtered server-side before broadcasting (see WebSocketWriter) -->
+        <!-- Logs streamed via SSE from /api/logs/stream?scope=service -->
         <div class="terminal" x-ref="logContainer">
             <template x-if="logs.length === 0">
                 <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
@@ -28,7 +32,7 @@
             <template x-for="log in logs" :key="log.id">
                 <div class="terminal-line">
                     <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
-                    <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                    <span :class="log.levelClass || getLevelClass(log.level)" x-text="`[${log.level}]`"></span>
                     <span x-text="log.message"></span>
                 </div>
             </template>

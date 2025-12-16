@@ -20,7 +20,6 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/services/events"
 	"golang.org/x/time/rate"
 )
 
@@ -44,11 +43,10 @@ type WebSocketHandler struct {
 	mu                     sync.RWMutex
 	authLoader             AuthLoader
 	eventService           interfaces.EventService
-	crawlProgressThrottler *rate.Limiter                // Rate limiter for crawl_progress events
-	jobSpawnThrottler      *rate.Limiter                // Rate limiter for job_spawn events
-	allowedEvents          map[string]bool              // Whitelist of events to broadcast (empty = allow all)
-	unifiedLogAggregator   *events.UnifiedLogAggregator // Unified aggregator for service and step logs
-	serverInstanceID       string                       // Unique ID generated on startup - clients use to detect server restart
+	crawlProgressThrottler *rate.Limiter   // Rate limiter for crawl_progress events
+	jobSpawnThrottler      *rate.Limiter   // Rate limiter for job_spawn events
+	allowedEvents          map[string]bool // Whitelist of events to broadcast (empty = allow all)
+	serverInstanceID       string          // Unique ID generated on startup - clients use to detect server restart
 }
 
 func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger, config *common.WebSocketConfig) *WebSocketHandler {
@@ -110,34 +108,6 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 		}
 	}
 
-	// Initialize unified log aggregator for trigger-based UI updates
-	// Handles both service logs and step logs with a single aggregator
-	// Triggers every timeThreshold (default 10s) for pending events
-	// Also triggers immediately when a step finishes
-	if config != nil {
-		timeThreshold := 10 * time.Second // Default 10 seconds to reduce WebSocket message frequency
-		if config.TimeThreshold != "" {
-			if parsed, err := time.ParseDuration(config.TimeThreshold); err == nil {
-				timeThreshold = parsed
-			}
-		}
-
-		// Create unified aggregator with callback to broadcast refresh trigger
-		arborLogger := arbor.NewLogger()
-		h.unifiedLogAggregator = events.NewUnifiedLogAggregator(
-			timeThreshold,
-			h.broadcastUnifiedRefreshTrigger,
-			arborLogger,
-		)
-
-		logger.Info().
-			Dur("time_threshold", timeThreshold).
-			Msg("Unified log aggregator initialized (service + step logs)")
-
-		// Start periodic flush in background
-		h.unifiedLogAggregator.StartPeriodicFlush(context.Background())
-	}
-
 	// Subscribe to crawler events if eventService is provided
 	if eventService != nil {
 		h.SubscribeToCrawlerEvents()
@@ -149,56 +119,6 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 // SetAuthLoader sets the auth loader for loading stored authentication
 func (h *WebSocketHandler) SetAuthLoader(loader AuthLoader) {
 	h.authLoader = loader
-}
-
-// broadcastUnifiedRefreshTrigger sends a unified WebSocket message to trigger UI refresh
-// This is called by the unified log aggregator when thresholds are reached
-// The message includes scope (service/job) and step_ids for job-scoped triggers
-func (h *WebSocketHandler) broadcastUnifiedRefreshTrigger(ctx context.Context, trigger events.LogRefreshTrigger) {
-	payload := map[string]interface{}{
-		"scope":     trigger.Scope,
-		"timestamp": trigger.Timestamp.Format(time.RFC3339),
-	}
-
-	// Include step_ids and finished flag for job scope
-	if trigger.Scope == "job" {
-		payload["step_ids"] = trigger.StepIDs
-		payload["finished"] = trigger.Finished
-	}
-
-	msg := WSMessage{
-		Type:    "refresh_logs",
-		Payload: payload,
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to marshal refresh_logs message")
-		return
-	}
-
-	h.mu.RLock()
-	clients := make([]*websocket.Conn, 0, len(h.clients))
-	mutexes := make([]*sync.Mutex, 0, len(h.clients))
-	for conn := range h.clients {
-		clients = append(clients, conn)
-		mutexes = append(mutexes, h.clientMutex[conn])
-	}
-	h.mu.RUnlock()
-
-	for i, conn := range clients {
-		mutex := mutexes[i]
-		mutex.Lock()
-		err := conn.WriteMessage(websocket.TextMessage, data)
-		mutex.Unlock()
-
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to send refresh_logs to client")
-		}
-	}
-
-	// NOTE: Don't log here - logging would trigger another log_event
-	// which would trigger another refresh_logs, creating an infinite loop
 }
 
 // Message types
@@ -897,19 +817,7 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		return
 	}
 
-	// Subscribe to log events from LogService (replaces direct BroadcastLog calls)
-	// Uses unified aggregator for trigger-based UI updates - NO direct log broadcasting
-	// Architecture: WebSocket sends only triggers, UI fetches logs from REST API
-	h.eventService.Subscribe("log_event", func(ctx context.Context, event interfaces.Event) error {
-		// Route all service logs through the unified aggregator for trigger-based updates
-		// This avoids heavy WebSocket load from streaming thousands of log entries
-		if h.unifiedLogAggregator != nil {
-			h.unifiedLogAggregator.RecordServiceLog(ctx)
-		}
-		// No fallback - aggregator is always initialized in production
-		// If not initialized, logs are still persisted and available via REST API
-		return nil
-	})
+	// NOTE: log_event subscription removed - service logs now streamed via SSE (/api/logs/stream)
 
 	h.eventService.Subscribe(interfaces.EventCrawlProgress, func(ctx context.Context, event interfaces.Event) error {
 		// Extract payload map
@@ -1241,28 +1149,9 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			return nil
 		}
 
-		// Extract step_id for aggregation
-		stepID := getString(payload, "step_id")
-		if stepID == "" {
-			h.logger.Warn().Msg("Step progress event missing step_id")
-			return nil
-		}
+		// NOTE: Log streaming now handled by SSE (/api/logs/stream)
+		// This broadcasts step status changes for UI job tree updates
 
-		// Use unified aggregator for trigger-based updates if available
-		if h.unifiedLogAggregator != nil {
-			// Check if step finished - trigger immediately for final state
-			status := getString(payload, "status")
-			if status == "completed" || status == "failed" || status == "cancelled" {
-				// Step finished - trigger immediate refresh so UI shows final events
-				h.unifiedLogAggregator.TriggerStepImmediately(ctx, stepID)
-			} else {
-				// Step still running - record event for periodic trigger
-				h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
-			}
-			return nil
-		}
-
-		// Fallback: Direct broadcast (legacy behavior if aggregator not initialized)
 		msg := WSMessage{
 			Type:    "step_progress",
 			Payload: payload,
@@ -1297,38 +1186,8 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		return nil
 	})
 
-	// Subscribe to unified job log events (EventJobLog) for all job types
-	// Architecture: NO direct log broadcasting via WebSocket - use trigger-based approach
-	// Logs are persisted to storage and UI fetches them via REST API when triggered
-	// This prevents heavy WebSocket load when jobs produce 5000+ log entries
-	h.eventService.Subscribe(interfaces.EventJobLog, func(ctx context.Context, event interfaces.Event) error {
-		payload, ok := event.Payload.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-
-		// Route all job logs through the unified aggregator for trigger-based updates
-		// The aggregator will send a refresh_logs trigger, and UI will fetch from /api/logs
-		if h.unifiedLogAggregator != nil {
-			// Use step_id to aggregate ALL logs for a step (manager -> step -> worker).
-			// This prevents refresh_logs from carrying thousands of worker job IDs and flooding /api/logs.
-			stepID := getString(payload, "step_id")
-			if stepID == "" && getString(payload, "step_name") != "" {
-				// Backward-compatible fallback: older payloads didn't include step_id.
-				stepID = getString(payload, "job_id")
-			}
-
-			if stepID != "" {
-				h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
-			} else {
-				// Non-step job logs - record as service log
-				h.unifiedLogAggregator.RecordServiceLog(ctx)
-			}
-		}
-		// Logs are already persisted to storage by LogService
-		// UI will fetch them via REST API when it receives the refresh trigger
-		return nil
-	})
+	// NOTE: EventJobLog subscription removed - job logs now streamed via SSE (/api/logs/stream)
+	// Logs are persisted to storage by LogService, UI fetches them via SSE stream
 
 	// Subscribe to job stats events for real-time queue statistics dashboard
 	h.eventService.Subscribe(interfaces.EventJobStats, func(ctx context.Context, event interfaces.Event) error {

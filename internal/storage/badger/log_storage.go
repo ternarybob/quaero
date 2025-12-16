@@ -121,7 +121,7 @@ func (s *LogStorage) getNextLineNumber(ctx context.Context, counterKey string) i
 	return int(atomic.AddUint64(&newCounter, 1))
 }
 
-func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
+func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) (int, error) {
 	// Set JobIDField directly (primary indexed field)
 	entry.JobIDField = jobID
 
@@ -153,14 +153,14 @@ func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.L
 	entry.Sequence = fmt.Sprintf("%019d_%010d", now, seq)
 
 	if err := s.db.Store().Insert(key, &entry); err != nil {
-		return fmt.Errorf("failed to append log: %w", err)
+		return 0, fmt.Errorf("failed to append log: %w", err)
 	}
-	return nil
+	return entry.LineNumber, nil
 }
 
 func (s *LogStorage) AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error {
 	for _, entry := range entries {
-		if err := s.AppendLog(ctx, jobID, entry); err != nil {
+		if _, err := s.AppendLog(ctx, jobID, entry); err != nil {
 			return err
 		}
 	}

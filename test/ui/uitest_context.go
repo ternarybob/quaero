@@ -1,16 +1,21 @@
-// framework_test.go - Unified UI test framework for Quaero
-// This provides a shared UITestContext and helper functions for all UI tests.
+// uitest_context.go - Shared UI test context and helpers for Quaero
+// This provides UITestContext and helper functions used by all UI tests.
+// NOTE: This is NOT a test file - it contains shared test infrastructure.
 
 package ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -589,4 +594,520 @@ func (utc *UITestContext) RunJobDefinitionTest(config JobDefinitionTestConfig) e
 
 	utc.Log("✓ Job definition test completed: %s", config.JobName)
 	return nil
+}
+
+// =============================================================================
+// Shared Test Tracker Types and Helper Functions
+// =============================================================================
+
+// WebSocketMessageTracker tracks WebSocket messages by type
+type WebSocketMessageTracker struct {
+	mu                        sync.Mutex
+	refreshLogsMessages       []map[string]interface{} // All refresh_logs messages
+	jobScopedRefreshCount     int                      // Count of job-scoped refresh_logs
+	serviceScopedRefreshCount int                      // Count of service-scoped refresh_logs
+	jobScopedStepIDTotal      int                      // Total step_ids observed in job-scoped refresh_logs payloads
+	jobScopedReceivedAt       []time.Time              // Local receive times for job-scoped refresh_logs
+	serviceScopedReceivedAt   []time.Time              // Local receive times for service-scoped refresh_logs
+}
+
+// NewWebSocketMessageTracker creates a new WebSocket message tracker
+func NewWebSocketMessageTracker() *WebSocketMessageTracker {
+	return &WebSocketMessageTracker{
+		refreshLogsMessages:     make([]map[string]interface{}, 0),
+		jobScopedReceivedAt:     make([]time.Time, 0),
+		serviceScopedReceivedAt: make([]time.Time, 0),
+	}
+}
+
+// AddRefreshLogs records a refresh_logs WebSocket message (notify-pull trigger).
+func (t *WebSocketMessageTracker) AddRefreshLogs(payload map[string]interface{}, receivedAt time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.refreshLogsMessages = append(t.refreshLogsMessages, payload)
+	scope, _ := payload["scope"].(string)
+	switch scope {
+	case "job":
+		t.jobScopedRefreshCount++
+		t.jobScopedReceivedAt = append(t.jobScopedReceivedAt, receivedAt)
+		if stepIDs, ok := payload["step_ids"].([]interface{}); ok {
+			t.jobScopedStepIDTotal += len(stepIDs)
+		}
+	case "service":
+		t.serviceScopedRefreshCount++
+		t.serviceScopedReceivedAt = append(t.serviceScopedReceivedAt, receivedAt)
+	}
+}
+
+// GetRefreshLogsCount returns the total count of refresh_logs messages
+func (t *WebSocketMessageTracker) GetRefreshLogsCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.refreshLogsMessages)
+}
+
+// GetJobScopedRefreshCount returns count of job-scoped refresh_logs messages
+func (t *WebSocketMessageTracker) GetJobScopedRefreshCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.jobScopedRefreshCount
+}
+
+// GetServiceScopedRefreshCount returns count of service-scoped refresh_logs messages
+func (t *WebSocketMessageTracker) GetServiceScopedRefreshCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.serviceScopedRefreshCount
+}
+
+// GetJobScopedRefreshStepIDTotal returns the total number of step_ids seen in job-scoped refresh_logs triggers.
+func (t *WebSocketMessageTracker) GetJobScopedRefreshStepIDTotal() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.jobScopedStepIDTotal
+}
+
+// GetJobScopedRefreshCountBefore returns count of job-scoped refresh_logs before deadline
+func (t *WebSocketMessageTracker) GetJobScopedRefreshCountBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, ts := range t.jobScopedReceivedAt {
+		if ts.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+// GetServiceScopedRefreshCountBefore returns count of service-scoped refresh_logs before deadline
+func (t *WebSocketMessageTracker) GetServiceScopedRefreshCountBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, ts := range t.serviceScopedReceivedAt {
+		if ts.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+// APILogsCall represents a single /api/logs call
+type APILogsCall struct {
+	Scope      string
+	URL        string
+	JobID      string
+	ReceivedAt time.Time
+}
+
+// APICallTracker tracks /api/logs calls so we can assert they are gated by WebSocket refresh_logs triggers.
+type APICallTracker struct {
+	mu           sync.Mutex
+	logsCalls    []APILogsCall
+	jobLogsCalls int
+	svcLogsCalls int
+}
+
+// NewAPICallTracker creates a new API call tracker
+func NewAPICallTracker() *APICallTracker {
+	return &APICallTracker{
+		logsCalls: make([]APILogsCall, 0),
+	}
+}
+
+// AddRequest records an API request
+func (t *APICallTracker) AddRequest(requestURL string, receivedAt time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !strings.Contains(requestURL, "/api/logs") {
+		return
+	}
+
+	scope := ""
+	jobID := ""
+	if u, err := url.Parse(requestURL); err == nil {
+		scope = u.Query().Get("scope")
+		jobID = u.Query().Get("job_id")
+	}
+
+	t.logsCalls = append(t.logsCalls, APILogsCall{
+		Scope:      scope,
+		URL:        requestURL,
+		JobID:      jobID,
+		ReceivedAt: receivedAt,
+	})
+
+	switch scope {
+	case "job":
+		t.jobLogsCalls++
+	case "service":
+		t.svcLogsCalls++
+	}
+}
+
+// GetJobLogsCalls returns count of job logs calls
+func (t *APICallTracker) GetJobLogsCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.jobLogsCalls
+}
+
+// GetServiceLogsCalls returns count of service logs calls
+func (t *APICallTracker) GetServiceLogsCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.svcLogsCalls
+}
+
+// GetJobLogsCallsBefore returns count of job logs calls before deadline
+func (t *APICallTracker) GetJobLogsCallsBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, c := range t.logsCalls {
+		if c.Scope == "job" && c.ReceivedAt.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+// GetServiceLogsCallsBefore returns count of service logs calls before deadline
+func (t *APICallTracker) GetServiceLogsCallsBefore(deadline time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, c := range t.logsCalls {
+		if c.Scope == "service" && c.ReceivedAt.Before(deadline) {
+			n++
+		}
+	}
+	return n
+}
+
+// StepExpansionTracker tracks step expansion order and log line numbers
+type StepExpansionTracker struct {
+	mu             sync.Mutex
+	expansionOrder []string         // Order steps were expanded
+	expandedSteps  map[string]bool  // Currently expanded steps
+	stepLogLines   map[string][]int // Step name -> first few log line numbers
+}
+
+// NewStepExpansionTracker creates a new step expansion tracker
+func NewStepExpansionTracker() *StepExpansionTracker {
+	return &StepExpansionTracker{
+		expansionOrder: make([]string, 0),
+		expandedSteps:  make(map[string]bool),
+		stepLogLines:   make(map[string][]int),
+	}
+}
+
+// RecordExpansion records a step expansion
+func (t *StepExpansionTracker) RecordExpansion(stepName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.expandedSteps[stepName] {
+		t.expandedSteps[stepName] = true
+		t.expansionOrder = append(t.expansionOrder, stepName)
+	}
+}
+
+// RecordLogLines records log line numbers for a step
+func (t *StepExpansionTracker) RecordLogLines(stepName string, lines []int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.stepLogLines[stepName]) == 0 {
+		t.stepLogLines[stepName] = lines
+	}
+}
+
+// GetExpansionOrder returns the order in which steps were expanded
+func (t *StepExpansionTracker) GetExpansionOrder() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	result := make([]string, len(t.expansionOrder))
+	copy(result, t.expansionOrder)
+	return result
+}
+
+// GetLogLines returns the recorded log lines for a step
+func (t *StepExpansionTracker) GetLogLines(stepName string) []int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.stepLogLines[stepName]
+}
+
+// StepIconData tracks icon class and status for each step
+type StepIconData struct {
+	StepName   string
+	Status     string
+	IconClass  string
+	HasSpinner bool
+}
+
+// ParentJobIconData tracks icon class for parent job
+type ParentJobIconData struct {
+	JobName   string
+	IconClass string
+}
+
+// DOMLogProgressSnapshot captures log progress state from DOM
+type DOMLogProgressSnapshot struct {
+	ExpandedSteps []string       `json:"expandedSteps"`
+	StepLogCounts map[string]int `json:"stepLogCounts"`
+	TotalLogLines int            `json:"totalLogLines"`
+}
+
+// DOMLogProgressSample is a timestamped progress snapshot
+type DOMLogProgressSample struct {
+	Elapsed  time.Duration
+	Snapshot DOMLogProgressSnapshot
+}
+
+// httpGetter interface for API helpers
+type httpGetter interface {
+	GET(path string) (*http.Response, error)
+	Logf(format string, args ...interface{})
+}
+
+// apiGetJSON fetches JSON from an API endpoint
+func apiGetJSON(t *testing.T, h httpGetter, path string, dest interface{}) error {
+	t.Helper()
+
+	resp, err := h.GET(path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+		return fmt.Errorf("failed to decode %s: %w", path, err)
+	}
+
+	return nil
+}
+
+// apiJobTreeStep represents a step in the job tree API response
+type apiJobTreeStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// apiJobTreeResponse represents the job tree API response
+type apiJobTreeResponse struct {
+	JobID  string           `json:"job_id"`
+	Status string           `json:"status"`
+	Steps  []apiJobTreeStep `json:"steps"`
+}
+
+// apiJobResponse represents a job API response
+type apiJobResponse struct {
+	Status string `json:"status"`
+}
+
+// apiJobTreeLogsStep represents a step in the logs API response
+type apiJobTreeLogsStep struct {
+	StepName   string `json:"step_name"`
+	TotalCount int    `json:"total_count"`
+}
+
+// apiJobTreeLogsResponse represents the logs API response
+type apiJobTreeLogsResponse struct {
+	Steps []apiJobTreeLogsStep `json:"steps"`
+}
+
+// getJobIDFromQueueUI extracts the job ID from the Queue UI using Alpine.js
+func getJobIDFromQueueUI(utc *UITestContext, jobName string) (string, error) {
+	var jobID string
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				if (typeof Alpine === 'undefined') return '';
+				const jobListEl = document.querySelector('[x-data="jobList"]');
+				if (!jobListEl) return '';
+				const component = Alpine.$data(jobListEl);
+				if (!component || !component.allJobs) return '';
+				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+				return job ? job.id : '';
+			})()
+		`, jobName), &jobID),
+	)
+	if err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
+// getUIStepStatusMap gets step status map from UI DOM
+func getUIStepStatusMap(utc *UITestContext) (map[string]string, error) {
+	var stepStatuses map[string]string
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = {};
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const step of treeSteps) {
+					const stepHeader = step.querySelector('.tree-step-header');
+					if (!stepHeader) continue;
+
+					const stepNameEl = step.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const statusEl = stepHeader.querySelector('.tree-step-status');
+					let status = 'unknown';
+					if (statusEl) {
+						if (statusEl.classList.contains('text-warning')) status = 'pending';
+						else if (statusEl.classList.contains('text-primary')) status = 'running';
+						else if (statusEl.classList.contains('text-success')) status = 'completed';
+						else if (statusEl.classList.contains('text-error')) status = 'failed';
+						else if (statusEl.classList.contains('text-gray')) status = 'cancelled';
+					}
+					result[stepName] = status;
+				}
+				return result;
+			})()
+		`, &stepStatuses),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return stepStatuses, nil
+}
+
+// getUIStepLogCountMap gets step log count map from UI DOM
+func getUIStepLogCountMap(utc *UITestContext) (map[string]int, error) {
+	var stepLogCounts map[string]int
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const result = {};
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const step of treeSteps) {
+					const stepNameEl = step.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const logsSection = step.querySelector('.tree-step-logs');
+					if (!logsSection) {
+						result[stepName] = 0;
+						continue;
+					}
+
+					const logLines = logsSection.querySelectorAll('.tree-log-line');
+					result[stepName] = logLines ? logLines.length : 0;
+				}
+				return result;
+			})()
+		`, &stepLogCounts),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return stepLogCounts, nil
+}
+
+// assertAPIParentJobStatusMatchesUI asserts that API job status matches UI
+func assertAPIParentJobStatusMatchesUI(t *testing.T, utc *UITestContext, h httpGetter, jobID string, uiStatus string) {
+	t.Helper()
+	if jobID == "" || uiStatus == "" {
+		return
+	}
+
+	var job apiJobResponse
+	if err := apiGetJSON(t, h, fmt.Sprintf("/api/jobs/%s", jobID), &job); err != nil {
+		t.Errorf("FAIL: Could not get parent job status from API for job_id=%s: %v", jobID, err)
+		return
+	}
+
+	if job.Status != uiStatus {
+		utc.Screenshot(fmt.Sprintf("status_mismatch_parent_%s_api_%s_ui_%s", sanitizeName(jobID), job.Status, uiStatus))
+		t.Errorf("FAIL: Parent job status mismatch: API=%s UI=%s (job_id=%s)", job.Status, uiStatus, jobID)
+	}
+}
+
+// assertAPIStepStatusesMatchUI asserts that API step statuses match UI
+func assertAPIStepStatusesMatchUI(t *testing.T, utc *UITestContext, h httpGetter, jobID string) {
+	t.Helper()
+	if jobID == "" {
+		return
+	}
+
+	var tree apiJobTreeResponse
+	if err := apiGetJSON(t, h, fmt.Sprintf("/api/jobs/%s/tree", jobID), &tree); err != nil {
+		t.Errorf("FAIL: Could not get step statuses from API for job_id=%s: %v", jobID, err)
+		return
+	}
+
+	apiStepStatus := make(map[string]string, len(tree.Steps))
+	for _, s := range tree.Steps {
+		apiStepStatus[s.Name] = s.Status
+	}
+
+	uiStepStatus, err := getUIStepStatusMap(utc)
+	if err != nil {
+		t.Errorf("FAIL: Could not get step statuses from UI DOM: %v", err)
+		return
+	}
+
+	for stepName, uiStatus := range uiStepStatus {
+		apiStatus, ok := apiStepStatus[stepName]
+		if !ok {
+			t.Errorf("FAIL: Step '%s' present in UI but missing from API tree response (job_id=%s)", stepName, jobID)
+			continue
+		}
+		if apiStatus != uiStatus {
+			utc.Screenshot(fmt.Sprintf("status_mismatch_step_%s_api_%s_ui_%s", sanitizeName(stepName), apiStatus, uiStatus))
+			t.Errorf("FAIL: Step status mismatch for '%s': API=%s UI=%s (job_id=%s)", stepName, apiStatus, uiStatus, jobID)
+		}
+	}
+}
+
+// captureDOMLogProgressSnapshot captures log progress from DOM
+func captureDOMLogProgressSnapshot(utc *UITestContext) (DOMLogProgressSnapshot, error) {
+	var snapshot DOMLogProgressSnapshot
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const stepLogCounts = {};
+				const expandedSteps = [];
+				let totalLogLines = 0;
+
+				const treeSteps = document.querySelectorAll('.tree-step');
+				for (const stepEl of treeSteps) {
+					const stepNameEl = stepEl.querySelector('.tree-step-name');
+					if (!stepNameEl) continue;
+					const stepName = stepNameEl.textContent.trim();
+					if (!stepName) continue;
+
+					const logsSection = stepEl.querySelector('.tree-step-logs');
+					if (!logsSection) continue; // Not expanded
+
+					const logLines = logsSection.querySelectorAll('.tree-log-line');
+					const count = logLines ? logLines.length : 0;
+					stepLogCounts[stepName] = count;
+					totalLogLines += count;
+					if (!expandedSteps.includes(stepName)) {
+						expandedSteps.push(stepName);
+					}
+				}
+
+				return { expandedSteps, stepLogCounts, totalLogLines };
+			})()
+		`, &snapshot),
+	)
+	if err != nil {
+		return DOMLogProgressSnapshot{}, err
+	}
+	return snapshot, nil
 }

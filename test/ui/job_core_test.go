@@ -1,17 +1,20 @@
-// core_test.go - Core UI tests for Quaero
-// Tests fundamental UI functionality: page loads, navigation, basic interactions
+// job_core_test.go - Job-related UI tests for Quaero
+// Tests job and queue page functionality, navigation between job pages
+// NOTE: Index/Home page tests are in index_test.go - do not duplicate here
 
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
 )
 
-// TestPagesLoad verifies all main pages load without errors
-func TestPagesLoad(t *testing.T) {
+// TestJobRelatedPagesLoad verifies job-related pages load without errors
+// NOTE: Home page is tested in index_test.go - not duplicated here
+func TestJobRelatedPagesLoad(t *testing.T) {
 	utc := NewUITestContext(t, 2*time.Minute)
 	defer utc.Cleanup()
 
@@ -19,7 +22,6 @@ func TestPagesLoad(t *testing.T) {
 		name string
 		url  string
 	}{
-		{"Home", utc.BaseURL},
 		{"Jobs", utc.JobsURL},
 		{"Queue", utc.QueueURL},
 		{"Documents", utc.DocsURL},
@@ -147,4 +149,169 @@ func (utc *UITestContext) getCurrentURL() (string, error) {
 	var url string
 	err := chromedp.Run(utc.Ctx, chromedp.Location(&url))
 	return url, err
+}
+
+// TestJobsPageActionButtons verifies Run and Edit buttons exist on job cards
+func TestJobsPageActionButtons(t *testing.T) {
+	utc := NewUITestContext(t, 2*time.Minute)
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing Jobs Page Action Buttons ---")
+
+	// Navigate to Jobs page
+	if err := utc.Navigate(utc.JobsURL); err != nil {
+		t.Fatalf("Failed to navigate to Jobs page: %v", err)
+	}
+
+	// Wait for Alpine.js to load jobs
+	time.Sleep(2 * time.Second)
+
+	// Check that Run and Edit buttons exist for at least one job
+	var hasRunButton, hasEditButton bool
+	err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`document.querySelectorAll('button[id$="-run"]').length > 0`, &hasRunButton),
+		chromedp.Evaluate(`document.querySelectorAll('button[id$="-edit"]').length > 0`, &hasEditButton),
+	)
+	if err != nil {
+		t.Fatalf("Failed to check for action buttons: %v", err)
+	}
+
+	utc.Screenshot("jobs_action_buttons")
+
+	if !hasRunButton {
+		t.Error("No Run buttons found on Jobs page")
+	}
+	if !hasEditButton {
+		t.Error("No Edit buttons found on Jobs page")
+	}
+
+	utc.Log("✓ Found Run and Edit buttons on Jobs page")
+}
+
+// TestJobsPageEditNavigation verifies clicking Edit navigates to job add page
+func TestJobsPageEditNavigation(t *testing.T) {
+	utc := NewUITestContext(t, 2*time.Minute)
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing Edit Navigation ---")
+
+	// Navigate to Jobs page
+	if err := utc.Navigate(utc.JobsURL); err != nil {
+		t.Fatalf("Failed to navigate to Jobs page: %v", err)
+	}
+
+	// Wait for Alpine.js to load jobs
+	time.Sleep(2 * time.Second)
+
+	// Find and click the first Edit button
+	err := chromedp.Run(utc.Ctx,
+		chromedp.WaitVisible(`button[id$="-edit"]`, chromedp.ByQuery),
+		chromedp.Click(`button[id$="-edit"]`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Failed to click Edit button: %v", err)
+	}
+
+	utc.Screenshot("after_edit_click")
+
+	// Verify navigation to job add page
+	currentURL, _ := utc.getCurrentURL()
+	if !strings.Contains(currentURL, "/jobs/add") {
+		t.Fatalf("Expected URL to contain '/jobs/add', got %s", currentURL)
+	}
+
+	utc.Log("✓ Edit navigation verified")
+}
+
+// TestJobsPageRunConfirmation verifies the Run confirmation modal appears and can be cancelled
+func TestJobsPageRunConfirmation(t *testing.T) {
+	utc := NewUITestContext(t, 2*time.Minute)
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing Run Confirmation Modal ---")
+
+	// Navigate to Jobs page
+	if err := utc.Navigate(utc.JobsURL); err != nil {
+		t.Fatalf("Failed to navigate to Jobs page: %v", err)
+	}
+
+	// Wait for Alpine.js to load jobs
+	time.Sleep(2 * time.Second)
+
+	utc.Screenshot("before_run_click")
+
+	// Click the first Run button
+	err := chromedp.Run(utc.Ctx,
+		chromedp.WaitVisible(`button[id$="-run"]`, chromedp.ByQuery),
+		chromedp.Click(`button[id$="-run"]`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("Failed to click Run button: %v", err)
+	}
+
+	// Wait for confirmation modal
+	err = chromedp.Run(utc.Ctx,
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
+	)
+	if err != nil {
+		utc.Screenshot("modal_not_found")
+		t.Fatalf("Confirmation modal did not appear: %v", err)
+	}
+
+	utc.Screenshot("confirmation_modal")
+
+	// Click Cancel button
+	err = chromedp.Run(utc.Ctx,
+		chromedp.Click(`//button[contains(., "Cancel")]`, chromedp.BySearch),
+		chromedp.WaitNotPresent(`.modal.active`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("Failed to cancel confirmation: %v", err)
+	}
+
+	utc.Screenshot("after_cancel")
+	utc.Log("✓ Run confirmation modal verified and cancelled")
+}
+
+// TestJobAddPage tests the job add page UI has required elements
+// This tests PAGE functionality, not job execution
+func TestJobAddPage(t *testing.T) {
+	utc := NewUITestContext(t, 2*time.Minute)
+	defer utc.Cleanup()
+
+	utc.Log("--- Testing Job Add Page ---")
+
+	jobAddURL := utc.BaseURL + "/jobs/add"
+
+	// Navigate to job add page
+	if err := chromedp.Run(utc.Ctx, chromedp.Navigate(jobAddURL)); err != nil {
+		t.Fatalf("Failed to navigate to job add page: %v", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(utc.Ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("Job add page did not load: %v", err)
+	}
+
+	utc.Screenshot("job_add_page_loaded")
+
+	// Verify TOML editor exists
+	var editorExists bool
+	if err := chromedp.Run(utc.Ctx,
+		chromedp.Evaluate(`document.getElementById('toml-editor') !== null`, &editorExists),
+	); err != nil {
+		t.Fatalf("Failed to check for TOML editor: %v", err)
+	}
+
+	if !editorExists {
+		utc.Screenshot("editor_missing")
+		t.Fatal("TOML editor not found on job add page")
+	}
+
+	utc.Log("✓ TOML editor found on job add page")
+	utc.Screenshot("job_add_test_complete")
 }

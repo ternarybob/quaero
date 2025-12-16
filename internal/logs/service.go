@@ -29,8 +29,8 @@ func NewService(storage interfaces.LogStorage, jobStorage interfaces.QueueStorag
 	}
 }
 
-// AppendLog appends a single log entry (delegates to storage)
-func (s *Service) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
+// AppendLog appends a single log entry and returns the assigned line number (delegates to storage)
+func (s *Service) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) (int, error) {
 	return s.storage.AppendLog(ctx, jobID, entry)
 }
 

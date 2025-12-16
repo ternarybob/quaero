@@ -864,30 +864,32 @@ func (m *Manager) AddJobLogFull(ctx context.Context, jobID, level, message, step
 	}
 
 	entry := models.LogEntry{
-		Timestamp:     now.Format("15:04:05"),
+		Timestamp:     now.Format("15:04:05.000"),
 		FullTimestamp: now.Format(time.RFC3339),
 		Level:         level,
 		Message:       message,
 		Context:       context,
 	}
 
-	if err := m.logStorage.AppendLog(ctx, jobID, entry); err != nil {
+	lineNumber, err := m.logStorage.AppendLog(ctx, jobID, entry)
+	if err != nil {
 		return fmt.Errorf("failed to append log: %w", err)
 	}
 
 	// Publish to WebSocket for real-time UI display (INFO+ levels only)
 	if m.eventService != nil && m.shouldPublishLogLevel(level) {
 		payload := map[string]interface{}{
-			"job_id":     jobID,
-			"manager_id": managerID,
-			"step_id":    stepID,
-			"parent_id":  parentID,
-			"step_name":  resolvedStepName,
-			"originator": resolvedOriginator,
-			"phase":      phase,
-			"level":      level,
-			"message":    message,
-			"timestamp":  now.Format(time.RFC3339),
+			"job_id":      jobID,
+			"manager_id":  managerID,
+			"step_id":     stepID,
+			"parent_id":   parentID,
+			"step_name":   resolvedStepName,
+			"originator":  resolvedOriginator,
+			"phase":       phase,
+			"level":       level,
+			"message":     message,
+			"timestamp":   now.Format(time.RFC3339),
+			"line_number": lineNumber, // Server-assigned sequential line number
 		}
 
 		event := interfaces.Event{

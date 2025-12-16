@@ -65,9 +65,12 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// NOTE: Scheduler trigger-collection endpoint removed - automatic scheduling via cron (every 5 minutes)
 
-	// API routes - Logs (unified endpoint for service and job logs)
+	// API routes - Logs (REST endpoint for service and job logs)
 	mux.HandleFunc("/api/logs", s.app.UnifiedLogsHandler.GetLogsHandler)
-	mux.HandleFunc("/api/logs/recent", s.app.WSHandler.GetRecentLogsHandler) // Legacy: kept for backward compatibility
+
+	// API routes - SSE Log Streaming (real-time logs via Server-Sent Events)
+	// Unified endpoint: /api/logs/stream?scope=service|job&job_id=X&step=Y&level=info
+	mux.HandleFunc("/api/logs/stream", s.app.SSELogsHandler.StreamLogs)
 
 	// API routes - Jobs (crawler job management)
 	mux.HandleFunc("/api/jobs/stats", s.app.JobHandler.GetJobStatsHandler)
