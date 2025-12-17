@@ -550,7 +550,7 @@ footer {
     color: #E06C75;
     font-weight: 600;
     background-color: rgba(224, 108, 117, 0.1);
-    padding: 0.1rem 0.2rem;
+    /* padding: 0.1rem 0.2rem; */
     border-radius: 2px;
 }
 
@@ -1526,8 +1526,8 @@ body.modal-open {
 .tree-log-line {
     display: flex;
     padding: 0.15rem 0 0.15rem 2rem;
-    font-size: 0.8rem;
-    line-height: 1.4;
+    font-size: 0.65rem;
+    line-height: 1.2;
     color: #333;
 }
 
@@ -1555,41 +1555,6 @@ body.modal-open {
     flex: 1;
     text-align: left;
     word-break: break-word;
-}
-
-/* Earlier logs indicator */
-.tree-logs-earlier {
-    color: #888;
-    font-style: italic;
-    padding: 0.25rem 0;
-    font-size: 0.7rem;
-    text-align: center;
-    border-bottom: 1px dashed #ccc;
-    margin-bottom: 0.25rem;
-}
-
-/* Show more logs button */
-.tree-logs-show-more {
-    text-align: center;
-    padding: 0.35rem 0;
-    border-bottom: 1px dashed #ddd;
-    margin-bottom: 0.25rem;
-    background: linear-gradient(to bottom, #f8f9fa, #fff);
-}
-
-.tree-logs-show-more .btn {
-    font-size: 0.75rem;
-    color: #0969da;
-    text-decoration: none;
-}
-
-.tree-logs-show-more .btn:hover {
-    text-decoration: underline;
-}
-
-.tree-logs-show-more .btn:disabled {
-    color: #888;
-    cursor: wait;
 }
 
 /* Step download button */

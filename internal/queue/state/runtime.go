@@ -43,8 +43,13 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 		return err
 	}
 
-	// Add job log for status change
-	logMessage := fmt.Sprintf("Status changed: %s", status)
+	// Add job log for status change with job identification
+	// Include job name and type for clear identification in logs
+	jobName := jobState.Name
+	if jobName == "" {
+		jobName = jobID[:8] // Use truncated ID if no name
+	}
+	logMessage := fmt.Sprintf("Status changed: %s [%s: %s]", status, jobState.Type, jobName)
 	if err := m.AddJobLog(ctx, jobID, "info", logMessage); err != nil {
 		// Log error but don't fail the status update (logging is non-critical)
 	}

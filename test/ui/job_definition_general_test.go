@@ -468,14 +468,13 @@ func TestJobDefinitionTestJobGeneratorErrorBlockDisplay(t *testing.T) {
 	utc.Log("Error block display test completed")
 }
 
-// TestJobDefinitionTestJobGeneratorLogFiltering tests log filtering and "Show earlier logs" functionality
-// Requirements (updated for prompt_7.md):
+// TestJobDefinitionTestJobGeneratorLogFiltering tests log filtering functionality
+// Requirements (updated for prompt_14.md - "Show earlier logs" removed):
 // 1. Filter dropdown with checkbox options (Debug, Info, Warn, Error) - matching settings page style
 // 2. Selecting only "Error" checkbox shows only error logs
-// 3. "Show X earlier logs" expands to show 100+ more logs
-// 4. Refresh button uses fa-rotate-right (standard refresh icon)
-// 5. Log count display shows "logs: X/Y" format
-// 6. No free text filter (removed)
+// 3. Refresh button uses fa-rotate-right (standard refresh icon)
+// 4. Log count display shows total count
+// 5. No free text filter (removed)
 func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 	utc := NewUITestContext(t, 5*time.Minute)
 	defer utc.Cleanup()
@@ -492,7 +491,7 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 		"name":        jobName,
 		"type":        "custom",
 		"enabled":     true,
-		"description": "Test log filtering and show earlier logs",
+		"description": "Test log filtering functionality",
 		"steps": []map[string]interface{}{
 			{
 				"name":        "generate_logs",
@@ -501,7 +500,7 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 				"on_error":    "continue",
 				"config": map[string]interface{}{
 					"worker_count":    10,
-					"log_count":       300, // Many logs to test "show earlier logs"
+					"log_count":       300, // Many logs to test filtering
 					"log_delay_ms":    2,
 					"failure_rate":    0.3, // 30% failure rate to generate error logs
 					"child_count":     0,
@@ -892,106 +891,7 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 	require.NoError(t, err, "Failed to reset filter to All")
 	utc.Screenshot("log_filtering_reset_to_all")
 
-	// ASSERTION 3: "Show X earlier logs" expands to show more logs
-	utc.Log("Testing 'Show earlier logs' functionality...")
-
-	var earlierLogsInfo map[string]interface{}
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const result = {
-					hasShowEarlierButton: false,
-					earlierLogsCount: 0,
-					buttonText: '',
-					initialLogCount: document.querySelectorAll('.tree-log-line').length
-				};
-
-				// Find "Show X earlier logs" button
-				const showMoreBtns = document.querySelectorAll('.tree-logs-show-more button, button.btn-link');
-				for (const btn of showMoreBtns) {
-					if (btn.textContent.toLowerCase().includes('earlier')) {
-						result.hasShowEarlierButton = true;
-						result.buttonText = btn.textContent.trim();
-
-						// Extract the count from "Show X earlier logs"
-						const match = btn.textContent.match(/(\d+)\s*earlier/i);
-						if (match) {
-							result.earlierLogsCount = parseInt(match[1], 10);
-						}
-						break;
-					}
-				}
-
-				return result;
-			})()
-		`, &earlierLogsInfo),
-	)
-	require.NoError(t, err, "Failed to check earlier logs button")
-
-	utc.Log("Earlier logs info: %+v", earlierLogsInfo)
-
-	hasEarlierLogsButton := earlierLogsInfo["hasShowEarlierButton"].(bool)
-	earlierLogsCount := int(earlierLogsInfo["earlierLogsCount"].(float64))
-	initialLogCountBeforeExpand := int(earlierLogsInfo["initialLogCount"].(float64))
-
-	if hasEarlierLogsButton && earlierLogsCount > 0 {
-		utc.Log("Found 'Show %d earlier logs' button", earlierLogsCount)
-		utc.Screenshot("log_filtering_earlier_logs_button")
-
-		// Click the "Show earlier logs" button using dispatchEvent for Alpine compatibility
-		err = chromedp.Run(utc.Ctx,
-			chromedp.Evaluate(`
-				(() => {
-					const showMoreBtns = document.querySelectorAll('.tree-logs-show-more button, button.btn-link, .load-earlier-logs-btn');
-					for (const btn of showMoreBtns) {
-						if (btn.textContent.toLowerCase().includes('earlier')) {
-							// Use dispatchEvent with MouseEvent for Alpine.js compatibility
-							const event = new MouseEvent('click', {
-								bubbles: true,
-								cancelable: true,
-								view: window
-							});
-							btn.dispatchEvent(event);
-							console.log('[Test] Clicked "Show earlier logs" button:', btn.textContent);
-							return true;
-						}
-					}
-					console.log('[Test] No "Show earlier logs" button found');
-					return false;
-				})()
-			`, nil),
-			chromedp.Sleep(4*time.Second), // Wait for API call and DOM update
-		)
-		require.NoError(t, err, "Failed to click 'Show earlier logs' button")
-		utc.Screenshot("log_filtering_after_expand")
-
-		// Get the new log count after expansion
-		var finalLogCount int
-		err = chromedp.Run(utc.Ctx,
-			chromedp.Evaluate(`
-				document.querySelectorAll('.tree-log-line').length
-			`, &finalLogCount),
-		)
-		require.NoError(t, err, "Failed to get final log count")
-
-		utc.Log("Log count before expand: %d, after expand: %d", initialLogCountBeforeExpand, finalLogCount)
-
-		// Assert that logs increased (loadMoreStepLogs adds 100 to the limit, some may be filtered)
-		logsAdded := finalLogCount - initialLogCountBeforeExpand
-		assert.Greater(t, finalLogCount, initialLogCountBeforeExpand, "Log count should increase after clicking 'Show earlier logs'")
-		// Expect at least 20 more logs (some may be filtered by default debug=off filter)
-		assert.GreaterOrEqual(t, logsAdded, 20, "Should show more logs after expanding (got %d)", logsAdded)
-		utc.Log("✓ ASSERTION 3 PASSED: 'Show earlier logs' expanded to show %d more logs", logsAdded)
-	} else {
-		utc.Log("⚠ No 'Show earlier logs' button found or no earlier logs available")
-		utc.Log("  This may happen if all logs are already visible")
-		// Skip this assertion if there are no earlier logs to show
-		if !hasEarlierLogsButton {
-			t.Skip("No 'Show earlier logs' button available - all logs may already be visible")
-		}
-	}
-
-	// ASSERTION 4: Refresh button uses fa-rotate-right (standard refresh icon)
+	// ASSERTION 3: Refresh button uses fa-rotate-right (standard refresh icon)
 	utc.Log("Testing refresh button icon (fa-rotate-right)...")
 	var refreshButtonInfo map[string]interface{}
 	err = chromedp.Run(utc.Ctx,
@@ -1030,10 +930,10 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 	assert.True(t, refreshButtonInfo["hasRefreshButton"].(bool), "Refresh button should exist")
 	assert.True(t, refreshButtonInfo["hasCorrectIcon"].(bool),
 		"Refresh button should use fa-rotate-right icon (got: %s)", refreshButtonInfo["iconClass"])
-	utc.Log("✓ ASSERTION 4 PASSED: Refresh button uses fa-rotate-right icon")
+	utc.Log("✓ ASSERTION 3 PASSED: Refresh button uses fa-rotate-right icon")
 
-	// ASSERTION 5: Log count display shows "logs: X/Y" format
-	utc.Log("Testing log count display (logs: X/Y)...")
+	// ASSERTION 4: Log count display shows total count (just the number)
+	utc.Log("Testing log count display (total count only)...")
 	var logCountInfo map[string]interface{}
 	err = chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`
@@ -1044,18 +944,22 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 					hasCorrectFormat: false
 				};
 
-				// Find log count display in step headers
+				// Find log count display in step headers (label with fa-file-lines icon)
 				const stepHeaders = document.querySelectorAll('.tree-step-header');
 				for (const header of stepHeaders) {
-					// Look for "logs: X/Y" format
-					const labels = header.querySelectorAll('.label');
+					const labels = header.querySelectorAll('.label.bg-secondary');
 					for (const label of labels) {
-						const text = label.textContent;
-						if (text.includes('logs:')) {
-							result.hasLogCount = true;
-							result.logCountText = text.trim();
-							// Check format: "logs: X/Y" where X and Y are numbers
-							result.hasCorrectFormat = /logs:\s*\d+\/\d+/.test(text);
+						// Check if this label has the file-lines icon (log count indicator)
+						const icon = label.querySelector('.fa-file-lines');
+						if (icon) {
+							const span = label.querySelector('span');
+							if (span) {
+								const text = span.textContent.trim();
+								result.hasLogCount = true;
+								result.logCountText = text;
+								// Check format: just a number (total count only)
+								result.hasCorrectFormat = /^\d+$/.test(text);
+							}
 							break;
 						}
 					}
@@ -1072,8 +976,8 @@ func TestJobDefinitionTestJobGeneratorLogFiltering(t *testing.T) {
 
 	if logCountInfo["hasLogCount"].(bool) {
 		assert.True(t, logCountInfo["hasCorrectFormat"].(bool),
-			"Log count should use 'logs: X/Y' format (got: %s)", logCountInfo["logCountText"])
-		utc.Log("✓ ASSERTION 5 PASSED: Log count displays 'logs: X/Y' format")
+			"Log count should show total count only (got: %s)", logCountInfo["logCountText"])
+		utc.Log("✓ ASSERTION 4 PASSED: Log count displays total count only")
 	} else {
 		utc.Log("⚠ Log count display not found - may need logs in step to verify")
 	}
@@ -1403,9 +1307,8 @@ func TestJobDefinitionTestJobGeneratorComprehensive(t *testing.T) {
 		utc.Log("Skipping Assertion 6 (job status=%s, jobID=%s)", finalStatus, jobID)
 	}
 
-	// ASSERTION 7: Verify log count display format (displayed/total)
-	// Total should be ALL logs regardless of level filter
-	utc.Log("Assertion 7: Verifying log count display shows displayed/total format...")
+	// ASSERTION 7: Verify log count display shows total count only
+	utc.Log("Assertion 7: Verifying log count display shows total count only...")
 	assertLogCountDisplayFormat(t, utc, helper, jobID)
 
 	// ASSERTION 8: Job reached terminal state within timeout
@@ -1415,10 +1318,10 @@ func TestJobDefinitionTestJobGeneratorComprehensive(t *testing.T) {
 	utc.Log("✓ Comprehensive test job generator test completed with all assertions")
 }
 
-// assertLogCountDisplayFormat verifies the log count display format in step headers
-// Format should be "logs: X/Y" where X = displayed logs (after filter), Y = total logs (regardless of filter)
+// assertLogCountDisplayFormat verifies the log count display shows total count only
+// Format should be just a number (total log count) that matches the highest line number
 func assertLogCountDisplayFormat(t *testing.T, utc *UITestContext, helper *common.HTTPTestHelper, jobID string) {
-	// Get log count display info from DOM
+	// Get log count display info from DOM, including highest visible line number
 	var stepLogCounts []map[string]interface{}
 	err := chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`
@@ -1431,19 +1334,34 @@ func assertLogCountDisplayFormat(t *testing.T, utc *UITestContext, helper *commo
 					const stepName = stepNameEl.textContent.trim();
 					if (!stepName) continue;
 
-					// Find the log count display element (contains "logs: X/Y")
-					const logCountEl = step.querySelector('.tree-step-header .label.bg-secondary span');
-					if (!logCountEl) continue;
+					// Find the highest line number in this step's logs
+					let highestLineNum = 0;
+					const logLines = step.querySelectorAll('.tree-log-line .tree-log-num');
+					for (const numEl of logLines) {
+						const num = parseInt(numEl.textContent.trim(), 10);
+						if (num > highestLineNum) highestLineNum = num;
+					}
 
-					const text = logCountEl.textContent.trim();
-					const match = text.match(/logs:\s*(\d+)\s*\/\s*(\d+)/i);
-					if (match) {
-						result.push({
-							stepName: stepName,
-							displayText: text,
-							displayed: parseInt(match[1], 10),
-							total: parseInt(match[2], 10)
-						});
+					// Find the log count display element (label with fa-file-lines icon)
+					const labels = step.querySelectorAll('.tree-step-header .label.bg-secondary');
+					for (const label of labels) {
+						const icon = label.querySelector('.fa-file-lines');
+						if (icon) {
+							const span = label.querySelector('span');
+							if (span) {
+								const text = span.textContent.trim();
+								// Check if it's just a number (total count only)
+								if (/^\d+$/.test(text)) {
+									result.push({
+										stepName: stepName,
+										displayText: text,
+										total: parseInt(text, 10),
+										highestLineNum: highestLineNum
+									});
+								}
+							}
+							break;
+						}
 					}
 				}
 				return result;
@@ -1465,28 +1383,27 @@ func assertLogCountDisplayFormat(t *testing.T, utc *UITestContext, helper *commo
 	// Verify each step's log count display
 	for _, stepInfo := range stepLogCounts {
 		stepName := stepInfo["stepName"].(string)
-		displayed := int(stepInfo["displayed"].(float64))
 		total := int(stepInfo["total"].(float64))
 		displayText := stepInfo["displayText"].(string)
+		highestLineNum := int(stepInfo["highestLineNum"].(float64))
 
-		utc.Log("Step '%s': %s (displayed=%d, total=%d)", stepName, displayText, displayed, total)
+		utc.Log("Step '%s': total=%s, highestLineNum=%d", stepName, displayText, highestLineNum)
 
-		// Verify: total should be >= displayed (total includes all logs, displayed is after filtering)
-		if total < displayed {
-			t.Errorf("FAIL: Step '%s' total (%d) is less than displayed (%d) - total should include all logs regardless of filter",
-				stepName, total, displayed)
+		// Verify: total should be a positive number
+		if total <= 0 {
+			t.Errorf("FAIL: Step '%s' total (%d) should be a positive number", stepName, total)
 			continue
 		}
 
-		// Verify: if default filter is applied (Info/Warn/Error, no Debug), total should be >= displayed
-		// The difference indicates debug logs that are excluded from display
-		if total > displayed {
-			utc.Log("✓ Step '%s': %d displayed / %d total (filter excludes %d logs)",
-				stepName, displayed, total, total-displayed)
-		} else {
-			utc.Log("✓ Step '%s': %d displayed / %d total (no filtering applied)",
-				stepName, displayed, total)
+		// Verify: total should be >= highest visible line number (real-time accuracy)
+		// The total count badge should always reflect at least the highest line number seen
+		if highestLineNum > 0 && total < highestLineNum {
+			t.Errorf("FAIL: Step '%s' total (%d) is less than highest visible line number (%d) - count not updating in real-time",
+				stepName, total, highestLineNum)
+			continue
 		}
+
+		utc.Log("✓ Step '%s': total count = %d (highest visible line = %d)", stepName, total, highestLineNum)
 	}
 
 	// Verify against API - the total in UI should match unfiltered_count from API
@@ -1798,24 +1715,12 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 		chromedp.Evaluate(`
 			(() => {
 				const result = {
-					treeLogLines: 0,
-					hasEarlierLogsButton: false,
-					earlierLogsCount: 0
+					treeLogLines: 0
 				};
 
 				// Count visible log lines in tree view
 				const logLines = document.querySelectorAll('.tree-log-line');
 				result.treeLogLines = logLines.length;
-
-				// Check for "Show earlier logs" button
-				const earlierBtn = document.querySelector('.load-earlier-logs-btn');
-				if (earlierBtn && earlierBtn.offsetParent !== null) {
-					result.hasEarlierLogsButton = true;
-					const match = earlierBtn.textContent.match(/(\d+)\s*earlier/i);
-					if (match) {
-						result.earlierLogsCount = parseInt(match[1], 10);
-					}
-				}
 
 				return result;
 			})()
@@ -1824,380 +1729,22 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 	require.NoError(t, err, "Failed to get log count info")
 
 	treeLogLines := int(logCountInfo["treeLogLines"].(float64))
-	hasEarlierButton := logCountInfo["hasEarlierLogsButton"].(bool)
-	earlierLogsCount := int(logCountInfo["earlierLogsCount"].(float64))
 
-	utc.Log("Step log count: %d displayed, hasEarlierButton: %v, earlier count: %d",
-		treeLogLines, hasEarlierButton, earlierLogsCount)
+	utc.Log("Step log count: %d displayed", treeLogLines)
 	utc.Log("Job config: worker_count=50, log_count=20, log_delay_ms=10, failure_rate=0.2")
 	utc.Screenshot("initial_log_count_result")
 
 	// ASSERTION: Step should have logs displayed
 	assert.Greater(t, treeLogLines, 0, "Step should have some logs displayed")
 
-	// Calculate total logs
-	totalLogs := treeLogLines + earlierLogsCount
-	utc.Log("Total logs available: %d (displayed: %d + earlier: %d)", totalLogs, treeLogLines, earlierLogsCount)
-
-	// ASSERTION: If there are more than 100 logs, verify initial display is reasonable
-	if totalLogs > 100 {
-		assert.GreaterOrEqual(t, treeLogLines, 80,
-			"Initial log display should show at least 80 logs when %d total are available", totalLogs)
-		assert.True(t, hasEarlierButton, "Should have 'Show earlier logs' button when total logs > 100")
-		utc.Log("✓ Pagination active: %d logs displayed, %d more available", treeLogLines, earlierLogsCount)
-	}
-
-	// ASSERTION: If "earlier logs" button is visible, verify behavior
-	if hasEarlierButton {
-		assert.GreaterOrEqual(t, treeLogLines, 50,
-			"When 'Show earlier logs' is visible, at least 50 logs should be initially displayed")
-		assert.Greater(t, earlierLogsCount, 0, "Earlier logs count should be positive")
-		utc.Log("✓ 'Show earlier logs' button found - pagination is working (showing %d earlier)", earlierLogsCount)
-	} else {
-		// No button means all logs fit within initial limit (100)
-		// This is expected for step-level logs which are primarily orchestration messages
-		utc.Log("✓ All %d step logs displayed within initial limit (no pagination needed)", treeLogLines)
-		utc.Log("  Note: Step logs are orchestration messages; worker logs are isolated per QUEUE_UI.md")
-	}
+	// Log display is now limited to configured limit (500) without pagination button
+	// Per prompt_14.md: "Show earlier logs" button removed
+	utc.Log("✓ Logs displayed within configured limit (%d logs shown)", treeLogLines)
+	utc.Log("  Note: Step logs are orchestration messages; worker logs are isolated per QUEUE_UI.md")
 
 	utc.Log("✓ Initial log count test completed")
 }
 
-// TestJobDefinitionShowEarlierLogsWorks verifies the "Show earlier logs" button actually works
-// Requirement: Clicking the button should load more logs
-func TestJobDefinitionShowEarlierLogsWorks(t *testing.T) {
-	utc := NewUITestContext(t, 5*time.Minute)
-	defer utc.Cleanup()
-
-	utc.Log("--- Testing 'Show Earlier Logs' Button Functionality ---")
-
-	// Create test job generator job definition with many logs
-	helper := utc.Env.NewHTTPTestHelper(t)
-	defID := fmt.Sprintf("show-earlier-logs-test-%d", time.Now().UnixNano())
-	jobName := "Show Earlier Logs Test"
-
-	// Job configuration - generate many worker jobs to create step-level orchestration logs
-	// Architecture note: test_job_generator creates child worker jobs. Step-level logs
-	// include orchestration messages. If step has 100+ logs, pagination becomes active.
-	jobConfig := map[string]interface{}{
-		"worker_count":    50,   // Many workers generates more step-level orchestration logs
-		"log_count":       20,   // Each worker generates 20 logs (in their own job)
-		"log_delay_ms":    10,   // Fast log generation
-		"failure_rate":    0.2,  // 20% failure rate for varied status logs
-		"child_count":     0,
-		"recursion_depth": 0,
-	}
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        jobName,
-		"type":        "custom",
-		"enabled":     true,
-		"description": "Test show earlier logs button with step orchestration logs",
-		"steps": []map[string]interface{}{
-			{
-				"name":        "generate_many_logs",
-				"type":        "test_job_generator",
-				"description": "Generate 300+ logs to test pagination",
-				"on_error":    "continue",
-				"config":      jobConfig,
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create job definition")
-	defer resp.Body.Close()
-	require.Equal(t, 201, resp.StatusCode, "Failed to create job definition")
-
-	utc.Log("Created job definition: %s", defID)
-	utc.Log("Job config: %+v", jobConfig)
-	defer helper.DELETE(fmt.Sprintf("/api/job-definitions/%s", defID))
-
-	// Trigger job
-	if err := utc.TriggerJob(jobName); err != nil {
-		t.Fatalf("Failed to trigger job: %v", err)
-	}
-
-	// Navigate to Queue page
-	err = utc.Navigate(utc.QueueURL)
-	require.NoError(t, err, "Failed to navigate to Queue page")
-
-	// Wait for job to complete with periodic screenshots every 30 seconds
-	utc.Log("Waiting for job to complete (capturing screenshots every 30 seconds)...")
-	startTime := time.Now()
-	lastScreenshotTime := startTime
-	jobTimeout := 5 * time.Minute
-	screenshotCount := 0
-
-	for {
-		if time.Since(startTime) > jobTimeout {
-			utc.Log("Job timeout reached after %v", time.Since(startTime))
-			break
-		}
-
-		// Capture screenshot every 30 seconds during execution
-		if time.Since(lastScreenshotTime) >= 30*time.Second {
-			screenshotCount++
-			utc.Screenshot(fmt.Sprintf("show_earlier_logs_running_%d", screenshotCount))
-			utc.Log("Captured periodic screenshot %d at %v elapsed", screenshotCount, time.Since(startTime))
-			lastScreenshotTime = time.Now()
-		}
-
-		var jobInfo map[string]interface{}
-		chromedp.Run(utc.Ctx,
-			chromedp.Evaluate(fmt.Sprintf(`
-				(() => {
-					const result = { status: '', logCount: 0 };
-					const cards = document.querySelectorAll('.card');
-					for (const card of cards) {
-						const titleEl = card.querySelector('.card-title');
-						if (titleEl && titleEl.textContent.includes('%s')) {
-							const statusBadge = card.querySelector('span.label[data-status]');
-							if (statusBadge) result.status = statusBadge.getAttribute('data-status');
-							const logLines = card.querySelectorAll('.tree-log-line');
-							result.logCount = logLines.length;
-						}
-					}
-					return result;
-				})()
-			`, jobName), &jobInfo),
-		)
-
-		currentStatus := ""
-		if s, ok := jobInfo["status"].(string); ok {
-			currentStatus = s
-		}
-		logCount := 0
-		if l, ok := jobInfo["logCount"].(float64); ok {
-			logCount = int(l)
-		}
-
-		if currentStatus != "" {
-			utc.Log("Job status: %s, visible logs: %d, elapsed: %v", currentStatus, logCount, time.Since(startTime))
-		}
-
-		if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "cancelled" {
-			utc.Log("Job reached terminal state: %s after %v", currentStatus, time.Since(startTime))
-			break
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-
-	// Wait for UI to settle
-	time.Sleep(2 * time.Second)
-	utc.Screenshot("show_earlier_logs_job_completed")
-
-	// Expand the job card to see the tree view (only if not already expanded)
-	var cardExpanded bool
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(fmt.Sprintf(`
-			(() => {
-				const cards = document.querySelectorAll('.card');
-				console.log('[Test] Found', cards.length, 'cards');
-				for (const card of cards) {
-					const titleEl = card.querySelector('.card-title');
-					if (titleEl && titleEl.textContent.includes('%s')) {
-						console.log('[Test] Found job card:', titleEl.textContent);
-						// Check if already expanded by looking for inline-tree-view content
-						const treeView = card.querySelector('.inline-tree-view');
-						const isExpanded = treeView && treeView.offsetParent !== null;
-						console.log('[Test] Card already expanded:', isExpanded);
-						if (isExpanded) {
-							console.log('[Test] Card already expanded, not clicking');
-							return true;
-						}
-						const expandBtn = card.querySelector('.job-expand-toggle') || card.querySelector('[x-on\\:click*="expandedItems"]');
-						if (expandBtn) {
-							console.log('[Test] Clicking expand button');
-							expandBtn.click();
-							return true;
-						} else {
-							console.log('[Test] No expand button found, clicking card');
-							card.click();
-							return true;
-						}
-					}
-				}
-				console.log('[Test] Job card not found for:', '%s');
-				return false;
-			})()
-		`, jobName, jobName), &cardExpanded),
-		chromedp.Sleep(3*time.Second),
-	)
-	require.NoError(t, err, "Failed to expand job card")
-	utc.Log("Job card expanded: %v", cardExpanded)
-	utc.Screenshot("show_earlier_logs_card_expanded")
-
-	// Wait for step rows to appear
-	time.Sleep(2 * time.Second)
-
-	// Expand the step to see step-level logs (only if not already expanded)
-	var stepClicked bool
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const stepHeaders = document.querySelectorAll('.tree-step-header');
-				console.log('[Test] Found', stepHeaders.length, 'step headers');
-				for (const header of stepHeaders) {
-					console.log('[Test] Step header:', header.textContent);
-					if (header.textContent.includes('generate_many_logs')) {
-						// Check if step is already expanded by looking for chevron-down
-						const chevron = header.querySelector('.fa-chevron-down');
-						const isExpanded = chevron !== null;
-						console.log('[Test] Step already expanded:', isExpanded);
-						if (isExpanded) {
-							console.log('[Test] Step already expanded, not clicking');
-							return true;
-						}
-						header.click();
-						return true;
-					}
-				}
-				console.log('[Test] Step header not found for: generate_many_logs');
-				return false;
-			})()
-		`, &stepClicked),
-		chromedp.Sleep(3*time.Second),
-	)
-	require.NoError(t, err, "Failed to expand step")
-	utc.Log("Step header clicked: %v", stepClicked)
-	utc.Screenshot("show_earlier_logs_step_expanded")
-
-	// Wait for logs to load and get initial count
-	time.Sleep(2 * time.Second)
-
-	// Debug: check page state
-	var pageState map[string]interface{}
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`
-			(() => {
-				return {
-					cardCount: document.querySelectorAll('.card').length,
-					stepHeaderCount: document.querySelectorAll('.tree-step-header').length,
-					stepRowCount: document.querySelectorAll('.tree-step-row').length,
-					logLineCount: document.querySelectorAll('.tree-log-line').length,
-					logContainerCount: document.querySelectorAll('.tree-logs-container, .step-logs').length,
-					expandedSteps: document.querySelectorAll('.tree-step-row.expanded, .tree-step-header.expanded').length,
-					visibleLogs: Array.from(document.querySelectorAll('.tree-log-line')).filter(el => el.offsetParent !== null).length
-				};
-			})()
-		`, &pageState),
-	)
-	if err == nil {
-		utc.Log("Page state: cards=%v stepHeaders=%v stepRows=%v logLines=%v logContainers=%v expandedSteps=%v visibleLogs=%v",
-			pageState["cardCount"], pageState["stepHeaderCount"], pageState["stepRowCount"],
-			pageState["logLineCount"], pageState["logContainerCount"], pageState["expandedSteps"],
-			pageState["visibleLogs"])
-	}
-
-	// Get initial log count from the step with retry
-	var initialCount int
-	for retry := 0; retry < 3; retry++ {
-		err = chromedp.Run(utc.Ctx,
-			chromedp.Evaluate(`document.querySelectorAll('.tree-log-line').length`, &initialCount),
-		)
-		require.NoError(t, err, "Failed to get initial log count")
-		if initialCount > 0 {
-			break
-		}
-		utc.Log("Retry %d: waiting for logs to appear...", retry+1)
-		time.Sleep(2 * time.Second)
-	}
-	utc.Log("Step initial log count: %d", initialCount)
-	utc.Log("Job config: worker_count=50, log_count=20, log_delay_ms=10, failure_rate=0.2")
-
-	// Check if "Show earlier logs" button exists
-	var buttonInfo map[string]interface{}
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const btn = document.querySelector('.load-earlier-logs-btn');
-				if (!btn || btn.offsetParent === null) {
-					return { exists: false, disabled: true };
-				}
-				return {
-					exists: true,
-					disabled: btn.disabled,
-					text: btn.textContent.trim()
-				};
-			})()
-		`, &buttonInfo),
-	)
-	require.NoError(t, err, "Failed to check button state")
-
-	if !buttonInfo["exists"].(bool) {
-		utc.Log("⚠ 'Show earlier logs' button not found - all logs may already be visible")
-		t.Skip("No 'Show earlier logs' button available - all logs already visible")
-		return
-	}
-
-	utc.Log("Found 'Show earlier logs' button: %s (disabled: %v)", buttonInfo["text"], buttonInfo["disabled"])
-	utc.Screenshot("show_earlier_logs_before_click")
-
-	// Click the button using dispatchEvent for Alpine.js compatibility
-	var clickResult map[string]interface{}
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const btn = document.querySelector('.load-earlier-logs-btn');
-				const result = {
-					found: !!btn,
-					disabled: btn ? btn.disabled : true,
-					clicked: false,
-					error: null
-				};
-				if (btn) {
-					try {
-						const event = new MouseEvent('click', {
-							bubbles: true,
-							cancelable: true,
-							view: window
-						});
-						btn.dispatchEvent(event);
-						console.log('[Test] Clicked "Show earlier logs" button');
-						result.clicked = true;
-					} catch (e) {
-						result.error = e.toString();
-					}
-				}
-				return result;
-			})()
-		`, &clickResult),
-	)
-	require.NoError(t, err, "Failed to click button")
-	utc.Log("Button click result: found=%v, disabled=%v, clicked=%v, error=%v",
-		clickResult["found"], clickResult["disabled"], clickResult["clicked"], clickResult["error"])
-	require.True(t, clickResult["clicked"].(bool), "Should have clicked the 'Show earlier logs' button")
-
-	// Wait for API call and DOM update
-	time.Sleep(4 * time.Second)
-	utc.Screenshot("show_earlier_logs_after_click")
-
-	// Get new log count
-	var newCount int
-	err = chromedp.Run(utc.Ctx,
-		chromedp.Evaluate(`document.querySelectorAll('.tree-log-line').length`, &newCount),
-	)
-	require.NoError(t, err, "Failed to get new log count")
-
-	utc.Log("Log count after click: %d (was %d)", newCount, initialCount)
-
-	// ASSERTION: Log count should have increased
-	logsAdded := newCount - initialCount
-	assert.Greater(t, newCount, initialCount,
-		"Clicking 'Show earlier logs' should increase displayed log count")
-
-	// ASSERTION: Should have loaded a reasonable number of logs (around 100, with tolerance for filters)
-	if logsAdded > 0 {
-		assert.GreaterOrEqual(t, logsAdded, 20,
-			"Should load at least 20 more logs (got %d)", logsAdded)
-		utc.Log("✓ Successfully loaded %d additional logs", logsAdded)
-	}
-
-	utc.Log("✓ 'Show Earlier Logs' button test completed")
-}
 
 // TestJobDefinitionTestJobGeneratorTomlConfig verifies that running the test_job_generator.toml
 // job definition produces log counts that match the configured values.
@@ -3518,6 +3065,7 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 	utc.Screenshot("step_expanded_final")
 
 	// ASSERTION 2: Get and verify log line numbers are in sequential order
+	// Note: "Show earlier logs" button was removed in prompt_14.md
 	var logInfo map[string]interface{}
 	chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`
@@ -3526,8 +3074,6 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 					lineNumbers: [],
 					displayedCount: 0,
 					totalCount: 0,
-					earlierCount: 0,
-					hasEarlierButton: false,
 					isSequential: true,
 					firstLine: 0,
 					lastLine: 0
@@ -3559,26 +3105,20 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 					}
 				}
 
-				// Get total from label
+				// Get total from label (now just shows total count, not "logs: X/Y")
 				const headers = document.querySelectorAll('.tree-step-header');
 				for (const h of headers) {
 					if (h.textContent.includes('high_volume_generator')) {
 						const countLabel = h.querySelector('.label.bg-secondary span');
 						if (countLabel) {
-							const match = countLabel.textContent.match(/logs:\s*(\d+)\s*\/\s*(\d+)/);
-							if (match) {
-								result.totalCount = parseInt(match[2], 10);
+							// Try new format (just a number)
+							const text = countLabel.textContent.trim();
+							const num = parseInt(text, 10);
+							if (!isNaN(num)) {
+								result.totalCount = num;
 							}
 						}
 					}
-				}
-
-				// Check for "Show earlier logs" button
-				const btn = document.querySelector('.load-earlier-logs-btn');
-				if (btn && btn.offsetParent !== null) {
-					result.hasEarlierButton = true;
-					const match = btn.textContent.match(/(\d+)\s*earlier/i);
-					if (match) result.earlierCount = parseInt(match[1], 10);
 				}
 
 				return result;
@@ -3588,11 +3128,9 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 
 	displayedCount := int(logInfo["displayedCount"].(float64))
 	totalCount := int(logInfo["totalCount"].(float64))
-	earlierCount := int(logInfo["earlierCount"].(float64))
 	isSequential := logInfo["isSequential"].(bool)
 	firstLine := int(logInfo["firstLine"].(float64))
 	lastLine := int(logInfo["lastLine"].(float64))
-	hasEarlierButton := logInfo["hasEarlierButton"].(bool)
 
 	// Get line numbers array for debug
 	lineNumbers := make([]int, 0)
@@ -3604,8 +3142,8 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 		}
 	}
 
-	utc.Log("Log info: displayed=%d, total=%d, earlier=%d, sequential=%v, range=%d-%d",
-		displayedCount, totalCount, earlierCount, isSequential, firstLine, lastLine)
+	utc.Log("Log info: displayed=%d, total=%d, sequential=%v, range=%d-%d",
+		displayedCount, totalCount, isSequential, firstLine, lastLine)
 
 	// Log first 10 and last 10 line numbers for debugging
 	if len(lineNumbers) > 0 {
@@ -3625,51 +3163,16 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 	assert.Greater(t, displayedCount, 0, "Should display some logs after expand")
 	utc.Log("Logs displayed: %d, total: %d, range: %d-%d", displayedCount, totalCount, firstLine, lastLine)
 
-	// ASSERTION 3: When showing latest logs, verify via "Show earlier logs" count
-	// Line numbers are PER-JOB (not global), so worker logs have lines 1-1200 each
-	// The "earlier" count should be high (total - displayed) if we're showing latest
-	if totalCount > 100 {
-		// Should display limited logs (typically ~100 or configured limit)
-		assert.LessOrEqual(t, displayedCount, 200, "Should display limited logs, not all")
+	// ASSERTION 3: Logs should be monotonically increasing (server-provided line numbers)
+	assert.True(t, isSequential, "Log line numbers should be monotonically increasing")
+	utc.Log("✓ ASSERTION 3 PASSED: Log line numbers are sequential")
 
-		// The "earlier" count should be roughly (total - displayed)
-		// If earlierCount is high, we're showing the latest logs (there are many earlier ones)
-		expectedEarlierMin := totalCount - displayedCount - 100 // Allow 100 tolerance
-		if expectedEarlierMin < 0 {
-			expectedEarlierMin = 0
-		}
-
-		assert.GreaterOrEqual(t, earlierCount, expectedEarlierMin,
-			"Should show latest logs (earlierCount should be high): earlier=%d, total=%d, expected >=%d",
-			earlierCount, totalCount, expectedEarlierMin)
-
-		// Additionally verify worker logs have high line numbers (near logCount per worker)
-		// Line numbers 1000+ indicate we're seeing logs from late in worker execution
-		maxWorkerLineExpected := logCount - 200 // e.g., 1200 - 200 = 1000
-		hasHighWorkerLines := false
-		for _, ln := range lineNumbers {
-			if ln >= maxWorkerLineExpected {
-				hasHighWorkerLines = true
-				break
-			}
-		}
-		assert.True(t, hasHighWorkerLines,
-			"Should have worker logs with high line numbers (>=%d) indicating late execution",
-			maxWorkerLineExpected)
-
-		utc.Log("✓ ASSERTION 3 PASSED: Showing latest logs (earlier=%d, has high line numbers=%v)", earlierCount, hasHighWorkerLines)
-	}
-
-	// ASSERTION 4: Should have "Show earlier logs" button for high volume
-	assert.True(t, hasEarlierButton, "Should have 'Show earlier logs' button for high volume")
-	utc.Log("✓ ASSERTION 4 PASSED: Has pagination button (earlier=%d)", earlierCount)
-
-	// ASSERTION 5: Total logs must EXACTLY match configuration
+	// ASSERTION 4: Total logs must match configuration
 	// Expected: workerCount * (logCount + 3 overhead) = 3 * 1203 = 3609
 	assert.GreaterOrEqual(t, totalCount, expectedTotalLogs,
 		"Total logs must match configuration: expected >=%d (workers=%d × (logs=%d + 3)), got %d",
 		expectedTotalLogs, workerCount, logCount, totalCount)
-	utc.Log("✓ ASSERTION 5 PASSED: Total logs=%d >= expected=%d", totalCount, expectedTotalLogs)
+	utc.Log("✓ ASSERTION 4 PASSED: Total logs=%d >= expected=%d", totalCount, expectedTotalLogs)
 
 	utc.Screenshot("high_volume_generator_completed")
 	utc.Log("✓ High volume generator test completed")

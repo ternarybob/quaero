@@ -94,7 +94,19 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 		jobLogger.Warn().Err(err).Msg("Failed to update job status to running")
 	}
 
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Test job generator starting: %d logs, %dms delay, %.0f%% failure rate", logCount, logDelay, failureRate*100))
+	// Get job/step context for log messages
+	jobName := job.Name
+	if jobName == "" {
+		jobName = job.ID[:8]
+	}
+	stepName := ""
+	if job.Metadata != nil {
+		if sn, ok := job.Metadata["step_name"].(string); ok {
+			stepName = sn
+		}
+	}
+
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("[SIMULATED] Starting: %d logs, %dms delay, %.0f%% failure rate", logCount, logDelay, failureRate*100))
 
 	// Generate logs with configured distribution
 	infoCount := 0
@@ -102,11 +114,19 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 	errorCount := 0
 	delay := time.Duration(logDelay) * time.Millisecond
 
+	// Build context prefix for log messages: [SIMULATED] step/job:
+	contextPrefix := "[SIMULATED]"
+	if stepName != "" {
+		contextPrefix = fmt.Sprintf("[SIMULATED] %s/%s:", stepName, jobName)
+	} else {
+		contextPrefix = fmt.Sprintf("[SIMULATED] %s:", jobName)
+	}
+
 	for i := 0; i < logCount; i++ {
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			w.jobMgr.AddJobLog(ctx, job.ID, "info", "Job cancelled")
+			w.jobMgr.AddJobLog(ctx, job.ID, "info", "[SIMULATED] Job cancelled")
 			return ctx.Err()
 		default:
 		}
@@ -117,15 +137,15 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 		if randVal < 0.80 {
 			level = "info"
 			infoCount++
-			message = fmt.Sprintf("Processing item %d/%d", i+1, logCount)
+			message = fmt.Sprintf("%s Processing item %d/%d", contextPrefix, i+1, logCount)
 		} else if randVal < 0.95 {
 			level = "warn"
 			warnCount++
-			message = fmt.Sprintf("Warning at item %d: resource usage high", i+1)
+			message = fmt.Sprintf("%s Warning at item %d (simulated resource usage high)", contextPrefix, i+1)
 		} else {
 			level = "error"
 			errorCount++
-			message = fmt.Sprintf("Error at item %d: operation failed", i+1)
+			message = fmt.Sprintf("%s Error at item %d (simulated operation failed)", contextPrefix, i+1)
 		}
 
 		w.jobMgr.AddJobLog(ctx, job.ID, level, message)
@@ -143,7 +163,7 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 			childJobID, err := w.spawnChildJob(ctx, job, i, recursionDepth)
 			if err != nil {
 				jobLogger.Warn().Err(err).Int("child_index", i).Msg("Failed to spawn child job")
-				w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to spawn child job %d: %v", i+1, err))
+				w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("[SIMULATED] Failed to spawn child job %d: %v", i+1, err))
 				continue
 			}
 			childJobsCreated++
@@ -151,7 +171,7 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 		}
 
 		if childJobsCreated > 0 {
-			w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Spawned %d child jobs", childJobsCreated))
+			w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("[SIMULATED] Spawned %d child jobs", childJobsCreated))
 		}
 	}
 
@@ -159,10 +179,10 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 	shouldFail := rand.Float64() < failureRate
 
 	// Log final statistics
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Log summary: INF=%d, WRN=%d, ERR=%d", infoCount, warnCount, errorCount))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("[SIMULATED] Log summary: INF=%d, WRN=%d, ERR=%d", infoCount, warnCount, errorCount))
 
 	if shouldFail {
-		errorMsg := "Simulated failure triggered by failure_rate configuration"
+		errorMsg := "[SIMULATED] Failure triggered by failure_rate configuration"
 		w.jobMgr.AddJobLog(ctx, job.ID, "error", errorMsg)
 		w.jobMgr.SetJobError(ctx, job.ID, errorMsg)
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
@@ -175,7 +195,7 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Test job generator completed successfully: %d children spawned", childJobsCreated))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("[SIMULATED] Completed successfully: %d children spawned", childJobsCreated))
 
 	return nil
 }

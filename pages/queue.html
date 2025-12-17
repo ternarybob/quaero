@@ -673,12 +673,12 @@
                                                                                 'label-error': step.status === 'failed',
                                                                                 'bg-gray': step.status === 'cancelled'
                                                                             }" x-text="step.status"></span>
-                                                                        <!-- Log count display (displayed/total) - total is ALL logs regardless of level filter -->
+                                                                        <!-- Log count display - shows total log count -->
                                                                         <template x-if="step.logs && step.logs.length > 0">
                                                                             <span class="label bg-secondary" style="font-size: 0.65rem; padding: 0.1rem 0.4rem; margin-left: 0.25rem;">
                                                                                 <i class="fas fa-file-lines" style="margin-right: 0.15rem;"></i>
                                                                                 <span
-                                                                                    x-text="'logs: ' + getFilteredTreeLogs(step.logs, item.job.id, step.name).length + '/' + (step.unfilteredLogCount || step.totalLogCount || step.logs.length)"></span>
+                                                                                    x-text="step.unfilteredLogCount || step.totalLogCount || step.logs.length"></span>
                                                                             </span>
                                                                         </template>
                                                                         <!-- Download logs button (enabled when step is completed/failed) -->
@@ -703,21 +703,6 @@
                                                                                             <span style="opacity: 0.7; margin-left: 0.5rem;" x-text="'(' + errGroup.count + ')'"></span>
                                                                                         </div>
                                                                                     </template>
-                                                                                </div>
-                                                                            </template>
-
-                                                                            <!-- Show More button (when there are earlier logs) -->
-                                                                            <template x-if="hasStepEarlierLogs(item.job.id, step.name, stepIndex)">
-                                                                                <div class="tree-logs-show-more">
-                                                                                    <button class="btn btn-sm btn-link load-earlier-logs-btn" @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)" :data-job-id="item.job.id"
-                                                                                        :data-step-name="step.name" :data-step-index="stepIndex" :disabled="stepLogLoading[item.job.id + ':' + step.name]">
-                                                                                        <template x-if="stepLogLoading[item.job.id + ':' + step.name]">
-                                                                                            <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
-                                                                                        </template>
-                                                                                        <template x-if="!stepLogLoading[item.job.id + ':' + step.name]">
-                                                                                            <span><i class="fas fa-chevron-up"></i> Show <span x-text="getStepEarlierLogsCount(item.job.id, step.name, stepIndex)"></span> earlier logs</span>
-                                                                                        </template>
-                                                                                    </button>
                                                                                 </div>
                                                                             </template>
 
@@ -4661,8 +4646,8 @@
                             return;
                         }
 
-                        // Keep payload bounded; "Show earlier logs" progressively grows the window.
-                        const limit = Math.min(this.getStepLogLimit(jobId, stepName), 5000);
+                        // Use step log limit for fetching - matches display limit to avoid wasteful fetches
+                        const limit = this.getStepLogLimit(jobId, stepName);
                         const level = this.getTreeLogLevelFilter(jobId);
                         // Use unified /api/logs endpoint with step parameter for step-grouped results
                         const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&step=${encodeURIComponent(stepName)}&limit=${limit}&level=${encodeURIComponent(level)}&order=desc`);
@@ -4889,15 +4874,19 @@
                             const mergedLogs = [...existingLogs, ...uniqueNewLogs];
                             // Sort by line_number - server now provides sequential line numbers for all logs
                             mergedLogs.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
-                            console.log('[Queue] SSE merged logs:', { step: stepName, newCount: uniqueNewLogs.length, totalCount: mergedLogs.length });
+
+                            // Use highest line_number as total count (line numbers are sequential from 1)
+                            // This gives real-time accurate count even when only a subset of logs is loaded
+                            const maxLineNumber = Math.max(...mergedLogs.map(l => l.line_number || 0));
+                            const realTimeTotal = Math.max(maxLineNumber, currentStep.totalLogCount || 0, mergedLogs.length);
+                            console.log('[Queue] SSE merged logs:', { step: stepName, newCount: uniqueNewLogs.length, inMemory: mergedLogs.length, maxLineNum: maxLineNumber, realTimeTotal });
 
                             const newSteps = [...treeData.steps];
                             newSteps[stepIdx] = {
                                 ...currentStep,
                                 logs: mergedLogs,
-                                // Use step's actual log count, not job's total count
-                                // data.meta.total_count is the JOB total, not per-step
-                                totalLogCount: mergedLogs.length
+                                // Use highest line_number as total (real-time accurate count)
+                                totalLogCount: realTimeTotal
                             };
                             treeData.steps = newSteps;
                         } else {
@@ -5038,8 +5027,9 @@
                     this.treeLogLevelFilter = { ...this.treeLogLevelFilter, [jobId]: level };
                 },
 
-                // Default maximum logs to display per step in tree view (100 initially, +100 per "Show earlier logs" click)
-                defaultLogsPerStep: 100,
+                // Default maximum logs to display per step in tree view (500 initially, +100 per "Show earlier logs" click)
+                // Increased from 100 to 500 to reduce "Show earlier logs" clicks for high-volume steps
+                defaultLogsPerStep: 500,
                 // Per-step expanded log limits (key: jobId:stepName, value: current limit)
                 stepLogLimits: {},
                 // Loading state for step log fetching
@@ -5074,40 +5064,13 @@
                     }
 
                     // Limit to step-specific limit (earliest-to-latest order, show most recent)
-                    const job = this.allJobs.find(j => j.id === jobId);
-                    const terminalStatuses = ['completed', 'failed', 'cancelled'];
-                    const isTerminalJob = job && terminalStatuses.includes(job.status);
-
-                    if (!isTerminalJob) {
-                        const limit = this.getStepLogLimit(jobId, stepName);
-                        if (filteredLogs.length > limit) {
-                            filteredLogs = filteredLogs.slice(-limit);
-                        }
+                    // Always apply limit regardless of job status to prevent DOM explosion
+                    const limit = this.getStepLogLimit(jobId, stepName);
+                    if (filteredLogs.length > limit) {
+                        filteredLogs = filteredLogs.slice(-limit);
                     }
 
                     return filteredLogs;
-                },
-
-                // Check if there are earlier logs not shown for a step
-                hasStepEarlierLogs(jobId, stepName, stepIndex) {
-                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
-                    if (!step) return false;
-
-                    const logs = step.logs || [];
-                    const totalCount = step.totalLogCount || logs.length;
-                    const shownCount = logs.length;
-                    return totalCount > shownCount;
-                },
-
-                // Get count of earlier logs not shown for a step
-                getStepEarlierLogsCount(jobId, stepName, stepIndex) {
-                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
-                    if (!step) return 0;
-
-                    const logs = step.logs || [];
-                    const totalCount = step.totalLogCount || logs.length;
-                    const shownCount = logs.length;
-                    return Math.max(0, totalCount - shownCount);
                 },
 
                 // Get the starting log index for line numbers
@@ -5115,81 +5078,6 @@
                 // Always return 0 so line numbers are: 0 + logIdx + 1 = 1, 2, 3, ...
                 getStepLogStartIndex(jobId, stepName, stepIndex) {
                     return 0;
-                },
-
-                // Load more logs for a step (increases the limit by 100 and fetches from API)
-                async loadMoreStepLogs(jobId, stepName, stepIndex) {
-                    console.log('[Queue] loadMoreStepLogs called:', { jobId: jobId?.substring(0, 8), stepName, stepIndex });
-
-                    if (!jobId || stepName === undefined) {
-                        console.error('[Queue] loadMoreStepLogs: Missing required parameters');
-                        return;
-                    }
-
-                    const key = `${jobId}:${stepName}`;
-
-                    // Prevent duplicate calls while loading
-                    if (this.stepLogLoading[key]) {
-                        console.log('[Queue] loadMoreStepLogs: Already loading, skipping');
-                        return;
-                    }
-
-                    // Mark as loading
-                    this.stepLogLoading = { ...this.stepLogLoading, [key]: true };
-
-                    try {
-                        // Get step job ID from tree data - the API needs the step job ID, not parent job ID
-                        const treeData = this.jobTreeData[jobId];
-                        const stepJobId = treeData?.steps?.[stepIndex]?.step_id;
-                        if (!stepJobId) {
-                            console.warn('[Queue] loadMoreStepLogs: No step_id found for step', stepName, 'at index', stepIndex);
-                            return;
-                        }
-
-                        // Increase the limit by 100 to load more earlier logs
-                        const currentLimit = this.getStepLogLimit(jobId, stepName);
-                        const newLimit = currentLimit + 100;
-                        this.stepLogLimits = { ...this.stepLogLimits, [key]: newLimit };
-                        console.log(`[Queue] loadMoreStepLogs: ${stepName} - increasing limit from ${currentLimit} to ${newLimit}`);
-
-                        // Use unified /api/logs endpoint with step parameter for step-grouped results
-                        const level = this.getTreeLogLevelFilter(jobId);
-                        const url = `/api/logs?scope=job&job_id=${stepJobId}&step=${encodeURIComponent(stepName)}&limit=${newLimit}&level=${encodeURIComponent(level)}&order=desc`;
-                        console.log('[Queue] loadMoreStepLogs: Fetching from', url);
-                        const response = await fetch(url);
-
-                        if (response.ok) {
-                            const data = await response.json();
-                            console.log('[Queue] loadMoreStepLogs: API response received, steps:', data.steps?.length);
-                            const stepLogs = data.steps?.find(s => s.step_name === stepName);
-
-                            if (stepLogs?.logs && this.jobTreeData[jobId]?.steps) {
-                                const newSteps = [...this.jobTreeData[jobId].steps];
-                                const oldLogCount = newSteps[stepIndex]?.logs?.length || 0;
-                                newSteps[stepIndex] = {
-                                    ...newSteps[stepIndex],
-                                    logs: stepLogs.logs,
-                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length,
-                                    unfilteredCount: stepLogs.unfiltered_count || stepLogs.total_count || stepLogs.logs.length
-                                };
-                                this.jobTreeData = {
-                                    ...this.jobTreeData,
-                                    [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
-                                };
-
-                                console.log(`[Queue] loadMoreStepLogs: Updated ${stepName} from ${oldLogCount} to ${stepLogs.logs.length} logs (total: ${stepLogs.total_count || stepLogs.logs.length})`);
-                            } else {
-                                console.warn('[Queue] loadMoreStepLogs: No matching step found in response for', stepName);
-                            }
-                        } else {
-                            console.error('[Queue] loadMoreStepLogs: API error', response.status, response.statusText);
-                        }
-                    } catch (error) {
-                        console.error('[Queue] loadMoreStepLogs: Exception:', error);
-                    } finally {
-                        this.stepLogLoading = { ...this.stepLogLoading, [key]: false };
-                        console.log('[Queue] loadMoreStepLogs: Complete for', stepName);
-                    }
                 },
 
                 // Download logs for a step as text file

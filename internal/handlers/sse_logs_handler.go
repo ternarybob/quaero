@@ -430,10 +430,10 @@ func (h *SSELogsHandler) streamServiceLogs(w http.ResponseWriter, r *http.Reques
 	flusher.Flush()
 
 	// Create subscriber
-	// Buffer size of 500 handles high-throughput logging without dropping entries
+	// Buffer size of 2000 handles high-throughput logging without dropping entries
 	ctx, cancel := context.WithCancel(r.Context())
 	sub := &serviceLogSubscriber{
-		logs:   make(chan interfaces.LogEntry, 500),
+		logs:   make(chan interfaces.LogEntry, 2000),
 		done:   make(chan struct{}),
 		level:  level,
 		limit:  limit,
@@ -459,16 +459,15 @@ func (h *SSELogsHandler) streamServiceLogs(w http.ResponseWriter, r *http.Reques
 	// Adaptive backoff rate limiting for high-throughput service log streams
 	// Same strategy as job logs
 	backoffLevels := []time.Duration{
+		500 * time.Millisecond,
 		1 * time.Second,
 		2 * time.Second,
 		3 * time.Second,
-		4 * time.Second,
 		5 * time.Second,
-		10 * time.Second,
 	}
 	currentBackoffLevel := 0
 	currentInterval := backoffLevels[0]
-	const logsPerIntervalThreshold = 50
+	const logsPerIntervalThreshold = 200
 
 	pingInterval := 15 * time.Second
 
@@ -573,10 +572,11 @@ func (h *SSELogsHandler) streamJobLogs(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Create subscriber
-	// Buffer size of 500 handles high-throughput jobs without dropping logs
+	// Buffer size of 2000 handles high-throughput parallel jobs (300+ workers)
+	// without dropping logs during burst periods
 	ctx, cancel := context.WithCancel(r.Context())
 	sub := &jobLogSubscriber{
-		logs:   make(chan jobLogEntry, 500),
+		logs:   make(chan jobLogEntry, 2000),
 		status: make(chan jobStatusUpdate, 10),
 		done:   make(chan struct{}),
 		jobID:  jobID,
@@ -625,22 +625,21 @@ func (h *SSELogsHandler) streamJobLogs(w http.ResponseWriter, r *http.Request) {
 	// Prevents browser overload while ensuring logs are delivered
 	//
 	// Backoff strategy:
-	// - Base interval: 1 second
-	// - When logs exceed threshold (50/interval), increase interval
-	// - Backoff levels: 1s → 2s → 3s → 4s → 5s → 10s (max)
+	// - Base interval: 500ms for faster initial delivery
+	// - When logs exceed threshold (200/interval), increase interval
+	// - Backoff levels: 500ms → 1s → 2s → 3s → 5s (max)
 	// - Reset to base when log rate drops below threshold
 	// - Always flush immediately on status change (job completion)
 	backoffLevels := []time.Duration{
+		500 * time.Millisecond,
 		1 * time.Second,
 		2 * time.Second,
 		3 * time.Second,
-		4 * time.Second,
 		5 * time.Second,
-		10 * time.Second,
 	}
 	currentBackoffLevel := 0
 	currentInterval := backoffLevels[0]
-	const logsPerIntervalThreshold = 50 // If we get more than this, increase backoff
+	const logsPerIntervalThreshold = 200 // Higher threshold for parallel jobs (300+ workers)
 
 	pingInterval := 15 * time.Second
 
