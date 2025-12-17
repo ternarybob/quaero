@@ -34,6 +34,7 @@ import (
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/kv"
 	"github.com/ternarybob/quaero/internal/services/llm"
+	"github.com/ternarybob/quaero/internal/services/mailer"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/places"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -109,6 +110,9 @@ type App struct {
 	// Connector service
 	ConnectorService interfaces.ConnectorService
 
+	// Mailer service
+	MailerService *mailer.Service
+
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
@@ -130,6 +134,7 @@ type App struct {
 	DevOpsHandler        *handlers.DevOpsHandler
 	UnifiedLogsHandler   *handlers.UnifiedLogsHandler
 	SSELogsHandler       *handlers.SSELogsHandler
+	MailerHandler        *handlers.MailerHandler
 }
 
 // New initializes the application with all dependencies
@@ -460,6 +465,13 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Debug().Msg("Connector service initialized")
 
+	// 5.14. Initialize mailer service
+	a.MailerService = mailer.NewService(
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Logger.Debug().Msg("Mailer service initialized")
+
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -736,6 +748,17 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(aggregateSummaryWorker)
 	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
 
+	// Register Email worker (notification step for job definitions)
+	emailWorker := workers.NewEmailWorker(
+		a.MailerService,
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(emailWorker)
+	a.Logger.Debug().Str("step_type", emailWorker.GetType().String()).Msg("Email worker registered")
+
 	// Register Test Job Generator worker (testing worker for logging, error tolerance, and job hierarchy validation)
 	testJobGeneratorWorker := workers.NewTestJobGeneratorWorker(
 		jobMgr,
@@ -878,6 +901,10 @@ func (a *App) initHandlers() error {
 
 	// Initialize connector handler
 	a.ConnectorHandler = handlers.NewConnectorHandler(a.ConnectorService, a.Logger)
+
+	// Initialize mailer handler
+	a.MailerHandler = handlers.NewMailerHandler(a.MailerService, a.Logger)
+	a.Logger.Debug().Msg("Mailer handler initialized")
 
 	// Initialize GitHub jobs handler
 	a.GitHubJobsHandler = handlers.NewGitHubJobsHandler(

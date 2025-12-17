@@ -89,6 +89,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/connectors", s.handleConnectorsRoute)
 	mux.HandleFunc("/api/connectors/", s.handleConnectorRoutes)
 
+	// API routes - Mail Configuration
+	mux.HandleFunc("/api/mail/config", s.handleMailConfigRoute)
+	mux.HandleFunc("/api/mail/test", s.app.MailerHandler.SendTestHandler)
+
 	// API routes - GitHub Jobs (repo and actions collectors)
 	mux.HandleFunc("/api/github/repo/preview", s.app.GitHubJobsHandler.PreviewRepoFilesHandler)
 	mux.HandleFunc("/api/github/repo/start", s.app.GitHubJobsHandler.StartRepoCollectorHandler)
@@ -402,6 +406,18 @@ func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {
 // handleSearchRoute delegates to SearchHandler (method enforcement happens at handler level)
 func (s *Server) handleSearchRoute(w http.ResponseWriter, r *http.Request) {
 	s.app.SearchHandler.SearchHandler(w, r)
+}
+
+// handleMailConfigRoute routes /api/mail/config requests (get and set)
+func (s *Server) handleMailConfigRoute(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		s.app.MailerHandler.GetConfigHandler(w, r)
+	case "POST":
+		s.app.MailerHandler.SetConfigHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleAuthRedirect redirects /auth and /auth/ to settings page with auth accordions expanded

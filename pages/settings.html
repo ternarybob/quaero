@@ -45,6 +45,12 @@
                                 Connectors
                             </a>
                         </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'mail' }">
+                            <a href="#" @click.prevent="selectSection('mail')">
+                                <i class="icon icon-mail"></i>
+                                Email
+                            </a>
+                        </li>
                         <li class="nav-item" :class="{ 'active': activeSection === 'config' }">
                             <a href="#" @click.prevent="selectSection('config')">
                                 <i class="icon icon-apps"></i>

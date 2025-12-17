@@ -30,6 +30,9 @@ const (
 	WorkerTypeDependencyGraph  WorkerType = "dependency_graph"  // Build dependency graph from extracted metadata
 	WorkerTypeAggregateSummary WorkerType = "aggregate_summary" // Generate summary of all enrichment metadata
 
+	// Notification workers
+	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
+
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
 )
@@ -41,7 +44,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
-		WorkerTypeAggregateSummary, WorkerTypeTestJobGenerator:
+		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeTestJobGenerator:
 		return true
 	}
 	return false
@@ -71,6 +74,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeClassify,
 		WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary,
+		WorkerTypeEmail,
 		WorkerTypeTestJobGenerator,
 	}
 }

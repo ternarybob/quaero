@@ -7,6 +7,16 @@ Execute: $ARGUMENTS
 
 **Read first:** `.claude/skills/refactoring/SKILL.md`
 
+## SETUP
+
+Create workdir from task description:
+```
+TASK_SLUG = slugify($ARGUMENTS)  # lowercase, hyphens, max 40 chars
+DATE = $(date +%Y-%m-%d)
+WORKDIR = ./workdir/${TASK_SLUG}-${DATE}
+mkdir -p $WORKDIR
+```
+
 ## AGENTS
 
 1. **ARCHITECT** - Finds EXISTING code, blocks unnecessary creation
@@ -28,19 +38,19 @@ Execute: $ARGUMENTS
 1. Read architecture docs and skills
 2. Search codebase for existing code to reuse
 3. Challenge: Does this NEED new code?
-4. Write `{workdir}/architect-analysis.md`
+4. Write `$WORKDIR/architect-analysis.md`
 
 ### PHASE 1: WORKER
 1. Follow architect's recommendation
 2. Apply refactoring skill (EXTEND > MODIFY > CREATE)
 3. **Run build - must pass**
-4. Write `{workdir}/step-{N}.md`
+4. Write `$WORKDIR/step-{N}.md`
 
 ### PHASE 2: VALIDATOR
 1. **Run build first** - FAIL = stop
 2. Verify skill compliance with concrete evidence
 3. Check anti-creation violations
-4. Write `{workdir}/validation-{N}.md`
+4. Write `$WORKDIR/validation-{N}.md`
 
 ### PHASE 3: ITERATE (max 5)
 ```
@@ -70,10 +80,13 @@ VALIDATOR FAIL
 
 ### PHASE 4: COMPLETE
 - Final build verification
-- Write `{workdir}/summary.md`
+- Write `$WORKDIR/summary.md`
 
 ## INVOKE
 ```
 /3agents Fix the step icon mismatch
+# → ./workdir/fix-step-icon-mismatch-2024-12-17/
+
 /3agents Add log line numbering
+# → ./workdir/add-log-line-numbering-2024-12-17/
 ```

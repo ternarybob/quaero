@@ -37,7 +37,8 @@ document.addEventListener('alpine:init', () => {
     const componentStateCache = {
         authCookies: { hasLoaded: false, data: [] },
         kv: { hasLoaded: false, data: [] },
-        config: { hasLoaded: false, data: null }
+        config: { hasLoaded: false, data: null },
+        mail: { hasLoaded: false, data: null }
     };
 
     // === UTILITY MIXINS AND HELPERS ===
@@ -292,7 +293,7 @@ document.addEventListener('alpine:init', () => {
         loadedSections: new Set(),
         activeSection: 'kv',
         defaultSection: 'kv',
-        validSections: ['kv', 'auth-cookies', 'connectors', 'config', 'danger', 'status', 'logs'],
+        validSections: ['kv', 'auth-cookies', 'connectors', 'mail', 'config', 'danger', 'status', 'logs'],
 
         init() {
             window.debugLog('SettingsNavigation', 'Initializing component');
@@ -981,6 +982,146 @@ document.addEventListener('alpine:init', () => {
                 if (window.showNotification) window.showNotification(e.message, 'error');
             } finally {
                 this.deleting = null;
+            }
+        }
+    }));
+
+    // Mail Configuration Component
+    Alpine.data('mail', () => ({
+        formData: {
+            smtp_host: '',
+            smtp_port: 587,
+            smtp_username: '',
+            smtp_password: '',
+            smtp_from: '',
+            smtp_from_name: 'Quaero',
+            smtp_use_tls: true
+        },
+        configured: false,
+        isLoading: false,
+        isSaving: false,
+        isSendingTest: false,
+        testEmail: '',
+
+        init() {
+            // Check global cache to prevent duplicate API calls
+            if (componentStateCache.mail.hasLoaded) {
+                logger.debug('Mail', 'Loading from cache, skipping API call');
+                this.applyConfig(componentStateCache.mail.data);
+                return;
+            }
+
+            this.loadConfig();
+        },
+
+        applyConfig(data) {
+            if (data) {
+                this.formData.smtp_host = data.smtp_host || '';
+                this.formData.smtp_port = data.smtp_port || 587;
+                this.formData.smtp_username = data.smtp_username || '';
+                this.formData.smtp_password = data.smtp_password || '';
+                this.formData.smtp_from = data.smtp_from || '';
+                this.formData.smtp_from_name = data.smtp_from_name || 'Quaero';
+                this.formData.smtp_use_tls = data.smtp_use_tls !== false;
+                this.configured = data.configured || false;
+            }
+            this.isLoading = false;
+        },
+
+        async loadConfig() {
+            this.isLoading = true;
+            try {
+                logger.debug('Mail', 'Loading mail configuration');
+                const response = await fetch('/api/mail/config');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+                const data = await response.json();
+
+                // Store in cache
+                componentStateCache.mail.hasLoaded = true;
+                componentStateCache.mail.data = data;
+
+                this.applyConfig(data);
+
+                logger.debug('Mail', 'Mail configuration loaded', { configured: this.configured });
+            } catch (error) {
+                logger.error('Mail', 'Failed to load mail config', error);
+                if (window.showNotification) {
+                    window.showNotification('Failed to load mail configuration', 'error');
+                }
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async saveConfig() {
+            this.isSaving = true;
+            try {
+                logger.debug('Mail', 'Saving mail configuration');
+
+                const response = await fetch('/api/mail/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.formData)
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || `HTTP error! status: ${response.status}`);
+                }
+
+                // Invalidate cache
+                componentStateCache.mail.hasLoaded = false;
+
+                // Reload to get updated configuration status
+                await this.loadConfig();
+
+                if (window.showNotification) {
+                    window.showNotification('Email configuration saved successfully', 'success');
+                }
+            } catch (error) {
+                logger.error('Mail', 'Failed to save mail config', error);
+                if (window.showNotification) {
+                    window.showNotification('Failed to save email configuration: ' + error.message, 'error');
+                }
+            } finally {
+                this.isSaving = false;
+            }
+        },
+
+        async sendTestEmail() {
+            if (!this.testEmail) {
+                if (window.showNotification) {
+                    window.showNotification('Please enter an email address', 'warning');
+                }
+                return;
+            }
+
+            this.isSendingTest = true;
+            try {
+                logger.debug('Mail', 'Sending test email', { to: this.testEmail });
+
+                const response = await fetch('/api/mail/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: this.testEmail })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || `HTTP error! status: ${response.status}`);
+                }
+
+                if (window.showNotification) {
+                    window.showNotification(`Test email sent successfully to ${this.testEmail}`, 'success');
+                }
+            } catch (error) {
+                logger.error('Mail', 'Failed to send test email', error);
+                if (window.showNotification) {
+                    window.showNotification('Failed to send test email: ' + error.message, 'error');
+                }
+            } finally {
+                this.isSendingTest = false;
             }
         }
     }));

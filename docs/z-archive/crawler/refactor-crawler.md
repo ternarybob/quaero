@@ -1,1 +1,0 @@
-The requirement specifically for confluence and also jira, is to capture a group of articales and then be able to queries / summarize using AI. \
