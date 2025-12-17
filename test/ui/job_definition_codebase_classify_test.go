@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"bufio"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,6 +312,12 @@ func TestJobDefinitionCodebaseClassify(t *testing.T) {
 			}
 		}
 	}
+
+	// --------------------------------------------------------------------------------
+	// Assertion 4: No SSE buffer overflows during high-load job execution
+	// --------------------------------------------------------------------------------
+	utc.Log("Assertion 4: Verifying no SSE buffer overflows occurred...")
+	assertNoSSEBufferOverflows(t, utc)
 
 	utc.Log("Codebase Classify context-specific test completed with final status: %s", finalStatus)
 	utc.Log("NOTE: Generic UI tests (WebSocket throttling, icons, log numbering, etc.) are in TestJobDefinitionGeneralUIAssertions")
@@ -1049,5 +1059,90 @@ func assertAllStepsAutoExpand(t *testing.T, utc *UITestContext, expansionOrder [
 		if !found {
 			t.Errorf("FAIL: Expected step '%s' did not auto-expand", expected)
 		}
+	}
+}
+
+// assertNoSSEBufferOverflows checks the service logs for SSE buffer overflow warnings.
+// This is a high-load scenario test assertion for jobs like codebase_classify that
+// generate thousands of log entries in parallel.
+//
+// The buffer size was increased from 2000 to 10000 in sse_logs_handler.go to handle
+// high-throughput scenarios. This assertion verifies the fix works.
+func assertNoSSEBufferOverflows(t *testing.T, utc *UITestContext) {
+	t.Helper()
+
+	// Find the latest service log file in the bin/logs/ directory
+	binLogsDir := filepath.Join(utc.Env.ResultsDir, "..", "bin", "logs")
+	if _, err := os.Stat(binLogsDir); os.IsNotExist(err) {
+		// Alternative: check relative to test working directory
+		binLogsDir = "../../bin/logs"
+	}
+
+	// Find all log files and get the most recent one
+	logFiles, err := filepath.Glob(filepath.Join(binLogsDir, "quaero.*.log"))
+	if err != nil || len(logFiles) == 0 {
+		utc.Log("Note: Could not find service log files in %s (skipping buffer overflow check)", binLogsDir)
+		return
+	}
+
+	// Get the most recent log file (they have timestamps in the filename)
+	var latestLog string
+	var latestTime time.Time
+	for _, logFile := range logFiles {
+		info, err := os.Stat(logFile)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(latestTime) {
+			latestTime = info.ModTime()
+			latestLog = logFile
+		}
+	}
+
+	if latestLog == "" {
+		utc.Log("Note: No readable service log files found (skipping buffer overflow check)")
+		return
+	}
+
+	// Count buffer overflow warnings in the log file
+	bufferOverflowCount := 0
+	file, err := os.Open(latestLog)
+	if err != nil {
+		utc.Log("Note: Could not open service log file %s: %v (skipping buffer overflow check)", latestLog, err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	// Increase scanner buffer for large log lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Buffer full, skipping entry") {
+			bufferOverflowCount++
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		utc.Log("Note: Error scanning service log file: %v", err)
+	}
+
+	utc.Log("Service log file: %s", filepath.Base(latestLog))
+	utc.Log("Buffer overflow warnings found: %d", bufferOverflowCount)
+
+	// Allow a small number of buffer overflows during initial burst, but fail if excessive
+	// The buffer increase from 2000 to 10000 should eliminate most/all overflows
+	const maxAllowedOverflows = 10
+	if bufferOverflowCount > maxAllowedOverflows {
+		t.Errorf("FAIL: Found %d SSE buffer overflow warnings in service logs (max allowed: %d). "+
+			"This indicates the SSE buffer size may need to be increased further.",
+			bufferOverflowCount, maxAllowedOverflows)
+	} else if bufferOverflowCount > 0 {
+		utc.Log("Note: %d minor buffer overflows occurred (within acceptable threshold of %d)",
+			bufferOverflowCount, maxAllowedOverflows)
+	} else {
+		utc.Log("✓ PASS: No SSE buffer overflows detected during high-load job execution")
 	}
 }

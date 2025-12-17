@@ -22,13 +22,13 @@
             </div>
         </div>
 
-        <!-- Job Statistics -->
+        <!-- Queue Metrics -->
         <section x-data="jobStatsHeader" x-init="init()">
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h3>Job Statistics</h3>
+                            <h3>Queue Metrics</h3>
                         </section>
                         <section class="navbar-section">
                             <button class="btn btn-sm" @click="loadStats()">
@@ -718,8 +718,15 @@
                                                                                 </div>
                                                                             </template>
 
-                                                                            <!-- Empty logs message -->
-                                                                            <template x-if="!step.logs || step.logs.length === 0">
+                                                                            <!-- Loading logs message (shown while fetch is in progress) -->
+                                                                            <template x-if="(!step.logs || step.logs.length === 0) && isStepLogsLoading(item.job.id, step.name)">
+                                                                                <div class="tree-logs-empty" style="color: #888;">
+                                                                                    <i class="fas fa-spinner fa-spin" style="margin-right: 0.5rem;"></i>
+                                                                                    Loading logs...
+                                                                                </div>
+                                                                            </template>
+                                                                            <!-- Empty logs message (shown only when fetch is complete and no logs exist) -->
+                                                                            <template x-if="(!step.logs || step.logs.length === 0) && !isStepLogsLoading(item.job.id, step.name)">
                                                                                 <div class="tree-logs-empty">
                                                                                     No logs for this step
                                                                                 </div>
@@ -1309,6 +1316,12 @@
                         connected: true
                     }
                 }));
+            }));
+
+            // Subscribe to job_stats events for real-time Queue Metrics updates
+            // This provides immediate stats without API roundtrip when jobs change status
+            wsUnsubscribers.push(WebSocketManager.subscribe('job_stats', (payload) => {
+                window.dispatchEvent(new CustomEvent('jobStats:update', { detail: payload }));
             }));
 
             // Subscribe to job status change events
@@ -4955,6 +4968,13 @@
                 isTreeStepExpanded(jobId, stepIndex) {
                     const key = `${jobId}:${stepIndex}`;
                     return !!this.jobTreeExpandedSteps[key];
+                },
+
+                // Check if logs are currently being fetched for a step
+                // Used to show "Loading logs..." instead of "No logs for this step" during fetch
+                isStepLogsLoading(jobId, stepName) {
+                    const key = `${jobId}:${stepName}`;
+                    return this._stepFetchInFlight.has(key) || !!this._stepFetchDebounceTimers[key];
                 },
 
                 getTreeSearchFilter(jobId) {

@@ -430,10 +430,11 @@ func (h *SSELogsHandler) streamServiceLogs(w http.ResponseWriter, r *http.Reques
 	flusher.Flush()
 
 	// Create subscriber
-	// Buffer size of 2000 handles high-throughput logging without dropping entries
+	// Buffer size of 10000 handles high-throughput logging (e.g., codebase_classify job with 150+ files)
+	// without dropping entries during burst periods
 	ctx, cancel := context.WithCancel(r.Context())
 	sub := &serviceLogSubscriber{
-		logs:   make(chan interfaces.LogEntry, 2000),
+		logs:   make(chan interfaces.LogEntry, 10000),
 		done:   make(chan struct{}),
 		level:  level,
 		limit:  limit,
@@ -572,11 +573,11 @@ func (h *SSELogsHandler) streamJobLogs(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Create subscriber
-	// Buffer size of 2000 handles high-throughput parallel jobs (300+ workers)
-	// without dropping logs during burst periods
+	// Buffer size of 10000 handles high-throughput parallel jobs (e.g., codebase_classify with 150+ files)
+	// without dropping logs during burst periods. Increased from 2000 after observing 719 buffer overflows.
 	ctx, cancel := context.WithCancel(r.Context())
 	sub := &jobLogSubscriber{
-		logs:   make(chan jobLogEntry, 2000),
+		logs:   make(chan jobLogEntry, 10000),
 		status: make(chan jobStatusUpdate, 10),
 		done:   make(chan struct{}),
 		jobID:  jobID,

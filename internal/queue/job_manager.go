@@ -524,8 +524,15 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 	}
 
 	// Add job log for status change
+	// Child/worker jobs log at DEBUG level to reduce noise in parent step logs
+	// Parent jobs (no ParentID) log at INFO level for visibility
 	logMessage := fmt.Sprintf("Status changed: %s", status)
-	if err := m.AddJobLog(ctx, jobID, "info", logMessage); err != nil {
+	logLevel := "info"
+	if jobState.ParentID != nil {
+		// Child jobs log at debug level to avoid flooding parent step logs
+		logLevel = "debug"
+	}
+	if err := m.AddJobLog(ctx, jobID, logLevel, logMessage); err != nil {
 		m.logger.Warn().Err(err).Str("job_id", jobID).Msg("UpdateJobStatus: failed to add job log")
 		// Log error but don't fail the status update (logging is non-critical)
 	}
