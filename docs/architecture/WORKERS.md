@@ -13,15 +13,15 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Classify Worker](#classify-worker)
   - [Code Map Worker](#code-map-worker)
   - [Crawler Worker](#crawler-worker)
-  - [Database Maintenance Worker](#database-maintenance-worker)
   - [Dependency Graph Worker](#dependency-graph-worker)
-  - [Extract Structure Worker](#extract-structure-worker)
+  - [Email Worker](#email-worker)
   - [GitHub Git Worker](#github-git-worker)
   - [GitHub Log Worker](#github-log-worker)
   - [GitHub Repo Worker](#github-repo-worker)
   - [Local Dir Worker](#local-dir-worker)
   - [Places Worker](#places-worker)
   - [Summary Worker](#summary-worker)
+  - [Test Job Generator Worker](#test-job-generator-worker)
   - [Web Search Worker](#web-search-worker)
 - [Configuration Reference](#configuration-reference)
 - [Worker Classification](#worker-classification)
@@ -422,11 +422,11 @@ filter_tags = ["devops-candidate"]
 
 ---
 
-### Extract Structure Worker
+### Email Worker
 
-**File**: `extract_structure_worker.go`
+**File**: `email_worker.go`
 
-**Purpose**: Extracts C/C++ code structure including includes, defines, conditionals, and platform-specific code using regex patterns.
+**Purpose**: Sends email notifications with job results. Used as a step in job definitions to email results/summaries to users.
 
 **Interfaces**: DefinitionWorker
 
@@ -437,31 +437,33 @@ filter_tags = ["devops-candidate"]
 **Step Config**:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `filter_tags` | []string | No | Tags for filtering documents |
-| `force` | bool | No | Force re-extraction |
+| `to` | string | Yes | Recipient email address |
+| `subject` | string | No | Email subject (default: "Quaero Job Results") |
+| `body` | string | No | Plain text email body |
+| `body_html` | string | No | HTML email body |
+| `body_from_document` | string | No | Document ID to use as email body |
+| `body_from_tag` | string | No | Get latest document with tag as email body |
 
 #### Outputs
 
-- Updates document metadata with:
-  - `local_includes` - Project-local includes
-  - `system_includes` - System/library includes
-  - `defines` - Preprocessor definitions
-  - `conditionals` - ifdef/ifndef symbols
-  - `platforms` - Detected platforms (windows, linux, macos, embedded)
-- Adds `devops-enriched` tag to processed documents
-- Tracks in `enrichment_passes`
+- Sends email to specified recipient
+- Logs success/failure to job logs
 
-#### Configuration
+#### Prerequisites
 
-Uses document storage and search services.
+Requires SMTP configuration in Settings > Email.
 
 #### Example Job Definition
 
 ```toml
-[step.extract_structure]
-type = "extract_structure"
-description = "Extract includes, defines, and platform info from C/C++ files"
-filter_tags = ["devops-candidate"]
+[step.notify]
+type = "email"
+description = "Send job results via email"
+
+[step.notify.config]
+to = "team@example.com"
+subject = "Daily Report Complete"
+body = "The daily report job has completed successfully."
 ```
 
 ---
@@ -712,6 +714,59 @@ filter_tags = ["documentation", "imported"]
 
 ---
 
+### Test Job Generator Worker
+
+**File**: `test_job_generator_worker.go`
+
+**Purpose**: Generates test jobs with random logs, warnings, and errors for testing the logging system, error tolerance, and job hierarchy. Supports recursive child job creation.
+
+**Interfaces**: DefinitionWorker, JobWorker
+
+**Job Type**: `"test_job_generator"`
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `worker_count` | int | No | Number of parallel worker jobs (default: 10) |
+| `log_count` | int | No | Number of log entries per job (default: 100) |
+| `log_delay_ms` | int | No | Delay between logs in ms (default: 50) |
+| `failure_rate` | float | No | Probability of job failure 0-1 (default: 0.1) |
+| `child_count` | int | No | Number of child jobs per job (default: 2) |
+| `recursion_depth` | int | No | Maximum recursion depth (default: 3) |
+
+#### Outputs
+
+- Generates log entries with random distribution: 80% INFO, 15% WARN, 5% ERROR
+- Creates child jobs recursively up to specified depth
+- Jobs may fail based on failure_rate probability
+
+#### Use Cases
+
+- Testing job logging and log viewer UI
+- Testing error tolerance and partial failure handling
+- Testing job hierarchy and parent-child relationships
+- Stress testing the queue system
+
+#### Example Job Definition
+
+```toml
+[step.test_logging]
+type = "test_job_generator"
+description = "Generate test jobs with random errors"
+
+[step.test_logging.config]
+worker_count = 5
+log_count = 50
+log_delay_ms = 100
+failure_rate = 0.2
+child_count = 2
+recursion_depth = 2
+```
+
+---
+
 ### Web Search Worker
 
 **File**: `web_search_worker.go`
@@ -830,21 +885,19 @@ search:
 - Code Map Worker - Creates structure/summary jobs
 - GitHub Git Worker - Processes file batches
 - Local Dir Worker - Processes file batches
+- Test Job Generator Worker - Creates recursive child jobs
 
 **Inline Processing** (Synchronous):
 - Aggregate Summary Worker - Single aggregation task
 - Analyze Build Worker - Process documents inline
 - Classify Worker - Process documents inline
 - Dependency Graph Worker - Single graph build
-- Extract Structure Worker - Process documents inline
+- Email Worker - Send email notification
 - GitHub Log Worker - Process individual logs
 - GitHub Repo Worker - Process individual files
 - Places Worker - Single search execution
 - Summary Worker - Single summary generation
 - Web Search Worker - Single search execution
-
-**Deprecated**:
-- Database Maintenance Worker - All operations are no-ops
 
 ### By Interface
 
@@ -856,15 +909,15 @@ search:
 | Classify | Yes | No |
 | Code Map | Yes | Yes |
 | Crawler | Yes | Yes |
-| Database Maintenance | No | Yes |
 | Dependency Graph | Yes | No |
-| Extract Structure | Yes | No |
+| Email | Yes | No |
 | GitHub Git | Yes | Yes |
 | GitHub Log | Yes | Yes |
 | GitHub Repo | Yes | Yes |
 | Local Dir | Yes | Yes |
 | Places | Yes | No |
 | Summary | Yes | No |
+| Test Job Generator | Yes | Yes |
 | Web Search | Yes | No |
 
 ### By Category
@@ -886,9 +939,11 @@ search:
 - Places Worker
 
 **Enrichment Workers**:
-- Extract Structure Worker
 - Dependency Graph Worker
+
+**Notification Workers**:
+- Email Worker
 
 **Utility Workers**:
 - Code Map Worker
-- Database Maintenance Worker (deprecated)
+- Test Job Generator Worker

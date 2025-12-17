@@ -31,7 +31,7 @@ The Manager/Worker Architecture document provides the definitive guide to unders
 - Learning about parent-child job hierarchies
 - Understanding real-time progress tracking
 
-### [Markdown + Metadata Architecture](architecture.md)
+### [Markdown + Metadata Architecture](ARCHITECTURE.md)
 **Comprehensive documentation of Quaero's document storage design**
 
 This document explains Quaero's canonical format strategy for storing content from diverse sources (Jira, Confluence, GitHub) as clean Markdown with structured metadata JSON.
@@ -42,9 +42,9 @@ This document explains Quaero's canonical format strategy for storing content fr
 - Document model and metadata schemas (Jira, Confluence, GitHub)
 - HTML to Markdown conversion process
 - HTML parsing details (generic scraping vs specialized transformers)
-- Storage implementation with SQLite
+- Storage implementation with BadgerDB
 - Two-step query pattern (filter by metadata, reason from markdown)
-- FTS5 full-text search indexes
+- Full-text search via BadgerDB
 - Immediate document saving during crawling
 - Crawler service logging
 - Known limitations and future enhancements
@@ -61,12 +61,12 @@ This document explains Quaero's canonical format strategy for storing content fr
 
 **If you want to understand:**
 - **Job monitoring and execution** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md)
-- **Document storage and search** → Read [Markdown + Metadata Architecture](architecture.md)
+- **Document storage and search** → Read [Markdown + Metadata Architecture](ARCHITECTURE.md)
 - **How crawler jobs work** → Read both documents (Manager/Worker for job flow, Markdown+Metadata for content processing)
 - **Real-time progress tracking** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md) WebSocket section
-- **Metadata extraction** → Read [Markdown + Metadata Architecture](architecture.md) HTML parsing section
+- **Metadata extraction** → Read [Markdown + Metadata Architecture](ARCHITECTURE.md) HTML parsing section
 - **Adding a new job type** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md) implementation guide
-- **Adding a new data source** → Read [Markdown + Metadata Architecture](architecture.md) transformers section
+- **Adding a new data source** → Read [Markdown + Metadata Architecture](ARCHITECTURE.md) crawler section
 
 ## Related Documentation
 
@@ -81,16 +81,16 @@ The following documents provide comprehensive guidance for AI agents refactoring
 
 | Document | Purpose |
 |----------|---------|
-| [Manager/Worker Architecture](manager_worker_architecture.md) | Core architecture, job hierarchy, data flow |
+| [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md) | Core architecture, job hierarchy, data flow |
 | [Queue Logging](QUEUE_LOGGING.md) | Logging flow, WebSocket events, log entry schema |
 | [Queue UI](QUEUE_UI.md) | Frontend architecture, Alpine.js components, icon standards |
 | [Queue Services](QUEUE_SERVICES.md) | Supporting services, event system, initialization order |
-| [Workers Reference](workers.md) | Complete worker documentation (17+ workers) |
+| [Workers Reference](WORKERS.md) | Complete worker documentation (17 workers) |
 
 **Reading Order for Refactoring:**
-1. Start with `manager_worker_architecture.md` for overall understanding
+1. Start with `MANAGER_WORKER_ARCHITECTURE.md` for overall understanding
 2. Read the specific document for the area you're modifying
-3. Check `workers.md` if implementing or modifying workers
+3. Check `WORKERS.md` if implementing or modifying workers
 
 ## Document History
 
@@ -100,8 +100,8 @@ The following documents provide comprehensive guidance for AI agents refactoring
 | QUEUE_LOGGING.md | 1.0 | 2025-12-12 | ✅ Current - Logging architecture for queue system |
 | QUEUE_UI.md | 1.0 | 2025-12-12 | ✅ Current - UI architecture for queue management |
 | QUEUE_SERVICES.md | 1.0 | 2025-12-12 | ✅ Current - Supporting services documentation |
-| workers.md | 1.0 | 2025-12-12 | ✅ Current - Complete worker reference |
-| architecture.md | - | 2024-11-06 | ✅ Current - Markdown + Metadata architecture |
+| WORKERS.md | 1.0 | 2025-12-17 | ✅ Current - Complete worker reference (17 workers) |
+| ARCHITECTURE.md | - | 2025-12-17 | ✅ Current - Markdown + Metadata architecture |
 | ~~JOB_EXECUTOR_ARCHITECTURE.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |
 | ~~JOB_QUEUE_MANAGEMENT.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |
 | ~~QUEUE_ARCHITECTURE.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |

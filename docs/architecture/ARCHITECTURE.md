@@ -17,7 +17,7 @@ This design enables a powerful two-step query pattern:
 
 - **Unified Format:** All content (Jira issues, Confluence pages, GitHub code) becomes consistent text
 - **LLM-Friendly:** Clean format ideal for language model reasoning and synthesis
-- **Full-Text Search:** Works seamlessly with SQLite FTS5 for fast text search
+- **Full-Text Search:** Works seamlessly with BadgerDB prefix scanning for fast text search
 - **Human-Readable:** Easy to inspect, debug, and understand
 - **Version Control:** Text format enables diffs and change tracking
 
@@ -42,45 +42,29 @@ By separating **content** (markdown) from **structure** (metadata), we get:
 ```mermaid
 sequenceDiagram
     participant Crawler as Crawler Service
-    participant Scraper as HTML Scraper<br/>(html_scraper.go)
-    participant Transformer as Transformer<br/>(jira_transformer.go)
-    participant Helpers as Shared Helpers<br/>(crawler/helpers.go)
-    participant Helper as Helper<br/>(helpers.go)
+    participant Scraper as HTML/Hybrid Scraper
+    participant Transform as Transform Service
+    participant Persister as Document Persister
     participant Storage as Document Storage<br/>(document_storage.go)
-    participant DB as SQLite Database
+    participant DB as BadgerDB
 
-    Note over Crawler,DB: Content Flow: HTML → Generic Metadata + RawHTML → Parse Inline → Markdown + Metadata → Storage
+    Note over Crawler,DB: Content Flow: URL → HTML → Markdown + Metadata → Storage (Immediate Save)
 
     Crawler->>Scraper: ScrapeURL(url)
-    Note right of Scraper: Extract generic metadata<br/>(title, Open Graph, links)
-    Scraper-->>Crawler: ScrapeResult<br/>(RawHTML, Markdown, Metadata)
+    Note right of Scraper: Extract content via<br/>HTTP or ChromeDP
+    Scraper-->>Crawler: ScrapeResult<br/>(HTML, Markdown, Metadata, Links)
 
-    Crawler->>Transformer: CrawlResult with RawHTML
-    Note right of Transformer: Parse HTML inline<br/>using shared helpers
+    Crawler->>Transform: HTMLToMarkdown(html, baseURL)
+    Note right of Transform: Use html-to-markdown library<br/>Fallback: stripHTMLTags()
+    Transform-->>Crawler: Markdown string
 
-    Transformer->>Helpers: CreateDocument(html)
-    Helpers-->>Transformer: goquery.Document
-    Transformer->>Helpers: ExtractTextFromDoc(doc, selectors)
-    Helpers-->>Transformer: IssueKey
-    Transformer->>Helpers: ExtractCleanedHTML(doc, selectors)
-    Helpers-->>Transformer: Description HTML
-    Transformer->>Helpers: ExtractDateFromDoc(doc, selectors)
-    Helpers-->>Transformer: CreatedDate
+    Crawler->>Persister: CreateDocument(result)
+    Note right of Persister: Build Document struct:<br/>- ContentMarkdown (primary)<br/>- Metadata (from scrape)<br/>- URL, timestamps
 
-    Transformer->>Transformer: Validate critical fields<br/>(IssueKey, Summary)
-    Transformer->>Helper: convertHTMLToMarkdown(HTML, baseURL)
-    Note right of Helper: Use html-to-markdown library<br/>Fallback: stripHTMLTags()
-    Helper-->>Transformer: Markdown string
-
-    Transformer->>Transformer: Build JiraMetadata struct<br/>(issue_key, project_key,<br/>status, priority, etc.)
-    Transformer->>Transformer: Call metadata.ToMap()<br/>Convert to map[string]interface{}
-
-    Transformer->>Transformer: Create Document:<br/>- ContentMarkdown (primary)<br/>- Metadata (structured JSON)<br/>- URL, timestamps
-
-    Transformer->>Storage: SaveDocument(doc)
+    Persister->>Storage: SaveDocument(doc)
     Storage->>Storage: Serialize metadata to JSON
-    Storage->>DB: INSERT/UPDATE documents table
-    Note right of DB: Store ContentMarkdown + Metadata JSON<br/>FTS5 index for full-text search
+    Storage->>DB: Upsert document
+    Note right of DB: Store ContentMarkdown + Metadata JSON<br/>Immediate availability for search
 
     Note over Crawler,DB: Query Pattern: Filter by Metadata → Reason from Markdown
 ```
@@ -88,112 +72,106 @@ sequenceDiagram
 ### Pipeline Components
 
 **1. Crawler Service** (`internal/services/crawler/service.go`)
-- Fetches HTML pages from Jira, Confluence using authenticated HTTP client
-- Stores raw HTML in `CrawlResult` objects
+- Fetches HTML pages from web sources using authenticated HTTP client
+- Coordinates scraping, content processing, and document persistence
 - Respects rate limits and handles authentication
+- Saves documents immediately after successful crawls (no deferred processing)
 
 **2. HTML Scraper** (`internal/services/crawler/html_scraper.go`)
 - Extracts generic metadata from HTML pages (title, description, Open Graph, Twitter Card, JSON-LD)
 - Generates markdown representation using html-to-markdown conversion
 - Discovers links for crawling
-- Produces `ScrapeResult` with RawHTML, Markdown, Metadata, and Links
+- Produces `ScrapeResult` with HTML, Markdown, Metadata, and Links
 
-**3. Shared Parsing Helpers** (`internal/services/crawler/helpers.go`)
-- `CreateDocument()` - Creates goquery.Document from HTML string for CSS selector-based extraction
-- `ExtractTextFromDoc()` - Tries multiple selectors in priority order, returns first match
-- `ExtractMultipleTextsFromDoc()` - Collects text from all matching elements (for arrays)
-- `ExtractCleanedHTML()` - Extracts and cleans HTML from selectors (removes UI elements)
-- `ExtractDateFromDoc()` - Extracts dates with RFC3339 normalization
-- `ParseJiraIssueKey()`, `ParseConfluencePageID()`, `ParseSpaceKey()` - Regex-based ID extraction
-- `NormalizeStatus()` - Status normalization for canonical forms
-- Used by transformers for source-specific metadata extraction
+**3. Hybrid Scraper** (`internal/services/crawler/hybrid_scraper.go`)
+- Combines HTTP and ChromeDP (headless Chrome) scraping strategies
+- Handles JavaScript-rendered content via ChromeDP
+- Falls back to HTTP scraping for simple pages
+- Manages browser pool for efficient resource usage
 
-**4. Transformers** (`internal/services/atlassian/jira_transformer.go`, `confluence_transformer.go`)
-- Subscribe to `EventCollectionTriggered` event (published every 5 minutes by scheduler)
-- Parse RawHTML directly using CSS selectors and shared helpers from `crawler/helpers.go`
-- Extract source-specific metadata (IssueKey, ProjectKey, Status, Priority for Jira; PageID, SpaceKey, Author for Confluence)
-- Validate critical fields (IssueKey/Summary for Jira, PageID/PageTitle for Confluence)
-- Convert HTML descriptions/content to Markdown
-- Build typed metadata structs and convert to maps
-- Save normalized `Document` structs to storage
+**4. Content Processor** (`internal/services/crawler/content_processor.go`)
+- Processes raw HTML content into structured data
+- Extracts main content vs navigation/UI elements
+- Handles various content types and formats
 
-**5. HTML-to-Markdown Conversion** (`internal/services/atlassian/helpers.go`)
-- `convertHTMLToMarkdown()` uses `github.com/JohannesKaufmann/html-to-markdown` library
+**5. Document Persister** (`internal/services/crawler/document_persister.go`)
+- Creates `Document` structs from crawl results
+- Handles deduplication via URL-based source IDs
+- Coordinates with storage layer for immediate persistence
+
+**6. Transform Service** (`internal/services/transform/service.go`)
+- `HTMLToMarkdown()` uses `github.com/JohannesKaufmann/html-to-markdown` library
 - Takes baseURL parameter for resolving relative links
 - Fallback to `stripHTMLTags()` if conversion fails
-- Logs conversion quality metrics (input/output lengths, warnings)
+- Logs conversion quality metrics (input/output lengths)
 
-**6. Document Storage** (`internal/storage/sqlite/document_storage.go`)
+**7. Document Storage** (`internal/storage/badger/document_storage.go`)
 - Smart upsert logic: preserves full content when upserting metadata-only documents
 - Serializes metadata to JSON before storage
-- Creates FTS5 full-text search index on title + content_markdown
+- Uses BadgerDB (via badgerhold) for persistence
 - Deserializes metadata JSON on read
+
+**8. Additional Crawler Components**
+- `link_extractor.go` - Extracts and filters links for recursive crawling
+- `filters.go` - URL pattern filtering (include/exclude patterns)
+- `rate_limiter.go` - Per-domain rate limiting
+- `chromedp_pool.go` - Browser instance pool management
+- `image_storage.go` - Image download and storage
+- `types.go` - Type definitions for crawler data structures
 
 ## 4. Markdown Storage Pipeline
 
-Quaero converts HTML content to markdown format for LLM consumption and search indexing. The pipeline consists of five stages that ensure robust markdown generation and storage.
+Quaero converts HTML content to markdown format for LLM consumption and search indexing. The pipeline uses immediate document persistence for instant availability.
 
 ### Pipeline Stages
 
-**1. HTML Scraping** (`html_scraper.go`)
+**1. HTML Scraping** (`html_scraper.go`, `hybrid_scraper.go`)
 
-The HTML scraper fetches and processes HTML content:
-- Fetches HTML content from URLs via authenticated HTTP client
+The scraper fetches and processes HTML content:
+- Fetches HTML content from URLs via authenticated HTTP client or ChromeDP
 - Converts HTML to markdown using `github.com/JohannesKaufmann/html-to-markdown`
-- Stores markdown in `ScrapeResult.Markdown` field (line 384)
+- Stores markdown in `ScrapeResult.Markdown` field
 - Uses base URL for resolving relative links in markdown
 - Generates markdown for all successful page scrapes
 
 **2. Metadata Storage** (`types.go`)
 
 The `ToCrawlResult()` method converts scrape results to crawler results:
-- Stores markdown in `CrawlResult.Metadata["markdown"]` (line 155)
-- Also stores HTML in `metadata["html"]` for transformer parsing
+- Stores markdown in `CrawlResult.Metadata["markdown"]`
+- Also stores HTML in `metadata["html"]` for additional processing
 - Stores plain text in `metadata["text_content"]` for fallback
-- Body field contains HTML (not markdown) for backward compatibility with transformers
 - All metadata fields preserved during conversion
 
 **3. Metadata Propagation** (`service.go`)
 
 The crawler service ensures metadata flows through the pipeline:
-- Executes HTML scraping via `scraper.ScrapeURL()` (lines 1148-1158)
-- Converts `ScrapeResult` to `CrawlResult` via `ToCrawlResult()` (line 1160)
-- Merges scrape metadata (including markdown) into `item.Metadata` (lines 1219-1226)
-- Propagates metadata to final `CrawlResult.Metadata` (lines 986-998)
+- Executes HTML scraping via scraper
+- Converts `ScrapeResult` to `CrawlResult` via `ToCrawlResult()`
+- Merges scrape metadata (including markdown) into `item.Metadata`
 - Markdown flows: `ScrapeResult` → `CrawlResult` → `item.Metadata` → final result
 - Preserves job-specific metadata (job_id, source_type, entity_type)
 
-**4. Document Transformation** (`jira_transformer.go`, `confluence_transformer.go`)
+**4. Document Persistence** (`document_persister.go`, `document_storage.go`)
 
-Transformers extract and convert content for document creation:
-- Extract HTML from `CrawlResult` via `selectResultBody()` helper
-- **Jira**: Extract description HTML (line 250), convert to markdown (line 345), store in document (line 429)
-- **Confluence**: Extract content HTML (line 255), convert to markdown (line 325), store in document (line 398)
-- Use `convertHTMLToMarkdown()` helper with base URL for link resolution
-- Fallback to `stripHTMLTags()` if conversion produces empty output (configurable)
-- Log conversion quality metrics for troubleshooting
-
-**5. Database Persistence** (`document_storage.go`)
-
-The storage layer handles markdown persistence:
-- `SaveDocument()` persists `doc.ContentMarkdown` to `content_markdown` column (line 84)
-- Smart upsert preserves full content when upserting metadata-only documents (lines 56-61)
-- `scanDocument()` retrieves `contentMarkdown` from database (line 544)
-- Populates `doc.ContentMarkdown` field on read (line 560)
-- Batch scanning retrieves markdown for multiple documents (lines 628-629)
+Documents are created and saved immediately after crawling:
+- Document persister creates `Document` structs from crawl results
+- Transform service converts HTML to markdown with link resolution
+- Storage layer handles persistence via BadgerDB
+- Smart upsert preserves full content when upserting metadata-only documents
+- Documents are immediately available for search and chat
 
 ### Data Flow Diagram
 
 ```
-HTML Page → HTMLScraper → ScrapeResult.Markdown
-          ↓
-          ToCrawlResult() → CrawlResult.Metadata["markdown"]
-          ↓
-          Metadata Merge → item.Metadata["markdown"]
-          ↓
-          Transformer → convertHTMLToMarkdown()
-          ↓
-          Document.ContentMarkdown → Database (content_markdown column)
+URL → Scraper (HTTP/ChromeDP)
+    ↓
+ScrapeResult (HTML, Markdown, Metadata)
+    ↓
+ToCrawlResult() → CrawlResult.Metadata["markdown"]
+    ↓
+Document Persister → Transform Service (HTMLToMarkdown)
+    ↓
+Document.ContentMarkdown → BadgerDB (immediate save)
 ```
 
 ### Configuration Options
@@ -214,30 +192,22 @@ HTML Page → HTMLScraper → ScrapeResult.Markdown
 
 ### Conversion Helper Functions
 
-**convertHTMLToMarkdown()** (`helpers.go` lines 198-266)
+**HTMLToMarkdown()** (`internal/services/transform/service.go`)
 
 Main conversion function with quality logging:
-- Creates markdown converter with base URL (line 209)
-- Converts HTML to markdown using library (line 210)
-- Handles conversion errors with fallback (lines 211-220)
-- Detects empty output and applies fallback if enabled (lines 232-252)
-- Logs quality metrics: input/output lengths, compression ratio, warnings (lines 222-263)
+- Creates markdown converter with base URL
+- Converts HTML to markdown using `html-to-markdown` library
+- Handles conversion errors with fallback
+- Detects empty output and applies fallback automatically
+- Logs quality metrics: input/output lengths
 
-**stripHTMLTags()** (`helpers.go` lines 179-193)
+**stripHTMLTags()** (`internal/services/transform/service.go`)
 
 Fallback function for failed conversions:
 - Removes HTML tags using regex
 - Cleans up whitespace
-- Decodes HTML entities
+- Decodes HTML entities (amp, lt, gt, quot, nbsp)
 - Returns plain text as last resort
-
-**selectResultBody()** (`helpers.go` lines 107-140)
-
-Helper for extracting HTML from crawler results:
-- Prioritizes `metadata["html"]` for cleaned HTML parsing
-- Falls back to `metadata["response_body"]` for backward compatibility
-- Uses `result.Body` if it looks like HTML
-- Does NOT fall back to markdown (preserves HTML for parsers)
 
 ### Troubleshooting
 
@@ -255,20 +225,17 @@ grep "Markdown conversion produced empty output" service.log
 ```
 
 **Verify Database Storage:**
-```sql
--- Check markdown content in database
-SELECT id, source_type, source_id, title,
-       LENGTH(content_markdown) as markdown_length,
-       SUBSTR(content_markdown, 1, 100) as markdown_preview
-FROM documents
-WHERE source_type IN ('jira', 'confluence')
-LIMIT 10;
+
+Use the Quaero API to query documents:
+```bash
+# Get documents with markdown content
+curl -X GET "http://localhost:8080/api/documents?limit=10"
 ```
 
 **Expected Results:**
-- `markdown_length` should be > 0 for most documents
-- `markdown_preview` should show markdown syntax (`#`, `*`, `[links]()`)
-- No HTML tags (`<div>`, `<p>`) in markdown preview
+- `content_markdown` should be non-empty for most documents
+- Markdown content should show markdown syntax (`#`, `*`, `[links]()`)
+- No HTML tags (`<div>`, `<p>`) in markdown content
 
 **Quality Metrics:**
 
@@ -281,22 +248,15 @@ The pipeline logs conversion quality for troubleshooting:
 
 ### Known Limitations
 
-**1. Markdown in CrawlResult.Metadata**
+**1. Empty Output Fallback**
 
-The markdown stored in `CrawlResult.Metadata["markdown"]` is generated by the initial HTML scraper and may differ from the final document markdown because:
-- Transformers re-convert HTML using source-specific content extraction
-- Different HTML regions may be selected (description vs full page content)
-- This is by design - scraped markdown is generic, document markdown is source-specific
+The empty output fallback (stripping HTML tags) is automatic when markdown conversion produces empty output.
 
-**2. Empty Output Fallback**
-
-The `enableEmptyOutputFallback` configuration is currently hardcoded in transformers. Future enhancement: make this configurable per-source or per-job.
-
-**3. Link Resolution**
+**2. Link Resolution**
 
 Relative links are resolved using base URL, but:
 - Links may still be broken if they reference dynamic content
-- Some Jira/Confluence internal links may not work outside the platform
+- Some internal links may not work outside the original platform
 - Future enhancement: validate and mark broken links in markdown
 
 ## 5. Document Model
@@ -359,12 +319,12 @@ type JiraMetadata struct {
 }
 ```
 
-**Usage:** Populated by `jira_transformer.go` parseJiraIssue method (lines 192-437) by parsing HTML inline using shared helpers
+**Usage:** Populated when crawling Jira pages with source-specific metadata extraction
 
-**Query Examples:**
-- Filter by status: `WHERE json_extract(metadata, '$.status') = 'In Progress'`
-- Filter by priority: `WHERE json_extract(metadata, '$.priority') = 'High'`
-- Filter by date range: `WHERE json_extract(metadata, '$.created_date') >= '2024-01-01'`
+**Query Examples (via API):**
+- Filter by status: Use API query parameters or search by metadata fields
+- Filter by priority: Search documents with priority metadata
+- Filter by date range: Use created_at/updated_at filters
 
 ### ConfluenceMetadata (lines 65-76)
 
@@ -382,12 +342,12 @@ type ConfluenceMetadata struct {
 }
 ```
 
-**Usage:** Populated by `confluence_transformer.go` parseConfluencePage method (lines 194-406) by parsing HTML inline using shared helpers
+**Usage:** Populated when crawling Confluence pages with source-specific metadata extraction
 
-**Query Examples:**
-- Filter by space: `WHERE json_extract(metadata, '$.space_key') = 'TEAM'`
-- Filter by author: `WHERE json_extract(metadata, '$.author') = 'alice'`
-- Filter by content type: `WHERE json_extract(metadata, '$.content_type') = 'page'`
+**Query Examples (via API):**
+- Filter by space: Use API query parameters to filter by space_key
+- Filter by author: Search documents with author metadata
+- Filter by content type: Filter by page vs blogpost content types
 
 ### GitHubMetadata (lines 78-88)
 
@@ -416,141 +376,111 @@ type CrossSourceMetadata struct {
 }
 ```
 
-**Status:** Defined but **currently unpopulated** by transformers (see section 10 on limitations)
+**Status:** Defined but **currently unpopulated** (future enhancement for cross-reference tracking)
 
 ## 6. HTML to Markdown Conversion
 
-The conversion process is implemented in `internal/services/atlassian/helpers.go`:
+The conversion process is implemented in `internal/services/transform/service.go`:
 
-### convertHTMLToMarkdown() (lines 47-63)
+### HTMLToMarkdown()
 
 ```go
-func convertHTMLToMarkdown(html string, baseURL string, logger arbor.ILogger) string {
+func (s *Service) HTMLToMarkdown(html string, baseURL string) (string, error) {
     if html == "" {
-        return ""
+        return "", nil
     }
 
     // Try HTML-to-markdown conversion
     mdConverter := md.NewConverter(baseURL, true, nil)
     converted, err := mdConverter.ConvertString(html)
     if err != nil {
-        logger.Warn().Err(err).Msg("Failed to convert HTML to markdown, using fallback")
+        s.logger.Warn().Err(err).Msg("HTML to markdown conversion failed, using fallback")
         // Fallback: strip HTML tags
-        return stripHTMLTags(html)
+        stripped := stripHTMLTags(html)
+        return stripped, nil
     }
 
-    return converted
+    // Check for empty output
+    if strings.TrimSpace(converted) == "" && html != "" {
+        stripped := stripHTMLTags(html)
+        return stripped, nil
+    }
+
+    return converted, nil
 }
 ```
 
 **Key Features:**
 
-- Uses `github.com/JohannesKaufmann/html-to-markdown` library (imported as `md` on line 8)
+- Uses `github.com/JohannesKaufmann/html-to-markdown` library
 - Takes `baseURL` parameter to resolve relative links in markdown output
-- Fallback mechanism: if conversion fails, calls `stripHTMLTags()` to remove HTML tags
+- Fallback mechanism: if conversion fails or produces empty output, calls `stripHTMLTags()`
 - Logs warnings on conversion failures for debugging
-- Enhanced with quality logging (see section 10)
 
-### stripHTMLTags() Fallback (lines 34-45)
+### stripHTMLTags() Fallback
 
 ```go
-func stripHTMLTags(html string) string {
+func stripHTMLTags(htmlStr string) string {
     // Remove HTML tags using regex
     re := regexp.MustCompile(`<[^>]*>`)
-    stripped := re.ReplaceAllString(html, "")
+    stripped := re.ReplaceAllString(htmlStr, "")
 
     // Clean up multiple whitespaces
     spaceRe := regexp.MustCompile(`\s+`)
     cleaned := spaceRe.ReplaceAllString(stripped, " ")
 
+    // Decode HTML entities
+    cleaned = strings.ReplaceAll(cleaned, "&amp;", "&")
+    cleaned = strings.ReplaceAll(cleaned, "&lt;", "<")
+    cleaned = strings.ReplaceAll(cleaned, "&gt;", ">")
+    cleaned = strings.ReplaceAll(cleaned, "&quot;", "\"")
+    cleaned = strings.ReplaceAll(cleaned, "&#39;", "'")
+    cleaned = strings.ReplaceAll(cleaned, "&nbsp;", " ")
+
     return strings.TrimSpace(cleaned)
 }
 ```
 
-**Usage:** Safety net when markdown conversion fails - strips all HTML tags and cleans whitespace
+**Usage:** Safety net when markdown conversion fails - strips all HTML tags, cleans whitespace, and decodes HTML entities
 
 ## 7. HTML Parsing Details
 
 ### HTML Parsing Architecture
 
-**Generic Parsing:** `html_scraper.go` (lines 536-636)
+**Generic Parsing:** `html_scraper.go`
 - Extracts standard metadata (title, description, Open Graph, Twitter Card, JSON-LD, canonical URL) using goquery
 - Generates markdown representation of page content
 - Discovers links for crawling
 - Works with any HTML source without customization
 
-**Specialized Parsing:** Transformers parse RawHTML directly for source-specific fields
-- **Jira Transformer** (`jira_transformer.go` parseJiraIssue method, lines 192-437):
-  - Extracts IssueKey, ProjectKey, Summary, Status, Priority, Assignee, Reporter, Labels, Components
-  - Uses CSS selectors with multiple fallbacks for resilience against UI changes
-  - Validates critical fields (IssueKey, Summary)
-  - Parses dates and normalizes status values
+**Hybrid Scraping:** `hybrid_scraper.go`
+- Combines HTTP and ChromeDP scraping strategies
+- Uses ChromeDP for JavaScript-rendered content
+- Falls back to HTTP scraping for simple pages
+- Determines strategy based on page requirements
 
-- **Confluence Transformer** (`confluence_transformer.go` parseConfluencePage method, lines 194-406):
-  - Extracts PageID, PageTitle, SpaceKey, SpaceName, Author, Version, ContentType
-  - Uses CSS selectors with multiple fallbacks for resilience against UI changes
-  - Validates critical fields (PageID, PageTitle)
-  - Parses version numbers and determines content type
+**Content Processing:** `content_processor.go`
+- Processes raw HTML content into structured data
+- Extracts main content vs navigation/UI elements
+- Handles various content types and formats
 
-**Shared Helpers:** `crawler/helpers.go` provides reusable extraction utilities:
-- `CreateDocument()` - Creates goquery.Document from HTML string for CSS selector-based extraction
-- `ExtractTextFromDoc()` - Tries multiple selectors in priority order, returns first match
-- `ExtractMultipleTextsFromDoc()` - Collects text from all matching elements (for labels, components, etc.)
-- `ExtractCleanedHTML()` - Extracts and cleans HTML from selectors, removes UI elements (buttons, toolbars, comments)
-- `ExtractDateFromDoc()` - Extracts dates with RFC3339 normalization, handles multiple date formats
-- `ParseJiraIssueKey()` - Regex-based extraction of Jira issue keys (pattern: `[A-Z][A-Z0-9]+-\d+`)
-- `ParseConfluencePageID()` - Regex-based extraction of Confluence page IDs from URLs
-- `ParseSpaceKey()` - Regex-based extraction of Confluence space keys from URLs
-- `NormalizeStatus()` - Status normalization to canonical forms (e.g., "TODO" → "To Do")
+**Link Extraction:** `link_extractor.go`
+- Extracts links from HTML content
+- Normalizes URLs and resolves relative paths
+- Filters links based on include/exclude patterns
 
 ### Design Philosophy
 
-- **html_scraper remains generic and reusable** for any HTML source
-- **Source-specific extraction is handled by transformers** using shared helpers
-- This keeps the crawler layer clean while allowing specialized metadata extraction where needed
-- Shared helpers prevent code duplication and ensure consistent extraction behavior
-
-### Why Inline Parsing in Transformers?
-
-**Architectural Decision:**
-- Jira/Confluence-specific fields are not available in standard HTML meta tags
-- Extraction requires CSS selectors targeting specific page structure elements
-- Multiple fallback selectors provide resilience against UI changes
-- Inline parsing in transformers eliminates unnecessary abstraction layer
-
-**Benefits:**
-- **Self-contained:** Each transformer has all the logic it needs for its source type
-- **Reduced indirection:** No jumping between parser and transformer files
-- **Easier debugging:** All extraction logic for a source is in one place
-- **Shared utilities:** Helper functions remain reusable across transformers
-- **Future-proof:** New sources (GitHub, etc.) can follow the same pattern
-
-**Example: Jira Issue Key Extraction**
-```go
-// Extract IssueKey with multiple fallbacks
-issueKey := crawler.ExtractTextFromDoc(doc, []string{
-    `[data-test-id="issue.views.issue-base.foundation.breadcrumbs.current-issue.item"]`,
-    `#key-val`,
-    `#issuekey-val`,
-})
-// Fallback: Parse from page title using regex
-if issueKey == "" {
-    titleText := doc.Find("title").First().Text()
-    issueKey = crawler.ParseJiraIssueKey(titleText)
-}
-```
-
-This pattern:
-1. Tries modern data-test-id selectors first (most reliable)
-2. Falls back to legacy ID selectors (#key-val)
-3. Ultimate fallback: regex parsing from title tag
-4. Ensures extraction works across different Jira versions and UI updates
+- **HTML scraper is generic and reusable** for any HTML source
+- **Content processing handles structure extraction** without source-specific logic
+- **Immediate document persistence** eliminates deferred processing complexity
+- This keeps the crawler layer clean and efficient
 
 ## 8. Storage Implementation
 
-The document storage layer (`internal/storage/sqlite/document_storage.go`) handles persistence:
+The document storage layer (`internal/storage/badger/document_storage.go`) handles persistence using BadgerDB via the badgerhold wrapper.
 
-### Smart Upsert Logic (lines 49-72)
+### Smart Upsert Logic
 
 ```go
 // Smart upsert: If existing doc has DetailLevel="full" and new doc is "metadata",
@@ -561,17 +491,17 @@ The document storage layer (`internal/storage/sqlite/document_storage.go`) handl
 
 - Prevents metadata-only updates from overwriting full content
 - Detects conflicts and preserves richer content
-- Logs upsert operations with detail level information
+- Uses BadgerDB's transaction support for consistency
 
-### Metadata Serialization (line 35)
+### Metadata Serialization
 
 ```go
 metadataJSON, err := json.Marshal(doc.Metadata)
 ```
 
-**Storage Format:** Metadata map is serialized to JSON before INSERT/UPDATE
+**Storage Format:** Metadata map is serialized to JSON before storage
 
-### Metadata Deserialization (lines 584-588)
+### Metadata Deserialization
 
 ```go
 if metadataStr != "" {
@@ -583,20 +513,12 @@ if metadataStr != "" {
 
 **Read Pattern:** JSON string is unmarshalled back into `map[string]interface{}`
 
-### FTS5 Full-Text Search
+### Full-Text Search
 
-The storage layer creates a FTS5 virtual table for fast full-text search:
-
-```sql
-CREATE VIRTUAL TABLE documents_fts USING fts5(title, content_markdown);
-```
-
-**Query Pattern:**
-```sql
-SELECT * FROM documents WHERE documents.id IN (
-    SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'search query'
-);
-```
+BadgerDB storage supports full-text search via:
+- Prefix-based key scanning for source type filtering
+- Metadata field queries via badgerhold query API
+- Content search through document retrieval and filtering
 
 ## 9. Two-Step Query Pattern
 
@@ -604,21 +526,21 @@ The Markdown+Metadata architecture enables efficient AI-powered query processing
 
 ### Step 1: Filter Documents Using Metadata
 
-Use SQL WHERE clauses on JSON fields to narrow down relevant documents:
+Use the Quaero API or search service to filter documents:
 
-```sql
--- Find high-priority in-progress Jira issues
-SELECT * FROM documents
-WHERE source_type = 'jira'
-  AND json_extract(metadata, '$.status') = 'In Progress'
-  AND json_extract(metadata, '$.priority') = 'High';
+```bash
+# Find documents by source type
+curl "http://localhost:8080/api/documents?source_type=jira"
 
--- Find Confluence pages in "TEAM" space modified last week
-SELECT * FROM documents
-WHERE source_type = 'confluence'
-  AND json_extract(metadata, '$.space_key') = 'TEAM'
-  AND json_extract(metadata, '$.last_modified') >= date('now', '-7 days');
+# Search documents with specific tags
+curl "http://localhost:8080/api/documents?tags=high-priority"
 ```
+
+The search service supports:
+- Source type filtering
+- Tag-based filtering
+- Date range queries
+- Full-text search across content
 
 ### Step 2: Reason from Markdown Content
 
@@ -626,8 +548,8 @@ Once filtered, analyze the `content_markdown` field with LLM:
 
 ```python
 # Pseudocode
-filtered_docs = db.query("SELECT * FROM documents WHERE ...")
-markdown_texts = [doc.content_markdown for doc in filtered_docs]
+filtered_docs = api.get_documents(source_type="jira", tags=["high-priority"])
+markdown_texts = [doc["content_markdown"] for doc in filtered_docs]
 
 # Send to LLM for reasoning
 prompt = f"""
@@ -645,70 +567,47 @@ response = llm.generate(prompt)
 **Benefits:**
 
 - Filter first reduces LLM token usage (only send relevant docs)
-- Metadata enables precise filtering (status, priority, dates)
+- Metadata enables precise filtering (source type, tags, dates)
 - Markdown provides clean text for reasoning (no HTML noise)
 - Citations easy to add (include `doc.url` and `doc.source_id`)
 
 ## 10. Known Limitations
 
-### 1. Job Results Unavailable After Restart
+### 1. CrossSourceMetadata Not Populated
 
-**Issue:** `CrawlResult` objects are only stored in-memory during job execution and are not persisted to the database.
-
-**Impact:** After service restart, `getJobResults()` in `atlassian/helpers.go` (lines 21-32) returns empty slice with warning.
-
-**Workaround:** Re-crawl to regenerate results.
-
-**Future Fix:** Persist `CrawlResult` objects to enable post-restart transformation.
-
-### 2. CrossSourceMetadata Not Populated
-
-**Issue:** `CrossSourceMetadata` struct is defined but never populated by transformers.
+**Issue:** `CrossSourceMetadata` struct is defined but never populated.
 
 **Impact:** No extraction of cross-references from content (Jira keys, GitHub PR numbers, Confluence page IDs).
 
-**Location:** `internal/models/document.go` lines 90-95
+**Location:** `internal/models/document.go`
 
-**Future Fix:** Implement cross-reference extraction using `internal/services/identifiers/extractor.go` service.
+**Future Fix:** Implement cross-reference extraction service.
 
-### 3. Limited Markdown Conversion Quality Logging
+### 2. Markdown Output Validation
 
-**Issue:** Before recent enhancements, `convertHTMLToMarkdown()` only logged errors, not conversion quality metrics.
-
-**Impact:** No visibility into conversion success rate, size ratios, or empty outputs.
-
-**Fix:** Enhanced logging added (see `docs/markdown_conversion_quality.md` for details).
-
-### 4. No Markdown Output Validation
-
-**Issue:** Transformers don't validate that markdown conversion produced meaningful output (could be empty or whitespace-only).
+**Issue:** The system doesn't validate that markdown conversion produced meaningful output (could be empty or whitespace-only).
 
 **Impact:** Empty markdown documents may be stored, reducing search quality.
 
-**Future Fix:** Add validation checks after markdown conversion (see enhancements in transformers).
+**Mitigation:** The transform service automatically falls back to HTML stripping when markdown conversion produces empty output.
 
 ## 11. Future Enhancements
 
 ### High Priority
 
-1. **Persist CrawlResult Objects**
-   - Enable post-restart transformation
-   - Store raw HTML/JSON responses in database
-   - Add background job to process stored results
-
-2. **Populate CrossSourceMetadata**
-   - Use `identifiers/extractor.go` service to extract cross-references
+1. **Populate CrossSourceMetadata**
+   - Extract cross-references from document content
    - Parse Jira keys (pattern: `[A-Z][A-Z0-9]+-\d+`)
    - Parse GitHub PR references (pattern: `#\d+` or full URLs)
    - Parse Confluence page IDs from URLs or titles
 
-3. **Add Markdown Quality Metrics**
+2. **Add Markdown Quality Metrics**
    - Log conversion success rate across documents
    - Track HTML → Markdown size ratios
    - Monitor fallback usage frequency
    - Alert on high failure rates
 
-4. **Implement Markdown Output Validation**
+3. **Implement Markdown Output Validation**
    - Check for empty or whitespace-only output
    - Validate minimum content length (e.g., > 10 characters)
    - Warn on suspiciously short outputs
@@ -716,44 +615,43 @@ response = llm.generate(prompt)
 
 ### Medium Priority
 
-5. **Incremental Crawling with DetailLevel**
+4. **Incremental Crawling with DetailLevel**
    - Initial crawl: `DetailLevel="metadata"` (fast discovery)
    - Follow-up: `DetailLevel="full"` (selective deep crawl)
    - Prioritize high-value documents for full content
 
-6. **Metadata Completeness Scoring**
+5. **Metadata Completeness Scoring**
    - Calculate percentage of optional fields populated
    - Track metadata quality over time
    - Identify sources with incomplete data
 
-7. **Custom HTML Conversion Rules**
-   - Add Jira-specific macro handling
+6. **Custom HTML Conversion Rules**
    - Preserve code blocks with language hints
    - Handle embedded media (images, videos)
    - Improve table formatting in markdown
 
 ### Low Priority
 
-8. **Bidirectional Reference Tracking**
+7. **Bidirectional Reference Tracking**
    - Store both "references" and "referenced_by" relationships
    - Enable graph queries (e.g., "impact analysis")
    - Build document relationship maps
 
-9. **Cross-Reference API Endpoints**
+8. **Cross-Reference API Endpoints**
    - `/api/documents/{id}/references` - Get outgoing references
    - `/api/documents/{id}/referenced-by` - Get incoming references
    - `/api/documents/{id}/related` - Find related documents
 
-10. **UI Visualization of Relationships**
-    - Document graph visualization
-    - Link highlights in document viewer
-    - Related documents sidebar
+9. **UI Visualization of Relationships**
+   - Document graph visualization
+   - Link highlights in document viewer
+   - Related documents sidebar
 
 ## 12. Metadata Schema Evolution
 
 The `ToMap()` pattern enables schema evolution without breaking changes:
 
-### How It Works (lines 109-158 in `models/document.go`)
+### How It Works (`models/document.go`)
 
 ```go
 // Each metadata type has a ToMap() method
@@ -1152,29 +1050,19 @@ request_timeout = 30
 
 ## 15. Immediate Document Saving During Crawling
 
-The crawler service now saves documents immediately after successful page crawls, eliminating the 5+ minute delay previously caused by the transformer-based approach. This provides instant document availability for search and chat while maintaining backward compatibility with transformers for metadata enhancement.
+The crawler service saves documents immediately after successful page crawls, providing instant document availability for search and chat.
 
-### Architecture Change
+### Architecture
 
-**Previous Flow (Async, Deferred):**
-1. Crawler fetches and stores raw HTML in memory
-2. Scheduler publishes `EventCollectionTriggered` every 5 minutes
-3. Transformers (Jira/Confluence) process stored results
-4. Transformers create documents with markdown
-5. Documents available after 5+ minute delay
-
-**New Flow (Immediate, Synchronous):**
+**Flow:**
 1. Crawler fetches HTML and extracts markdown
-2. **NEW**: Create document immediately after successful crawl
-3. **NEW**: Save document to database synchronously
+2. Create document immediately after successful crawl
+3. Save document to database synchronously
 4. Document available within milliseconds
-5. Transformers can still enhance documents later
 
 ### Implementation Details
 
-**Location:** `internal/services/crawler/service.go` lines 871-964 (in `workerLoop()`)
-
-**Trigger:** After result is stored in memory and before progress update
+**Location:** `internal/services/crawler/service.go` and `document_persister.go`
 
 **Conditions for Saving:**
 1. `result.Error == ""` (successful crawl)
@@ -1185,7 +1073,7 @@ The crawler service now saves documents immediately after successful page crawls
 
 **Source Type Extraction:**
 - **Priority 1:** `item.Metadata["source_type"]` (from job metadata)
-- **Priority 2:** URL pattern matching (e.g., "atlassian.net/wiki" → "confluence")
+- **Priority 2:** URL pattern matching
 - **Default:** "crawler" if unable to determine
 
 **Title Extraction:**
@@ -1211,8 +1099,6 @@ doc := models.Document{
 
 ### Deduplication Strategy
 
-**Database UNIQUE Constraint:** `(source_type, source_id)`
-
 **Using URL as SourceID:**
 - Same URL crawled multiple times → same `source_id`
 - Database upsert behavior automatically handles duplicates
@@ -1225,68 +1111,6 @@ doc := models.Document{
 - Crawl job continues processing other URLs
 - Failed document saves don't affect crawler progress
 
-**Logging:**
-```go
-// On success (INFO level):
-s.logger.Info().
-    Str("job_id", jobID).
-    Str("document_id", doc.ID).
-    Str("title", doc.Title).
-    Str("url", doc.URL).
-    Int("markdown_length", len(doc.ContentMarkdown)).
-    Str("source_type", doc.SourceType).
-    Msg("Document saved immediately after crawling")
-
-// On failure (ERROR level):
-s.logger.Error().
-    Err(err).
-    Str("job_id", jobID).
-    Str("document_id", doc.ID).
-    Str("title", doc.Title).
-    Str("url", doc.URL).
-    Msg("Failed to save document immediately after crawling")
-```
-
-**Database Persistence:** Success/failure messages are persisted to job logs (sampled: every 10th document to avoid bloat)
-
-### Relationship with Transformers
-
-**Transformers Remain Operational:**
-- Jira/Confluence transformers continue to run on schedule
-- Extract structured metadata (issue keys, page IDs, etc.)
-- Enhance documents with source-specific data
-- Database upsert ensures no duplicates
-
-**Enhancement Workflow:**
-1. **Immediate Save:** Basic document with markdown content (instant availability)
-2. **Transformer Enhancement:** Adds structured metadata fields later
-3. **Database Upsert:** Updates existing document without duplication
-
-**Example:**
-
-```
-Time 0ms: Crawler saves document
-{
-  "id": "doc_abc123",
-  "source_type": "crawler",
-  "title": "BUG-123",
-  "content_markdown": "# Bug Description\n..."
-}
-
-Time 5min: Jira transformer enhances document
-{
-  "id": "doc_abc123",
-  "source_type": "jira",
-  "title": "BUG-123: Login fails",
-  "content_markdown": "# Bug Description\n...",
-  "metadata": {
-    "issue_key": "BUG-123",
-    "status": "In Progress",
-    "priority": "High"
-  }
-}
-```
-
 ### Performance Impact
 
 **Overhead:**
@@ -1297,12 +1121,11 @@ Time 5min: Jira transformer enhances document
 **Benefits:**
 - Documents available immediately for search
 - Chat can use documents within milliseconds
-- No 5-minute wait for transformers
 - Better user experience during crawls
 
 **Database Considerations:**
-- SQLite write performance: ~1ms for small documents
-- Mutex in DocumentStorage prevents SQLITE_BUSY errors
+- BadgerDB write performance: ~1ms for small documents
+- Transaction support ensures data consistency
 - No additional locking or concurrency management needed
 
 ### Configuration
@@ -1310,29 +1133,12 @@ Time 5min: Jira transformer enhances document
 **No Additional Config Required:**
 - Feature is always enabled during crawling
 - Relies on existing `documentStorage` dependency
-- Uses same database connection as transformers
+- Uses same database connection as other services
 
 **Dependency Injection:**
 - Added `documentStorage` field to crawler `Service` struct
 - Passed via constructor parameter
-- Initialized in `internal/app/app.go` line 244
-
-### Testing Considerations
-
-**Verify:**
-1. Documents saved immediately after crawling (query database during job)
-2. Markdown content populated correctly
-3. Source type correctly identified
-4. Title extraction works for various URL patterns
-5. Error handling doesn't crash crawler
-6. Database persistence via job logs
-7. Transformers can still update documents
-8. No duplicate documents created
-
-**Test Coverage:**
-- Unit tests in `internal/services/crawler/service_test.go`
-- Mock DocumentStorage implementation for isolation
-- Integration tests verify end-to-end flow
+- Initialized in `internal/app/app.go`
 
 ### Troubleshooting
 
@@ -1342,49 +1148,24 @@ Time 5min: Jira transformer enhances document
 1. Look for `"Document saved immediately after crawling"` INFO logs
 2. Verify markdown exists in `result.Metadata["markdown"]`
 3. Check for ERROR logs indicating save failures
-4. Query database directly: `SELECT * FROM documents WHERE url LIKE '%pattern%'`
-
-**Problem: Duplicate documents created**
-
-**Check:**
-1. Verify UNIQUE constraint on `(source_type, source_id)` exists
-2. Check that URL is being used as `source_id`
-3. Review upsert behavior in DocumentStorage
 
 **Problem: Document save errors**
 
 **Check:**
 1. ERROR logs with document details
 2. Database connection status
-3. Mutex deadlocks (unlikely but check logs)
-4. Disk space and permissions
-
-### Backward Compatibility
-
-**Transformers:**
-- No changes needed to existing transformer code
-- Continue to operate on scheduled events
-- Upsert behavior prevents conflicts
-
-**Job Execution:**
-- No changes to job configuration required
-- Works with all existing job types
-- Compatible with manual and scheduled jobs
-
-**Database Schema:**
-- Uses existing `documents` table
-- No new columns or indexes needed
-- Leverages UNIQUE constraint for deduplication
+3. Disk space and permissions
 
 ## Conclusion
 
 The Markdown+Metadata architecture provides:
 
-✅ **Unified content format** across all sources (Jira, Confluence, GitHub)
-✅ **Efficient filtering** via structured metadata (SQL queries)
-✅ **Deep reasoning** via clean markdown content (LLM-friendly)
-✅ **Schema flexibility** via JSON serialization (no migrations)
-✅ **Full-text search** via SQLite FTS5 indexes
-✅ **Future-proof design** for new sources and features
+- **Unified content format** across all sources (web, Jira, Confluence, GitHub)
+- **Efficient filtering** via structured metadata
+- **Deep reasoning** via clean markdown content (LLM-friendly)
+- **Schema flexibility** via JSON serialization (no migrations)
+- **Full-text search** via BadgerDB queries
+- **Immediate document availability** via synchronous persistence
+- **Future-proof design** for new sources and features
 
 This design balances **performance** (fast metadata filtering) with **intelligence** (markdown reasoning), enabling powerful AI-powered knowledge retrieval.
