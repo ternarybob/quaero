@@ -211,7 +211,7 @@ func NewDefaultConfig() *Config {
 			Dir: "./variables", // Default directory for variables files (./variables/*.toml)
 		},
 		Connectors: ConnectorDirConfig{
-			Dir: "./connectors", // Default directory for connector files (relative to executable)
+			Dir: "./", // Default directory for connector file (connectors.toml in executable directory)
 		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

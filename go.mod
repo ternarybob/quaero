@@ -19,6 +19,7 @@ require (
 	github.com/ternarybob/arbor v1.4.66
 	github.com/ternarybob/banner v0.0.5
 	github.com/timshannon/badgerhold/v4 v4.0.3
+	github.com/yuin/goldmark v1.7.1
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/time v0.14.0
 	google.golang.org/genai v1.34.0

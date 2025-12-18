@@ -441,12 +441,13 @@ filter_tags = ["devops-candidate"]
 | `subject` | string | No | Email subject (default: "Quaero Job Results") |
 | `body` | string | No | Plain text email body |
 | `body_html` | string | No | HTML email body |
-| `body_from_document` | string | No | Document ID to use as email body |
-| `body_from_tag` | string | No | Get latest document with tag as email body |
+| `body_from_document` | string | No | Document ID to use as email body (markdown auto-converted to HTML) |
+| `body_from_tag` | string | No | Get latest document with tag as email body (markdown auto-converted to HTML) |
 
 #### Outputs
 
-- Sends email to specified recipient
+- Sends email to specified recipient (HTML formatted with professional styling)
+- Markdown content is automatically converted to styled HTML with headings, lists, code blocks, tables
 - Logs success/failure to job logs
 
 #### Prerequisites
@@ -686,10 +687,11 @@ search_type = "text_search"
 | `prompt` | string | Yes | Natural language instruction for summary |
 | `filter_tags` | []string | Yes | Tags for filtering documents to include |
 | `api_key` | string | No | Gemini API key |
+| `output_tags` | []string | No | Additional tags to apply to the output document (useful for downstream steps) |
 
 #### Outputs
 
-- Creates new summary document
+- Creates new summary document with tags: `["summary", job-name-slug, ...job.Tags, ...output_tags]`
 - Stores aggregated content from source documents
 - Metadata: source_document_count, source_tags, model_used
 
@@ -786,10 +788,12 @@ recursion_depth = 2
 | `depth` | int | No | Search depth for follow-ups (1-10, default: 1) |
 | `breadth` | int | No | Results per search (1-5, default: 3) |
 | `api_key` | string | No | Gemini API key |
+| `output_tags` | []string | No | Additional tags to apply to output documents (useful for downstream steps) |
 
 #### Outputs
 
-- Documents with search results
+- Documents with search results tagged with: `["web_search", ...job.Tags, "date:YYYY-MM-DD", ...output_tags]`
+- Automatic date tag for filtering documents by search date
 - Metadata: query, sources, result_count, depth, breadth, search_queries
 - Sources stored as array with URL and title
 

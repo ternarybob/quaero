@@ -218,4 +218,8 @@ type StorageManager interface {
 	// LoadConnectorsFromFiles loads connectors from TOML files in the specified directory
 	// This is used to load connector configurations at startup
 	LoadConnectorsFromFiles(ctx context.Context, dirPath string) error
+
+	// LoadEmailFromFile loads email configuration from email.toml file in the specified directory
+	// This is used to load email/SMTP settings at startup
+	LoadEmailFromFile(ctx context.Context, dirPath string) error
 }

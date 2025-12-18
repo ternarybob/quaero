@@ -281,6 +281,13 @@ func (a *App) initDatabase() error {
 		a.Logger.Warn().Err(err).Msg("Failed to load connectors from files")
 	}
 
+	// Load email configuration from file
+	// This happens after variables are loaded so that email settings can reference variables
+	if err := a.StorageManager.LoadEmailFromFile(context.Background(), a.Config.Connectors.Dir); err != nil {
+		// Log warning but dont fail startup (consistent with other loaders)
+		a.Logger.Warn().Err(err).Msg("Failed to load email config from file")
+	}
+
 	// Phase 2: Perform {key-name} replacement in config after storage initialization
 	// This replaces any {key-name} references in config values with actual KV store values
 	// Must happen BEFORE services (LLM, Agent, Places) are initialized

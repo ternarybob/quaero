@@ -14,8 +14,71 @@ auto_start = false
 
 [step.search_asx_gnp]
 type = "web_search"
-description = "Search web for ASX:GNP company information using Gemini with Google Search grounding"
+description = "Search for financial data and news on ASX:GNP"
 on_error = "fail"
-query = "find me latest information on ASX listed company ASX:GNP"
-depth = 3
-breadth = 3
+api_key = "{google_gemini_api_key}"
+query = "ASX:GNP GenusPlus stock price market cap P/E ratio financial results analyst ratings announcements releases site:google.com/finance OR site:au.finance.yahoo.com OR site:asx.com.au OR site:marketindex.com.au OR site:hotcopper.com.au"
+output_tags = ["asx-gnp-search"]
+depth = 4
+breadth = 4
+
+# Step 2: Summarize and generate investment signal
+[step.summarize_results]
+type = "summary"
+description = "Generate investment analysis with BUY/HOLD/SELL signal"
+depends = "search_asx_gnp"
+on_error = "fail"
+filter_tags = ["gnp"]
+api_key = "{google_gemini_api_key}"
+prompt = """You are a professional equity research analyst. Analyze the collected information about ASX:GNP (GenusPlus Group Ltd) and generate an investment research report.
+
+## REQUIRED SECTIONS
+
+### 1. INVESTMENT SIGNAL
+Provide a clear recommendation at the TOP of your report:
+- **SIGNAL: BUY** - If fundamentals are strong, positive momentum, undervalued
+- **SIGNAL: HOLD** - If fairly valued, mixed signals, wait for clarity
+- **SIGNAL: SELL** - If deteriorating fundamentals, overvalued, negative outlook
+
+Include a confidence level (High/Medium/Low) based on data quality.
+
+### 2. PRICE & VALUATION
+- Current share price and recent movement
+- Market capitalization
+- P/E ratio (if available)
+- 52-week high/low
+- Comparison to sector peers
+
+### 3. FINANCIAL PERFORMANCE
+- Revenue and profit trends
+- Recent earnings results
+- Order book / pipeline
+- Debt levels and cash position
+
+### 4. RECENT DEVELOPMENTS
+- Key news and announcements
+- Contract wins/losses
+- Management changes
+- Market sentiment
+
+### 5. RISKS & CATALYSTS
+- **Bull case**: What could drive the stock higher
+- **Bear case**: What could drive the stock lower
+- Key upcoming events to watch
+
+### 6. SUMMARY
+2-3 sentence conclusion supporting your signal.
+
+---
+**IMPORTANT**: Base your signal ONLY on the data provided. If data is insufficient, state "SIGNAL: HOLD (Insufficient Data)" and explain what information is missing."""
+output_tags = ["asx-gnp-summary"]
+
+# Step 3: Email the analysis report
+[step.email_summary]
+type = "email"
+description = "Send ASX:GNP investment analysis via email"
+depends = "summarize_results"
+on_error = "fail"
+to = "{email_recipient}"
+subject = "ASX:GNP Investment Analysis - Signal Report"
+body_from_tag = "asx-gnp-summary"

@@ -225,6 +225,7 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	filterTags, _ := initResult.Metadata["filter_tags"].([]string)
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 	documents, _ := initResult.Metadata["documents"].([]*models.Document)
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
 	w.logger.Info().
 		Str("phase", "run").
@@ -262,7 +263,7 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	}
 
 	// Create summary document
-	doc, err := w.createDocument(summaryContent, prompt, documents, &jobDef, stepID)
+	doc, err := w.createDocument(summaryContent, prompt, documents, &jobDef, stepID, stepConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -439,7 +440,7 @@ func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Clien
 }
 
 // createDocument creates a Document from the summary results
-func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string) (*models.Document, error) {
+func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
 	// Build tags - include job name and any job-level tags
 	tags := []string{"summary"}
 	if jobDef != nil {
@@ -449,6 +450,19 @@ func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents 
 
 		if len(jobDef.Tags) > 0 {
 			tags = append(tags, jobDef.Tags...)
+		}
+	}
+
+	// Add output_tags from step config (allows downstream steps to find this document)
+	if stepConfig != nil {
+		if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
+			for _, tag := range outputTags {
+				if tagStr, ok := tag.(string); ok && tagStr != "" {
+					tags = append(tags, tagStr)
+				}
+			}
+		} else if outputTags, ok := stepConfig["output_tags"].([]string); ok {
+			tags = append(tags, outputTags...)
 		}
 	}
 

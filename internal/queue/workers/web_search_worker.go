@@ -204,6 +204,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	depth, _ := initResult.Metadata["depth"].(int)
 	breadth, _ := initResult.Metadata["breadth"].(int)
 	apiKey, _ := initResult.Metadata["api_key"].(string)
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
 	w.logger.Info().
 		Str("phase", "run").
@@ -244,7 +245,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	// Create document from results
-	doc, err := w.createDocument(results, query, &jobDef, stepID)
+	doc, err := w.createDocument(results, query, &jobDef, stepID, stepConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -466,7 +467,7 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 }
 
 // createDocument creates a Document from the search results
-func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string) (*models.Document, error) {
+func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Web Search Results: %s\n\n", query))
@@ -517,6 +518,23 @@ func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string
 	tags := []string{"web_search"}
 	if jobDef != nil && len(jobDef.Tags) > 0 {
 		tags = append(tags, jobDef.Tags...)
+	}
+
+	// Add date tag for filtering (format: date:YYYY-MM-DD)
+	dateTag := fmt.Sprintf("date:%s", results.SearchDate.Format("2006-01-02"))
+	tags = append(tags, dateTag)
+
+	// Add output_tags from step config (allows downstream steps to find this document)
+	if stepConfig != nil {
+		if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
+			for _, tag := range outputTags {
+				if tagStr, ok := tag.(string); ok && tagStr != "" {
+					tags = append(tags, tagStr)
+				}
+			}
+		} else if outputTags, ok := stepConfig["output_tags"].([]string); ok {
+			tags = append(tags, outputTags...)
+		}
 	}
 
 	// Build metadata

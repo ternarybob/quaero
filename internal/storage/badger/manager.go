@@ -111,3 +111,8 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 func (m *Manager) LoadConnectorsFromFiles(ctx context.Context, dirPath string) error {
 	return LoadConnectorsFromFiles(ctx, m.connector, m.kv, dirPath, m.logger)
 }
+
+// LoadEmailFromFile loads email configuration from email.toml file
+func (m *Manager) LoadEmailFromFile(ctx context.Context, dirPath string) error {
+	return LoadEmailFromFile(ctx, m.kv, dirPath, m.logger)
+}
