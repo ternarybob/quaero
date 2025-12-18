@@ -701,6 +701,24 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
+	// Register ASX Announcements worker (synchronous execution, fetches ASX company announcements)
+	asxAnnouncementsWorker := workers.NewASXAnnouncementsWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(asxAnnouncementsWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", asxAnnouncementsWorker.GetType().String()).Msg("ASX Announcements worker registered")
+
+	// Register ASX Stock Data worker (synchronous execution, fetches real-time prices and technicals)
+	asxStockDataWorker := workers.NewASXStockDataWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(asxStockDataWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", asxStockDataWorker.GetType().String()).Msg("ASX Stock Data worker registered")
+
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	summaryWorker := workers.NewSummaryWorker(
 		a.SearchService,

@@ -33,6 +33,10 @@ const (
 	// Notification workers
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
+	// Financial data workers
+	WorkerTypeASXAnnouncements WorkerType = "asx_announcements" // Fetch ASX company announcements
+	WorkerTypeASXStockData     WorkerType = "asx_stock_data"    // Fetch real-time stock prices and technical analysis
+
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
 )
@@ -44,7 +48,8 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
-		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeTestJobGenerator:
+		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
+		WorkerTypeASXStockData, WorkerTypeTestJobGenerator:
 		return true
 	}
 	return false
@@ -75,6 +80,8 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary,
 		WorkerTypeEmail,
+		WorkerTypeASXAnnouncements,
+		WorkerTypeASXStockData,
 		WorkerTypeTestJobGenerator,
 	}
 }

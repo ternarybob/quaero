@@ -1,84 +1,140 @@
-# Web Search Job Definition
-# Uses Gemini SDK with GoogleSearch grounding to search the web
-# and create a collated document with results and source references
+# ASX Investment Analysis Job Definition
+# Fetches real-time stock data, company announcements, and web research
+# Generates technical analysis and BUY/HOLD/SELL signals
 
 id = "web-search-asx-gnp"
-name = "Web Search: ASX:GNP Company Info"
+name = "ASX:GNP Investment Analysis"
 type = "web_search"
-description = "Search for latest information on ASX listed company ASX:GNP"
+description = "Comprehensive investment analysis for ASX listed company ASX:GNP"
 tags = ["web-search", "asx", "stocks", "gnp"]
 schedule = ""
-timeout = "5m"
+timeout = "10m"
 enabled = true
 auto_start = false
 
+# Step 1: Fetch real-time stock data and technical indicators
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch real-time prices, valuations, and calculate technicals"
+on_error = "continue"
+asx_code = "GNP"
+period = "Y1"
+output_tags = ["gnp", "asx-gnp-data"]
+
+# Step 2: Fetch ASX company announcements
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch official ASX announcements for GNP"
+depends = "fetch_stock_data"
+on_error = "continue"
+asx_code = "GNP"
+period = "Y1"
+limit = 30
+output_tags = ["gnp", "asx-gnp-announcements"]
+
+# Step 3: Web search for additional financial data and news
 [step.search_asx_gnp]
 type = "web_search"
-description = "Search for financial data and news on ASX:GNP"
+description = "Search for financial news and analyst coverage"
+depends = "fetch_announcements"
 on_error = "fail"
 api_key = "{google_gemini_api_key}"
-query = "ASX:GNP GenusPlus stock price market cap P/E ratio financial results analyst ratings announcements releases site:google.com/finance OR site:au.finance.yahoo.com OR site:asx.com.au OR site:marketindex.com.au OR site:hotcopper.com.au"
-output_tags = ["asx-gnp-search"]
-depth = 4
-breadth = 4
+query = "ASX:GNP GenusPlus financial results analyst ratings news site:afr.com OR site:theaustralian.com.au OR site:stockhead.com.au OR site:hotcopper.com.au"
+output_tags = ["gnp", "asx-gnp-search"]
+depth = 3
+breadth = 3
 
-# Step 2: Summarize and generate investment signal
+# Step 4: Generate investment analysis with signals
 [step.summarize_results]
 type = "summary"
-description = "Generate investment analysis with BUY/HOLD/SELL signal"
+description = "Generate investment analysis with technical signals"
 depends = "search_asx_gnp"
 on_error = "fail"
 filter_tags = ["gnp"]
 api_key = "{google_gemini_api_key}"
 prompt = """You are a professional equity research analyst. Analyze the collected information about ASX:GNP (GenusPlus Group Ltd) and generate an investment research report.
 
+**CRITICAL: Use ONLY the stock data provided in the documents. Do NOT invent or hallucinate prices.**
+Look for the document titled "ASX:GNP Stock Data & Technical Analysis" for accurate real-time data.
+
 ## REQUIRED SECTIONS
 
-### 1. INVESTMENT SIGNAL
-Provide a clear recommendation at the TOP of your report:
-- **SIGNAL: BUY** - If fundamentals are strong, positive momentum, undervalued
-- **SIGNAL: HOLD** - If fairly valued, mixed signals, wait for clarity
-- **SIGNAL: SELL** - If deteriorating fundamentals, overvalued, negative outlook
+### 1. RECENT ANNOUNCEMENTS OVERVIEW
+Summarize key themes from recent ASX announcements and their impact on stock price.
+Then list significant announcements (last 10 months) in chronological order:
+(DD MMM YYYY): Headline
 
-Include a confidence level (High/Medium/Low) based on data quality.
+### 2. CURRENT MARKET DATA
+**Use ONLY data from the Stock Data document. If not found, state "Data unavailable".**
 
-### 2. PRICE & VALUATION
-- Current share price and recent movement
-- Market capitalization
-- P/E ratio (if available)
-- 52-week high/low
-- Comparison to sector peers
+| Metric | Value |
+|--------|-------|
+| Last Price | $ |
+| Day Change | $ (%) |
+| 52-Week Range | $ - $ |
+| Market Cap | $ |
+| P/E Ratio | |
+| Dividend Yield | % |
 
-### 3. FINANCIAL PERFORMANCE
-- Revenue and profit trends
-- Recent earnings results
-- Order book / pipeline
-- Debt levels and cash position
+### 3. TECHNICAL ANALYSIS
 
-### 4. RECENT DEVELOPMENTS
-- Key news and announcements
-- Contract wins/losses
-- Management changes
-- Market sentiment
+**Moving Averages:**
+| MA | Value | Price Position |
+|----|-------|----------------|
+| SMA 20 | $ | Above/Below |
+| SMA 50 | $ | Above/Below |
+| SMA 200 | $ | Above/Below |
+
+**Momentum:**
+- RSI (14): (Overbought >70 / Oversold <30 / Neutral)
+- Support Level: $
+- Resistance Level: $
+- Overall Trend: BULLISH / BEARISH / NEUTRAL
+
+### 4. INVESTMENT SIGNALS
+
+#### SHORT-TERM TRADING (1-4 weeks)
+**SIGNAL: BUY / HOLD / SELL**
+- Entry Point: $
+- Stop Loss: $
+- Target: $
+- Risk/Reward Ratio:
+- Rationale: (Based on technicals, momentum, support/resistance)
+
+#### LONG-TERM INVESTING (6-12 months)
+**SIGNAL: BUY / HOLD / SELL**
+- Fair Value Estimate: $
+- Upside/Downside: %
+- Confidence: High / Medium / Low
+- Rationale: (Based on fundamentals, growth trajectory, industry position)
 
 ### 5. RISKS & CATALYSTS
-- **Bull case**: What could drive the stock higher
-- **Bear case**: What could drive the stock lower
-- Key upcoming events to watch
+
+**Bull Case:**
+- Key drivers that could push price higher
+
+**Bear Case:**
+- Risks that could drive price lower
+
+**Upcoming Events:**
+- Earnings dates, AGM, dividend dates, contract announcements
 
 ### 6. SUMMARY
-2-3 sentence conclusion supporting your signal.
+2-3 sentence conclusion with primary recommendation.
 
 ---
-**IMPORTANT**: Base your signal ONLY on the data provided. If data is insufficient, state "SIGNAL: HOLD (Insufficient Data)" and explain what information is missing."""
+**IMPORTANT**:
+- If stock data document is not found, state "SIGNAL: HOLD (Insufficient Data)"
+- Never invent prices - use only provided data
+- Be specific with price levels for entry/exit points"""
 output_tags = ["asx-gnp-summary"]
 
-# Step 3: Email the analysis report
+# Step 5: Email the analysis report
 [step.email_summary]
 type = "email"
 description = "Send ASX:GNP investment analysis via email"
 depends = "summarize_results"
 on_error = "fail"
 to = "{email_recipient}"
-subject = "ASX:GNP Investment Analysis - Signal Report"
+subject = "ASX:GNP Investment Analysis - Technical & Fundamental Report"
 body_from_tag = "asx-gnp-summary"

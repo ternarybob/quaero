@@ -10,6 +10,7 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Agent Worker](#agent-worker)
   - [Aggregate Summary Worker](#aggregate-summary-worker)
   - [Analyze Build Worker](#analyze-build-worker)
+  - [ASX Announcements Worker](#asx-announcements-worker)
   - [Classify Worker](#classify-worker)
   - [Code Map Worker](#code-map-worker)
   - [Crawler Worker](#crawler-worker)
@@ -220,6 +221,70 @@ type = "analyze_build"
 description = "Analyze Makefiles, CMake, and other build files"
 depends = "extract_structure"
 filter_tags = ["devops-candidate"]
+```
+
+---
+
+### ASX Announcements Worker
+
+**File**: `asx_announcements_worker.go`
+
+**Purpose**: Fetches ASX (Australian Securities Exchange) company announcements from the official ASX website. Parses the announcements page and stores each announcement as an individual document with metadata including PDF links, price sensitivity, and date information.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
+| `period` | string | No | Time period for announcements (default: "M6" = 6 months). Options: D1, W1, M1, M3, M6, Y1, Y5 |
+| `limit` | int | No | Maximum number of announcements to fetch (default: 50) |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+
+#### Outputs
+
+- Individual documents for each announcement with tags: `["asx-announcement", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- If price sensitive, adds tag: `"price-sensitive"`
+- Metadata includes: asx_code, headline, announcement_date, price_sensitive, pdf_url, pdf_filename, parent_job_id, file_details
+- Document content in markdown format with headline, date, company code, price sensitivity status, and PDF link
+
+#### Document Structure
+
+Each announcement is stored as a markdown document:
+
+```markdown
+# ASX Announcement: {Headline}
+
+**Date**: 2 January 2006 3:04 PM
+**Company**: ASX:GNP
+**Price Sensitive**: Yes ⚠️
+
+**Document**: [filename.pdf](https://www.asx.com.au/...)
+**Details**: 5 pages, 1.2 MB
+
+---
+*Full announcement available at PDF link above*
+```
+
+#### Configuration
+
+No additional configuration required. The worker fetches announcements from the public ASX website.
+
+#### Example Job Definition
+
+```toml
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch official ASX announcements for GNP"
+on_error = "continue"
+asx_code = "GNP"
+period = "M6"
+limit = 20
+output_tags = ["asx-gnp-search", "gnp"]
 ```
 
 ---
@@ -894,6 +959,7 @@ search:
 **Inline Processing** (Synchronous):
 - Aggregate Summary Worker - Single aggregation task
 - Analyze Build Worker - Process documents inline
+- ASX Announcements Worker - Fetch ASX company announcements
 - Classify Worker - Process documents inline
 - Dependency Graph Worker - Single graph build
 - Email Worker - Send email notification
@@ -910,6 +976,7 @@ search:
 | Agent | Yes | Yes |
 | Aggregate Summary | Yes | No |
 | Analyze Build | Yes | No |
+| ASX Announcements | Yes | No |
 | Classify | Yes | No |
 | Code Map | Yes | Yes |
 | Crawler | Yes | Yes |
@@ -935,6 +1002,7 @@ search:
 - Web Search Worker
 
 **Data Source Workers**:
+- ASX Announcements Worker
 - Crawler Worker
 - GitHub Git Worker
 - GitHub Log Worker

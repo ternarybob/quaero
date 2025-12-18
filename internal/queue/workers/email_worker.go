@@ -155,10 +155,18 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	// Send the email
+	w.logger.Info().
+		Bool("has_html", htmlBody != "").
+		Int("html_len", len(htmlBody)).
+		Int("text_len", len(body)).
+		Msg("Sending email with body")
+
 	var err error
 	if htmlBody != "" {
+		w.logger.Debug().Msg("Sending HTML email")
 		err = w.mailerService.SendHTMLEmail(ctx, to, subject, htmlBody, body)
 	} else {
+		w.logger.Debug().Msg("Sending plain text email (no HTML body)")
 		err = w.mailerService.SendEmail(ctx, to, subject, body)
 	}
 
@@ -236,18 +244,26 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 
 	// Body from tag (get latest document with tag)
 	if tag, ok := stepConfig["body_from_tag"].(string); ok && tag != "" {
+		w.logger.Debug().Str("tag", tag).Msg("Looking for document by tag for email body")
 		opts := interfaces.SearchOptions{
 			Tags:  []string{tag},
 			Limit: 1,
 		}
 		results, err := w.searchService.Search(ctx, "", opts)
 		if err == nil && len(results) > 0 {
+			w.logger.Debug().Str("doc_id", results[0].ID).Msg("Found document by tag")
 			if doc, err := w.documentStorage.GetDocument(results[0].ID); err == nil && doc != nil {
 				if doc.ContentMarkdown != "" {
+					w.logger.Debug().Int("markdown_len", len(doc.ContentMarkdown)).Msg("Document has markdown content, converting to HTML")
 					textBody = doc.ContentMarkdown
 					// Convert markdown to HTML for rich email formatting
 					htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+					w.logger.Debug().Int("html_len", len(htmlBody)).Msg("HTML body after conversion")
+				} else {
+					w.logger.Warn().Str("doc_id", results[0].ID).Msg("Document has no markdown content")
 				}
+			} else {
+				w.logger.Warn().Str("doc_id", results[0].ID).Err(err).Msg("Failed to get document by ID")
 			}
 		} else {
 			w.logger.Warn().Str("tag", tag).Err(err).Msg("Failed to find document by tag for email body")
@@ -260,8 +276,11 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 // convertMarkdownToHTML converts markdown content to styled HTML for email
 func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	if markdown == "" {
+		w.logger.Debug().Msg("convertMarkdownToHTML: empty markdown input")
 		return ""
 	}
+
+	w.logger.Debug().Int("markdown_len", len(markdown)).Msg("Converting markdown to HTML")
 
 	// Create goldmark instance with common extensions
 	md := goldmark.New(
@@ -276,12 +295,18 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(markdown), &buf); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to convert markdown to HTML, using plain text")
+		w.logger.Error().Err(err).Int("input_len", len(markdown)).Msg("Failed to convert markdown to HTML")
 		return ""
 	}
 
+	htmlContent := buf.String()
+	w.logger.Debug().Int("html_len", len(htmlContent)).Msg("Markdown converted to HTML successfully")
+
 	// Wrap in styled HTML email template
-	return w.wrapInEmailTemplate(buf.String())
+	result := w.wrapInEmailTemplate(htmlContent)
+	w.logger.Debug().Int("final_len", len(result)).Msg("HTML wrapped in email template")
+
+	return result
 }
 
 // wrapInEmailTemplate wraps HTML content in a styled email template
