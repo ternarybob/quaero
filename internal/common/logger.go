@@ -116,8 +116,8 @@ func SetupLogger(config *Config) arbor.ILogger {
 
 // createWriterConfig creates a standard writer configuration with user preferences
 func createWriterConfig(config *Config, writerType models.LogWriterType, filename string) models.WriterConfiguration {
-	// Default time format if not specified
-	timeFormat := "15:04:05"
+	// Default time format if not specified (HH:MM:SS.mmm for alignment with SSE logs)
+	timeFormat := "15:04:05.000"
 	if config != nil && config.Logging.TimeFormat != "" {
 		timeFormat = config.Logging.TimeFormat
 	}

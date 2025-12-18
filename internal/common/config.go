@@ -73,7 +73,7 @@ type LoggingConfig struct {
 	Level         string   `toml:"level"`           // "debug", "info", "warn", "error"
 	Format        string   `toml:"format"`          // "json" or "text"
 	Output        []string `toml:"output"`          // "stdout", "file"
-	TimeFormat    string   `toml:"time_format"`     // Time format for logs (e.g. "15:04:05" or "2006-01-02 15:04:05")
+	TimeFormat    string   `toml:"time_format"`     // Time format for logs (default: "15:04:05.000")
 	ClientDebug   bool     `toml:"client_debug"`    // Enable client-side debug logging
 	MinEventLevel string   `toml:"min_event_level"` // Minimum log level to publish as events to UI ("debug", "info", "warn", "error")
 }

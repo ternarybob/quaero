@@ -384,7 +384,7 @@ func (a *App) initServices() error {
 	logViewerConfig := arbormodels.WriterConfiguration{
 		Type:       arbormodels.LogWriterTypeFile,
 		FileName:   filepath.Join(logsDir, "quaero.log"),
-		TimeFormat: "15:04:05",
+		TimeFormat: "15:04:05.000",
 	}
 
 	a.SystemLogsService = logviewer.NewService(logViewerConfig)

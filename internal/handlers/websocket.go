@@ -509,13 +509,13 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 			dateTime := strings.TrimSpace(parts[1])
 			messageWithFields := strings.TrimSpace(parts[2])
 
-			// Parse timestamp from "Oct  2 16:27:13" format
+			// Parse timestamp from "Oct  2 16:27:13" format and add .000 for alignment with live logs
 			timeParts := strings.Fields(dateTime)
 			var timestamp string
 			if len(timeParts) >= 3 {
-				timestamp = timeParts[len(timeParts)-1]
+				timestamp = timeParts[len(timeParts)-1] + ".000"
 			} else {
-				timestamp = time.Now().Format("15:04:05")
+				timestamp = time.Now().Format("15:04:05.000")
 			}
 
 			// Map level to 3-letter format for consistency

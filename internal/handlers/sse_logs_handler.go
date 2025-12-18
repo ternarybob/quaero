@@ -757,30 +757,30 @@ func (h *SSELogsHandler) sendInitialServiceLogs(w http.ResponseWriter, flusher h
 			dateTime := strings.TrimSpace(parts[1])
 			message := strings.TrimSpace(parts[2])
 
-			// Map level
-			logLevel := "info"
+			// Map level to 3-letter format for consistency with live streaming logs
+			logLevel := "INF"
 			switch levelStr {
 			case "ERR", "ERROR", "FATAL", "PANIC":
-				logLevel = "error"
+				logLevel = "ERR"
 			case "WRN", "WARN":
-				logLevel = "warn"
+				logLevel = "WRN"
 			case "INF", "INFO":
-				logLevel = "info"
+				logLevel = "INF"
 			case "DBG", "DEBUG":
-				logLevel = "debug"
+				logLevel = "DBG"
 			}
 
 			if !h.shouldIncludeLevel(logLevel, level) {
 				continue
 			}
 
-			// Parse timestamp
+			// Parse timestamp and add .000 for alignment with live logs (which use 15:04:05.000)
 			timeParts := strings.Fields(dateTime)
 			var timestamp string
 			if len(timeParts) >= 3 {
-				timestamp = timeParts[len(timeParts)-1]
+				timestamp = timeParts[len(timeParts)-1] + ".000"
 			} else {
-				timestamp = time.Now().Format("15:04:05")
+				timestamp = time.Now().Format("15:04:05.000")
 			}
 
 			logs = append(logs, map[string]interface{}{
