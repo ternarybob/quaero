@@ -654,6 +654,13 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	content.WriteString(fmt.Sprintf("# ASX:%s Stock Data - %s\n\n", asxCode, data.CompanyName))
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
 
+	// Data Sources Section
+	content.WriteString("## Data Sources\n\n")
+	content.WriteString("| Source | Data Provided |\n")
+	content.WriteString("|--------|---------------|\n")
+	content.WriteString("| ASX Markit Digital API | Current price, bid/ask, market cap, P/E, EPS, dividend yield |\n")
+	content.WriteString("| Yahoo Finance | Historical OHLCV data, technical indicators |\n\n")
+
 	// Current Price Section
 	content.WriteString("## Current Price\n\n")
 	content.WriteString(fmt.Sprintf("| Metric | Value |\n"))
@@ -664,6 +671,58 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	content.WriteString(fmt.Sprintf("| Day Range | $%.2f - $%.2f |\n", data.DayLow, data.DayHigh))
 	content.WriteString(fmt.Sprintf("| Volume | %s |\n", formatNumber(data.Volume)))
 	content.WriteString(fmt.Sprintf("| Avg Volume | %s |\n\n", formatNumber(data.AvgVolume)))
+
+	// Period Performance Section (like screenshot)
+	content.WriteString("## Period Performance\n\n")
+	content.WriteString("| Period | Price | Change ($) | Change (%) |\n")
+	content.WriteString("|--------|-------|------------|------------|\n")
+	periodPerf := calculatePeriodPerformance(data.HistoricalPrices, data.LastPrice)
+	for _, p := range periodPerf {
+		changeColor := ""
+		if p.ChangePercent > 0 {
+			changeColor = "+"
+		}
+		content.WriteString(fmt.Sprintf("| %s | $%.2f | %s$%.2f | %s%.2f%% |\n",
+			p.Period, p.Price, changeColor, p.ChangeValue, changeColor, p.ChangePercent))
+	}
+	content.WriteString("\n")
+
+	// Volume Analysis Section
+	content.WriteString("## Volume Analysis\n\n")
+	content.WriteString(fmt.Sprintf("| Metric | Value |\n"))
+	content.WriteString(fmt.Sprintf("|--------|-------|\n"))
+	content.WriteString(fmt.Sprintf("| Today's Volume | %s |\n", formatNumber(data.Volume)))
+	content.WriteString(fmt.Sprintf("| Average Volume | %s |\n", formatNumber(data.AvgVolume)))
+	volRatio := 0.0
+	if data.AvgVolume > 0 {
+		volRatio = float64(data.Volume) / float64(data.AvgVolume) * 100
+	}
+	volSignal := "Normal"
+	if volRatio > 150 {
+		volSignal = "High (Unusual Activity)"
+	} else if volRatio < 50 {
+		volSignal = "Low (Quiet Trading)"
+	}
+	content.WriteString(fmt.Sprintf("| Volume vs Avg | %.1f%% |\n", volRatio))
+	content.WriteString(fmt.Sprintf("| Volume Signal | %s |\n\n", volSignal))
+
+	// Recent Volume Trend (last 10 days)
+	if len(data.HistoricalPrices) >= 10 {
+		content.WriteString("### Recent Volume Trend (Last 10 Days)\n\n")
+		content.WriteString("| Date | Close | Volume | vs Avg |\n")
+		content.WriteString("|------|-------|--------|--------|\n")
+		startIdx := len(data.HistoricalPrices) - 10
+		for i := len(data.HistoricalPrices) - 1; i >= startIdx; i-- {
+			p := data.HistoricalPrices[i]
+			volVsAvg := 0.0
+			if data.AvgVolume > 0 {
+				volVsAvg = float64(p.Volume) / float64(data.AvgVolume) * 100
+			}
+			content.WriteString(fmt.Sprintf("| %s | $%.2f | %s | %.0f%% |\n",
+				p.Date.Format("02 Jan"), p.Close, formatNumber(p.Volume), volVsAvg))
+		}
+		content.WriteString("\n")
+	}
 
 	// Valuation Section
 	content.WriteString("## Valuation\n\n")
@@ -723,6 +782,18 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	}
 	content.WriteString(fmt.Sprintf("**Position in 52-Week Range**: %.1f%% (%.2f low, %.2f high)\n\n", rangePercent, data.Week52Low, data.Week52High))
 
+	// Historical Daily Data (CSV format for LLM consumption)
+	if len(data.HistoricalPrices) > 0 {
+		content.WriteString("## Historical Daily Data (OHLCV)\n\n")
+		content.WriteString("```csv\n")
+		content.WriteString("Date,Open,High,Low,Close,Volume\n")
+		for _, p := range data.HistoricalPrices {
+			content.WriteString(fmt.Sprintf("%s,%.2f,%.2f,%.2f,%.2f,%d\n",
+				p.Date.Format("2006-01-02"), p.Open, p.High, p.Low, p.Close, p.Volume))
+		}
+		content.WriteString("```\n\n")
+	}
+
 	// Build tags
 	tags := []string{"asx-stock-data", strings.ToLower(asxCode)}
 	tags = append(tags, fmt.Sprintf("date:%s", time.Now().Format("2006-01-02")))
@@ -770,6 +841,65 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	}
 
 	return doc
+}
+
+// PeriodPerformance holds price change data for a time period
+type PeriodPerformance struct {
+	Period        string
+	Price         float64
+	ChangeValue   float64
+	ChangePercent float64
+}
+
+// calculatePeriodPerformance calculates price changes over various periods
+func calculatePeriodPerformance(prices []OHLCV, currentPrice float64) []PeriodPerformance {
+	var results []PeriodPerformance
+	if len(prices) == 0 || currentPrice == 0 {
+		return results
+	}
+
+	now := time.Now()
+	periods := []struct {
+		name string
+		days int
+	}{
+		{"1 Week (7d)", 7},
+		{"1 Month (30d)", 30},
+		{"3 Month (91d)", 91},
+		{"6 Month (183d)", 183},
+		{"1 Year (365d)", 365},
+		{"2 Year (730d)", 730},
+	}
+
+	for _, period := range periods {
+		targetDate := now.AddDate(0, 0, -period.days)
+		// Find closest price to target date
+		var closestPrice float64
+		minDiff := time.Duration(math.MaxInt64)
+		for _, p := range prices {
+			diff := p.Date.Sub(targetDate)
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff < minDiff {
+				minDiff = diff
+				closestPrice = p.Close
+			}
+		}
+
+		if closestPrice > 0 {
+			changeValue := currentPrice - closestPrice
+			changePercent := (changeValue / closestPrice) * 100
+			results = append(results, PeriodPerformance{
+				Period:        period.name,
+				Price:         closestPrice,
+				ChangeValue:   changeValue,
+				ChangePercent: changePercent,
+			})
+		}
+	}
+
+	return results
 }
 
 // formatNumber formats a number with commas
