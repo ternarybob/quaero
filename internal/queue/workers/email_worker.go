@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -217,14 +218,17 @@ func (w *EmailWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // resolveBody determines the email body from step configuration
-// Supports: body (direct text), body_html (HTML), body_from_document (document ID), body_from_tag (latest document with tag)
+// Supports: body (direct text/markdown), body_html (HTML), body_from_document (document ID), body_from_tag (latest document with tag)
+// All text content is converted to HTML for proper email presentation
 func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]interface{}) (textBody, htmlBody string) {
-	// Direct body text
+	// Direct body text (markdown is converted to HTML)
 	if body, ok := stepConfig["body"].(string); ok && body != "" {
 		textBody = body
+		// Convert markdown to HTML for rich email formatting
+		htmlBody = w.convertMarkdownToHTML(body)
 	}
 
-	// Direct HTML body
+	// Direct HTML body (overrides conversion from body)
 	if html, ok := stepConfig["body_html"].(string); ok && html != "" {
 		htmlBody = html
 	}
@@ -242,12 +246,15 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 		}
 	}
 
-	// Body from tag (get latest document with tag)
+	// Body from tag (get most recently CREATED document with tag)
+	// Order by created_at to get the newest summary, not the most recently updated
 	if tag, ok := stepConfig["body_from_tag"].(string); ok && tag != "" {
 		w.logger.Debug().Str("tag", tag).Msg("Looking for document by tag for email body")
 		opts := interfaces.SearchOptions{
-			Tags:  []string{tag},
-			Limit: 1,
+			Tags:     []string{tag},
+			Limit:    1,
+			OrderBy:  "created_at",
+			OrderDir: "desc",
 		}
 		results, err := w.searchService.Search(ctx, "", opts)
 		if err == nil && len(results) > 0 {
@@ -274,6 +281,7 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 }
 
 // convertMarkdownToHTML converts markdown content to styled HTML for email
+// Always returns HTML - never returns empty string (falls back to preformatted text)
 func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	if markdown == "" {
 		w.logger.Debug().Msg("convertMarkdownToHTML: empty markdown input")
@@ -295,11 +303,19 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(markdown), &buf); err != nil {
-		w.logger.Error().Err(err).Int("input_len", len(markdown)).Msg("Failed to convert markdown to HTML")
-		return ""
+		w.logger.Error().Err(err).Int("input_len", len(markdown)).Msg("Failed to convert markdown to HTML, using preformatted fallback")
+		// Fallback: wrap raw text in <pre> tags so we still send HTML
+		htmlContent := "<pre style=\"white-space: pre-wrap; font-family: monospace;\">" + escapeHTML(markdown) + "</pre>"
+		return w.wrapInEmailTemplate(htmlContent)
 	}
 
 	htmlContent := buf.String()
+	if htmlContent == "" {
+		w.logger.Warn().Msg("Goldmark returned empty HTML, using preformatted fallback")
+		// Fallback for empty conversion result
+		htmlContent = "<pre style=\"white-space: pre-wrap; font-family: monospace;\">" + escapeHTML(markdown) + "</pre>"
+	}
+
 	w.logger.Debug().Int("html_len", len(htmlContent)).Msg("Markdown converted to HTML successfully")
 
 	// Wrap in styled HTML email template
@@ -307,6 +323,16 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	w.logger.Debug().Int("final_len", len(result)).Msg("HTML wrapped in email template")
 
 	return result
+}
+
+// escapeHTML escapes HTML special characters for safe embedding
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
+	return s
 }
 
 // wrapInEmailTemplate wraps HTML content in a styled email template

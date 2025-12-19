@@ -253,7 +253,8 @@
                 filteredDocuments = [...allDocuments];
             } else {
                 filteredDocuments = allDocuments.filter(doc => {
-                    return (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
+                    return (doc.id && doc.id.toLowerCase().includes(searchTerm)) ||
+                        (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
                         (doc.content_markdown && doc.content_markdown.toLowerCase().includes(searchTerm)) ||
                         (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
                 });

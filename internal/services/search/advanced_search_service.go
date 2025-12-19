@@ -146,11 +146,21 @@ func (s *AdvancedSearchService) executeListDocuments(
 		limit = 1000 // Higher default for list operations
 	}
 
+	// Use OrderBy/OrderDir from SearchOptions if specified, otherwise default to updated_at desc
+	orderBy := opts.OrderBy
+	if orderBy == "" {
+		orderBy = "updated_at"
+	}
+	orderDir := opts.OrderDir
+	if orderDir == "" {
+		orderDir = "desc"
+	}
+
 	listOpts := &interfaces.ListOptions{
 		Limit:    limit,
 		Offset:   opts.Offset,
-		OrderBy:  "updated_at",
-		OrderDir: "desc",
+		OrderBy:  orderBy,
+		OrderDir: orderDir,
 		Tags:     opts.Tags, // Push tags filter to DB level for efficiency
 	}
 

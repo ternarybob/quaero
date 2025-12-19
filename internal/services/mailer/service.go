@@ -7,7 +7,9 @@ package mailer
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net/smtp"
 	"strconv"
@@ -171,25 +173,29 @@ func (s *Service) SendHTMLEmail(ctx context.Context, to, subject, htmlBody, text
 
 	if htmlBody != "" {
 		// Multipart message with HTML and text
-		boundary := "boundary123456789"
+		// Generate unique boundary to avoid conflicts with content
+		boundary := generateBoundary()
 		msg.WriteString("MIME-Version: 1.0\r\n")
 		msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
 		msg.WriteString("\r\n")
 
-		// Plain text part
+		// Plain text part - use base64 encoding for safety with long lines
 		if textBody != "" {
 			msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 			msg.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+			msg.WriteString("Content-Transfer-Encoding: base64\r\n")
 			msg.WriteString("\r\n")
-			msg.WriteString(textBody)
+			msg.WriteString(encodeBase64WithLineBreaks(textBody))
 			msg.WriteString("\r\n")
 		}
 
-		// HTML part
+		// HTML part - use base64 encoding to handle large content and long lines
+		// RFC 5322 limits line length to 998 chars; base64 ensures compliance
 		msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 		msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
 		msg.WriteString("\r\n")
-		msg.WriteString(htmlBody)
+		msg.WriteString(encodeBase64WithLineBreaks(htmlBody))
 		msg.WriteString("\r\n")
 
 		msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
@@ -329,4 +335,39 @@ func (s *Service) SendTestEmail(ctx context.Context, to string) error {
 
 	s.logger.Info().Str("to", to).Msg("Test email sent successfully")
 	return nil
+}
+
+// generateBoundary creates a unique MIME boundary string
+// Uses crypto/rand for uniqueness to avoid collisions with content
+func generateBoundary() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to a simple boundary if random fails
+		return "quaero_boundary_fallback"
+	}
+	return fmt.Sprintf("quaero_%x", b)
+}
+
+// encodeBase64WithLineBreaks encodes content as base64 with 76-char line breaks
+// per RFC 2045 for MIME content. This ensures compatibility with all mail servers
+// and prevents line-length related corruption of large HTML content.
+func encodeBase64WithLineBreaks(content string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+
+	// Insert line breaks every 76 characters per RFC 2045
+	var result strings.Builder
+	const lineLen = 76
+
+	for i := 0; i < len(encoded); i += lineLen {
+		end := i + lineLen
+		if end > len(encoded) {
+			end = len(encoded)
+		}
+		result.WriteString(encoded[i:end])
+		if end < len(encoded) {
+			result.WriteString("\r\n")
+		}
+	}
+
+	return result.String()
 }

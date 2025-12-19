@@ -28,6 +28,14 @@ type SearchOptions struct {
 
 	// UpdatedAfter filters documents updated after this timestamp (RFC3339 format)
 	UpdatedAfter string
+
+	// OrderBy specifies the field to order results by (created_at, updated_at)
+	// Defaults to "updated_at" if not specified
+	OrderBy string
+
+	// OrderDir specifies the order direction (asc, desc)
+	// Defaults to "desc" if not specified
+	OrderDir string
 }
 
 // SearchService provides document search functionality
