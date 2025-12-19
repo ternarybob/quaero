@@ -29,7 +29,11 @@ Must be *_test.go file or STOP
 
 ### PHASE 0: UNDERSTAND
 1. Read test file - extract requirements
-2. Read skills for applicable patterns
+2. Read skills for applicable patterns:
+   - `.claude/skills/refactoring/SKILL.md` - Core patterns
+   - `.claude/skills/go/SKILL.md` - Go changes
+   - `.claude/skills/frontend/SKILL.md` - Frontend changes
+   - `.claude/skills/monitoring/SKILL.md` - UI tests (screenshots, monitoring, results)
 
 ### PHASE 1: RUN TEST
 ```bash
