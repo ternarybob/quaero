@@ -59,3 +59,15 @@ temperature = 0.7                         # Chat completion temperature
 level = "debug"           # Debug level for detailed test logs
 min_event_level = "debug" # Publish all logs to UI for test visibility
 output = ["file", "console"] # Write to both file (for SystemLogsService) and console (for test harness capture)
+
+# =============================================================================
+# Email Configuration (SMTP for sending emails)
+# =============================================================================
+[email]
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+smtp_username = "{smtp_username}"
+smtp_password = "{smtp_password}"
+smtp_from = "{smtp_from}"
+smtp_from_name = "Quaero Test"
+smtp_use_tls = true

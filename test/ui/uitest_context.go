@@ -897,6 +897,7 @@ func apiGetJSON(t *testing.T, h httpGetter, path string, dest interface{}) error
 
 // apiJobTreeStep represents a step in the job tree API response
 type apiJobTreeStep struct {
+	StepID string `json:"step_id,omitempty"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
 }
@@ -913,10 +914,18 @@ type apiJobResponse struct {
 	Status string `json:"status"`
 }
 
+// apiLogEntry represents a log entry in the logs API response
+type apiLogEntry struct {
+	LineNumber int    `json:"line_number"`
+	Level      string `json:"level"`
+	Message    string `json:"message"`
+}
+
 // apiJobTreeLogsStep represents a step in the logs API response
 type apiJobTreeLogsStep struct {
-	StepName   string `json:"step_name"`
-	TotalCount int    `json:"total_count"`
+	StepName   string        `json:"step_name"`
+	Logs       []apiLogEntry `json:"logs"`
+	TotalCount int           `json:"total_count"`
 }
 
 // apiJobTreeLogsResponse represents the logs API response

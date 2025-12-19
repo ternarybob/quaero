@@ -505,7 +505,7 @@ func (h *UnifiedLogsHandler) shouldIncludeLevel(logLevel, filterLevel string) bo
 type StepLog struct {
 	LineNumber int    `json:"line_number"`
 	Level      string `json:"level"`
-	Text       string `json:"text"`
+	Message    string `json:"message"`
 }
 
 // StepLogsResponse represents step-grouped logs response
@@ -563,7 +563,7 @@ func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.R
 			stepLogs = append(stepLogs, StepLog{
 				LineNumber: logEntries[i].LineNumber,
 				Level:      logEntries[i].Level,
-				Text:       logEntries[i].Message,
+				Message:    logEntries[i].Message,
 			})
 		}
 	} else {
@@ -572,7 +572,7 @@ func (h *UnifiedLogsHandler) getStepGroupedLogs(w http.ResponseWriter, r *http.R
 			stepLogs = append(stepLogs, StepLog{
 				LineNumber: log.LineNumber,
 				Level:      log.Level,
-				Text:       log.Message,
+				Message:    log.Message,
 			})
 		}
 	}
