@@ -29,6 +29,7 @@ mkdir -p $WORKDIR
 - Follow ALL patterns in `.claude/skills/refactoring/SKILL.md`
 - Apply `.claude/skills/go/SKILL.md` for Go changes
 - Apply `.claude/skills/frontend/SKILL.md` for frontend changes
+- Apply `.claude/skills/monitoring/SKILL.md` for UI test changes (screenshots, monitoring, results)
 - NEVER modify tests to make code pass
 - Iterate until CORRECT, not "good enough"
 
