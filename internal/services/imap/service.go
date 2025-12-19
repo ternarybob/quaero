@@ -214,7 +214,7 @@ func (s *Service) FetchUnreadEmails(ctx context.Context, subjectFilter string) (
 		// Parse message body
 		body, err := s.parseMessageBody(msg, section)
 		if err != nil {
-			s.logger.Warn().Err(err).Uint32("seq", msg.SeqNum).Msg("Failed to parse message body")
+			s.logger.Warn().Err(err).Int("seq", int(msg.SeqNum)).Msg("Failed to parse message body")
 			continue
 		}
 
@@ -289,7 +289,7 @@ func (s *Service) MarkAsRead(ctx context.Context, messageID uint32) error {
 		return fmt.Errorf("failed to mark message as read: %w", err)
 	}
 
-	s.logger.Debug().Uint32("message_id", messageID).Msg("Marked message as read")
+	s.logger.Debug().Int("message_id", int(messageID)).Msg("Marked message as read")
 	return nil
 }
 

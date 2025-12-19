@@ -141,7 +141,7 @@ func (w *EmailWatcherWorker) CreateJobs(ctx context.Context, step models.JobStep
 
 			// Mark as read even if invalid
 			if err := w.imapService.MarkAsRead(ctx, email.ID); err != nil {
-				w.logger.Warn().Err(err).Uint32("email_id", email.ID).Msg("Failed to mark email as read")
+				w.logger.Warn().Err(err).Int("email_id", int(email.ID)).Msg("Failed to mark email as read")
 			}
 			continue
 		}
@@ -167,7 +167,7 @@ func (w *EmailWatcherWorker) CreateJobs(ctx context.Context, step models.JobStep
 
 			// Mark as read
 			if err := w.imapService.MarkAsRead(ctx, email.ID); err != nil {
-				w.logger.Warn().Err(err).Uint32("email_id", email.ID).Msg("Failed to mark email as read")
+				w.logger.Warn().Err(err).Int("email_id", int(email.ID)).Msg("Failed to mark email as read")
 			}
 			continue
 		}
@@ -193,7 +193,7 @@ func (w *EmailWatcherWorker) CreateJobs(ctx context.Context, step models.JobStep
 
 			// Mark as read even if execution failed
 			if err := w.imapService.MarkAsRead(ctx, email.ID); err != nil {
-				w.logger.Warn().Err(err).Uint32("email_id", email.ID).Msg("Failed to mark email as read")
+				w.logger.Warn().Err(err).Int("email_id", int(email.ID)).Msg("Failed to mark email as read")
 			}
 			continue
 		}
@@ -208,12 +208,12 @@ func (w *EmailWatcherWorker) CreateJobs(ctx context.Context, step models.JobStep
 
 		// Mark email as read
 		if err := w.imapService.MarkAsRead(ctx, email.ID); err != nil {
-			w.logger.Warn().Err(err).Uint32("email_id", email.ID).Msg("Failed to mark email as read")
+			w.logger.Warn().Err(err).Int("email_id", int(email.ID)).Msg("Failed to mark email as read")
 			if w.jobMgr != nil {
 				w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Failed to mark email as read: %v", err))
 			}
 		} else {
-			w.logger.Debug().Uint32("email_id", email.ID).Msg("Marked email as read")
+			w.logger.Debug().Int("email_id", int(email.ID)).Msg("Marked email as read")
 		}
 	}
 
