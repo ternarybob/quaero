@@ -62,9 +62,10 @@ max_file_size = 1048576
 
 [step.classify_files]
 type = "agent"
-description = "LLM classification of file purpose and role"
+description = "Rule-based classification of file purpose and role"
 depends = "import_files"
-agent_type = "category_classifier"
+agent_type = "rule_classifier"
+batch_mode = true
 filter_tags = ["codebase", "test-project"]
 
 [step.extract_build_info]
@@ -72,14 +73,20 @@ type = "agent"
 description = "Extract how to build, run, and test the project"
 depends = "import_files"
 agent_type = "metadata_enricher"
+batch_mode = true
 filter_tags = ["codebase", "test-project"]
+filter_limit = 50
+filter_category = ["build", "config", "docs"]
 
 [step.identify_components]
 type = "agent"
 description = "Identify major components and entry points"
 depends = "classify_files"
 agent_type = "entity_recognizer"
+batch_mode = true
 filter_tags = ["codebase", "test-project"]
+filter_limit = 100
+filter_category = ["source", "config"]
 
 # PHASE 3: SYNTHESIS (Depends on Phase 2)
 
@@ -94,6 +101,7 @@ type = "summary"
 description = "Generate codebase index document"
 depends = "classify_files, code_map"
 filter_tags = ["codebase", "test-project"]
+filter_limit = 200
 api_key = "{google_gemini_api_key}"
 prompt = """Create a comprehensive INDEX of this codebase. For each file:
 - File path
@@ -108,6 +116,7 @@ type = "summary"
 description = "Generate codebase summary document"
 depends = "extract_build_info, identify_components"
 filter_tags = ["codebase", "test-project"]
+filter_limit = 150
 api_key = "{google_gemini_api_key}"
 prompt = """Create a comprehensive SUMMARY of this codebase covering:
 
@@ -124,6 +133,7 @@ type = "summary"
 description = "Generate codebase map document"
 depends = "code_map, build_graph"
 filter_tags = ["codebase", "test-project"]
+filter_limit = 100
 api_key = "{google_gemini_api_key}"
 prompt = """Create a structural MAP of this codebase:
 
