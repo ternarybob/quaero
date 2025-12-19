@@ -32,6 +32,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
+	"github.com/ternarybob/quaero/internal/services/imap"
 	"github.com/ternarybob/quaero/internal/services/kv"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mailer"
@@ -112,6 +113,9 @@ type App struct {
 
 	// Mailer service
 	MailerService *mailer.Service
+
+	// IMAP service
+	IMAPService *imap.Service
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -479,6 +483,13 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Debug().Msg("Mailer service initialized")
 
+	// 5.15. Initialize IMAP service for email reading
+	a.IMAPService = imap.NewService(
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Logger.Debug().Msg("IMAP service initialized")
+
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -783,6 +794,17 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(emailWorker)
 	a.Logger.Debug().Str("step_type", emailWorker.GetType().String()).Msg("Email worker registered")
+
+	// Register Email Watcher worker (monitors IMAP inbox for job execution commands)
+	emailWatcherWorker := workers.NewEmailWatcherWorker(
+		a.IMAPService,
+		a.StorageManager.JobDefinitionStorage(),
+		a.Orchestrator,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(emailWatcherWorker)
+	a.Logger.Debug().Str("step_type", emailWatcherWorker.GetType().String()).Msg("Email watcher worker registered")
 
 	// Register Test Job Generator worker (testing worker for logging, error tolerance, and job hierarchy validation)
 	testJobGeneratorWorker := workers.NewTestJobGeneratorWorker(

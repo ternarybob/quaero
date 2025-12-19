@@ -39,6 +39,9 @@ const (
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
+
+	// Email monitoring workers
+	WorkerTypeEmailWatcher WorkerType = "email_watcher" // Monitors IMAP inbox for job execution commands
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -49,7 +52,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
-		WorkerTypeASXStockData, WorkerTypeTestJobGenerator:
+		WorkerTypeASXStockData, WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher:
 		return true
 	}
 	return false
@@ -83,5 +86,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeASXAnnouncements,
 		WorkerTypeASXStockData,
 		WorkerTypeTestJobGenerator,
+		WorkerTypeEmailWatcher,
 	}
 }
