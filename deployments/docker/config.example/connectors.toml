@@ -1,0 +1,13 @@
+# External Connectors Configuration
+#
+# Define external service connectors (GitHub, etc.)
+# Values can use {variable_name} syntax to reference variables from .env file.
+
+[github]
+type = "github"
+token = "{github_token}"
+
+# Additional connectors can be added below:
+# [github-other]
+# type = "github"
+# token = "{github_other_token}"

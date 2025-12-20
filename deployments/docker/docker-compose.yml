@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   quaero:
     build:
@@ -12,11 +10,31 @@ services:
     container_name: quaero
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-9000}:8080"
     volumes:
-      - ./config:/app/config:ro
+      # Environment variables (.env) - loaded into KV store at startup
+      - ./config/.env:/app/.env:ro
+      # Main configuration file
+      - ./config/quaero.toml:/app/config/quaero.toml:ro
+      # Email/SMTP configuration (uses {variable} syntax)
+      - ./config/email.toml:/app/config/email.toml:ro
+      # External connectors (GitHub, etc.)
+      - ./config/connectors.toml:/app/config/connectors.toml:ro
+      # Variable definitions
+      - ./config/variables.toml:/app/config/variables.toml:ro
+      # Additional variable files
+      - ./config/variables:/app/config/variables:ro
+      # Job definitions directory
+      - ./config/job-definitions:/app/job-definitions:ro
+      # Job templates directory
+      - ./config/job-templates:/app/job-templates:ro
+      # Persistent data storage
       - quaero-data:/app/data
+      # Log files
       - quaero-logs:/app/logs
+    env_file:
+      - path: ./config/.env
+        required: false
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_OUTPUT=${LOG_OUTPUT:-both}

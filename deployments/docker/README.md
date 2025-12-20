@@ -7,21 +7,58 @@ This directory contains Docker configuration for deploying Quaero in containers.
 - `Dockerfile` - Multi-stage build configuration for production
 - `Dockerfile.test` - Test environment with Chrome for UI tests
 - `docker-compose.yml` - Docker Compose orchestration
+- `config.example/` - Example configuration files
 
 ## Quick Start
 
 ### 1. Configure
 
-Create a config directory and add your configuration:
+Copy the example configuration and customize:
 
 ```bash
-mkdir config
-cp ../quaero.toml config/
+# Copy example config directory
+cp -r config.example config
+
+# Copy and edit the environment file
+cp config/.env.example config/.env
+nano config/.env  # Add your API keys and secrets
 ```
 
-Edit `config/quaero.toml` with your settings.
+### 2. Configuration Structure
 
-### 2. Build and Run
+The config directory mirrors the local `./bin` structure:
+
+```
+config/
+├── .env                 # API keys and secrets (from .env.example)
+├── quaero.toml          # Main configuration
+├── email.toml           # SMTP configuration
+├── connectors.toml      # External connectors (GitHub, etc.)
+├── variables.toml       # Variable definitions
+├── variables/           # Additional variable files
+├── job-definitions/     # Job definition TOML files
+└── job-templates/       # Job template TOML files
+```
+
+### 3. Variable Substitution
+
+Configuration files support `{variable_name}` syntax for dynamic values:
+
+```toml
+# In quaero.toml
+[gemini]
+google_api_key = "{google_gemini_api_key}"
+
+# In email.toml
+[email]
+smtp_password = "{smtp_password}"
+```
+
+Variables are loaded from:
+1. `.env` file (highest priority)
+2. `variables.toml` and files in `variables/`
+
+### 4. Build and Run
 
 ```bash
 # Build and start
@@ -38,22 +75,33 @@ docker-compose down
 
 ### Environment Variables
 
-Set in `.env` file or pass to docker-compose:
+Set in `config/.env` file:
 
 ```bash
+# API Keys
+google_gemini_api_key=your_key_here
+google_places_api_key=your_key_here
+github_token=your_token_here
+
+# Email
+smtp_host=smtp.gmail.com
+smtp_username=your_email@gmail.com
+smtp_password=your_app_password
+smtp_from=your_email@gmail.com
+email_recipient=recipient@example.com
+
+# Docker Compose
 VERSION=1.0.0
 BUILD=production
-GIT_COMMIT=$(git rev-parse HEAD)
 PORT=8080
 LOG_LEVEL=info
-LOG_OUTPUT=both
 ```
 
 ### Volumes
 
-- `quaero-data` - Application data storage
+- `quaero-data` - Application data storage (BadgerDB)
 - `quaero-logs` - Log files
-- `./config` - Configuration files (read-only)
+- `./config/*` - Configuration files (read-only)
 
 ## Build Arguments
 

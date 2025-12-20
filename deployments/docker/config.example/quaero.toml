@@ -1,0 +1,110 @@
+# Quaero Docker Configuration
+# ============================
+#
+# This is the main configuration file for Quaero when running in Docker.
+# Copy this directory to ./config and customize for your environment.
+#
+# Configuration Load Order (priority from lowest to highest):
+#   1. Defaults (hardcoded in application)
+#   2. TOML file (this file)
+#   3. Environment variables (QUAERO_*)
+#   4. Command line flags
+#
+# Variable Substitution:
+#   Use {variable_name} syntax to reference values from the KV store.
+#   Variables are loaded from .env file and variables.toml at startup.
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
+# Controls environment mode: "development" or "production"
+# Production mode enforces stricter validation:
+#  - Rejects test URLs (localhost, 127.0.0.1, ::1, port 3333)
+#  - Ensures seed URLs point to real production services
+
+environment = "production"
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+[server]
+port = 8080
+host = "0.0.0.0"  # Listen on all interfaces in Docker
+
+# =============================================================================
+# Storage Configuration
+# =============================================================================
+[storage.badger]
+path = "/app/data"  # Docker volume mount point
+
+[storage.filesystem]
+images = "/app/data/images"
+attachments = "/app/data/attachments"
+
+# =============================================================================
+# Gemini Configuration (Google AI)
+# =============================================================================
+# API key is loaded from .env file via KV store
+[gemini]
+google_api_key = "{google_gemini_api_key}"
+agent_model = "gemini-2.0-flash"
+chat_model = "gemini-2.0-flash"
+
+# =============================================================================
+# Places API Configuration
+# =============================================================================
+[places_api]
+api_key = "{google_places_api_key}"
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+[logging]
+level = "info"
+format = "json"
+output = ["stdout", "file"]
+client_debug = false
+
+# =============================================================================
+# Queue Configuration
+# =============================================================================
+[queue]
+concurrency = 5
+
+# =============================================================================
+# Job Definitions Configuration
+# =============================================================================
+[jobs]
+definitions_dir = "/app/job-definitions"
+templates_dir = "/app/job-templates"
+
+# =============================================================================
+# Default Scheduled Jobs
+# =============================================================================
+[jobs.crawl_and_collect]
+enabled = true
+schedule = "*/5 * * * *"
+description = "Crawl and collect website data, store as markdown"
+
+[jobs.scan_and_summarize]
+enabled = true
+schedule = "*/10 * * * *"
+description = "Scan markdown documents and generate summaries with metadata"
+
+# =============================================================================
+# Crawler Configuration
+# =============================================================================
+[crawler]
+user_agent = "Quaero/1.0 (Web Crawler)"
+user_agent_rotation = true
+max_concurrency = 5
+request_delay = "2s"
+random_delay = "1s"
+request_timeout = "60s"
+max_body_size = 20971520
+max_depth = 5
+follow_robots_txt = true
+output_format = "markdown"
+only_main_content = true
+include_links = true
+include_metadata = true

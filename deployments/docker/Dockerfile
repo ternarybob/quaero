@@ -8,6 +8,9 @@ WORKDIR /build
 
 # Copy go mod files
 COPY go.mod go.sum ./
+
+# Allow Go toolchain to download newer versions if needed
+ENV GOTOOLCHAIN=auto
 RUN go mod download
 
 # Copy source code
@@ -30,8 +33,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+# Install runtime dependencies including Chromium for web crawling
+RUN apk add --no-cache ca-certificates tzdata chromium && \
+    ln -s /usr/bin/chromium-browser /usr/bin/google-chrome
+
+# Configure Chromium for headless operation
+ENV CHROME_BIN=/usr/bin/chromium-browser
+ENV CHROMEDP_DISABLE_GPU=true
+ENV CHROMEDP_NO_SANDBOX=true
 
 # Create non-root user
 RUN addgroup -g 1000 quaero && \
@@ -41,6 +50,9 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /build/quaero .
+
+# Copy pages (HTML templates) from builder
+COPY --from=builder /build/pages /app/pages
 
 # Create directories
 RUN mkdir -p /app/data /app/logs && \
@@ -57,5 +69,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 # Run the application
+# Note: Flags must come before 'serve' for proper parsing
 ENTRYPOINT ["/app/quaero"]
-CMD ["serve", "-c", "/app/config/quaero.toml"]
+CMD ["-c", "/app/config/quaero.toml", "serve"]
