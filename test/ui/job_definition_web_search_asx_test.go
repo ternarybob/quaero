@@ -10,15 +10,23 @@ import (
 )
 
 // TestJobDefinitionWebSearchASX tests the Web Search ASX:GNP job definition end-to-end.
-// This job has 3 steps:
-// 1. search_asx_gnp - Web search for ASX:GNP company info
-// 2. summarize_results - AI summary of search results
-// 3. email_summary - Email the summary
+// This job matches the production pattern in bin/job-definitions/web-search-asx-wes.toml
+// and has 9 steps:
+// 1. fetch_stock_data - Fetch ASX stock data and technicals
+// 2. fetch_announcements - Fetch ASX company announcements
+// 3. search_asx_gnp - Web search for financial news
+// 4. search_industry - Search for industry outlook
+// 5. search_competitors - Search for competitor comparison
+// 6. analyze_competitors - Dynamic competitor analysis via LLM
+// 7. analyze_announcements - Noise vs signal announcement analysis
+// 8. summarize_results - AI summary with investment recommendations
+// 9. email_summary - Email the summary (tests markdown-to-HTML conversion)
 //
 // The test verifies:
 // - Job completes successfully
-// - All 3 steps are present
+// - All 9 steps are present (matching production WES job pattern)
 // - Each step generates output (documents or email sent)
+// - Email step converts markdown to HTML (not raw markdown)
 func TestJobDefinitionWebSearchASX(t *testing.T) {
 	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
@@ -149,15 +157,26 @@ func TestJobDefinitionWebSearchASX(t *testing.T) {
 	}
 
 	// --------------------------------------------------------------------------------
-	// Assertion 2: Verify expected 3 steps exist (search_asx_gnp, summarize_results, email_summary)
+	// Assertion 2: Verify expected 9 steps exist (matching production WES job pattern)
 	// --------------------------------------------------------------------------------
-	utc.Log("Assertion 2: Verifying expected steps are present...")
+	utc.Log("Assertion 2: Verifying expected 9 steps are present (matching production WES pattern)...")
 	if jobID != "" {
 		var tree apiJobTreeResponse
 		if err := apiGetJSON(t, httpHelper, fmt.Sprintf("/api/jobs/%s/tree", jobID), &tree); err != nil {
 			t.Errorf("FAIL: Could not get step tree from API for job_id=%s: %v", jobID, err)
 		} else {
-			expectedSteps := []string{"search_asx_gnp", "summarize_results", "email_summary"}
+			// These 9 steps match the production pattern in bin/job-definitions/web-search-asx-wes.toml
+			expectedSteps := []string{
+				"fetch_stock_data",
+				"fetch_announcements",
+				"search_asx_gnp",
+				"search_industry",
+				"search_competitors",
+				"analyze_competitors",
+				"analyze_announcements",
+				"summarize_results",
+				"email_summary",
+			}
 			foundSteps := make(map[string]bool)
 			for _, step := range tree.Steps {
 				foundSteps[step.Name] = true
@@ -171,10 +190,10 @@ func TestJobDefinitionWebSearchASX(t *testing.T) {
 				}
 			}
 
-			if len(tree.Steps) != 3 {
-				t.Errorf("FAIL: Expected exactly 3 steps, got %d", len(tree.Steps))
+			if len(tree.Steps) != 9 {
+				t.Errorf("FAIL: Expected exactly 9 steps (matching WES production pattern), got %d", len(tree.Steps))
 			} else {
-				utc.Log("PASS: Web Search ASX:GNP has exactly 3 steps")
+				utc.Log("PASS: Web Search ASX:GNP has exactly 9 steps (matching WES production pattern)")
 			}
 		}
 	} else {
@@ -227,15 +246,15 @@ func TestJobDefinitionWebSearchASX(t *testing.T) {
 	}
 
 	// --------------------------------------------------------------------------------
-	// Assertion 5: Verify email step sent HTML content (not raw markdown)
+	// Assertion 5: Verify email step converted markdown to HTML (not raw markdown)
 	// --------------------------------------------------------------------------------
-	utc.Log("Assertion 5: Verifying email step sent HTML content...")
+	utc.Log("Assertion 5: Verifying email step converted markdown to HTML...")
 	if jobID != "" {
 		var tree apiJobTreeResponse
 		if err := apiGetJSON(t, httpHelper, fmt.Sprintf("/api/jobs/%s/tree", jobID), &tree); err == nil {
 			for _, step := range tree.Steps {
 				if step.Name == "email_summary" && step.Status == "completed" {
-					// Get logs for email step to verify HTML was sent
+					// Get logs for email step to verify HTML was generated from markdown
 					var logsResp apiJobTreeLogsResponse
 					logsPath := fmt.Sprintf("/api/logs?scope=job&job_id=%s&step=%s&limit=50&level=all", step.StepID, step.Name)
 					if err := apiGetJSON(t, httpHelper, logsPath, &logsResp); err != nil {
@@ -243,44 +262,118 @@ func TestJobDefinitionWebSearchASX(t *testing.T) {
 						break
 					}
 
-					// Look for log entry indicating HTML email was sent
-					foundHTMLIndicator := false
+					// Look for explicit log entry indicating HTML was generated from markdown
+					// The email worker logs: "HTML email body generated (X bytes) from markdown content"
+					foundHTMLConversion := false
+					foundEmailSent := false
+					var htmlBytes string
+
 					for _, stepLogs := range logsResp.Steps {
 						for _, entry := range stepLogs.Logs {
-							// The email worker logs "has_html=true" when sending HTML
-							// or "Sending HTML email" or similar indicators
-							if strings.Contains(entry.Message, "HTML") ||
-								strings.Contains(entry.Message, "has_html") ||
-								strings.Contains(entry.Message, "html_len") {
-								foundHTMLIndicator = true
-								utc.Log("PASS: Email step sent HTML content (found: %s)", entry.Message)
-								break
-							}
-						}
-						if foundHTMLIndicator {
-							break
-						}
-					}
-
-					if !foundHTMLIndicator {
-						// The worker may not log HTML details at info level, so just verify email was sent
-						for _, stepLogs := range logsResp.Steps {
-							for _, entry := range stepLogs.Logs {
-								if strings.Contains(entry.Message, "Email sent successfully") {
-									utc.Log("PASS: Email was sent successfully (HTML conversion is enabled in code)")
-									foundHTMLIndicator = true
-									break
+							// Check for HTML conversion log (primary assertion)
+							if strings.Contains(entry.Message, "HTML email body generated") &&
+								strings.Contains(entry.Message, "from markdown") {
+								foundHTMLConversion = true
+								// Extract byte count for logging
+								if idx := strings.Index(entry.Message, "("); idx != -1 {
+									if end := strings.Index(entry.Message[idx:], ")"); end != -1 {
+										htmlBytes = entry.Message[idx : idx+end+1]
+									}
 								}
+								utc.Log("PASS: Email HTML generated from markdown %s", htmlBytes)
 							}
-							if foundHTMLIndicator {
-								break
+
+							// Check for email sent confirmation
+							if strings.Contains(entry.Message, "Email sent successfully") {
+								foundEmailSent = true
 							}
 						}
 					}
 
-					if !foundHTMLIndicator {
-						t.Errorf("FAIL: Could not verify email step sent HTML content")
+					if !foundHTMLConversion {
+						t.Errorf("FAIL: Email step did not log HTML conversion from markdown. "+
+							"Expected log containing 'HTML email body generated ... from markdown'")
 					}
+
+					if !foundEmailSent {
+						t.Errorf("FAIL: Email step did not log successful send")
+					} else if foundHTMLConversion {
+						utc.Log("PASS: Email sent successfully with HTML body from markdown conversion")
+					}
+
+					// --------------------------------------------------------------------------------
+					// Assertion 5b: Retrieve HTML document and verify actual content
+					// The email worker saves the HTML body as a document with tag "email-html"
+					// This allows us to verify the actual HTML content, not just log messages
+					// --------------------------------------------------------------------------------
+					utc.Log("Assertion 5b: Verifying HTML document content...")
+
+					// Search for documents with tag "email-html"
+					var docsResp apiDocumentsResponse
+					docsPath := "/api/documents?tags=email-html&limit=10"
+					if err := apiGetJSON(t, httpHelper, docsPath, &docsResp); err != nil {
+						utc.Log("Warning: Could not fetch email-html documents: %v", err)
+					} else if len(docsResp.Documents) == 0 {
+						t.Errorf("FAIL: No email-html document found - email worker should save HTML body as document")
+					} else {
+						// Get the most recent email-html document
+						doc := docsResp.Documents[0]
+						utc.Log("Found email-html document: %s", doc.ID)
+
+						// Verify the content contains HTML tags (not raw markdown)
+						content := doc.ContentMarkdown // HTML is stored in ContentMarkdown field
+
+						// Check for HTML indicators
+						hasHTMLDoctype := strings.Contains(content, "<!DOCTYPE html>")
+						hasHTMLTag := strings.Contains(content, "<html")
+						hasBodyTag := strings.Contains(content, "<body")
+						hasHeadingTag := strings.Contains(content, "<h1") || strings.Contains(content, "<h2") || strings.Contains(content, "<h3")
+						hasParagraphTag := strings.Contains(content, "<p>") || strings.Contains(content, "<p ")
+
+						htmlIndicators := 0
+						if hasHTMLDoctype {
+							htmlIndicators++
+						}
+						if hasHTMLTag {
+							htmlIndicators++
+						}
+						if hasBodyTag {
+							htmlIndicators++
+						}
+						if hasHeadingTag {
+							htmlIndicators++
+						}
+						if hasParagraphTag {
+							htmlIndicators++
+						}
+
+						// Check for raw markdown indicators (should NOT be present in HTML)
+						hasRawMarkdownHeader := strings.Contains(content, "\n## ") || strings.Contains(content, "\n# ")
+						hasRawMarkdownBold := strings.Contains(content, "**") && !strings.Contains(content, "<strong>")
+						hasRawMarkdownList := strings.Contains(content, "\n- ") && !strings.Contains(content, "<li>")
+
+						if htmlIndicators >= 2 {
+							utc.Log("PASS: HTML document contains %d HTML indicators (DOCTYPE=%v, html=%v, body=%v, h1-h3=%v, p=%v)",
+								htmlIndicators, hasHTMLDoctype, hasHTMLTag, hasBodyTag, hasHeadingTag, hasParagraphTag)
+						} else {
+							t.Errorf("FAIL: HTML document has only %d HTML indicators - expected at least 2. Content may still be markdown.", htmlIndicators)
+						}
+
+						if hasRawMarkdownHeader || hasRawMarkdownBold || hasRawMarkdownList {
+							t.Errorf("FAIL: HTML document contains raw markdown (header=%v, bold=%v, list=%v) - conversion failed",
+								hasRawMarkdownHeader, hasRawMarkdownBold, hasRawMarkdownList)
+						} else {
+							utc.Log("PASS: HTML document does not contain raw markdown indicators")
+						}
+
+						// Log first 500 chars of content for debugging
+						preview := content
+						if len(preview) > 500 {
+							preview = preview[:500] + "..."
+						}
+						utc.Log("HTML document preview: %s", preview)
+					}
+
 					break
 				}
 			}

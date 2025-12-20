@@ -933,6 +933,20 @@ type apiJobTreeLogsResponse struct {
 	Steps []apiJobTreeLogsStep `json:"steps"`
 }
 
+// apiDocument represents a document from the API
+type apiDocument struct {
+	ID              string `json:"id"`
+	SourceType      string `json:"source_type"`
+	Title           string `json:"title"`
+	ContentMarkdown string `json:"content_markdown"`
+}
+
+// apiDocumentsResponse represents the documents API response
+type apiDocumentsResponse struct {
+	Documents  []apiDocument `json:"documents"`
+	TotalCount int           `json:"total_count"`
+}
+
 // getJobIDFromQueueUI extracts the job ID from the Queue UI using Alpine.js
 func getJobIDFromQueueUI(utc *UITestContext, jobName string) (string, error) {
 	var jobID string

@@ -1,46 +1,210 @@
-# Web Search ASX:GNP Job Definition
-# Simple 3-step job for UI testing: web search -> summarize -> email
+# ASX Investment Analysis Job Definition (Test Version)
+# Matches the production pattern in bin/job-definitions/web-search-asx-wes.toml
+# Fetches real-time stock data, company announcements, and web research
+# Generates technical analysis with signal-to-noise focus
 
 id = "web-search-asx-gnp"
 name = "Web Search: ASX:GNP Company Info"
 type = "web_search"
-description = "Search for ASX:GNP company information and email summary"
-tags = ["web-search", "asx", "stocks", "gnp"]
+description = "Comprehensive investment analysis for ASX:GNP (GenusPlus) with dynamic competitor identification and stock data fetching"
+tags = ["web-search", "asx", "stocks", "gnp", "test"]
 schedule = ""
-timeout = "10m"
+timeout = "20m"
 enabled = true
 auto_start = false
 
-# Step 1: Web search for ASX:GNP company info
+# Step 1: Fetch real-time stock data and technical indicators for GNP
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch real-time prices, valuations, and calculate technicals for GNP"
+on_error = "continue"
+asx_code = "GNP"
+period = "M6"
+output_tags = ["gnp", "asx-gnp-data"]
+
+# Step 2: Fetch ASX company announcements for GNP
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch official ASX announcements for GNP"
+depends = "fetch_stock_data"
+on_error = "continue"
+asx_code = "GNP"
+period = "M6"
+limit = 20
+output_tags = ["gnp", "asx-gnp-announcements"]
+
+# Step 3: Web search for additional financial data and news
 [step.search_asx_gnp]
 type = "web_search"
-description = "Search for ASX:GNP company information"
+description = "Search for financial news and analyst coverage"
+depends = "fetch_announcements"
 on_error = "fail"
 api_key = "{google_gemini_api_key}"
-query = "ASX:GNP GenusPlus Group company information 2025"
+query = "ASX:GNP GenusPlus Group financial results infrastructure electrical news site:afr.com OR site:stockhead.com.au OR site:hotcopper.com.au"
 output_tags = ["gnp", "asx-gnp-search"]
 depth = 2
 breadth = 2
 
-# Step 2: Summarize the search results
-[step.summarize_results]
-type = "summary"
-description = "Summarize search results about ASX:GNP"
+# Step 4: Search for industry outlook and trends
+[step.search_industry]
+type = "web_search"
+description = "Search for infrastructure and electrical services sector outlook"
 depends = "search_asx_gnp"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+query = "Australian infrastructure electrical services sector outlook 2025 energy transmission mining services renewable energy"
+output_tags = ["gnp", "asx-gnp-industry"]
+depth = 2
+breadth = 2
+
+# Step 5: Search for competitor analysis (web search for context)
+[step.search_competitors]
+type = "web_search"
+description = "Search for infrastructure sector competitor comparison"
+depends = "search_industry"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+query = "ASX infrastructure electrical contractors comparison GenusPlus Downer Ventia Cimic market share revenue 2025"
+output_tags = ["gnp", "asx-gnp-competitor-news"]
+depth = 2
+breadth = 2
+
+# Step 6: DYNAMIC COMPETITOR ANALYSIS - LLM identifies competitors and fetches stock data
+[step.analyze_competitors]
+type = "competitor_analysis"
+description = "Identify infrastructure sector competitors via LLM and fetch their real-time stock data"
+depends = "search_competitors"
+on_error = "continue"
+asx_code = "GNP"
+api_key = "{google_gemini_api_key}"
+prompt = "Identify the top 3-5 ASX-listed infrastructure/electrical services sector competitors for GenusPlus Group (GNP). Focus on companies in electrical infrastructure, transmission, and energy services. Include direct competitors like Downer, Ventia, and similar infrastructure contractors."
+period = "M6"
+output_tags = ["gnp", "asx-gnp-competitors"]
+
+# Step 7: Analyze announcements vs price correlation (NOISE VS SIGNAL)
+[step.analyze_announcements]
+type = "summary"
+description = "Analyze announcements against share price movements to identify noise vs signal"
+depends = "analyze_competitors"
 on_error = "fail"
 filter_tags = ["gnp"]
 api_key = "{google_gemini_api_key}"
-prompt = """Summarize the collected information about ASX:GNP (GenusPlus Group Ltd).
-Include: company overview, recent news, and key business activities.
-Keep the summary concise (2-3 paragraphs)."""
+prompt = """You are a critical equity research analyst specializing in separating NOISE from SIGNAL in corporate communications.
+
+**YOUR TASK**: Analyze each ASX announcement against the historical share price data to determine if announcements actually moved the stock price or were just PR noise.
+
+**INPUT DOCUMENTS**:
+1. "ASX:GNP Stock Data & Technical Analysis" - Contains historical daily prices and technicals
+2. "ASX:GNP Announcements" - Contains dated announcements with headlines
+3. Competitor stock data documents (dynamically fetched)
+
+## REQUIRED ANALYSIS
+
+### ANNOUNCEMENT-PRICE CORRELATION TABLE
+
+For EACH announcement, determine if price moved significantly in the 3 days after:
+
+| Date | Announcement | Price Before | Price +3 Days | Change % | SIGNAL/NOISE |
+|------|--------------|--------------|---------------|----------|--------------|
+
+**SIGNAL** = Price moved >3% in either direction within 3 trading days
+**NOISE** = Price moved <3% or moved opposite to announcement sentiment
+
+### SIGNAL ANNOUNCEMENTS (Price Movers)
+List announcements that ACTUALLY moved the share price with evidence.
+
+### NOISE ANNOUNCEMENTS (PR Fluff)
+List announcements that had NO material price impact.
+
+### INVESTOR INTELLIGENCE SUMMARY
+**Signal-to-Noise Ratio**: X signal announcements / Y total announcements = Z%
+
+**CRITICAL RULES**:
+- Use ONLY prices from the Stock Data document
+- Be skeptical - assume all announcements are noise until proven otherwise
+- IF YOU DO NOT HAVE DATA, SAY "UNKNOWN" - never fabricate"""
+output_tags = ["gnp", "asx-gnp-announcement-analysis"]
+
+# Step 8: Generate final investment analysis with all data
+[step.summarize_results]
+type = "summary"
+description = "Generate comprehensive investment analysis with industry context and critical assessment"
+depends = "analyze_announcements"
+on_error = "fail"
+filter_tags = ["gnp"]
+api_key = "{google_gemini_api_key}"
+prompt = """You are a professional equity research analyst. Generate a comprehensive investment report for ASX:GNP (GenusPlus Group Ltd) using ALL collected data.
+
+**COMPANY CONTEXT**: GenusPlus Group is an Australian infrastructure services company specializing in:
+- Electrical infrastructure and transmission
+- Energy services and renewable energy projects
+- Mining services and maintenance
+
+**INPUT DOCUMENTS**:
+1. "ASX:GNP Stock Data & Technical Analysis" - GNP price data and technicals
+2. Competitor stock data documents (dynamically fetched)
+3. "ASX:GNP Announcements" - Raw announcements
+4. "Web Search: industry outlook" - Industry trends
+5. "Web Search: competitor comparison" - Competitor news
+6. "Announcement-Price Correlation Analysis" - Noise vs signal analysis
+
+## EXECUTIVE SUMMARY
+
+| Assessment | Rating | Confidence |
+|------------|--------|------------|
+| Technical Outlook | BULLISH / BEARISH / NEUTRAL | HIGH / MEDIUM / LOW |
+| Announcement Credibility | HIGH / MEDIUM / LOW | |
+| Signal-to-Noise Ratio | X% | |
+| Industry Outlook | POSITIVE / NEUTRAL / NEGATIVE | |
+| Competitive Position | LEADER / STRONG / MODERATE | |
+| Overall Recommendation | STRONG BUY / BUY / HOLD / SELL / STRONG SELL | |
+
+## PRICE ACTION ANALYSIS
+
+### Current Position (GNP)
+| Metric | Value | Signal |
+|--------|-------|--------|
+| Last Price | $ | |
+| vs SMA 20 | Above/Below | Bullish/Bearish |
+| vs SMA 50 | Above/Below | Bullish/Bearish |
+| RSI (14) | X | Overbought/Oversold/Neutral |
+| 52-Week Position | X% | |
+
+## COMPETITIVE POSITIONING
+
+### Peer Comparison - USING ACTUAL FETCHED DATA
+| Stock | Last Price | Change % | SMA20 vs Price | RSI | Trend Signal |
+|-------|------------|----------|----------------|-----|--------------|
+| GNP | $ | % | | | |
+| [Competitors...] | ... | ... | ... | ... | ... |
+
+## INVESTMENT THESIS
+
+### Bull Case
+### Bear Case
+### Fair Value Assessment
+
+## ACTIONABLE RECOMMENDATION
+
+### For Traders (1-4 weeks)
+**SIGNAL: BUY / HOLD / SELL / NO TRADE**
+
+### For Investors (6-12 months)
+**SIGNAL: BUY / HOLD / SELL**
+
+---
+**CRITICAL DATA RULES**:
+- Use ONLY the stock data provided - never invent prices
+- If data is missing, state "DATA UNAVAILABLE"
+- Verify all figures independently before trading"""
 output_tags = ["asx-gnp-summary"]
 
-# Step 3: Email the summary
+# Step 9: Email the analysis report
 [step.email_summary]
 type = "email"
-description = "Email the ASX:GNP summary"
+description = "Send ASX:GNP investment analysis via email"
 depends = "summarize_results"
 on_error = "fail"
 to = "{email_recipient}"
-subject = "ASX:GNP Company Summary"
+subject = "ASX:GNP Investment Analysis - Dynamic Competitor Report"
 body_from_tag = "asx-gnp-summary"

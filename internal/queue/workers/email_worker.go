@@ -10,7 +10,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -162,6 +164,22 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Int("text_len", len(body)).
 		Msg("Sending email with body")
 
+	// Log HTML conversion result explicitly for test assertion visibility
+	if htmlBody != "" {
+		if err := w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("HTML email body generated (%d bytes) from markdown content", len(htmlBody))); err != nil {
+			w.logger.Warn().Err(err).Msg("Failed to add HTML conversion log")
+		}
+
+		// Save HTML body as document for verification and debugging
+		// This allows tests to retrieve and verify actual HTML content
+		htmlDoc := w.saveHTMLDocument(ctx, stepID, subject, htmlBody)
+		if htmlDoc != nil {
+			if err := w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Email HTML document saved: %s", htmlDoc.ID)); err != nil {
+				w.logger.Warn().Err(err).Msg("Failed to add HTML document log")
+			}
+		}
+	}
+
 	var err error
 	if htmlBody != "" {
 		w.logger.Debug().Msg("Sending HTML email")
@@ -280,17 +298,61 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 	return textBody, htmlBody
 }
 
+// saveHTMLDocument saves the HTML email body as a document for verification
+// This creates a retrievable artifact that tests can use to verify actual HTML content
+func (w *EmailWorker) saveHTMLDocument(ctx context.Context, stepID, subject, htmlBody string) *models.Document {
+	if htmlBody == "" {
+		return nil
+	}
+
+	now := time.Now()
+	shortStepID := stepID
+	if len(stepID) > 8 {
+		shortStepID = stepID[:8]
+	}
+
+	doc := &models.Document{
+		ID:              "doc_" + uuid.New().String(),
+		SourceType:      "email_html",
+		SourceID:        stepID,
+		Title:           fmt.Sprintf("Email HTML: %s", subject),
+		ContentMarkdown: htmlBody, // Store HTML in ContentMarkdown for retrieval via API
+		DetailLevel:     models.DetailLevelFull,
+		Metadata: map[string]interface{}{
+			"step_id":    stepID,
+			"subject":    subject,
+			"html_bytes": len(htmlBody),
+		},
+		Tags:       []string{"email-html", fmt.Sprintf("email-html-%s", shortStepID)},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		LastSynced: &now,
+	}
+
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		w.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to save HTML email document")
+		return nil
+	}
+
+	w.logger.Debug().Str("doc_id", doc.ID).Msg("Saved HTML email document for verification")
+	return doc
+}
+
 // convertMarkdownToHTML converts markdown content to styled HTML for email
-// Always returns HTML - never returns empty string (falls back to preformatted text)
+// Always returns HTML - uses goldmark for conversion with preprocessing for LLM output
 func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	if markdown == "" {
 		w.logger.Debug().Msg("convertMarkdownToHTML: empty markdown input")
 		return ""
 	}
 
-	w.logger.Debug().Int("markdown_len", len(markdown)).Msg("Converting markdown to HTML")
+	// Strip outer markdown code fences that LLMs often wrap their output in
+	// Common patterns: ```markdown\n...\n``` or ```\n...\n```
+	markdown = w.stripOuterCodeFences(markdown)
 
-	// Create goldmark instance with common extensions
+	w.logger.Debug().Int("markdown_len", len(markdown)).Msg("Converting markdown to HTML using goldmark")
+
+	// Create goldmark instance with GitHub Flavored Markdown extensions
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM, // GitHub Flavored Markdown (tables, strikethrough, etc.)
@@ -303,19 +365,12 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(markdown), &buf); err != nil {
-		w.logger.Error().Err(err).Int("input_len", len(markdown)).Msg("Failed to convert markdown to HTML, using preformatted fallback")
-		// Fallback: wrap raw text in <pre> tags so we still send HTML
-		htmlContent := "<pre style=\"white-space: pre-wrap; font-family: monospace;\">" + escapeHTML(markdown) + "</pre>"
-		return w.wrapInEmailTemplate(htmlContent)
+		w.logger.Error().Err(err).Int("input_len", len(markdown)).Msg("Failed to convert markdown to HTML")
+		// Return the markdown wrapped in pre tags as fallback
+		return w.wrapInEmailTemplate("<pre>" + escapeHTML(markdown) + "</pre>")
 	}
 
 	htmlContent := buf.String()
-	if htmlContent == "" {
-		w.logger.Warn().Msg("Goldmark returned empty HTML, using preformatted fallback")
-		// Fallback for empty conversion result
-		htmlContent = "<pre style=\"white-space: pre-wrap; font-family: monospace;\">" + escapeHTML(markdown) + "</pre>"
-	}
-
 	w.logger.Debug().Int("html_len", len(htmlContent)).Msg("Markdown converted to HTML successfully")
 
 	// Wrap in styled HTML email template
@@ -323,6 +378,464 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	w.logger.Debug().Int("final_len", len(result)).Msg("HTML wrapped in email template")
 
 	return result
+}
+
+// stripOuterCodeFences removes markdown code fences that wrap the entire content
+// LLMs often output their responses wrapped in ```markdown ... ```
+// Also handles unclosed code fences (``` at start but no proper closing)
+func (w *EmailWorker) stripOuterCodeFences(content string) string {
+	content = strings.TrimSpace(content)
+
+	// Check if content starts with a code fence
+	if strings.HasPrefix(content, "```") {
+		// Find the end of the opening fence line
+		firstNewline := strings.Index(content, "\n")
+		if firstNewline == -1 {
+			return content
+		}
+
+		// Get the language hint (e.g., "markdown" from "```markdown")
+		openingLine := content[:firstNewline]
+		lang := strings.TrimPrefix(openingLine, "```")
+		lang = strings.TrimSpace(lang)
+
+		// Check for closing fence - could be "```" or "```\n" or surrounded by whitespace
+		trimmedEnd := strings.TrimRight(content, " \t\n\r")
+
+		if strings.HasSuffix(trimmedEnd, "```") {
+			// Find the start of the closing fence
+			lastFenceStart := strings.LastIndex(trimmedEnd, "\n```")
+			if lastFenceStart == -1 {
+				// Closing fence is at the very end without newline
+				lastFenceStart = len(trimmedEnd) - 3
+			}
+
+			// Extract content between fences
+			innerContent := content[firstNewline+1 : lastFenceStart]
+			innerContent = strings.TrimSpace(innerContent)
+
+			w.logger.Debug().
+				Str("lang", lang).
+				Int("original_len", len(content)).
+				Int("inner_len", len(innerContent)).
+				Msg("Stripped outer code fences from markdown")
+
+			return innerContent
+		}
+
+		// UNCLOSED code fence - strip the opening fence and process content
+		// This handles cases where LLM outputs ```markdown at start but forgets closing ```
+		innerContent := content[firstNewline+1:]
+		innerContent = strings.TrimSpace(innerContent)
+
+		// Also strip any trailing incomplete fence like "``" or "`"
+		innerContent = strings.TrimRight(innerContent, "`")
+		innerContent = strings.TrimSpace(innerContent)
+
+		w.logger.Warn().
+			Str("lang", lang).
+			Int("original_len", len(content)).
+			Int("inner_len", len(innerContent)).
+			Msg("Stripped UNCLOSED code fence from markdown (no closing ```)")
+
+		return innerContent
+	}
+
+	return content
+}
+
+// containsRawMarkdown checks if HTML content still contains unconverted markdown patterns
+// This is used to detect when goldmark fails to convert content properly
+func (w *EmailWorker) containsRawMarkdown(html string) bool {
+	// Check for markdown headers (## or # patterns)
+	// These should NEVER appear in properly converted HTML
+	// Check for patterns like "\n## ", "> ## ", "<p>## " etc.
+	if strings.Contains(html, "## ") || strings.Contains(html, "# ") {
+		// Verify it's actually a markdown header, not something else
+		// Check if it's NOT already inside an HTML tag
+		if strings.Contains(html, "\n## ") || strings.Contains(html, "\n# ") ||
+			strings.Contains(html, ">## ") || strings.Contains(html, "># ") ||
+			strings.HasPrefix(html, "## ") || strings.HasPrefix(html, "# ") {
+			w.logger.Debug().Msg("containsRawMarkdown: found markdown headers")
+			return true
+		}
+	}
+
+	// Check for markdown bold (**text**)
+	// Even if some <strong> tags exist, if ** is still present, conversion was incomplete
+	if strings.Contains(html, "**") {
+		w.logger.Debug().Msg("containsRawMarkdown: found markdown bold (**)")
+		return true
+	}
+
+	// Check for markdown lists (- item or * item at start of lines)
+	// These should NEVER appear in properly converted HTML
+	if strings.Contains(html, "\n- ") || strings.HasPrefix(html, "- ") ||
+		strings.Contains(html, "\n* ") || strings.HasPrefix(html, "* ") {
+		// Make sure it's not inside a <style> or <code> block by checking context
+		// Simple heuristic: if no <li> exists at all, definitely unconverted
+		if !strings.Contains(html, "<li>") {
+			w.logger.Debug().Msg("containsRawMarkdown: found markdown lists with no <li>")
+			return true
+		}
+	}
+
+	// Check for markdown code blocks (```)
+	if strings.Contains(html, "```") {
+		w.logger.Debug().Msg("containsRawMarkdown: found markdown code blocks (```)")
+		return true
+	}
+
+	return false
+}
+
+// simpleMarkdownToHTML performs basic line-by-line markdown to HTML conversion
+// This is used as a fallback when goldmark fails to parse malformed markdown from LLMs
+func (w *EmailWorker) simpleMarkdownToHTML(markdown string) string {
+	var result strings.Builder
+
+	// Normalize line endings
+	markdown = strings.ReplaceAll(markdown, "\r\n", "\n")
+	markdown = strings.ReplaceAll(markdown, "\r", "\n")
+
+	// Remove BOM if present
+	markdown = strings.TrimPrefix(markdown, "\xef\xbb\xbf")
+
+	lines := strings.Split(markdown, "\n")
+	inCodeBlock := false
+	inList := false
+	inTable := false
+
+	for i, line := range lines {
+		// Normalize the line - remove non-breaking spaces, zero-width chars, etc.
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.ReplaceAll(trimmed, "\u00A0", " ") // Non-breaking space
+		trimmed = strings.ReplaceAll(trimmed, "\u200B", "")  // Zero-width space
+		trimmed = strings.ReplaceAll(trimmed, "\uFEFF", "")  // BOM
+
+		// Handle code blocks FIRST (highest priority)
+		if strings.HasPrefix(trimmed, "```") {
+			if inCodeBlock {
+				result.WriteString("</code></pre>\n")
+				inCodeBlock = false
+			} else {
+				// Close any open blocks
+				if inList {
+					result.WriteString("</ul>\n")
+					inList = false
+				}
+				if inTable {
+					result.WriteString("</tbody>\n</table>\n")
+					inTable = false
+				}
+				// Extract language hint if present
+				lang := strings.TrimPrefix(trimmed, "```")
+				if lang != "" {
+					result.WriteString(fmt.Sprintf("<pre><code class=\"language-%s\">", escapeHTML(lang)))
+				} else {
+					result.WriteString("<pre><code>")
+				}
+				inCodeBlock = true
+			}
+			continue
+		}
+
+		if inCodeBlock {
+			result.WriteString(escapeHTML(line))
+			result.WriteString("\n")
+			continue
+		}
+
+		// Handle headers BEFORE tables - a line starting with # is a header, not a table
+		// even if it contains | characters
+		headerContent, headerLevel := w.parseMarkdownHeader(trimmed)
+		if headerLevel > 0 {
+			if inList {
+				result.WriteString("</ul>\n")
+				inList = false
+			}
+			if inTable {
+				result.WriteString("</tbody>\n</table>\n")
+				inTable = false
+			}
+			result.WriteString(fmt.Sprintf("<h%d>", headerLevel))
+			result.WriteString(w.processInlineMarkdown(headerContent))
+			result.WriteString(fmt.Sprintf("</h%d>\n", headerLevel))
+			continue
+		}
+
+		// Handle tables - detect by | character at start/in line
+		if strings.Contains(trimmed, "|") && strings.Count(trimmed, "|") >= 2 {
+			// Check if this is a table separator row (|---|---|)
+			isSeparator := strings.Contains(trimmed, "---") || strings.Contains(trimmed, ":--") || strings.Contains(trimmed, "--:")
+
+			if !inTable {
+				// Start table - check if this is a header row
+				inTable = true
+				result.WriteString("<table>\n")
+
+				// Check if next line is separator (indicates this is header)
+				isHeader := false
+				if i+1 < len(lines) {
+					nextLine := strings.TrimSpace(lines[i+1])
+					if strings.Contains(nextLine, "|") && (strings.Contains(nextLine, "---") || strings.Contains(nextLine, ":--")) {
+						isHeader = true
+					}
+				}
+
+				if isHeader && !isSeparator {
+					result.WriteString("<thead>\n<tr>\n")
+					cells := w.parseTableRow(trimmed)
+					for _, cell := range cells {
+						result.WriteString("<th>")
+						result.WriteString(w.processInlineMarkdown(cell))
+						result.WriteString("</th>\n")
+					}
+					result.WriteString("</tr>\n</thead>\n<tbody>\n")
+					continue
+				}
+			}
+
+			if isSeparator {
+				// Skip separator rows
+				continue
+			}
+
+			// Regular table row
+			result.WriteString("<tr>\n")
+			cells := w.parseTableRow(trimmed)
+			for _, cell := range cells {
+				result.WriteString("<td>")
+				result.WriteString(w.processInlineMarkdown(cell))
+				result.WriteString("</td>\n")
+			}
+			result.WriteString("</tr>\n")
+			continue
+		} else if inTable {
+			// End of table
+			result.WriteString("</tbody>\n</table>\n")
+			inTable = false
+		}
+
+		// Handle horizontal rules
+		if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+			if inList {
+				result.WriteString("</ul>\n")
+				inList = false
+			}
+			result.WriteString("<hr />\n")
+			continue
+		}
+
+		// Handle unordered list items
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			if !inList {
+				result.WriteString("<ul>\n")
+				inList = true
+			}
+			content := strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* ")
+			result.WriteString("<li>")
+			result.WriteString(w.processInlineMarkdown(content))
+			result.WriteString("</li>\n")
+			continue
+		}
+
+		// Handle numbered list items
+		if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+			dotIdx := strings.Index(trimmed, ". ")
+			if dotIdx > 0 && dotIdx < 4 {
+				if !inList {
+					result.WriteString("<ol>\n")
+					inList = true
+				}
+				content := trimmed[dotIdx+2:]
+				result.WriteString("<li>")
+				result.WriteString(w.processInlineMarkdown(content))
+				result.WriteString("</li>\n")
+				continue
+			}
+		}
+
+		// Close list if we hit a non-list line
+		if inList && trimmed != "" {
+			result.WriteString("</ul>\n")
+			inList = false
+		}
+
+		// Handle blockquotes (> text)
+		if strings.HasPrefix(trimmed, "> ") || trimmed == ">" {
+			content := strings.TrimPrefix(trimmed, "> ")
+			content = strings.TrimPrefix(content, ">")
+			result.WriteString("<blockquote>")
+			result.WriteString(w.processInlineMarkdown(content))
+			result.WriteString("</blockquote>\n")
+			continue
+		}
+
+		// Handle empty lines
+		if trimmed == "" {
+			result.WriteString("<br />\n")
+			continue
+		}
+
+		// Handle regular paragraphs
+		result.WriteString("<p>")
+		result.WriteString(w.processInlineMarkdown(trimmed))
+		result.WriteString("</p>\n")
+	}
+
+	// Close any open blocks
+	if inCodeBlock {
+		result.WriteString("</code></pre>\n")
+	}
+	if inList {
+		result.WriteString("</ul>\n")
+	}
+	if inTable {
+		result.WriteString("</tbody>\n</table>\n")
+	}
+
+	return result.String()
+}
+
+// parseMarkdownHeader parses a markdown header line and returns the content and level (1-6)
+// Returns level 0 if not a header
+// Handles various formats: "## Header", "##Header", "##  Header", etc.
+func (w *EmailWorker) parseMarkdownHeader(line string) (content string, level int) {
+	// Count leading # characters
+	level = 0
+	for i, c := range line {
+		if c == '#' {
+			level++
+		} else {
+			// Found end of # sequence
+			if level > 0 && level <= 6 {
+				// Extract content after the # symbols
+				content = strings.TrimSpace(line[i:])
+				// If content is empty and line only has #, not a header
+				if content == "" && i == len(line) {
+					return "", 0
+				}
+				return content, level
+			}
+			return "", 0
+		}
+	}
+	// Line was all # characters - not a valid header
+	return "", 0
+}
+
+// parseTableRow extracts cells from a markdown table row
+func (w *EmailWorker) parseTableRow(row string) []string {
+	// Remove leading/trailing | if present
+	row = strings.TrimSpace(row)
+	if strings.HasPrefix(row, "|") {
+		row = row[1:]
+	}
+	if strings.HasSuffix(row, "|") {
+		row = row[:len(row)-1]
+	}
+
+	// Split by | and trim each cell
+	parts := strings.Split(row, "|")
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, strings.TrimSpace(part))
+	}
+	return cells
+}
+
+// processInlineMarkdown handles inline markdown formatting (bold, italic, code, links)
+func (w *EmailWorker) processInlineMarkdown(text string) string {
+	// First escape HTML
+	text = escapeHTML(text)
+
+	// Process inline code (must be before bold/italic to avoid conflicts)
+	// Match `code` patterns
+	for {
+		start := strings.Index(text, "`")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(text[start+1:], "`")
+		if end == -1 {
+			// Unmatched backtick - remove it to avoid raw markdown in output
+			text = text[:start] + text[start+1:]
+			continue
+		}
+		end += start + 1
+		code := text[start+1 : end]
+		text = text[:start] + "<code>" + code + "</code>" + text[end+1:]
+	}
+
+	// Process bold (**text** or __text__)
+	maxIterations := 100 // Prevent infinite loops
+	for i := 0; i < maxIterations; i++ {
+		start := strings.Index(text, "**")
+		if start == -1 {
+			start = strings.Index(text, "__")
+		}
+		if start == -1 {
+			break
+		}
+		marker := text[start : start+2]
+		end := strings.Index(text[start+2:], marker)
+		if end == -1 {
+			// Unmatched marker - remove it to avoid raw markdown in output
+			text = text[:start] + text[start+2:]
+			continue
+		}
+		end += start + 2
+		bold := text[start+2 : end]
+		text = text[:start] + "<strong>" + bold + "</strong>" + text[end+2:]
+	}
+
+	// Process italic (*text* or _text_) - be careful not to match ** or __
+	for i := 0; i < maxIterations; i++ {
+		// Find single * not followed by another *
+		start := -1
+		for j := 0; j < len(text); j++ {
+			if text[j] == '*' || text[j] == '_' {
+				// Check it's not part of ** or __
+				if j > 0 && (text[j-1] == '*' || text[j-1] == '_') {
+					continue
+				}
+				if j < len(text)-1 && (text[j+1] == '*' || text[j+1] == '_') {
+					continue
+				}
+				start = j
+				break
+			}
+		}
+		if start == -1 {
+			break
+		}
+		marker := string(text[start])
+		// Find closing marker
+		end := -1
+		for j := start + 1; j < len(text); j++ {
+			if string(text[j]) == marker {
+				// Check it's not part of ** or __
+				if j > 0 && (text[j-1] == '*' || text[j-1] == '_') {
+					continue
+				}
+				if j < len(text)-1 && (text[j+1] == '*' || text[j+1] == '_') {
+					continue
+				}
+				end = j
+				break
+			}
+		}
+		if end == -1 {
+			// Unmatched marker - remove it to avoid raw markdown in output
+			text = text[:start] + text[start+1:]
+			continue
+		}
+		italic := text[start+1 : end]
+		text = text[:start] + "<em>" + italic + "</em>" + text[end+1:]
+	}
+
+	return text
 }
 
 // escapeHTML escapes HTML special characters for safe embedding
