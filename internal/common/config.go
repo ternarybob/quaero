@@ -208,7 +208,7 @@ func NewDefaultConfig() *Config {
 			CredentialsDir: "./auth", // Default directory for auth files
 		},
 		Variables: KeysDirConfig{
-			Dir: "./variables", // Default directory for variables files (./variables/*.toml)
+			Dir: "./", // Default directory for variables.toml file (like email.toml and connectors.toml)
 		},
 		Connectors: ConnectorDirConfig{
 			Dir: "./", // Default directory for connector file (connectors.toml in executable directory)

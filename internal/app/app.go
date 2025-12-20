@@ -18,6 +18,7 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
@@ -837,6 +838,18 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 	)
+
+	// Register Job Template worker (must be after Orchestrator is created since it needs it)
+	jobTemplateWorker := workers.NewJobTemplateWorker(
+		a.StorageManager.JobDefinitionStorage(),
+		jobs.NewService(a.StorageManager.KeyValueStorage(), a.AgentService, a.Logger),
+		a.Orchestrator,
+		jobMgr,
+		a.Logger,
+		"./job-templates", // Templates directory relative to executable
+	)
+	a.StepManager.RegisterWorker(jobTemplateWorker)
+	a.Logger.Debug().Str("step_type", jobTemplateWorker.GetType().String()).Msg("Job template worker registered")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 

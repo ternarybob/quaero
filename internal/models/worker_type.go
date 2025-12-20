@@ -43,6 +43,9 @@ const (
 
 	// Email monitoring workers
 	WorkerTypeEmailWatcher WorkerType = "email_watcher" // Monitors IMAP inbox for job execution commands
+
+	// Template orchestration workers
+	WorkerTypeJobTemplate WorkerType = "job_template" // Executes job templates with variable substitution
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -54,7 +57,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
 		WorkerTypeASXStockData, WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
-		WorkerTypeEmailWatcher:
+		WorkerTypeEmailWatcher, WorkerTypeJobTemplate:
 		return true
 	}
 	return false
@@ -90,5 +93,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeCompetitorAnalysis,
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,
+		WorkerTypeJobTemplate,
 	}
 }
