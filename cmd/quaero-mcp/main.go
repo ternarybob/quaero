@@ -8,6 +8,7 @@ import (
 	"github.com/ternarybob/arbor"
 	arbor_models "github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/services/connectors"
 	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/storage"
 )
@@ -51,6 +52,9 @@ func main() {
 		logger.Fatal().Err(err).Msg("Failed to initialize search service")
 	}
 
+	// Initialize connector service for GitHub tools
+	connectorService := connectors.NewService(storageManager.ConnectorStorage(), logger)
+
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
 		"quaero",
@@ -58,11 +62,20 @@ func main() {
 		server.WithToolCapabilities(true),
 	)
 
-	// Register tools
+	// Register search tools
 	mcpServer.AddTool(createSearchDocumentsTool(), handleSearchDocuments(searchService, logger))
 	mcpServer.AddTool(createGetDocumentTool(), handleGetDocument(searchService, logger))
 	mcpServer.AddTool(createListRecentDocumentsTool(), handleListRecent(searchService, logger))
 	mcpServer.AddTool(createGetRelatedDocumentsTool(), handleGetRelated(searchService, logger))
+
+	// Register GitHub workflow tools
+	mcpServer.AddTool(createListGitHubWorkflowsTool(), handleListGitHubWorkflows(connectorService, logger))
+	mcpServer.AddTool(createGetGitHubWorkflowLogsTool(), handleGetGitHubWorkflowLogs(connectorService, logger))
+
+	// Register GitHub repository tools
+	mcpServer.AddTool(createSearchGitHubRepoTool(), handleSearchGitHubRepo(searchService, logger))
+	mcpServer.AddTool(createGetGitHubRepoFileTool(), handleGetGitHubRepoFile(searchService, logger))
+	mcpServer.AddTool(createListGitHubRepoFilesTool(), handleListGitHubRepoFiles(searchService, logger))
 
 	// Start server (blocks on stdio)
 	if err := server.ServeStdio(mcpServer); err != nil {
