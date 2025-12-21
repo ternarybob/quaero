@@ -313,15 +313,8 @@ This is not personal financial advice - consult a licensed adviser for SMSF deci
 output_tags = ["moneyball-recommendation", "{stock:ticker_lower}", "{stock:industry}", "smsf-report"]
 
 # =========================================================================
-# Step 7: Email Investment Report
+# NOTE: Email removed from template - handled at portfolio level
 # =========================================================================
-# Sends the final Moneyball investment recommendation via email.
-
-[step.email_report]
-type = "email"
-description = "Email Moneyball investment report for ASX:{stock:ticker}"
-depends = "investment_recommendation"
-on_error = "fail"
-to = "bobmcallan@gmail.com"
-subject = "SMSF Moneyball Analysis: ASX:{stock:ticker} ({stock:name}) - Investment Recommendation"
-body_from_tag = "moneyball-recommendation"
+# Individual stock emails are removed. The portfolio-level job definition
+# (moneyball-stocks-daily.toml) consolidates all stock analyses and sends
+# a single portfolio review email.

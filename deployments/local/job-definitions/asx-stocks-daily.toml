@@ -1,0 +1,30 @@
+# ASX Stocks Daily Analysis - Template Orchestration Job
+# This job uses job_template to run the asx-stock-analysis template for multiple stocks
+
+id = "asx-stocks-daily"
+name = "ASX Daily Stock Analysis (Multiple Stocks)"
+type = "job_template"
+description = "Runs ASX stock analysis template for configured stocks"
+tags = ["asx", "stocks", "daily", "template"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+[step.run_stock_analysis]
+type = "job_template"
+description = "Execute stock analysis template for each configured stock"
+on_error = "continue"
+template = "asx-stock-analysis"
+
+# Variables array - each entry creates a separate job from the template
+# Available variable keys: ticker, name, industry
+# Variable references in template: {stock:ticker}, {stock:name}, {stock:industry}
+# Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
+variables = [
+    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    # { ticker = "WES", name = "Wesfarmers", industry = "retail" },
+    # { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
+    # { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+]

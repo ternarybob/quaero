@@ -1,0 +1,222 @@
+# Moneyball Portfolio Assessment - Daily Analysis Job
+# ===========================================================================
+# This job orchestrates the Moneyball quantitative investment strategy for
+# an SMSF portfolio. It runs individual stock analyses, then consolidates
+# all results into a single portfolio review with BUY|HOLD|SELL recommendations.
+#
+# WORKFLOW:
+# 1. Run moneyball-stock-assessment template for each stock (parallel child jobs)
+# 2. Generate consolidated portfolio summary with all stocks compared
+# 3. Email single portfolio review to SMSF committee
+# ===========================================================================
+
+id = "moneyball-stocks-daily"
+name = "Moneyball Portfolio Assessment (SMSF)"
+type = "job_template"
+description = "Runs Moneyball quantitative investment analysis for configured SMSF portfolio stocks, then consolidates into portfolio review"
+tags = ["moneyball", "asx", "stocks", "daily", "template", "smsf", "portfolio"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# ===========================================================================
+# Step 1: Run Individual Stock Analyses
+# ===========================================================================
+# Executes the moneyball-stock-assessment template for each stock.
+# Each stock becomes a child job with its own analysis.
+# This step completes when ALL child jobs finish.
+
+[step.run_moneyball_analysis]
+type = "job_template"
+description = "Execute Moneyball quantitative assessment template for each configured stock"
+on_error = "continue"
+template = "moneyball-stock-assessment"
+
+# Variables array - each entry creates a separate job from the template
+# Available variable keys: ticker, name, industry
+# Variable references in template: {stock:ticker}, {stock:name}, {stock:industry}
+# Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
+variables = [
+    # Banking & Finance
+    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    # { ticker = "NAB", name = "National Australia Bank", industry = "banking" },
+
+    # Retail & Consumer
+    # { ticker = "WES", name = "Wesfarmers", industry = "retail" },
+    # { ticker = "WOW", name = "Woolworths Group", industry = "retail" },
+
+    # Resources & Mining
+    # { ticker = "BHP", name = "BHP Group", industry = "mining" },
+    # { ticker = "RIO", name = "Rio Tinto", industry = "mining" },
+    # { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
+
+    # Energy
+    # { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
+    # { ticker = "WDS", name = "Woodside Energy", industry = "energy" },
+
+    # Technology & AI
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+
+    # Engineering & Infrastructure
+    # { ticker = "GNP", name = "GenusPlus Group", industry = "engineering" },
+]
+
+# ===========================================================================
+# Step 2: Generate Consolidated Portfolio Summary
+# ===========================================================================
+# After all individual stock analyses complete, this step reads ALL
+# moneyball-recommendation documents and creates a portfolio-level view.
+
+[step.generate_portfolio_summary]
+type = "summary"
+description = "Generate consolidated SMSF portfolio review with all stocks"
+depends = "run_moneyball_analysis"
+on_error = "fail"
+filter_tags = ["moneyball-recommendation"]
+api_key = "{google_gemini_api_key}"
+prompt = """You are a senior SMSF investment committee adviser preparing a consolidated portfolio review using the Moneyball quantitative investment strategy.
+
+You have received individual Moneyball analysis reports for multiple ASX stocks. Your task is to consolidate these into a SINGLE portfolio review document.
+
+# SMSF PORTFOLIO REVIEW: MONEYBALL STRATEGY ASSESSMENT
+## Prepared for: SMSF Investment Committee
+## Analysis Date: [Current Date]
+
+---
+
+## EXECUTIVE SUMMARY
+
+**PORTFOLIO MONEYBALL COMPLIANCE**: [X/10] (how well portfolio aligns with strategy)
+**OVERALL PORTFOLIO RECOMMENDATION**: [INCREASE / MAINTAIN / REDUCE EXPOSURE]
+
+[2-3 sentence summary of portfolio health and key actions]
+
+---
+
+## PORTFOLIO HOLDINGS - CONSOLIDATED RECOMMENDATIONS
+
+Create a summary table of ALL stocks analyzed:
+
+| Stock | Industry | Moneyball Score | Fit Score | Recommendation | Conviction | Action Priority |
+|-------|----------|-----------------|-----------|----------------|------------|-----------------|
+| ASX:XXX | sector | X/25 | X/5 | BUY/HOLD/SELL | High/Med/Low | 1-5 |
+| ... | ... | ... | ... | ... | ... | ... |
+
+**Legend:**
+- Moneyball Score: Composite quantitative score (max 25)
+- Fit Score: How many of 5 Moneyball criteria met
+- Action Priority: 1=Immediate, 5=Monitor
+
+---
+
+## PORTFOLIO COMPOSITION ANALYSIS
+
+### Sector Allocation
+| Sector | # Stocks | % of Portfolio | Outlook |
+|--------|----------|----------------|---------|
+| banking | X | X% | Positive/Neutral/Negative |
+| ... | ... | ... | ... |
+
+### Moneyball Strategy Compliance
+
+**Portfolio Strengths (Aligned with Moneyball):**
+1. [Strength 1 - e.g., "3 stocks with high ROE >15%"]
+2. [Strength 2]
+3. [Strength 3]
+
+**Portfolio Weaknesses (Deviations from Moneyball):**
+1. [Weakness 1 - e.g., "2 stocks with high leverage"]
+2. [Weakness 2]
+3. [Weakness 3]
+
+### Diversification Assessment
+- **Sector Diversification**: [Well Diversified / Concentrated / Under-Diversified]
+- **Factor Diversification**: [Analysis of quality/value/momentum balance]
+- **Risk Concentration**: [Any single-stock or sector risks]
+
+---
+
+## ACTIONABLE RECOMMENDATIONS
+
+### Immediate Actions (Priority 1-2)
+For stocks with SELL or urgent BUY signals:
+
+| Action | Stock | Reason | Target |
+|--------|-------|--------|--------|
+| BUY | ASX:XXX | [reason] | Entry $X.XX |
+| SELL | ASX:YYY | [reason] | Exit now |
+
+### Monitor (Priority 3-5)
+Stocks to watch for changes:
+
+| Stock | Current Rec | Watch For | Trigger |
+|-------|-------------|-----------|---------|
+| ASX:XXX | HOLD | [event] | [condition] |
+
+---
+
+## PORTFOLIO RISK SUMMARY
+
+### Aggregate Risk Assessment
+| Risk Category | Level | Key Factors |
+|--------------|-------|-------------|
+| Market Risk | Low/Med/High | [factors] |
+| Sector Risk | Low/Med/High | [factors] |
+| Concentration Risk | Low/Med/High | [factors] |
+| Liquidity Risk | Low/Med/High | [factors] |
+
+**OVERALL PORTFOLIO RISK**: [Low / Moderate / High]
+
+---
+
+## INDIVIDUAL STOCK SUMMARIES
+
+For each stock in the portfolio, provide a brief summary:
+
+### ASX:XXX - Company Name
+- **Sector**: industry
+- **Moneyball Score**: X/25
+- **Recommendation**: BUY/HOLD/SELL
+- **Key Point**: [One sentence summary]
+
+[Repeat for each stock]
+
+---
+
+## SMSF COMPLIANCE CHECK
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Sole Purpose Test | Pass/Caution | |
+| Diversification | Adequate/Needs Review | |
+| Liquidity Needs | Met/Concerns | |
+| Investment Strategy Alignment | Yes/Review | |
+
+---
+
+## NEXT REVIEW
+
+- **Recommended Review Date**: [Date]
+- **Key Events to Monitor**: [Upcoming earnings, events]
+- **Trigger for Early Review**: [Conditions that warrant immediate action]
+
+---
+
+**DISCLAIMER**: This portfolio review uses the Moneyball quantitative framework. Recommendations are based on available data and systematic analysis. This is not personal financial advice. Consult a licensed adviser for SMSF investment decisions.
+"""
+output_tags = ["moneyball-portfolio-review", "smsf-portfolio", "portfolio-summary"]
+
+# ===========================================================================
+# Step 3: Email Consolidated Portfolio Report
+# ===========================================================================
+# Sends the single consolidated portfolio review email.
+
+[step.email_portfolio_report]
+type = "email"
+description = "Email consolidated SMSF portfolio Moneyball review"
+depends = "generate_portfolio_summary"
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "SMSF Moneyball Portfolio Review - Consolidated Stock Analysis"
+body_from_tag = "moneyball-portfolio-review"
