@@ -291,7 +291,7 @@ func TestJobDefinitionWebSearchASX(t *testing.T) {
 					}
 
 					if !foundHTMLConversion {
-						t.Errorf("FAIL: Email step did not log HTML conversion from markdown. "+
+						t.Errorf("FAIL: Email step did not log HTML conversion from markdown. " +
 							"Expected log containing 'HTML email body generated ... from markdown'")
 					}
 

@@ -11,18 +11,18 @@ type WorkerType string
 
 // WorkerType constants define all supported worker types for job execution
 const (
-	WorkerTypeAgent               WorkerType = "agent"
-	WorkerTypeCrawler             WorkerType = "crawler"
-	WorkerTypePlacesSearch        WorkerType = "places_search"
-	WorkerTypeWebSearch           WorkerType = "web_search"
-	WorkerTypeGitHubRepo          WorkerType = "github_repo"
-	WorkerTypeGitHubActions       WorkerType = "github_actions"
-	WorkerTypeGitHubGit           WorkerType = "github_git" // Clone repository via git instead of API
-	WorkerTypeTransform WorkerType = "transform"
-	WorkerTypeReindex   WorkerType = "reindex"
-	WorkerTypeLocalDir  WorkerType = "local_dir" // Local directory indexing (full content)
-	WorkerTypeCodeMap             WorkerType = "code_map"  // Hierarchical code structure analysis
-	WorkerTypeSummary             WorkerType = "summary"   // Corpus summary generation from tagged documents
+	WorkerTypeAgent         WorkerType = "agent"
+	WorkerTypeCrawler       WorkerType = "crawler"
+	WorkerTypePlacesSearch  WorkerType = "places_search"
+	WorkerTypeWebSearch     WorkerType = "web_search"
+	WorkerTypeGitHubRepo    WorkerType = "github_repo"
+	WorkerTypeGitHubActions WorkerType = "github_actions"
+	WorkerTypeGitHubGit     WorkerType = "github_git" // Clone repository via git instead of API
+	WorkerTypeTransform     WorkerType = "transform"
+	WorkerTypeReindex       WorkerType = "reindex"
+	WorkerTypeLocalDir      WorkerType = "local_dir" // Local directory indexing (full content)
+	WorkerTypeCodeMap       WorkerType = "code_map"  // Hierarchical code structure analysis
+	WorkerTypeSummary       WorkerType = "summary"   // Corpus summary generation from tagged documents
 
 	// Enrichment pipeline workers - each handles a specific enrichment step
 	WorkerTypeAnalyzeBuild     WorkerType = "analyze_build"     // Parse build files (CMake, Makefile) for targets and dependencies
@@ -34,9 +34,9 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial data workers
-	WorkerTypeASXAnnouncements    WorkerType = "asx_announcements"    // Fetch ASX company announcements
-	WorkerTypeASXStockData        WorkerType = "asx_stock_data"       // Fetch real-time stock prices and technical analysis
-	WorkerTypeCompetitorAnalysis  WorkerType = "competitor_analysis"  // Analyze competitors and spawn stock data jobs
+	WorkerTypeASXAnnouncements   WorkerType = "asx_announcements"   // Fetch ASX company announcements
+	WorkerTypeASXStockData       WorkerType = "asx_stock_data"      // Fetch real-time stock prices and technical analysis
+	WorkerTypeCompetitorAnalysis WorkerType = "competitor_analysis" // Analyze competitors and spawn stock data jobs
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy

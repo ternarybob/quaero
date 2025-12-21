@@ -1545,10 +1545,10 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 	// Step-level logs only include orchestration messages (starting/completed messages).
 	// To test pagination, we need many workers to generate step monitor events.
 	jobConfig := map[string]interface{}{
-		"worker_count":    50,   // Many workers generates more step-level orchestration logs
-		"log_count":       20,   // Each worker generates 20 logs (in their own job)
-		"log_delay_ms":    10,   // Fast log generation
-		"failure_rate":    0.2,  // 20% failure rate for varied status logs
+		"worker_count":    50,  // Many workers generates more step-level orchestration logs
+		"log_count":       20,  // Each worker generates 20 logs (in their own job)
+		"log_delay_ms":    10,  // Fast log generation
+		"failure_rate":    0.2, // 20% failure rate for varied status logs
 		"child_count":     0,
 		"recursion_depth": 0,
 	}
@@ -1744,7 +1744,6 @@ func TestJobDefinitionLogInitialCount(t *testing.T) {
 
 	utc.Log("✓ Initial log count test completed")
 }
-
 
 // TestJobDefinitionTestJobGeneratorTomlConfig verifies that running the test_job_generator.toml
 // job definition produces log counts that match the configured values.
@@ -2794,11 +2793,11 @@ func TestJobDefinitionHighVolumeGenerator(t *testing.T) {
 
 	// Job configuration - these values define expected behavior
 	const (
-		workerCount  = 3
-		logCount     = 1200 // logs per worker
-		logDelayMs   = 5
-		failureRate  = 0.05
-		stepName     = "high_volume_generator"
+		workerCount = 3
+		logCount    = 1200 // logs per worker
+		logDelayMs  = 5
+		failureRate = 0.05
+		stepName    = "high_volume_generator"
 	)
 	// Expected total logs: workers * (log_count + 3 overhead logs per worker)
 	expectedTotalLogs := workerCount * (logCount + 3)

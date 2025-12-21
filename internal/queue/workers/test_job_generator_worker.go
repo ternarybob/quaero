@@ -204,11 +204,11 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 func (w *TestJobGeneratorWorker) spawnChildJob(ctx context.Context, parentJob *models.QueueJob, childIndex int, maxDepth int) (string, error) {
 	// Create child job configuration - each child has slightly different settings
 	childConfig := map[string]interface{}{
-		"log_count":       getConfigIntWithDefault(parentJob.Config, "log_count", 10) / 2,      // Half the logs
-		"log_delay_ms":    getConfigIntWithDefault(parentJob.Config, "log_delay_ms", 100),      // Same delay
-		"failure_rate":    getConfigFloatWithDefault(parentJob.Config, "failure_rate", 0.1),    // Same failure rate
-		"child_count":     getConfigIntWithDefault(parentJob.Config, "child_count", 0) / 2,     // Half the children
-		"recursion_depth": maxDepth,                                                            // Same max depth
+		"log_count":       getConfigIntWithDefault(parentJob.Config, "log_count", 10) / 2,   // Half the logs
+		"log_delay_ms":    getConfigIntWithDefault(parentJob.Config, "log_delay_ms", 100),   // Same delay
+		"failure_rate":    getConfigFloatWithDefault(parentJob.Config, "failure_rate", 0.1), // Same failure rate
+		"child_count":     getConfigIntWithDefault(parentJob.Config, "child_count", 0) / 2,  // Half the children
+		"recursion_depth": maxDepth,                                                         // Same max depth
 	}
 
 	// Create child job metadata - copy parent metadata

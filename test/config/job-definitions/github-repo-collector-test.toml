@@ -1,0 +1,29 @@
+# GitHub Repository Content Collector - Test Version
+# This job definition is used by test/ui/job_definition_github_test.go
+# Named "GitHub Repository Collector" to match test expectations
+
+id = "github-repo-collector-test"
+name = "GitHub Repository Collector"
+description = "Fetches repository content via API and imports as searchable documents"
+tags = ["github", "source-code", "repository", "test"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+extension = false
+
+[step.fetch_repo_content]
+type = "github_repo"
+description = "Fetch repository files and import as searchable documents"
+on_error = "continue"
+connector_id = "{github_connector_id}"
+owner = "ternarybob"
+repo = "quaero"
+branches = ["main"]
+extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]
+exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/"]
+max_files = 10
+
+[error_tolerance]
+max_child_failures = 50
+failure_action = "continue"
