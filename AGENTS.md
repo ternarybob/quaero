@@ -90,6 +90,43 @@ $env:VAR = "value"           # Won't work on Linux/macOS bash
 ./scripts/build.sh --run
 ```
 
+### WSL (Windows Subsystem for Linux) Environment
+
+**When operating in WSL:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ WSL DETECTION                                                    │
+│                                                                  │
+│ Indicators you are in WSL:                                      │
+│ • Path contains /mnt/c/ or /mnt/d/                              │
+│ • uname -r shows "Microsoft" or "WSL"                           │
+│ • /proc/version contains "Microsoft"                            │
+│                                                                  │
+│ WSL RULES:                                                       │
+│ 1. Normalize paths: replace \ with /                            │
+│ 2. Use Linux commands (bash, not powershell)                    │
+│ 3. Go/build tools: use powershell.exe for Windows Go            │
+│ 4. Test execution: run via powershell.exe from Windows path     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**WSL Command Patterns:**
+
+| Task | WSL Command |
+|------|-------------|
+| Run Go tests | `powershell.exe -Command "cd C:\\path\\to\\project; go test -v ./..."` |
+| Build | `powershell.exe -Command "cd C:\\path\\to\\project; .\\scripts\\build.ps1"` |
+| Path conversion | `/mnt/c/dev/project` → `C:\\dev\\project` |
+
+**Path Normalization:**
+```bash
+# Convert WSL path to Windows path
+WSL_PATH="/mnt/c/development/quaero"
+WIN_PATH=$(echo "$WSL_PATH" | sed 's|/mnt/\([a-z]\)/|\U\1:\\|' | sed 's|/|\\|g')
+# Result: C:\development\quaero
+```
+
 ---
 
 ## BUILD AND TEST INSTRUCTIONS
