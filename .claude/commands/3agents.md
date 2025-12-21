@@ -37,51 +37,56 @@ mkdir -p $WORKDIR
 
 ### PHASE 0: ARCHITECT
 1. Read architecture docs and skills
-2. Search codebase for existing code to reuse
-3. Challenge: Does this NEED new code?
-4. Write `$WORKDIR/architect-analysis.md`
+2. **Extract ALL requirements from task** - explicit AND implicit
+3. Write `$WORKDIR/requirements.md`:
+   ```markdown
+   ## Requirements
+   - [ ] REQ-1: <requirement>
+   - [ ] REQ-2: <requirement>
+   ...
+   ## Acceptance Criteria
+   - [ ] AC-1: <criterion>
+   ...
+   ```
+4. Search codebase for existing code to reuse
+5. Challenge: Does this NEED new code?
+6. Write `$WORKDIR/architect-analysis.md` referencing requirements
 
 ### PHASE 1: WORKER
-1. Follow architect's recommendation
-2. Apply refactoring skill (EXTEND > MODIFY > CREATE)
-3. **Run build - must pass**
-4. Write `$WORKDIR/step-{N}.md`
+1. **Read `$WORKDIR/requirements.md`** - understand ALL requirements
+2. Follow architect's recommendation
+3. Apply refactoring skill (EXTEND > MODIFY > CREATE)
+4. **Run build - must pass**
+5. Write `$WORKDIR/step-{N}.md` - note which REQs addressed
 
 ### PHASE 2: VALIDATOR
 1. **Run build first** - FAIL = stop
-2. Verify skill compliance with concrete evidence
-3. Check anti-creation violations
-4. Write `$WORKDIR/validation-{N}.md`
+2. **Read `$WORKDIR/requirements.md`**
+3. **Verify EACH requirement implemented** - check boxes in requirements.md
+4. **Review code against architect-analysis.md**
+5. Check skill compliance with concrete evidence
+6. Check anti-creation violations
+7. Write `$WORKDIR/validation-{N}.md`:
+   - Requirements: [x] REQ-1, [ ] REQ-2 (missing: reason)
+   - Architecture compliance: PASS/FAIL
+   - Skill compliance: PASS/FAIL
 
 ### PHASE 3: ITERATE (max 5)
 ```
-VALIDATOR FAIL
-     │
-     ▼
-┌─────────────────────────┐
-│ WORKER                  │
-│ • Read ALL violations   │
-│ • Address EVERY issue   │
-│ • Apply skills          │
-│ • Run build             │
-└───────────┬─────────────┘
-            ▼
-┌─────────────────────────┐
-│ VALIDATOR               │
-│ • Run build             │
-│ • Equally harsh         │
-│ • Verify ALL fixed      │
-└───────────┬─────────────┘
-     ┌──────┴──────┐
-     ▼             ▼
-   FAIL          PASS → Complete
-     │
-     └──► Loop
+VALIDATOR FAIL → WORKER reads validation + requirements.md
+                      ↓
+              Address ALL issues + missing REQs
+                      ↓
+              VALIDATOR re-checks ALL requirements
+                      ↓
+              PASS (all REQs checked) → Complete
+              FAIL → Loop
 ```
 
 ### PHASE 4: COMPLETE
 - Final build verification
-- Write `$WORKDIR/summary.md`
+- Update `$WORKDIR/requirements.md` - all boxes checked [x]
+- Write `$WORKDIR/summary.md` with final requirement status
 
 ## INVOKE
 ```
