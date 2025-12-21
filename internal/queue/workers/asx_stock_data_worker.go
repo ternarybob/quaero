@@ -50,9 +50,9 @@ type StockData struct {
 	AvgVolume     int64
 
 	// Valuation
-	MarketCap    int64
-	PERatio      float64
-	EPS          float64
+	MarketCap     int64
+	PERatio       float64
+	EPS           float64
 	DividendYield float64
 
 	// 52-week range

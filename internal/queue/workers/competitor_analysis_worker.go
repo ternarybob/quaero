@@ -25,11 +25,11 @@ import (
 // CompetitorAnalysisWorker analyzes a target company, identifies competitors,
 // and fetches stock data for each competitor inline.
 type CompetitorAnalysisWorker struct {
-	documentStorage    interfaces.DocumentStorage
-	kvStorage          interfaces.KeyValueStorage
-	jobMgr             *queue.Manager
-	logger             arbor.ILogger
-	stockDataWorker    *ASXStockDataWorker // Reuses existing stock data worker
+	documentStorage interfaces.DocumentStorage
+	kvStorage       interfaces.KeyValueStorage
+	jobMgr          *queue.Manager
+	logger          arbor.ILogger
+	stockDataWorker *ASXStockDataWorker // Reuses existing stock data worker
 }
 
 // Compile-time assertion
@@ -46,11 +46,11 @@ func NewCompetitorAnalysisWorker(
 	stockDataWorker := NewASXStockDataWorker(documentStorage, logger, jobMgr)
 
 	return &CompetitorAnalysisWorker{
-		documentStorage:    documentStorage,
-		kvStorage:          kvStorage,
-		jobMgr:             jobMgr,
-		logger:             logger,
-		stockDataWorker:    stockDataWorker,
+		documentStorage: documentStorage,
+		kvStorage:       kvStorage,
+		jobMgr:          jobMgr,
+		logger:          logger,
+		stockDataWorker: stockDataWorker,
 	}
 }
 
@@ -126,7 +126,7 @@ func (w *CompetitorAnalysisWorker) Init(ctx context.Context, step models.JobStep
 
 	return &interfaces.WorkerInitResult{
 		WorkItems:            []interfaces.WorkItem{},
-		TotalCount:           0, // Will be determined after LLM call
+		TotalCount:           0,                                   // Will be determined after LLM call
 		Strategy:             interfaces.ProcessingStrategyInline, // Execute inline
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{

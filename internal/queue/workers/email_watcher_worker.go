@@ -241,10 +241,10 @@ func (w *EmailWatcherWorker) ValidateConfig(step models.JobStep) error {
 func extractJobName(body string) string {
 	// Try different patterns
 	patterns := []string{
-		`(?i)execute:\s*([a-zA-Z0-9_-]+)`,           // execute: job-name
-		`(?i)run:\s*([a-zA-Z0-9_-]+)`,               // run: job-name
-		`(?i)job:\s*([a-zA-Z0-9_-]+)`,               // job: job-name
-		`(?i)trigger:\s*([a-zA-Z0-9_-]+)`,           // trigger: job-name
+		`(?i)execute:\s*([a-zA-Z0-9_-]+)`, // execute: job-name
+		`(?i)run:\s*([a-zA-Z0-9_-]+)`,     // run: job-name
+		`(?i)job:\s*([a-zA-Z0-9_-]+)`,     // job: job-name
+		`(?i)trigger:\s*([a-zA-Z0-9_-]+)`, // trigger: job-name
 	}
 
 	for _, pattern := range patterns {

@@ -1500,11 +1500,11 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Build step from step definition and step job (if found)
 		step := JobTreeStep{
-			Name:     stepName,
-			Status:   "pending", // Default if no step job found
-			Expanded: false,
+			Name:         stepName,
+			Status:       "pending", // Default if no step job found
+			Expanded:     false,
 			ChildSummary: nil,
-			Logs: []JobTreeLog{},
+			Logs:         []JobTreeLog{},
 		}
 
 		if stepJob != nil {
