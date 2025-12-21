@@ -165,6 +165,17 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		agentInput["gemini_rate_limit"] = rateLimit
 	}
 
+	// Add model selection and validation options from job config
+	if modelSelection, ok := job.Config["model_selection"].(string); ok && modelSelection != "" {
+		agentInput["model_selection"] = modelSelection
+	}
+	if validation, ok := job.Config["validation"].(bool); ok {
+		agentInput["validation"] = validation
+	}
+	if validationCount, ok := job.Config["validation_iteration_count"]; ok {
+		agentInput["validation_iteration_count"] = validationCount
+	}
+
 	// Check for cancellation before agent execution
 	select {
 	case <-ctx.Done():
@@ -526,6 +537,17 @@ func (w *AgentWorker) executeBatchMode(ctx context.Context, step models.JobStep,
 			agentInput["gemini_api_key"] = resolvedAPIKey
 		}
 
+		// Add model selection and validation options from step config
+		if modelSelection, ok := stepConfig["model_selection"].(string); ok && modelSelection != "" {
+			agentInput["model_selection"] = modelSelection
+		}
+		if validation, ok := stepConfig["validation"].(bool); ok {
+			agentInput["validation"] = validation
+		}
+		if validationCount, ok := stepConfig["validation_iteration_count"]; ok {
+			agentInput["validation_iteration_count"] = validationCount
+		}
+
 		// Execute agent
 		agentOutput, err := w.agentService.Execute(ctx, agentType, agentInput)
 		if err != nil {
@@ -759,6 +781,17 @@ func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID 
 	}
 	if rateLimit, ok := stepConfig["rate_limit"].(string); ok && rateLimit != "" {
 		jobConfig["gemini_rate_limit"] = rateLimit
+	}
+
+	// Copy model selection and validation options from step config
+	if modelSelection, ok := stepConfig["model_selection"].(string); ok && modelSelection != "" {
+		jobConfig["model_selection"] = modelSelection
+	}
+	if validation, ok := stepConfig["validation"].(bool); ok {
+		jobConfig["validation"] = validation
+	}
+	if validationCount, ok := stepConfig["validation_iteration_count"]; ok {
+		jobConfig["validation_iteration_count"] = validationCount
 	}
 
 	// Create queue job with metadata for UI filtering and event aggregation

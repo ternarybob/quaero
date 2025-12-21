@@ -87,6 +87,16 @@ const (
 //   - filter_updated_after (string): RFC3339 timestamp. Only process documents updated after this time.
 //   - filter_limit (int): Maximum number of documents to process. Useful for testing or batching.
 //
+// AI Step Config Keys (for agent steps only):
+//   - model_selection (string): LLM model selection strategy. Options:
+//   - "auto": Automatically select based on task complexity (default)
+//   - "fast": Use fast model for simple tasks
+//   - "thinking": Use thinking model for complex reasoning
+//   - "default": Use the standard agent_model
+//   - validation (bool): Whether to validate AI output by re-prompting the LLM. Default: true
+//   - validation_iteration_count (int): Number of validation iterations to perform. Default: 1
+//     Higher values provide more thorough validation at the cost of additional API calls.
+//
 // Example TOML:
 //
 //	[step.extract_keywords]
@@ -94,6 +104,9 @@ const (
 //	agent_type = "keyword_extractor"
 //	filter_tags = ["technical", "needs-processing"]
 //	filter_limit = 100
+//	model_selection = "auto"
+//	validation = true
+//	validation_iteration_count = 1
 type JobStep struct {
 	Name        string                 `json:"name"`                  // Step identifier/name
 	Type        WorkerType             `json:"type"`                  // Worker type for routing to appropriate worker (required)
