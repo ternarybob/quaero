@@ -39,11 +39,12 @@ Execute: $ARGUMENTS
 
 ### PHASE 1: RUN TEST
 ```bash
-# Extract test name from file, run via package
-TEST_NAME=$(grep -m1 "^func Test" {test_file} | sed 's/func \(Test[^(]*\).*/\1/')
+# Extract ALL test names from file, build regex pattern
+TEST_PATTERN=$(grep "^func Test" {test_file} | sed 's/func \(Test[^(]*\).*/\1/' | paste -sd'|')
 TEST_PKG=$(dirname {test_file})
-go test -v -run "$TEST_NAME" ./$TEST_PKG/...
+go test -v -run "^($TEST_PATTERN)$" ./$TEST_PKG/...
 ```
+- Run ONLY tests defined in the specified file
 - **ALL PASS →** Complete
 - **ANY FAIL →** Fix & Iterate
 
