@@ -66,7 +66,7 @@ TEST FAILS
 │ VALIDATE TEMPLATE       │
 │ • UI job test? Check:   │
 │   - Progressive screenshots│
-│   - Job fail = test fail│
+│   - Assert expected status│
 │   - Config in results   │
 └───────────┬─────────────┘
             ▼
@@ -124,14 +124,16 @@ for {
 }
 ```
 
-### Job Failure = Test Failure (REQUIRED)
+### Job Status Assertion (REQUIRED)
 ```go
-// Terminal status check
-if currentStatus == "failed" {
-    utc.Screenshot("job_failed_state")
-    t.Fatalf("Job failed - status: %s", currentStatus)
+// Assert EXPECTED terminal status (success OR failure depending on test intent)
+expectedStatus := "completed" // or "failed" for failure tests
+if currentStatus != expectedStatus {
+    utc.Screenshot("unexpected_status")
+    t.Fatalf("Expected status %s, got: %s", expectedStatus, currentStatus)
 }
 ```
+**Note:** Tests validating failure scenarios (error tolerance, invalid config, etc.) should expect `"failed"` status.
 
 ### Job Config in Results (REQUIRED)
 ```go
