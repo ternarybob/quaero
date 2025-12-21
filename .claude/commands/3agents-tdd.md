@@ -9,7 +9,8 @@ Execute: $ARGUMENTS
 
 ## INPUT VALIDATION
 ```
-Must be *_test.go file or STOP
+1. Normalize path: replace \ with /
+2. Must be *_test.go file or STOP
 ```
 
 ## FUNDAMENTAL RULE
@@ -38,8 +39,12 @@ Must be *_test.go file or STOP
 
 ### PHASE 1: RUN TEST
 ```bash
-go test -v -run "Test.*" {test_file}
+# Extract ALL test names from file, build regex pattern
+TEST_PATTERN=$(grep "^func Test" {test_file} | sed 's/func \(Test[^(]*\).*/\1/' | paste -sd'|')
+TEST_PKG=$(dirname {test_file})
+go test -v -run "^($TEST_PATTERN)$" ./$TEST_PKG/...
 ```
+- Run ONLY tests defined in the specified file
 - **ALL PASS →** Complete
 - **ANY FAIL →** Fix & Iterate
 
