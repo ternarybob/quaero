@@ -1,0 +1,51 @@
+# Confluence Crawler Job Definition
+# Default crawler configuration for Atlassian Confluence sites
+# Automatically matched when quick crawl URL matches url_patterns
+
+id = "confluence-crawler"
+name = "Confluence Crawler"
+description = "Default crawler configuration for Atlassian Confluence sites"
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+tags = ["confluence", "atlassian", "wiki"]
+
+# Extension matching: when true, this job can be matched by Chrome extension
+extension = true
+
+# URL patterns for automatic job matching (wildcards supported)
+# Quick crawl will use this job definition when the URL matches any pattern
+url_patterns = ["*.atlassian.net/wiki/*"]
+
+[step.crawl]
+type = "crawler"
+description = "Crawl Confluence pages and extract content"
+on_error = "fail"
+
+# Crawler configuration
+max_depth = 2
+max_pages = 20
+concurrency = 3
+follow_links = true
+download_images = true  # Download and store images locally
+
+# Confluence-specific URL patterns
+# Include patterns: URLs must contain one of these to be crawled
+include_patterns = ["/wiki/spaces/", "/wiki/display/", "/pages/"]
+
+# Exclude patterns: URLs containing these will be skipped
+exclude_patterns = [
+    "/login",
+    "/logout",
+    "/authenticate",
+    "/plugins/",
+    "/download/",
+    "/rest/",
+    "/ajax/",
+    "action=edit",
+    "action=history",
+    "action=diff",
+    "/attachments/",
+    "preview=true"
+]

@@ -150,8 +150,8 @@ func main() {
 		Str("host", config.Server.Host).
 		Msg("Starting Quaero server")
 
-	// Initialize application
-	application, err := app.New(config, logger)
+	// Initialize application (pass config files for reload functionality)
+	application, err := app.New(config, logger, configFiles...)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize application")
 	}

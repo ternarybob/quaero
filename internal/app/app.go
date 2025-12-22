@@ -51,6 +51,7 @@ import (
 // App holds all application components and dependencies
 type App struct {
 	Config         *common.Config
+	ConfigPaths    []string // Paths to config files for reload functionality
 	Logger         arbor.ILogger
 	ctx            context.Context
 	cancelCtx      context.CancelFunc
@@ -143,10 +144,12 @@ type App struct {
 }
 
 // New initializes the application with all dependencies
-func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
+// configPaths are stored for reload functionality (optional)
+func New(cfg *common.Config, logger arbor.ILogger, configPaths ...string) (*App, error) {
 	app := &App{
-		Config: cfg,
-		Logger: logger,
+		Config:      cfg,
+		ConfigPaths: configPaths,
+		Logger:      logger,
 	}
 
 	// Initialize database
@@ -464,11 +467,12 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.EventService,
 		a.Logger,
+		a.ConfigPaths..., // Pass config paths for reload functionality
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize config service: %w", err)
 	}
-	a.Logger.Debug().Msg("Config service initialized")
+	a.Logger.Debug().Strs("paths", a.ConfigPaths).Msg("Config service initialized")
 
 	// 5.13. Initialize connector service
 	a.ConnectorService = connectors.NewService(

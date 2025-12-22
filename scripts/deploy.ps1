@@ -222,8 +222,139 @@ if ($Logs) {
 Write-ColorOutput "`nDeploying service..." "Yellow"
 
 if ($Target -eq "docker") {
-    # Docker deployment
-    Write-ColorOutput "Starting Docker containers..." "Yellow"
+    # Docker deployment - build image with configs baked in
+    Write-ColorOutput "Preparing Docker build staging..." "Yellow"
+
+    # Paths
+    $commonConfigPath = Join-Path -Path $projectRoot -ChildPath "deployments\common"
+    $dockerConfigPath = Join-Path -Path $projectRoot -ChildPath "deployments\docker\config"
+    $stagingPath = Join-Path -Path $projectRoot -ChildPath "deployments\docker\.docker-staging"
+
+    # Clean and create staging directory
+    if (Test-Path $stagingPath) {
+        Remove-Item -Path $stagingPath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $stagingPath -Force | Out-Null
+    New-Item -ItemType Directory -Path "$stagingPath\config" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$stagingPath\job-definitions" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$stagingPath\job-templates" -Force | Out-Null
+
+    # Stage config files: common first, then docker-specific overrides
+    Write-ColorOutput "  Staging configuration files..." "Gray"
+
+    # Copy common configs first (base layer)
+    $commonConnectors = Join-Path -Path $commonConfigPath -ChildPath "connectors.toml"
+    $commonEmail = Join-Path -Path $commonConfigPath -ChildPath "email.toml"
+    if (Test-Path $commonConnectors) {
+        Copy-Item -Path $commonConnectors -Destination "$stagingPath\config\connectors.toml"
+    }
+    if (Test-Path $commonEmail) {
+        Copy-Item -Path $commonEmail -Destination "$stagingPath\config\email.toml"
+    }
+
+    # Copy docker-specific configs (override layer)
+    $dockerQuaero = Join-Path -Path $dockerConfigPath -ChildPath "quaero.toml"
+    $dockerConnectors = Join-Path -Path $dockerConfigPath -ChildPath "connectors.toml"
+    $dockerEmail = Join-Path -Path $dockerConfigPath -ChildPath "email.toml"
+    $dockerVariables = Join-Path -Path $dockerConfigPath -ChildPath "variables.toml"
+
+    if (Test-Path $dockerQuaero) {
+        Copy-Item -Path $dockerQuaero -Destination "$stagingPath\config\quaero.toml"
+    }
+    if (Test-Path $dockerConnectors) {
+        Copy-Item -Path $dockerConnectors -Destination "$stagingPath\config\connectors.toml" -Force
+    }
+    if (Test-Path $dockerEmail) {
+        Copy-Item -Path $dockerEmail -Destination "$stagingPath\config\email.toml" -Force
+    }
+    if (Test-Path $dockerVariables) {
+        Copy-Item -Path $dockerVariables -Destination "$stagingPath\config\variables.toml"
+    }
+
+    # Copy .env file: check deployments/env/ first, then docker/config/
+    $envPath = Join-Path -Path $projectRoot -ChildPath "deployments\env\.env"
+    $dockerEnvPath = Join-Path -Path $dockerConfigPath -ChildPath ".env"
+    if (Test-Path $dockerEnvPath) {
+        Copy-Item -Path $dockerEnvPath -Destination "$stagingPath\config\.env"
+    } elseif (Test-Path $envPath) {
+        Copy-Item -Path $envPath -Destination "$stagingPath\config\.env"
+    }
+
+    # Stage job-definitions: common first, then docker overrides
+    Write-ColorOutput "  Staging job-definitions..." "Gray"
+    $commonJobDefs = Join-Path -Path $commonConfigPath -ChildPath "job-definitions"
+    $dockerJobDefs = Join-Path -Path $dockerConfigPath -ChildPath "job-definitions"
+
+    if (Test-Path $commonJobDefs) {
+        Get-ChildItem -Path $commonJobDefs -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$stagingPath\job-definitions\" -Force
+        }
+    }
+    if (Test-Path $dockerJobDefs) {
+        Get-ChildItem -Path $dockerJobDefs -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$stagingPath\job-definitions\" -Force
+        }
+    }
+
+    # Stage job-templates: common first, then docker overrides
+    Write-ColorOutput "  Staging job-templates..." "Gray"
+    $commonJobTemplates = Join-Path -Path $commonConfigPath -ChildPath "job-templates"
+    $dockerJobTemplates = Join-Path -Path $dockerConfigPath -ChildPath "job-templates"
+
+    if (Test-Path $commonJobTemplates) {
+        Get-ChildItem -Path $commonJobTemplates -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$stagingPath\job-templates\" -Force
+        }
+    }
+    if (Test-Path $dockerJobTemplates) {
+        Get-ChildItem -Path $dockerJobTemplates -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$stagingPath\job-templates\" -Force
+        }
+    }
+
+    # Get version info for build args
+    $versionFile = Join-Path -Path $projectRoot -ChildPath ".version"
+    $version = "dev"
+    $build = "unknown"
+    if (Test-Path $versionFile) {
+        $versionContent = Get-Content $versionFile
+        foreach ($line in $versionContent) {
+            if ($line -match '^version:\s*(.+)$') {
+                $version = $matches[1].Trim()
+            }
+            if ($line -match '^build:\s*(.+)$') {
+                $build = $matches[1].Trim()
+            }
+        }
+    }
+    $gitCommit = git rev-parse --short HEAD 2>$null
+    if (-not $gitCommit) { $gitCommit = "unknown" }
+
+    Write-ColorOutput "Building Docker image..." "Yellow"
+    Write-ColorOutput "  Version: $version, Build: $build, Commit: $gitCommit" "Gray"
+
+    # Build the Docker image
+    Push-Location $projectRoot
+    docker build `
+        --build-arg VERSION=$version `
+        --build-arg BUILD=$build `
+        --build-arg GIT_COMMIT=$gitCommit `
+        -t quaero:latest `
+        -f deployments/docker/Dockerfile `
+        .
+    $buildResult = $LASTEXITCODE
+    Pop-Location
+
+    if ($buildResult -ne 0) {
+        Write-ColorOutput "Docker build failed!" "Red"
+        exit 1
+    }
+    Write-ColorOutput "Docker image built successfully" "Green"
+
+    # Clean up staging directory
+    Remove-Item -Path $stagingPath -Recurse -Force
+
+    Write-ColorOutput "Starting Docker container..." "Yellow"
 
     $dockerComposeFile = Join-Path -Path $projectRoot -ChildPath "deployments\docker\docker-compose.yml"
 
@@ -235,11 +366,11 @@ if ($Target -eq "docker") {
     docker-compose -f $dockerComposeFile up -d
 
     if ($LASTEXITCODE -eq 0) {
-        Write-ColorOutput "Docker containers started successfully" "Green"
+        Write-ColorOutput "Docker container started successfully" "Green"
         Start-Sleep -Seconds 2
         docker-compose -f $dockerComposeFile ps
     } else {
-        Write-ColorOutput "Failed to start Docker containers" "Red"
+        Write-ColorOutput "Failed to start Docker container" "Red"
         exit 1
     }
 } else {

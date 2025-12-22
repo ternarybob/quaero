@@ -80,7 +80,8 @@ type LoggingConfig struct {
 
 // JobsConfig contains configuration for job definitions
 type JobsConfig struct {
-	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
+	DefinitionsDir string `toml:"definitions_dir"`  // Directory containing job definition files (TOML/JSON)
+	ClearOnStartup bool   `toml:"clear_on_startup"` // Clear existing configuration from KV store before loading (default: false)
 }
 
 // KeysDirConfig contains configuration for key/value file loading (generic secrets/configuration)

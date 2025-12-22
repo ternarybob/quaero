@@ -1258,6 +1258,54 @@ document.addEventListener('alpine:init', () => {
 
     // Settings Danger Zone Component
     Alpine.data('settingsDanger', () => ({
+        clearOnReload: false,
+        isReloading: false,
+
+        confirmReloadConfiguration() {
+            const clearText = this.clearOnReload
+                ? 'This will CLEAR all existing key/value configuration before reloading from files.\n\n'
+                : '';
+
+            const confirmed = confirm(
+                '⚠ Reload Configuration\n\n' +
+                clearText +
+                'This will reload configuration from TOML files.\n\n' +
+                'Continue?'
+            );
+
+            if (!confirmed) return;
+
+            this.isReloading = true;
+
+            fetch('/api/config/reload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ clear: this.clearOnReload })
+            })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        window.showNotification(result.message, 'success');
+                        // Invalidate component caches so they reload fresh data
+                        if (typeof componentStateCache !== 'undefined') {
+                            componentStateCache.config.hasLoaded = false;
+                            componentStateCache.kv.hasLoaded = false;
+                        }
+                    } else {
+                        window.showNotification('Failed to reload configuration: ' + result.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error reloading configuration:', error);
+                    window.showNotification('Failed to reload configuration: ' + error.message, 'error');
+                })
+                .finally(() => {
+                    this.isReloading = false;
+                });
+        },
+
         confirmDeleteAllDocuments() {
             const confirmed = confirm(
                 '⚠ WARNING: This will delete ALL documents from the collection database.\n\n' +

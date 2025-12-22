@@ -19,15 +19,18 @@ type Service struct {
 	mu           sync.RWMutex
 	cachedConfig *common.Config
 	cacheValid   bool
+	configPaths  []string // Paths to config files for reload functionality
 }
 
 // NewService creates a new config service with event-driven cache invalidation
 // If kvStorage is nil, key injection is skipped (backward compatibility)
+// configPaths are stored for reload functionality (optional)
 func NewService(
 	config *common.Config,
 	kvStorage interfaces.KeyValueStorage,
 	eventSvc interfaces.EventService,
 	logger arbor.ILogger,
+	configPaths ...string,
 ) (*Service, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -37,11 +40,12 @@ func NewService(
 	}
 
 	service := &Service{
-		config:     config,
-		kvStorage:  kvStorage,
-		eventSvc:   eventSvc,
-		logger:     logger,
-		cacheValid: false,
+		config:      config,
+		kvStorage:   kvStorage,
+		eventSvc:    eventSvc,
+		logger:      logger,
+		cacheValid:  false,
+		configPaths: configPaths,
 	}
 
 	// Subscribe to key update events if event service is available
@@ -137,5 +141,44 @@ func (s *Service) Close() error {
 	}
 	s.InvalidateCache()
 	s.logger.Debug().Msg("ConfigService closed")
+	return nil
+}
+
+// ReloadConfig reloads configuration from files
+// If clear is true, clears all KV store entries before reloading
+// Uses the same code path as startup config loading
+func (s *Service) ReloadConfig(ctx context.Context, clear bool) error {
+	s.logger.Info().Bool("clear", clear).Strs("paths", s.configPaths).Msg("Reloading configuration")
+
+	// Step 1: Clear KV store if requested
+	if clear && s.kvStorage != nil {
+		s.logger.Info().Msg("Clearing KV store before reload")
+		if err := s.kvStorage.DeleteAll(ctx); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to clear KV store")
+			return fmt.Errorf("failed to clear KV store: %w", err)
+		}
+		s.logger.Info().Msg("KV store cleared successfully")
+	}
+
+	// Step 2: Reload config from files using same code path as startup
+	if len(s.configPaths) == 0 {
+		s.logger.Warn().Msg("No config paths available for reload")
+		return fmt.Errorf("no config paths available for reload")
+	}
+
+	newConfig, err := common.LoadFromFiles(s.kvStorage, s.configPaths...)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to reload config from files")
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	// Step 3: Update the stored config
+	s.mu.Lock()
+	s.config = newConfig
+	s.cacheValid = false
+	s.cachedConfig = nil
+	s.mu.Unlock()
+
+	s.logger.Info().Msg("Configuration reloaded successfully")
 	return nil
 }

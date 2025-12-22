@@ -41,6 +41,9 @@ type KeyValueStorage interface {
 	// Delete removes a key/value pair, returns error if not found
 	Delete(ctx context.Context, key string) error
 
+	// DeleteAll removes all key/value pairs from storage
+	DeleteAll(ctx context.Context) error
+
 	// List returns all key/value pairs ordered by updated_at DESC
 	List(ctx context.Context) ([]KeyValuePair, error)
 

@@ -1,0 +1,24 @@
+# Agent Document Generator Job Definition
+# Demonstrates document generation using agents to create new documents from existing ones
+
+id = "agent-document-generator"
+name = "Agent Document Generator"
+description = "Generates summary documents from existing documents using Google Gemini ADK"
+tags = ["agent", "generated", "summary"]
+schedule = ""
+timeout = "20m"
+enabled = false
+auto_start = false
+
+[step.generate_summaries]
+type = "agent"
+description = "Generate executive summaries from technical documentation using AI"
+on_error = "fail"
+operation_type = "generate"
+agent_type = "summary_generator"
+api_key = "{google_gemini_api_key}"
+prompt = "Generate a comprehensive executive summary based on the following documents. Focus on key insights, trends, and actionable recommendations."
+filter_source_type = "crawler"
+filter_tags = ["technical-documentation"]
+filter_limit = 20
+filter_updated_after = "2025-10-01T00:00:00Z"

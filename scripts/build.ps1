@@ -306,8 +306,14 @@ function Deploy-Files {
         [string]$BinDirectory
     )
 
+    # Common config path (shared across deployments)
+    $commonConfigPath = Join-Path -Path $ProjectRoot -ChildPath "deployments\common"
+
+    # Local deployment config path (deployment-specific overrides)
+    $localConfigPath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local"
+
     # Deploy configuration file (only if not exists)
-    $configSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\quaero.toml"
+    $configSourcePath = Join-Path -Path $localConfigPath -ChildPath "quaero.toml"
     $configDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero.toml"
 
     if (Test-Path $configSourcePath) {
@@ -349,7 +355,7 @@ function Deploy-Files {
         }
 
         # Deploy MCP-specific config file (only if not exists)
-        $mcpConfigSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\quaero-mcp.toml"
+        $mcpConfigSourcePath = Join-Path -Path $localConfigPath -ChildPath "quaero-mcp.toml"
         $mcpConfigDestPath = Join-Path -Path $mcpDestPath -ChildPath "quaero-mcp.toml"
         if (Test-Path $mcpConfigSourcePath) {
             if (-not (Test-Path $mcpConfigDestPath)) {
@@ -369,14 +375,78 @@ function Deploy-Files {
         Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
     }
 
-    # Create job-definitions directory if it doesn't exist
+    # Deploy job-definitions from common directory first, then local overrides
     $jobDefsDestPath = Join-Path -Path $BinDirectory -ChildPath "job-definitions"
     if (-not (Test-Path $jobDefsDestPath)) {
         New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
     }
 
+    # Copy from common first (base layer)
+    $commonJobDefsPath = Join-Path -Path $commonConfigPath -ChildPath "job-definitions"
+    if (Test-Path $commonJobDefsPath) {
+        Get-ChildItem -Path $commonJobDefsPath -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $jobDefsDestPath -Force
+        }
+    }
+
+    # Copy from local to override (if any deployment-specific definitions exist)
+    $localJobDefsPath = Join-Path -Path $localConfigPath -ChildPath "job-definitions"
+    if (Test-Path $localJobDefsPath) {
+        Get-ChildItem -Path $localJobDefsPath -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $jobDefsDestPath -Force
+        }
+    }
+
+    # Deploy job-templates from common directory first, then local overrides
+    $jobTemplatesDestPath = Join-Path -Path $BinDirectory -ChildPath "job-templates"
+    if (-not (Test-Path $jobTemplatesDestPath)) {
+        New-Item -ItemType Directory -Path $jobTemplatesDestPath -Force | Out-Null
+    }
+
+    # Copy from common first (base layer)
+    $commonJobTemplatesPath = Join-Path -Path $commonConfigPath -ChildPath "job-templates"
+    if (Test-Path $commonJobTemplatesPath) {
+        Get-ChildItem -Path $commonJobTemplatesPath -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $jobTemplatesDestPath -Force
+        }
+    }
+
+    # Copy from local to override (if any deployment-specific templates exist)
+    $localJobTemplatesPath = Join-Path -Path $localConfigPath -ChildPath "job-templates"
+    if (Test-Path $localJobTemplatesPath) {
+        Get-ChildItem -Path $localJobTemplatesPath -File | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $jobTemplatesDestPath -Force
+        }
+    }
+
+    # Deploy connectors.toml from common, then local override (only if not exists in bin)
+    $connectorsDestPath = Join-Path -Path $BinDirectory -ChildPath "connectors.toml"
+    if (-not (Test-Path $connectorsDestPath)) {
+        $commonConnectorsPath = Join-Path -Path $commonConfigPath -ChildPath "connectors.toml"
+        $localConnectorsPath = Join-Path -Path $localConfigPath -ChildPath "connectors.toml"
+
+        if (Test-Path $localConnectorsPath) {
+            Copy-Item -Path $localConnectorsPath -Destination $connectorsDestPath
+        } elseif (Test-Path $commonConnectorsPath) {
+            Copy-Item -Path $commonConnectorsPath -Destination $connectorsDestPath
+        }
+    }
+
+    # Deploy email.toml from common, then local override (only if not exists in bin)
+    $emailDestPath = Join-Path -Path $BinDirectory -ChildPath "email.toml"
+    if (-not (Test-Path $emailDestPath)) {
+        $commonEmailPath = Join-Path -Path $commonConfigPath -ChildPath "email.toml"
+        $localEmailPath = Join-Path -Path $localConfigPath -ChildPath "email.toml"
+
+        if (Test-Path $localEmailPath) {
+            Copy-Item -Path $localEmailPath -Destination $emailDestPath
+        } elseif (Test-Path $commonEmailPath) {
+            Copy-Item -Path $commonEmailPath -Destination $emailDestPath
+        }
+    }
+
     # Deploy auth directory (only new files, no override)
-    $authSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\auth"
+    $authSourcePath = Join-Path -Path $localConfigPath -ChildPath "auth"
     $authDestPath = Join-Path -Path $BinDirectory -ChildPath "auth"
 
     if (Test-Path $authSourcePath) {
@@ -398,6 +468,15 @@ function Deploy-Files {
     $variablesDestPath = Join-Path -Path $BinDirectory -ChildPath "variables"
     if (-not (Test-Path $variablesDestPath)) {
         New-Item -ItemType Directory -Path $variablesDestPath -Force | Out-Null
+    }
+
+    # Deploy .env file from deployments/env/ (only if not exists in bin)
+    $envDestPath = Join-Path -Path $BinDirectory -ChildPath ".env"
+    if (-not (Test-Path $envDestPath)) {
+        $envSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\env\.env"
+        if (Test-Path $envSourcePath) {
+            Copy-Item -Path $envSourcePath -Destination $envDestPath
+        }
     }
 
 }

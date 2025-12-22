@@ -44,6 +44,8 @@ config.yaml
 
 # Docker deployment config (contains secrets)
 deployments/docker/config/
+deployments/docker/.docker-staging/
+
 
 # Temporary and Test Output files
 *.tmp

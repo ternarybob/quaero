@@ -130,6 +130,26 @@ func (s *KVStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// DeleteAll removes all key/value pairs from storage
+func (s *KVStorage) DeleteAll(ctx context.Context) error {
+	// Find all pairs first
+	var pairs []interfaces.KeyValuePair
+	err := s.db.Store().Find(&pairs, nil)
+	if err != nil {
+		return fmt.Errorf("failed to list key/value pairs for deletion: %w", err)
+	}
+
+	// Delete each pair
+	for _, pair := range pairs {
+		if err := s.db.Store().Delete(pair.Key, &interfaces.KeyValuePair{}); err != nil {
+			s.logger.Warn().Str("key", pair.Key).Err(err).Msg("Failed to delete key during DeleteAll")
+		}
+	}
+
+	s.logger.Info().Int("count", len(pairs)).Msg("Deleted all key/value pairs")
+	return nil
+}
+
 // List returns all key/value pairs ordered by updated_at DESC
 func (s *KVStorage) List(ctx context.Context) ([]interfaces.KeyValuePair, error) {
 	var pairs []interfaces.KeyValuePair

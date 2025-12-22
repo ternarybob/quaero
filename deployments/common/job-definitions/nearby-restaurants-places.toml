@@ -1,0 +1,25 @@
+# Example Places Nearby Search Job Definition
+# This file demonstrates how to search for nearby places using coordinates
+
+id = "places-nearby-restaurants"
+name = "Nearby Restaurants (Wheelers Hill)"
+type = "places"
+description = "Search for restaurants near Wheelers Hill using Google Places Nearby Search API"
+schedule = ""
+timeout = "5m"
+enabled = true
+auto_start = true
+
+[step.search_nearby_restaurants]
+type = "places_search"
+description = "Search for nearby restaurants using Google Places API"
+on_error = "fail"
+search_query = "restaurants near Wheelers Hill"
+search_type = "nearby_search"
+max_results = 20
+list_name = "Wheelers Hill Restaurants"
+location_latitude = -37.9167
+location_longitude = 145.1833
+location_radius = 2000
+filter_type = "restaurant"
+filter_min_rating = 3.5

@@ -1,0 +1,69 @@
+# Test Job Generator Definition - Enhanced for Testing
+# This job definition includes multiple generator steps for comprehensive testing:
+# - Fast generator: Quick execution for basic testing
+# - High-volume generator: 1000+ logs for pagination testing
+# - Slow generator: 2+ minutes execution for long-running job testing
+
+id = "test-job-generator"
+name = "Test Job Generator"
+description = "Comprehensive test job generator with multiple steps for testing logging, error tolerance, pagination, and long-running jobs"
+tags = ["test", "logging", "error-tolerance", "pagination"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+# Step 1: Fast Generator - Quick test with moderate logs
+[step.fast_generator]
+type = "test_job_generator"
+description = "Fast generator - quick execution with moderate logging"
+on_error = "continue"
+worker_count = 5
+log_count = 50
+log_delay_ms = 10
+failure_rate = 0.1
+child_count = 0
+recursion_depth = 0
+
+# Step 2: High-Volume Generator - 1000+ logs for pagination testing
+[step.high_volume_generator]
+type = "test_job_generator"
+description = "High-volume generator - 1000+ logs per worker for pagination testing"
+depends = "fast_generator"
+on_error = "continue"
+worker_count = 3
+log_count = 1200
+log_delay_ms = 5
+failure_rate = 0.05
+child_count = 0
+recursion_depth = 0
+
+# Step 3: Slow Generator - Takes 2+ minutes for long-running job testing
+[step.slow_generator]
+type = "test_job_generator"
+description = "Slow generator - 2+ minute execution for long-running job testing"
+depends = "high_volume_generator"
+on_error = "continue"
+worker_count = 2
+log_count = 300
+log_delay_ms = 500
+failure_rate = 0.0
+child_count = 0
+recursion_depth = 0
+
+# Step 4: Recursive Generator - Tests child job hierarchy
+[step.recursive_generator]
+type = "test_job_generator"
+description = "Recursive generator - tests child job creation and hierarchy"
+depends = "slow_generator"
+on_error = "continue"
+worker_count = 3
+log_count = 20
+log_delay_ms = 50
+failure_rate = 0.2
+child_count = 2
+recursion_depth = 2
+
+[error_tolerance]
+max_child_failures = 100
+failure_action = "continue"

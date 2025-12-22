@@ -246,8 +246,14 @@ deploy_files() {
     local project_root=$1
     local bin_dir=$2
 
+    # Common config path (shared across deployments)
+    local common_config="$project_root/deployments/common"
+
+    # Local deployment config path (deployment-specific overrides)
+    local local_config="$project_root/deployments/local"
+
     # Deploy configuration file (only if not exists)
-    local config_source="$project_root/deployments/local/quaero.toml"
+    local config_source="$local_config/quaero.toml"
     local config_dest="$bin_dir/quaero.toml"
     if [ -f "$config_source" ] && [ ! -f "$config_dest" ]; then
         cp "$config_source" "$config_dest"
@@ -275,7 +281,7 @@ deploy_files() {
             cp "$mcp_source/README.md" "$mcp_dest/README.md"
         fi
         # Deploy MCP config (only if not exists)
-        local mcp_config_source="$project_root/deployments/local/quaero-mcp.toml"
+        local mcp_config_source="$local_config/quaero-mcp.toml"
         local mcp_config_dest="$mcp_dest/quaero-mcp.toml"
         if [ -f "$mcp_config_source" ] && [ ! -f "$mcp_config_dest" ]; then
             cp "$mcp_config_source" "$mcp_config_dest"
@@ -290,11 +296,68 @@ deploy_files() {
         cp -r "$pages_source" "$pages_dest"
     fi
 
-    # Create job-definitions directory
+    # Deploy job-definitions from common directory first, then local overrides
     mkdir -p "$bin_dir/job-definitions"
 
+    # Copy from common first (base layer)
+    if [ -d "$common_config/job-definitions" ]; then
+        for file in "$common_config/job-definitions"/*.toml; do
+            if [ -f "$file" ]; then
+                cp "$file" "$bin_dir/job-definitions/"
+            fi
+        done
+    fi
+
+    # Copy from local to override (if any deployment-specific definitions exist)
+    if [ -d "$local_config/job-definitions" ]; then
+        for file in "$local_config/job-definitions"/*.toml; do
+            if [ -f "$file" ]; then
+                cp "$file" "$bin_dir/job-definitions/"
+            fi
+        done
+    fi
+
+    # Deploy job-templates from common directory first, then local overrides
+    mkdir -p "$bin_dir/job-templates"
+
+    # Copy from common first (base layer)
+    if [ -d "$common_config/job-templates" ]; then
+        for file in "$common_config/job-templates"/*.toml; do
+            if [ -f "$file" ]; then
+                cp "$file" "$bin_dir/job-templates/"
+            fi
+        done
+    fi
+
+    # Copy from local to override (if any deployment-specific templates exist)
+    if [ -d "$local_config/job-templates" ]; then
+        for file in "$local_config/job-templates"/*.toml; do
+            if [ -f "$file" ]; then
+                cp "$file" "$bin_dir/job-templates/"
+            fi
+        done
+    fi
+
+    # Deploy connectors.toml from common, then local override (only if not exists in bin)
+    if [ ! -f "$bin_dir/connectors.toml" ]; then
+        if [ -f "$local_config/connectors.toml" ]; then
+            cp "$local_config/connectors.toml" "$bin_dir/connectors.toml"
+        elif [ -f "$common_config/connectors.toml" ]; then
+            cp "$common_config/connectors.toml" "$bin_dir/connectors.toml"
+        fi
+    fi
+
+    # Deploy email.toml from common, then local override (only if not exists in bin)
+    if [ ! -f "$bin_dir/email.toml" ]; then
+        if [ -f "$local_config/email.toml" ]; then
+            cp "$local_config/email.toml" "$bin_dir/email.toml"
+        elif [ -f "$common_config/email.toml" ]; then
+            cp "$common_config/email.toml" "$bin_dir/email.toml"
+        fi
+    fi
+
     # Deploy auth directory (only new files)
-    local auth_source="$project_root/deployments/local/auth"
+    local auth_source="$local_config/auth"
     local auth_dest="$bin_dir/auth"
     if [ -d "$auth_source" ]; then
         mkdir -p "$auth_dest"
@@ -310,6 +373,13 @@ deploy_files() {
 
     # Create variables directory
     mkdir -p "$bin_dir/variables"
+
+    # Deploy .env file from deployments/env/ (only if not exists in bin)
+    local env_source="$project_root/deployments/env/.env"
+    local env_dest="$bin_dir/.env"
+    if [ -f "$env_source" ] && [ ! -f "$env_dest" ]; then
+        cp "$env_source" "$env_dest"
+    fi
 }
 
 # Limit old log files

@@ -3,6 +3,28 @@
         <h2 style="color: var(--color-danger);">Danger Zone</h2>
     </div>
     <div class="card-body">
+        <!-- Reload Configuration Section -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--color-border);">
+            <div>
+                <p style="font-weight: bold;">Reload Configuration</p>
+                <p>
+                    Reloads configuration from TOML files. Use "Clear before reload" to remove all existing
+                    key/value settings before reloading (useful for removing stale configuration).
+                </p>
+                <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" x-model="clearOnReload" style="width: 16px; height: 16px;">
+                    <span>Clear existing configuration before reload</span>
+                </label>
+            </div>
+            <div>
+                <button class="btn btn-sm btn-warning" @click="confirmReloadConfiguration()" :disabled="isReloading">
+                    <i class="fas fa-sync-alt" :class="{ 'fa-spin': isReloading }"></i>
+                    <span x-text="isReloading ? 'RELOADING...' : 'RELOAD CONFIG'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Clear All Documents Section -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
             <div>
                 <p style="font-weight: bold;">Clear All Documents</p>

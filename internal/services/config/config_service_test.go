@@ -93,6 +93,13 @@ func (m *mockKVStorage) Upsert(ctx context.Context, key, value, description stri
 	return !exists, nil // Returns true if newly created, false if updated
 }
 
+func (m *mockKVStorage) DeleteAll(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data = make(map[string]string)
+	return nil
+}
+
 // mockEventService implements interfaces.EventService for testing
 type mockEventService struct {
 	handlers map[interfaces.EventType][]interfaces.EventHandler

@@ -1,0 +1,38 @@
+# GitHub Git Clone Collector
+# Uses git clone instead of API for faster bulk file downloads
+# Can be triggered from extension when visiting GitHub repository pages
+# Documents are tagged with the github repo name
+
+id = "github-git-collector"
+name = "GitHub Git Clone Collector"
+description = "Clones repository via git and imports files as searchable documents. Faster than API for bulk downloads."
+tags = ["github", "source-code", "repository", "git-clone"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+# Extension matching: when true, this job can be matched by Chrome extension
+# based on url_patterns. The download can be triggered from the extension
+# when visiting a matching GitHub repository page.
+extension = true
+
+# URL patterns for extension matching - matches GitHub repository pages
+url_patterns = ["github.com/*/*", "*.github.com/*/*"]
+
+[step.clone_and_import]
+type = "github_git"
+description = "Clone repository via git and import files as searchable documents. Owner/repo extracted from visited URL."
+on_error = "continue"
+connector_name = "github-magentus"
+# owner and repo are extracted from trigger_url when triggered from extension
+# branch defaults to "main" if not extracted from URL
+# git_path: defaults to "git" on Linux/macOS, "C:\Program Files\Git\bin\git.exe" on Windows
+# git_path = "/usr/bin/git"
+extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]
+exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/"]
+max_files = 500
+
+[error_tolerance]
+max_child_failures = 100
+failure_action = "continue"

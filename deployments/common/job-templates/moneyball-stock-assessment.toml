@@ -1,0 +1,320 @@
+# Moneyball Stock Assessment Job Template
+# =========================================================================
+# Quantitative "Moneyball" strategy for ASX stock portfolio assessment
+#
+# STRATEGY PRINCIPLES:
+# - Data-Driven Decisions: Rely on factual metrics over intuition
+# - Identify Undervalued Assets: Find quality companies the market is mispricing
+# - Rules-Based System: Disciplined, systematic buy/sell criteria
+# - Risk Management: Diversification and long-term portfolio optimization
+#
+# USAGE:
+# This template is designed to be invoked via a job_template step with variables:
+#   variables = [
+#     { ticker = "GNP", name = "GenusPlus Group", industry = "engineering" },
+#     { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" }
+#   ]
+#
+# VARIABLE SYNTAX:
+# - {stock:ticker} - ASX ticker code (e.g., GNP)
+# - {stock:name} - Company name
+# - {stock:industry} - Industry classification
+# - {stock:ticker_lower} - Lowercase ticker for URLs/tags
+# =========================================================================
+
+id = "moneyball-{stock:ticker_lower}"
+name = "Moneyball Analysis: ASX:{stock:ticker}"
+type = "stock_analysis"
+description = "Quantitative Moneyball strategy assessment for {stock:name} (ASX:{stock:ticker}) - SMSF investment analysis"
+tags = ["moneyball", "asx", "portfolio", "{stock:ticker_lower}", "{stock:industry}"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Step 1: Research Moneyball/Quantitative Investing Strategy
+# =========================================================================
+# Collects current information on Moneyball investing principles to inform
+# the analysis framework with up-to-date strategy guidance.
+
+[step.research_moneyball_strategy]
+type = "web_search"
+description = "Research Moneyball quantitative investing strategy principles"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+query = """Moneyball quantitative investing strategy stocks:
+- factor investing metrics ROE earnings growth low leverage
+- value investing undervalued stocks screening criteria
+- quality stock screening P/E ratio debt-to-equity
+- systematic rules-based stock selection
+- smart beta factor strategies"""
+output_tags = ["moneyball-strategy", "{stock:ticker_lower}"]
+depth = 3
+breadth = 4
+
+# =========================================================================
+# Step 2: Collect Daily Stock Data (24 Months)
+# =========================================================================
+# Fetches comprehensive historical OHLCV data and technical indicators.
+# Data is stored as CSV within the document for quantitative analysis.
+
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch 24-month daily stock data and technicals for {stock:name}"
+depends = "research_moneyball_strategy"
+on_error = "continue"
+asx_code = "{stock:ticker}"
+period = "Y2"
+output_tags = ["{stock:ticker_lower}", "stock-data", "moneyball-data", "{stock:industry}"]
+
+# =========================================================================
+# Step 3: Collect Company Announcements & Financial Performance
+# =========================================================================
+# Fetches official ASX announcements to extract financial performance,
+# earnings releases, and material events for fundamental analysis.
+
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch ASX announcements for {stock:name} financial analysis"
+depends = "fetch_stock_data"
+on_error = "continue"
+asx_code = "{stock:ticker}"
+period = "Y2"
+limit = 50
+output_tags = ["{stock:ticker_lower}", "announcements", "moneyball-data", "{stock:industry}"]
+
+# =========================================================================
+# Step 3b: Search for Additional Financial News and Analyst Coverage
+# =========================================================================
+# Web search for analyst ratings, financial news, and competitor comparisons.
+
+[step.search_financial_news]
+type = "web_search"
+description = "Search financial news and analyst coverage for {stock:name}"
+depends = "fetch_announcements"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+query = """ASX:{stock:ticker} {stock:name}
+- financial results earnings revenue profit
+- analyst ratings broker recommendations
+- competitors comparison market position
+site:afr.com OR site:theaustralian.com.au OR site:stockhead.com.au OR site:marketindex.com.au"""
+output_tags = ["{stock:ticker_lower}", "financial-news", "moneyball-data", "{stock:industry}"]
+depth = 3
+breadth = 3
+
+# =========================================================================
+# Step 4: Industry Analysis & Competitive Positioning
+# =========================================================================
+# Research industry outlook, competitive dynamics, and company positioning.
+
+[step.industry_analysis]
+type = "web_search"
+description = "Analyze {stock:industry} industry outlook and {stock:name} positioning"
+depends = "search_financial_news"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+query = """Australia {stock:industry} industry:
+- {stock:name} market share competitors
+- {stock:industry} sector outlook 2024 2025
+- {stock:industry} industry trends growth drivers
+- ASX {stock:industry} stocks comparison
+site:ibisworld.com OR site:afr.com OR site:asx.com.au"""
+output_tags = ["{stock:ticker_lower}", "industry-analysis", "moneyball-data", "{stock:industry}"]
+depth = 3
+breadth = 3
+
+# =========================================================================
+# Step 5: Generate Industry-Grouped Stock Summary
+# =========================================================================
+# Creates a comprehensive summary document with all collected data,
+# organized by industry for portfolio comparison.
+
+[step.generate_stock_summary]
+type = "summary"
+description = "Generate Moneyball summary for {stock:name} grouped by {stock:industry}"
+depends = "industry_analysis"
+on_error = "fail"
+filter_tags = ["{stock:ticker_lower}"]
+api_key = "{google_gemini_api_key}"
+prompt = """You are a quantitative equity analyst applying the "Moneyball" investment strategy.
+Analyze all collected data for ASX:{stock:ticker} ({stock:name}) in the {stock:industry} sector.
+
+Generate a comprehensive stock summary document with the following sections:
+
+## 1. COMPANY OVERVIEW
+- Company: {stock:name} (ASX:{stock:ticker})
+- Industry: {stock:industry}
+- Brief description and business model
+- Market position and key competitive advantages
+
+## 2. QUANTITATIVE METRICS (Moneyball Factors)
+Create a metrics scorecard table:
+
+| Moneyball Factor | Metric | Value | Score (1-5) | Signal |
+|------------------|--------|-------|-------------|--------|
+| Quality | Return on Equity (ROE) | % | | High/Low |
+| Quality | Earnings Stability | | | Stable/Volatile |
+| Value | P/E Ratio | | | Cheap/Fair/Expensive |
+| Value | Price vs 52-Week Range | % | | Oversold/Fair/Overbought |
+| Growth | Earnings Growth Rate | % | | Strong/Moderate/Weak |
+| Leverage | Debt-to-Equity | | | Low/Moderate/High |
+| Momentum | Trend (SMA alignment) | | | Bullish/Neutral/Bearish |
+| Momentum | RSI (14) | | | Oversold/Neutral/Overbought |
+
+**COMPOSITE MONEYBALL SCORE**: X/25 (sum of factor scores)
+
+## 3. FINANCIAL PERFORMANCE
+- Recent earnings results and trends
+- Revenue growth trajectory
+- Profit margins and sustainability
+- Key announcements impacting valuation
+
+## 4. INDUSTRY POSITIONING
+- Sector: {stock:industry}
+- Industry outlook and growth drivers
+- Competitive landscape and market share
+- Key competitors and relative positioning
+
+## 5. TECHNICAL ANALYSIS
+- Current Price vs Moving Averages (SMA 20/50/200)
+- Support and Resistance levels
+- Volume trends and institutional interest
+- Price momentum indicators
+
+## 6. RISK ASSESSMENT
+- Key business risks
+- Industry/sector risks
+- Valuation risks (overvaluation indicators)
+- Catalyst risks (upcoming events)
+
+**OVERALL RISK RATING**: Low / Moderate / High
+
+---
+IMPORTANT:
+- Use ONLY data from the provided documents
+- Score each Moneyball factor 1-5 based on actual data
+- If data unavailable, mark as "N/A" and explain
+- Be objective - do not inflate scores without evidence"""
+output_tags = ["moneyball-summary", "{stock:ticker_lower}", "{stock:industry}"]
+
+# =========================================================================
+# Step 6: Apply Moneyball Strategy - Investment Recommendation
+# =========================================================================
+# Final analysis applying Moneyball principles for SMSF investment decision.
+# Generates BUY/HOLD/SELL recommendation with detailed rationale.
+
+[step.investment_recommendation]
+type = "summary"
+description = "Generate Moneyball BUY/HOLD/SELL recommendation for {stock:name}"
+depends = "generate_stock_summary"
+on_error = "fail"
+filter_tags = ["moneyball-summary", "{stock:ticker_lower}"]
+api_key = "{google_gemini_api_key}"
+prompt = """You are a senior investment adviser for a Self-Managed Super Fund (SMSF) applying the Moneyball quantitative investment strategy.
+
+Based on the stock summary for ASX:{stock:ticker} ({stock:name}), generate a formal investment recommendation.
+
+# MONEYBALL INVESTMENT ANALYSIS REPORT
+## ASX:{stock:ticker} - {stock:name}
+### Prepared for: SMSF Investment Committee
+
+---
+
+## EXECUTIVE SUMMARY
+
+**RECOMMENDATION: [BUY / HOLD / SELL]**
+**Conviction Level: [High / Medium / Low]**
+**Target Allocation: [X% of portfolio]**
+
+[2-3 sentence summary of recommendation rationale]
+
+---
+
+## MONEYBALL STRATEGY FIT ASSESSMENT
+
+### Undervalued Asset Criteria
+| Criterion | Meets Criteria | Evidence |
+|-----------|---------------|----------|
+| High ROE (>15%) | Yes/No | |
+| Low Financial Leverage | Yes/No | |
+| Stable Earnings Growth | Yes/No | |
+| Below Intrinsic Value | Yes/No | |
+| Strong Competitive Position | Yes/No | |
+
+**MONEYBALL FIT SCORE**: X/5 criteria met
+
+### Quantitative Signals
+- **Value Signal**: [Undervalued / Fair Value / Overvalued]
+- **Quality Signal**: [High Quality / Average / Low Quality]
+- **Momentum Signal**: [Positive / Neutral / Negative]
+- **Risk Signal**: [Low Risk / Moderate Risk / High Risk]
+
+---
+
+## INVESTMENT THESIS
+
+### Bull Case (Why to BUY)
+1. [Key positive factor 1]
+2. [Key positive factor 2]
+3. [Key positive factor 3]
+
+### Bear Case (Why to SELL)
+1. [Key risk/negative 1]
+2. [Key risk/negative 2]
+3. [Key risk/negative 3]
+
+---
+
+## SMSF CONSIDERATIONS
+
+### Regulatory Compliance
+- Sole purpose test: [Pass/Caution]
+- Diversification requirement: [Contribution to diversification]
+- Liquidity needs: [Adequate/Concerns]
+
+### Risk/Return Profile
+- **Expected Annual Return**: X%
+- **Risk Rating**: Low / Medium / High
+- **Suitable for**: Growth / Balanced / Conservative SMSF
+
+---
+
+## ACTIONABLE RECOMMENDATION
+
+### For BUY Recommendation:
+- **Entry Price Range**: $X.XX - $X.XX
+- **Position Size**: X% of portfolio (max)
+- **Stop Loss**: $X.XX (X% below entry)
+- **Target Price**: $X.XX (X% upside)
+- **Time Horizon**: Short-term / Medium-term / Long-term
+
+### For HOLD Recommendation:
+- **Current Position**: Maintain exposure
+- **Watch Points**: [Key triggers for upgrade/downgrade]
+
+### For SELL Recommendation:
+- **Exit Strategy**: Immediate / Staged
+- **Reason for Exit**: [Key factor]
+
+---
+
+## CONFIDENCE DISCLAIMER
+This analysis uses the Moneyball quantitative framework. Scores and recommendations are based on available data.
+Markets can remain irrational longer than portfolios can remain solvent.
+This is not personal financial advice - consult a licensed adviser for SMSF decisions.
+
+---
+**Analysis Date**: [Current Date]
+**Analyst**: Quaero Moneyball Engine
+**Industry Sector**: {stock:industry}
+"""
+output_tags = ["moneyball-recommendation", "{stock:ticker_lower}", "{stock:industry}", "smsf-report"]
+
+# =========================================================================
+# NOTE: Email removed from template - handled at portfolio level
+# =========================================================================
+# Individual stock emails are removed. The portfolio-level job definition
+# (moneyball-stocks-daily.toml) consolidates all stock analyses and sends
+# a single portfolio review email.

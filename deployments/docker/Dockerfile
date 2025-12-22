@@ -54,9 +54,21 @@ COPY --from=builder /build/quaero .
 # Copy pages (HTML templates) from builder
 COPY --from=builder /build/pages /app/pages
 
-# Create directories
-RUN mkdir -p /app/data /app/logs && \
-    chown -R quaero:quaero /app
+# Create directories for config and data
+RUN mkdir -p /app/config /app/data /app/logs /app/job-definitions /app/job-templates
+
+# Copy configuration files from staging directory
+# These are prepared by deploy.ps1 before docker build
+COPY deployments/docker/.docker-staging/config/ /app/config/
+COPY deployments/docker/.docker-staging/job-definitions/ /app/job-definitions/
+COPY deployments/docker/.docker-staging/job-templates/ /app/job-templates/
+
+# Copy .env to app root if present (for KV store loading)
+# The .env file in /app/config/ is also symlinked to /app/.env for compatibility
+RUN if [ -f /app/config/.env ]; then cp /app/config/.env /app/.env; fi
+
+# Set ownership
+RUN chown -R quaero:quaero /app
 
 # Switch to non-root user
 USER quaero

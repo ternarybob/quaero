@@ -102,8 +102,9 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
-	mux.HandleFunc("/api/config", s.app.ConfigHandler.GetConfig) // GET - application configuration
-	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)           // Graceful shutdown endpoint (internal-only, dev mode)
+	mux.HandleFunc("/api/config", s.app.ConfigHandler.GetConfig)           // GET - application configuration
+	mux.HandleFunc("/api/config/reload", s.app.ConfigHandler.ReloadConfig) // POST - reload configuration from files
+	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)                     // Graceful shutdown endpoint (internal-only, dev mode)
 
 	// API routes - System Logs
 	mux.HandleFunc("/api/system/logs/files", s.app.SystemLogsHandler.ListLogFilesHandler)

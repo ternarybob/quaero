@@ -13,7 +13,7 @@ Create workdir from task description:
 ```
 TASK_SLUG = slugify($ARGUMENTS)  # lowercase, hyphens, max 40 chars
 DATE = $(date +%Y-%m-%d)
-WORKDIR = .claude/workdir/${TASK_SLUG}-${DATE}  # e.g., ./workdir/${TASK_SLUG}-${DATE}
+WORKDIR = .claude/workdir/${DATE}-${TASK_SLUG}  # e.g., ./workdir/${DATE}-${TASK_SLUG}
 mkdir -p $WORKDIR
 ```
 

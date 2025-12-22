@@ -1,40 +1,15 @@
 services:
   quaero:
-    build:
-      context: ../..
-      dockerfile: deployments/docker/Dockerfile
-      args:
-        VERSION: ${VERSION:-dev}
-        BUILD: ${BUILD:-unknown}
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    # Use pre-built image (built by deploy.ps1 with configs baked in)
+    image: quaero:latest
     container_name: quaero
     restart: unless-stopped
     ports:
       - "${PORT:-9000}:8080"
     volumes:
-      # Environment variables (.env) - loaded into KV store at startup
-      - ./config/.env:/app/.env:ro
-      # Main configuration file
-      - ./config/quaero.toml:/app/config/quaero.toml:ro
-      # Email/SMTP configuration (uses {variable} syntax)
-      - ./config/email.toml:/app/config/email.toml:ro
-      # External connectors (GitHub, etc.)
-      - ./config/connectors.toml:/app/config/connectors.toml:ro
-      # Variable definitions
-      - ./config/variables.toml:/app/config/variables.toml:ro
-      # Additional variable files
-      - ./config/variables:/app/config/variables:ro
-      # Job definitions directory
-      - ./config/job-definitions:/app/job-definitions:ro
-      # Job templates directory
-      - ./config/job-templates:/app/job-templates:ro
-      # Persistent data storage
+      # Persistent data storage only - configs are baked into image
       - quaero-data:/app/data
-      # Log files
       - quaero-logs:/app/logs
-    env_file:
-      - path: ./config/.env
-        required: false
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_OUTPUT=${LOG_OUTPUT:-both}

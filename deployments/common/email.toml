@@ -1,0 +1,33 @@
+# Email/SMTP Configuration
+#
+# Configure SMTP settings for sending email notifications from Quaero.
+# This file is loaded at application startup.
+#
+# All string fields support variable substitution using {variable_name} syntax.
+# Variables are loaded from ./variables/*.toml files.
+#
+# Common SMTP configurations:
+#
+# Gmail (requires App Password):
+#   smtp_host = "smtp.gmail.com"
+#   smtp_port = 587
+#   smtp_use_tls = true
+#
+# Outlook/Office365:
+#   smtp_host = "smtp.office365.com"
+#   smtp_port = 587
+#   smtp_use_tls = true
+#
+# Amazon SES:
+#   smtp_host = "email-smtp.us-east-1.amazonaws.com"
+#   smtp_port = 587
+#   smtp_use_tls = true
+
+[email]
+smtp_host = "{smtp_host}"
+smtp_port = 587
+smtp_username = "{smtp_username}"
+smtp_password = "{smtp_password}"
+smtp_from = "{smtp_from}"
+smtp_from_name = "Quaero"
+smtp_use_tls = true

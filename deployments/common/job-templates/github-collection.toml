@@ -1,0 +1,89 @@
+# GitHub Collection Job Template
+# Template for collecting both repository files AND workflow logs from a GitHub repository.
+# Uses template variables: {repo:owner}, {repo:name}, {repo:branch}, {repo:connector}
+#
+# Two modes of collection:
+# 1. github_git (git clone) - Fast bulk file download using local git
+# 2. github_actions - Workflow run logs for CI/CD analysis
+#
+# Template variables:
+# - {repo:owner}        - Repository owner (user or organization)
+# - {repo:name}         - Repository name
+# - {repo:name_lower}   - Repository name (lowercase for tags)
+# - {repo:branch}       - Target branch (default: main)
+# - {repo:connector}    - Name of configured GitHub connector
+
+id = "github-collection-{repo:owner}-{repo:name_lower}"
+name = "GitHub: {repo:owner}/{repo:name}"
+description = "Collect repository files and workflow logs from {repo:owner}/{repo:name}"
+tags = ["github", "repository", "{repo:owner}", "{repo:name_lower}"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+# Extension matching: triggers when visiting GitHub repo pages
+extension = true
+url_patterns = ["github.com/{repo:owner}/{repo:name}", "github.com/{repo:owner}/{repo:name}/*"]
+
+# Step 1: Clone repository and import source files
+[step.collect_repo_files]
+type = "github_git"
+description = "Clone repository via git and import source files as searchable documents"
+on_error = "continue"
+connector_name = "{repo:connector}"
+owner = "{repo:owner}"
+repo = "{repo:name}"
+branch = "{repo:branch}"
+extensions = [
+    ".go",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".py",
+    ".java",
+    ".rs",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".md",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".json",
+]
+exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/", "__pycache__/"]
+max_files = 1000
+output_tags = ["{repo:name_lower}", "github-{repo:name_lower}-source"]
+
+# Step 2: Collect recent workflow runs (failures first for debugging)
+[step.collect_workflow_logs]
+type = "github_actions"
+description = "Collect recent workflow run logs for CI/CD analysis"
+depends = "collect_repo_files"
+on_error = "continue"
+connector_name = "{repo:connector}"
+owner = "{repo:owner}"
+repo = "{repo:name}"
+status = "failure"
+max_runs = 10
+output_tags = ["{repo:name_lower}", "github-{repo:name_lower}-ci", "workflow-logs"]
+
+# Step 3: Also collect successful runs for comparison
+[step.collect_success_logs]
+type = "github_actions"
+description = "Collect successful workflow runs for baseline comparison"
+depends = "collect_workflow_logs"
+on_error = "continue"
+connector_name = "{repo:connector}"
+owner = "{repo:owner}"
+repo = "{repo:name}"
+status = "success"
+max_runs = 5
+output_tags = ["{repo:name_lower}", "github-{repo:name_lower}-ci", "workflow-logs", "success"]
+
+[error_tolerance]
+max_child_failures = 50
+failure_action = "continue"

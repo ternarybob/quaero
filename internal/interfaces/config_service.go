@@ -14,6 +14,11 @@ type ConfigService interface {
 	// InvalidateCache invalidates the cached config, forcing a rebuild on next GetConfig()
 	InvalidateCache()
 
+	// ReloadConfig reloads configuration from files
+	// If clear is true, clears all KV store entries before reloading
+	// Uses the same code path as startup config loading
+	ReloadConfig(ctx context.Context, clear bool) error
+
 	// Close unsubscribes from events and cleans up resources
 	Close() error
 }

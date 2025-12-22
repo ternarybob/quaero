@@ -1,0 +1,60 @@
+# Example API Keys Configuration
+# Copy this file to a new file (e.g., google-keys.toml) and add your actual API keys
+# Files in this directory are automatically loaded on startup
+#
+# IMPORTANT: This file is only an example and should not be loaded as-is.
+# Copy it to a new file with a descriptive name and add your real API keys.
+#
+# Format: Each API key is defined in a TOML section [section-name]
+# The section name becomes the key name used in job definitions and configuration
+
+# =============================================================================
+# Google Places API Key
+# =============================================================================
+# Used for places search functionality in job definitions
+# Get your API key from: https://console.cloud.google.com/apis/credentials
+# Enable the "Places API" in Google Cloud Console
+
+# [google-places-key]
+# value = "YOUR_GOOGLE_PLACES_API_KEY_HERE"
+# description = "Google Places API key for location search functionality"
+
+# =============================================================================
+# Google Gemini LLM API Key
+# =============================================================================
+# Used for LLM-powered features (chat, summarization, embeddings)
+# Get your API key from: https://aistudio.google.com/app/apikey
+# Free tier available with rate limits
+
+# [gemini-llm-key]
+# value = "YOUR_GEMINI_API_KEY_HERE"
+# description = "Google Gemini API key for LLM features (chat, summarization, embeddings)"
+
+# =============================================================================
+# Google Agent API Key
+# =============================================================================
+# Used for agent-based document processing (keyword extraction, etc.)
+# Get your API key from: https://aistudio.google.com/app/apikey
+# Same API key can be used for both LLM and Agent features
+
+# [agent-google-key]
+# value = "YOUR_AGENT_API_KEY_HERE"
+# description = "Google API key for agent-based document processing"
+
+# =============================================================================
+# Custom API Keys
+# =============================================================================
+# You can add any custom API keys or secrets here
+# Each section name becomes the key name in the KV store
+
+# [my-custom-api-key]
+# value = "YOUR_CUSTOM_API_KEY_HERE"
+# description = "Custom API key for my service"
+
+# =============================================================================
+# Cookie-Based Authentication
+# =============================================================================
+# Cookie-based authentication should NOT be stored in this directory!
+# Use the ./auth directory instead for cookie-based authentication.
+# See ../auth/README.md for cookie-based authentication configuration.
+
