@@ -155,13 +155,15 @@ type PlacesAPIConfig struct {
 
 // GeminiConfig contains unified Google Gemini API configuration for all AI services
 type GeminiConfig struct {
-	GoogleAPIKey string  `toml:"google_api_key"` // Google Gemini API key for all AI operations
-	AgentModel   string  `toml:"agent_model"`    // Gemini model for agent operations (default: "gemini-2.0-flash")
-	ChatModel    string  `toml:"chat_model"`     // Gemini model for chat operations (default: "gemini-2.0-flash")
-	MaxTurns     int     `toml:"max_turns"`      // Maximum agent conversation turns (default: 10)
-	Timeout      string  `toml:"timeout"`        // Operation timeout as duration string (default: "5m")
-	RateLimit    string  `toml:"rate_limit"`     // Rate limit duration string (default: "4s" for 15 RPM)
-	Temperature  float32 `toml:"temperature"`    // Chat completion temperature (default: 0.7)
+	GoogleAPIKey       string  `toml:"google_api_key"`       // Google Gemini API key for all AI operations
+	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-2.0-flash")
+	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-2.0-flash")
+	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-2.0-flash-thinking-exp")
+	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-2.0-flash")
+	MaxTurns           int     `toml:"max_turns"`            // Maximum agent conversation turns (default: 10)
+	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
+	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "4s" for 15 RPM)
+	Temperature        float32 `toml:"temperature"`          // Chat completion temperature (default: 0.7)
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -268,13 +270,15 @@ func NewDefaultConfig() *Config {
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 		Gemini: GeminiConfig{
-			GoogleAPIKey: "",                 // User must provide API key (no fallback)
-			AgentModel:   "gemini-2.0-flash", // Fast, cost-effective model for agents
-			ChatModel:    "gemini-2.0-flash", // Fast, cost-effective model for chat
-			MaxTurns:     10,                 // Reasonable limit for agent loops
-			Timeout:      "5m",               // 5 minutes for operations
-			RateLimit:    "4s",               // Default to 4s (15 RPM) for free tier
-			Temperature:  0.7,                // Default temperature for chat completions
+			GoogleAPIKey:       "",                                   // User must provide API key (no fallback)
+			AgentModel:         "gemini-2.0-flash",                   // Default model for agents
+			AgentModelFast:     "gemini-2.0-flash",                   // Fast model for simple tasks
+			AgentModelThinking: "gemini-2.0-flash-thinking-exp-1219", // Thinking model for complex reasoning
+			ChatModel:          "gemini-2.0-flash",                   // Fast, cost-effective model for chat
+			MaxTurns:           10,                                   // Reasonable limit for agent loops
+			Timeout:            "5m",                                 // 5 minutes for operations
+			RateLimit:          "4s",                                 // Default to 4s (15 RPM) for free tier
+			Temperature:        0.7,                                  // Default temperature for chat completions
 		},
 	}
 }
@@ -568,6 +572,12 @@ func applyEnvOverrides(config *Config) {
 	}
 	if agentModel := os.Getenv("QUAERO_GEMINI_AGENT_MODEL"); agentModel != "" {
 		config.Gemini.AgentModel = agentModel
+	}
+	if agentModelFast := os.Getenv("QUAERO_GEMINI_AGENT_MODEL_FAST"); agentModelFast != "" {
+		config.Gemini.AgentModelFast = agentModelFast
+	}
+	if agentModelThinking := os.Getenv("QUAERO_GEMINI_AGENT_MODEL_THINKING"); agentModelThinking != "" {
+		config.Gemini.AgentModelThinking = agentModelThinking
 	}
 	if chatModel := os.Getenv("QUAERO_GEMINI_CHAT_MODEL"); chatModel != "" {
 		config.Gemini.ChatModel = chatModel
