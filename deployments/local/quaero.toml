@@ -25,6 +25,20 @@
 environment = "development" # "development" or "production"
 
 # =============================================================================
+# Configuration Reload Settings
+# =============================================================================
+# Controls whether to clear all key/value configuration at startup before loading.
+# This ensures a clean slate by removing any stale configuration from previous runs.
+#
+# Runtime Reload:
+# - Configuration can be reloaded at runtime via Settings > Danger Zone > Reload Configuration
+# - The reload UI provides a checkbox to optionally clear configuration before reloading
+#
+# Default: false (preserves existing configuration)
+
+# clear_config_on_startup = false  # Set to true to clear ALL KV config before loading
+
+# =============================================================================
 # Server Configuration
 # =============================================================================
 # Defaults: port=8080, host="localhost"
@@ -108,21 +122,11 @@ environment = "development" # "development" or "production"
 # - agent: AI agent jobs (keyword extraction, summarization, classification)
 # - custom: Custom workflow jobs (multi-step orchestration)
 #
-# Configuration Reload:
-# - clear_on_startup: If true, clears all key/value configuration before loading at startup
-#   This ensures a clean slate by removing any stale configuration from previous runs.
-#   Default: false (preserves existing configuration)
-#
-# Runtime Reload:
-# - Configuration can be reloaded at runtime via Settings > Danger Zone > Reload Configuration
-# - The reload UI provides a checkbox to optionally clear configuration before reloading
-#
-# Default: definitions_dir="./job-definitions", clear_on_startup=false
+# Default: definitions_dir="./job-definitions"
 # Env var: QUAERO_JOBS_DEFINITIONS_DIR
 
 [jobs]
 definitions_dir = "./deployments/local/job-definitions"  # Load job definitions from local directory
-# clear_on_startup = false  # Set to true to clear KV store before loading config at startup
 
 # =============================================================================
 # Variables Configuration

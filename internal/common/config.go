@@ -17,21 +17,22 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Environment string             `toml:"environment"` // "development" or "production" - controls test URL validation
-	Server      ServerConfig       `toml:"server"`
-	Queue       QueueConfig        `toml:"queue"`
-	Storage     StorageConfig      `toml:"storage"`
-	Processing  ProcessingConfig   `toml:"processing"`
-	Logging     LoggingConfig      `toml:"logging"`
-	Jobs        JobsConfig         `toml:"jobs"`
-	Auth        AuthDirConfig      `toml:"auth"`
-	Variables   KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
-	Connectors  ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
-	Crawler     CrawlerConfig      `toml:"crawler"`
-	Search      SearchConfig       `toml:"search"`
-	WebSocket   WebSocketConfig    `toml:"websocket"`
-	PlacesAPI   PlacesAPIConfig    `toml:"places_api"`
-	Gemini      GeminiConfig       `toml:"gemini"`
+	Environment          string             `toml:"environment"`             // "development" or "production" - controls test URL validation
+	ClearConfigOnStartup bool               `toml:"clear_config_on_startup"` // Clear all KV configuration before loading at startup (default: false)
+	Server               ServerConfig       `toml:"server"`
+	Queue                QueueConfig        `toml:"queue"`
+	Storage              StorageConfig      `toml:"storage"`
+	Processing           ProcessingConfig   `toml:"processing"`
+	Logging              LoggingConfig      `toml:"logging"`
+	Jobs                 JobsConfig         `toml:"jobs"`
+	Auth                 AuthDirConfig      `toml:"auth"`
+	Variables            KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
+	Connectors           ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
+	Crawler              CrawlerConfig      `toml:"crawler"`
+	Search               SearchConfig       `toml:"search"`
+	WebSocket            WebSocketConfig    `toml:"websocket"`
+	PlacesAPI            PlacesAPIConfig    `toml:"places_api"`
+	Gemini               GeminiConfig       `toml:"gemini"`
 }
 
 type ServerConfig struct {
@@ -80,8 +81,7 @@ type LoggingConfig struct {
 
 // JobsConfig contains configuration for job definitions
 type JobsConfig struct {
-	DefinitionsDir string `toml:"definitions_dir"`  // Directory containing job definition files (TOML/JSON)
-	ClearOnStartup bool   `toml:"clear_on_startup"` // Clear existing configuration from KV store before loading (default: false)
+	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
 }
 
 // KeysDirConfig contains configuration for key/value file loading (generic secrets/configuration)
