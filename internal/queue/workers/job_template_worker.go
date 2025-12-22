@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -175,7 +176,16 @@ func (w *JobTemplateWorker) parseVariables(raw interface{}) ([]map[string]interf
 	return result, nil
 }
 
+// templateJobResult holds the result of executing a single template instance
+type templateJobResult struct {
+	index      int
+	identifier string
+	jobID      string
+	err        error
+}
+
 // CreateJobs loads the template, applies variable substitution, and executes each instance.
+// Supports parallel execution when parallel=true is set in step config.
 func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
@@ -188,6 +198,7 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	template, _ := initResult.Metadata["template"].(string)
 	templateFile, _ := initResult.Metadata["template_file"].(string)
 	variables, _ := initResult.Metadata["variables"].([]map[string]interface{})
+	parallel, _ := initResult.Metadata["parallel"].(bool)
 
 	w.logger.Info().
 		Str("phase", "run").
@@ -195,10 +206,15 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		Str("template", template).
 		Int("instances", len(variables)).
 		Str("step_id", stepID).
+		Bool("parallel", parallel).
 		Msg("Starting job template execution")
 
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Executing template '%s' with %d variable sets", template, len(variables)))
+		mode := "sequential"
+		if parallel {
+			mode = "parallel"
+		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Executing template '%s' with %d variable sets (%s)", template, len(variables), mode))
 	}
 
 	// Load template content
@@ -207,8 +223,9 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		return "", fmt.Errorf("failed to read template file: %w", err)
 	}
 
-	// Execute each variable set
-	successCount := 0
+	// Prepare all job definitions first
+	var preparedJobs []preparedJob
+
 	for i, varSet := range variables {
 		// Get identifier for logging
 		var identifier string
@@ -217,15 +234,6 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 				identifier = s
 				break
 			}
-		}
-
-		w.logger.Info().
-			Int("index", i).
-			Str("identifier", identifier).
-			Msg("Processing template instance")
-
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[%d/%d] Processing: %s", i+1, len(variables), identifier))
 		}
 
 		// Apply variable substitution to template
@@ -264,42 +272,45 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		templatedJobDef.CreatedAt = time.Now()
 		templatedJobDef.UpdatedAt = time.Now()
 		templatedJobDef.JobType = models.JobOwnerTypeSystem
-		// Store source info in description since the model doesn't have dedicated fields
 		templatedJobDef.Description = fmt.Sprintf("%s\n\n[Generated from template '%s' for %s]",
 			templatedJobDef.Description, template, identifier)
 
-		// Execute the templated job using Orchestrator
-		if w.orchestrator == nil {
-			w.logger.Error().Msg("Orchestrator not available")
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "error", "Orchestrator not configured")
-			}
-			continue
-		}
+		preparedJobs = append(preparedJobs, preparedJob{
+			index:      i,
+			identifier: identifier,
+			jobDef:     templatedJobDef,
+		})
+	}
 
-		// Run the job definition (nil monitors since we track via parent step)
-		executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, templatedJobDef, nil, nil)
-		if err != nil {
-			w.logger.Error().Err(err).
-				Str("identifier", identifier).
-				Str("job_def_id", templatedJobDef.ID).
-				Msg("Failed to execute templated job")
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to execute job for %s: %v", identifier, err))
-			}
-			continue
-		}
+	if len(preparedJobs) == 0 {
+		return "", fmt.Errorf("failed to prepare any template instances")
+	}
 
-		w.logger.Info().
-			Str("identifier", identifier).
-			Str("job_id", executedJobID).
-			Msg("Successfully executed templated job")
-
+	// Check orchestrator availability
+	if w.orchestrator == nil {
+		w.logger.Error().Msg("Orchestrator not available")
 		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Started job %s for %s", executedJobID[:8], identifier))
+			w.jobMgr.AddJobLog(ctx, stepID, "error", "Orchestrator not configured")
 		}
+		return "", fmt.Errorf("orchestrator not configured")
+	}
 
-		successCount++
+	var results []templateJobResult
+
+	if parallel {
+		// Parallel execution: spawn all jobs concurrently
+		results = w.executeParallel(ctx, stepID, preparedJobs, len(variables))
+	} else {
+		// Sequential execution: run one at a time (original behavior)
+		results = w.executeSequential(ctx, stepID, preparedJobs, len(variables))
+	}
+
+	// Count successes and report results
+	successCount := 0
+	for _, result := range results {
+		if result.err == nil {
+			successCount++
+		}
 	}
 
 	if successCount == 0 {
@@ -311,6 +322,147 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	}
 
 	return stepID, nil
+}
+
+// preparedJob holds a prepared job definition ready for execution
+type preparedJob struct {
+	index      int
+	identifier string
+	jobDef     *models.JobDefinition
+}
+
+// executeSequential runs template jobs one at a time (original behavior)
+func (w *JobTemplateWorker) executeSequential(ctx context.Context, stepID string, preparedJobs []preparedJob, totalCount int) []templateJobResult {
+	results := make([]templateJobResult, 0, len(preparedJobs))
+
+	for _, pj := range preparedJobs {
+		w.logger.Info().
+			Int("index", pj.index).
+			Str("identifier", pj.identifier).
+			Msg("Processing template instance (sequential)")
+
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[%d/%d] Processing: %s", pj.index+1, totalCount, pj.identifier))
+		}
+
+		// Run the job definition
+		executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, pj.jobDef, nil, nil)
+		if err != nil {
+			w.logger.Error().Err(err).
+				Str("identifier", pj.identifier).
+				Str("job_def_id", pj.jobDef.ID).
+				Msg("Failed to execute templated job")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to execute job for %s: %v", pj.identifier, err))
+			}
+			results = append(results, templateJobResult{
+				index:      pj.index,
+				identifier: pj.identifier,
+				err:        err,
+			})
+			continue
+		}
+
+		w.logger.Info().
+			Str("identifier", pj.identifier).
+			Str("job_id", executedJobID).
+			Msg("Successfully executed templated job")
+
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed job %s for %s", executedJobID[:8], pj.identifier))
+		}
+
+		results = append(results, templateJobResult{
+			index:      pj.index,
+			identifier: pj.identifier,
+			jobID:      executedJobID,
+		})
+	}
+
+	return results
+}
+
+// executeParallel spawns all template jobs concurrently and waits for completion.
+// Jobs are created by ExecuteJobDefinition and appear in the UI as they start.
+func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, preparedJobs []preparedJob, totalCount int) []templateJobResult {
+	results := make([]templateJobResult, len(preparedJobs))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	w.logger.Info().
+		Int("job_count", len(preparedJobs)).
+		Str("step_id", stepID).
+		Msg("Spawning parallel template jobs")
+
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawning %d parallel jobs...", len(preparedJobs)))
+	}
+
+	// Log all jobs that will be spawned
+	for i, pj := range preparedJobs {
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[%d/%d] Queuing: %s", i+1, totalCount, pj.identifier))
+		}
+	}
+
+	// Execute all jobs in parallel goroutines
+	for i, pj := range preparedJobs {
+		wg.Add(1)
+		go func(idx int, job preparedJob) {
+			defer wg.Done()
+
+			w.logger.Info().
+				Int("index", job.index).
+				Str("identifier", job.identifier).
+				Msg("Starting parallel template job execution")
+
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Starting: %s", job.identifier))
+			}
+
+			// Execute the job definition - this creates the manager job and executes it
+			executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, job.jobDef, nil, nil)
+
+			mu.Lock()
+			if err != nil {
+				w.logger.Error().Err(err).
+					Str("identifier", job.identifier).
+					Msg("Failed to execute parallel templated job")
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed: %s - %v", job.identifier, err))
+				}
+				results[idx] = templateJobResult{
+					index:      job.index,
+					identifier: job.identifier,
+					err:        err,
+				}
+			} else {
+				w.logger.Info().
+					Str("identifier", job.identifier).
+					Str("job_id", executedJobID).
+					Msg("Parallel templated job completed")
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %s (job: %s)", job.identifier, executedJobID[:8]))
+				}
+				results[idx] = templateJobResult{
+					index:      job.index,
+					identifier: job.identifier,
+					jobID:      executedJobID,
+				}
+			}
+			mu.Unlock()
+		}(i, pj)
+	}
+
+	// Wait for all parallel jobs to complete
+	wg.Wait()
+
+	w.logger.Info().
+		Int("job_count", len(preparedJobs)).
+		Str("step_id", stepID).
+		Msg("All parallel template jobs completed")
+
+	return results
 }
 
 // substituteTemplateVariables replaces {variable:key} patterns with actual values
