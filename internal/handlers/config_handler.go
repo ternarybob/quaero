@@ -11,16 +11,18 @@ import (
 )
 
 type ConfigHandler struct {
-	logger    arbor.ILogger
-	config    *common.Config // Original config (fallback)
-	configSvc interfaces.ConfigService
+	logger         arbor.ILogger
+	config         *common.Config // Original config (fallback)
+	configSvc      interfaces.ConfigService
+	storageManager interfaces.StorageManager // For clearing and reloading TOML config
 }
 
-func NewConfigHandler(logger arbor.ILogger, config *common.Config, configSvc interfaces.ConfigService) *ConfigHandler {
+func NewConfigHandler(logger arbor.ILogger, config *common.Config, configSvc interfaces.ConfigService, storageManager interfaces.StorageManager) *ConfigHandler {
 	return &ConfigHandler{
-		logger:    logger,
-		config:    config,
-		configSvc: configSvc,
+		logger:         logger,
+		config:         config,
+		configSvc:      configSvc,
+		storageManager: storageManager,
 	}
 }
 
@@ -67,7 +69,7 @@ func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 // ReloadConfigRequest represents the request body for config reload
 type ReloadConfigRequest struct {
-	Clear bool `json:"clear"` // If true, clears KV store before reloading
+	Clear bool `json:"clear"` // If true, clears all TOML-loaded config before reloading
 }
 
 // ReloadConfigResponse represents the response for config reload
@@ -76,9 +78,10 @@ type ReloadConfigResponse struct {
 	Message string `json:"message"`
 }
 
-// ReloadConfig reloads configuration from files
+// ReloadConfig reloads all TOML configuration from files
 // POST /api/config/reload
 // Body: {"clear": bool}
+// When clear=true, deletes ALL TOML-loaded data (job definitions, connectors, variables) before reloading
 func (h *ConfigHandler) ReloadConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -106,32 +109,70 @@ func (h *ConfigHandler) ReloadConfig(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info().Bool("clear", req.Clear).Msg("Config reload requested")
 
-	// Call the config service to reload
-	if h.configSvc == nil {
-		h.logger.Error().Msg("Config service not available")
+	// Check storage manager is available
+	if h.storageManager == nil {
+		h.logger.Error().Msg("Storage manager not available")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ReloadConfigResponse{
 			Success: false,
-			Message: "Config service not available",
+			Message: "Storage manager not available",
 		})
 		return
 	}
 
-	if err := h.configSvc.ReloadConfig(r.Context(), req.Clear); err != nil {
-		h.logger.Error().Err(err).Msg("Failed to reload configuration")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ReloadConfigResponse{
-			Success: false,
-			Message: err.Error(),
-		})
-		return
+	ctx := r.Context()
+
+	// Step 1: Clear all TOML-loaded config if requested
+	if req.Clear {
+		h.logger.Info().Msg("Clearing all TOML-loaded configuration data")
+		if err := h.storageManager.ClearAllConfigData(ctx); err != nil {
+			h.logger.Error().Err(err).Msg("Failed to clear configuration data")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ReloadConfigResponse{
+				Success: false,
+				Message: "Failed to clear configuration: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	// Step 2: Reload all TOML files
+	// Load variables from files
+	if h.config.Variables.Dir != "" {
+		if err := h.storageManager.LoadVariablesFromFiles(ctx, h.config.Variables.Dir); err != nil {
+			h.logger.Warn().Err(err).Str("dir", h.config.Variables.Dir).Msg("Failed to reload variables")
+		}
+	}
+
+	// Load job definitions from files
+	if h.config.Jobs.DefinitionsDir != "" {
+		if err := h.storageManager.LoadJobDefinitionsFromFiles(ctx, h.config.Jobs.DefinitionsDir); err != nil {
+			h.logger.Warn().Err(err).Str("dir", h.config.Jobs.DefinitionsDir).Msg("Failed to reload job definitions")
+		}
+	}
+
+	// Load connectors from files
+	if h.config.Connectors.Dir != "" {
+		if err := h.storageManager.LoadConnectorsFromFiles(ctx, h.config.Connectors.Dir); err != nil {
+			h.logger.Warn().Err(err).Str("dir", h.config.Connectors.Dir).Msg("Failed to reload connectors")
+		}
+
+		// Load email config (from same directory as connectors)
+		if err := h.storageManager.LoadEmailFromFile(ctx, h.config.Connectors.Dir); err != nil {
+			h.logger.Warn().Err(err).Str("dir", h.config.Connectors.Dir).Msg("Failed to reload email config")
+		}
+	}
+
+	// Step 3: Invalidate config service cache so it picks up new KV values
+	if h.configSvc != nil {
+		h.configSvc.InvalidateCache()
 	}
 
 	message := "Configuration reloaded successfully"
 	if req.Clear {
-		message = "Configuration cleared and reloaded successfully"
+		message = "All configuration cleared and reloaded from TOML files"
 	}
 
 	h.logger.Info().Msg(message)

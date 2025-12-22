@@ -72,3 +72,23 @@ func (s *ConnectorStorage) DeleteConnector(ctx context.Context, id string) error
 	}
 	return nil
 }
+
+// DeleteAllConnectors removes all connectors from storage
+// Used by config reload to clear all connectors before reloading from TOML files
+func (s *ConnectorStorage) DeleteAllConnectors(ctx context.Context) error {
+	// Find all connectors
+	var connectors []models.Connector
+	if err := s.db.Store().Find(&connectors, nil); err != nil {
+		return fmt.Errorf("failed to list connectors for deletion: %w", err)
+	}
+
+	// Delete each connector
+	for _, connector := range connectors {
+		if err := s.db.Store().Delete(connector.ID, &models.Connector{}); err != nil {
+			s.logger.Warn().Str("id", connector.ID).Err(err).Msg("Failed to delete connector during DeleteAll")
+		}
+	}
+
+	s.logger.Info().Int("count", len(connectors)).Msg("Deleted all connectors")
+	return nil
+}

@@ -150,6 +150,7 @@ type JobDefinitionStorage interface {
 	GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error)
 	GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error)
 	DeleteJobDefinition(ctx context.Context, id string) error
+	DeleteAllJobDefinitions(ctx context.Context) error // Clear all job definitions (for config reload)
 	CountJobDefinitions(ctx context.Context) (int, error)
 }
 
@@ -184,6 +185,7 @@ type ConnectorStorage interface {
 	ListConnectors(ctx context.Context) ([]*models.Connector, error)
 	UpdateConnector(ctx context.Context, connector *models.Connector) error
 	DeleteConnector(ctx context.Context, id string) error
+	DeleteAllConnectors(ctx context.Context) error // Clear all connectors (for config reload)
 }
 
 // StorageManager - composite interface for all storage operations
@@ -201,6 +203,11 @@ type StorageManager interface {
 	// MigrateAPIKeysToKVStore migrates API keys from auth_credentials table to key_value_store
 	// This is idempotent and safe to call multiple times
 	MigrateAPIKeysToKVStore(ctx context.Context) error
+
+	// ClearAllConfigData clears all TOML-loaded configuration data from storage
+	// This includes: job definitions, connectors, and key/value pairs
+	// Used by config reload functionality to ensure clean slate before reloading
+	ClearAllConfigData(ctx context.Context) error
 
 	// LoadVariablesFromFiles loads variables (key/value pairs) from TOML files in the specified directory
 	// This is used to load configuration secrets and other variables at startup

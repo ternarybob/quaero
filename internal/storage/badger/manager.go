@@ -102,6 +102,34 @@ func (m *Manager) MigrateAPIKeysToKVStore(ctx context.Context) error {
 	return nil
 }
 
+// ClearAllConfigData clears all TOML-loaded configuration data from storage
+// This includes: job definitions, connectors, and key/value pairs
+// Used by config reload functionality to ensure clean slate before reloading
+func (m *Manager) ClearAllConfigData(ctx context.Context) error {
+	m.logger.Info().Msg("Clearing all TOML-loaded configuration data")
+
+	// Clear job definitions
+	if err := m.jobDefinition.DeleteAllJobDefinitions(ctx); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to clear job definitions")
+		return err
+	}
+
+	// Clear connectors
+	if err := m.connector.DeleteAllConnectors(ctx); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to clear connectors")
+		return err
+	}
+
+	// Clear key/value pairs (variables, email config, etc.)
+	if err := m.kv.DeleteAll(ctx); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to clear key/value pairs")
+		return err
+	}
+
+	m.logger.Info().Msg("All TOML-loaded configuration data cleared successfully")
+	return nil
+}
+
 // LoadJobDefinitionsFromFiles loads job definitions from TOML files
 func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error {
 	return LoadJobDefinitionsFromFiles(ctx, m.jobDefinition, m.kv, dirPath, m.logger)

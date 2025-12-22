@@ -261,6 +261,17 @@ func (a *App) initDatabase() error {
 		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
 
+	// Clear all TOML-loaded config data if clear_config_on_startup is enabled
+	// This ensures a clean slate before loading fresh configuration from files
+	if a.Config.ClearConfigOnStartup {
+		a.Logger.Info().Msg("clear_config_on_startup enabled - clearing all TOML-loaded configuration data")
+		if err := a.StorageManager.ClearAllConfigData(context.Background()); err != nil {
+			a.Logger.Error().Err(err).Msg("Failed to clear config data on startup")
+		} else {
+			a.Logger.Info().Msg("All TOML-loaded configuration data cleared successfully")
+		}
+	}
+
 	// Load variables from files (e.g. API keys, secrets)
 	// This must happen before config replacement so that loaded variables can be used
 	if err := a.StorageManager.LoadVariablesFromFiles(context.Background(), a.Config.Variables.Dir); err != nil {
@@ -971,7 +982,7 @@ func (a *App) initHandlers() error {
 	a.Logger.Debug().Msg("SSE logs handler initialized")
 
 	// Initialize config handler with ConfigService for dynamic key injection
-	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)
+	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService, a.StorageManager)
 
 	// Initialize connector handler
 	a.ConnectorHandler = handlers.NewConnectorHandler(a.ConnectorService, a.Logger)

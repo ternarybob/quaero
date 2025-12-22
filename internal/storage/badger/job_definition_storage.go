@@ -134,6 +134,26 @@ func (s *JobDefinitionStorage) DeleteJobDefinition(ctx context.Context, id strin
 	return nil
 }
 
+// DeleteAllJobDefinitions removes all job definitions from storage
+// Used by config reload to clear all definitions before reloading from TOML files
+func (s *JobDefinitionStorage) DeleteAllJobDefinitions(ctx context.Context) error {
+	// Find all job definitions
+	var jobDefs []models.JobDefinition
+	if err := s.db.Store().Find(&jobDefs, nil); err != nil {
+		return fmt.Errorf("failed to list job definitions for deletion: %w", err)
+	}
+
+	// Delete each job definition
+	for _, jobDef := range jobDefs {
+		if err := s.db.Store().Delete(jobDef.ID, &models.JobDefinition{}); err != nil {
+			s.logger.Warn().Str("id", jobDef.ID).Err(err).Msg("Failed to delete job definition during DeleteAll")
+		}
+	}
+
+	s.logger.Info().Int("count", len(jobDefs)).Msg("Deleted all job definitions")
+	return nil
+}
+
 func (s *JobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, error) {
 	count, err := s.db.Store().Count(&models.JobDefinition{}, nil)
 	if err != nil {
