@@ -1,17 +1,13 @@
-# ASX Stock Review Job Template
+# ASX Stock Review Analysis Template
 # =========================================================================
-# Comprehensive ASX Stock Analysis with Deep Data Collection
-# Parallel data collection for speed, deep analysis for quality
+# Stock analysis for a single ASX stock - uses data from asx-stock-data template.
+# Performs: announcement analysis, stock summary, investment recommendation.
 #
-# FEATURES:
-# - Parallel Data Collection: All data steps run simultaneously for speed
-# - Deep Analysis: 24 months of data, NOISE vs SIGNAL analysis
-# - Technical Analysis: Price action, SMAs, RSI, support/resistance
-# - Fundamental Analysis: Announcements, financials, industry outlook
-# - Conviction Scoring: 1-10 scale for actionable recommendations
+# PREREQUISITE: Data must be collected first using asx-stock-data template.
+# This template finds collected data via filter_tags using {stock:ticker_lower}.
 #
 # USAGE:
-# This template is designed to be invoked via a job_template step with variables:
+# This template is invoked via a job_template step with variables:
 #   variables = [
 #     { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
 #     { ticker = "XRO", name = "Xero Limited", industry = "technology" }
@@ -21,125 +17,33 @@
 # - {stock:ticker} - ASX ticker code (e.g., ROC)
 # - {stock:name} - Company name
 # - {stock:industry} - Industry classification
-# - {stock:ticker_lower} - Lowercase ticker for URLs/tags
+# - {stock:ticker_lower} - Lowercase ticker for filtering
 # =========================================================================
 
 id = "asx-review-{stock:ticker_lower}"
 name = "ASX Stock Review: {stock:ticker}"
 type = "stock_analysis"
-description = "Comprehensive investment analysis for {stock:name} (ASX:{stock:ticker}) - Deep analysis with parallel data collection"
+description = "Investment analysis for {stock:name} (ASX:{stock:ticker}) - uses collected data"
 tags = ["asx", "stock-review", "{stock:ticker_lower}", "{stock:industry}"]
 schedule = ""
-timeout = "30m"
+timeout = "20m"
 enabled = true
 auto_start = false
 
 # =========================================================================
-# PARALLEL DATA COLLECTION PHASE
-# =========================================================================
-# All data collection steps run in parallel (no depends) for maximum speed.
-# Each step produces tagged output for summary steps to consume.
-
-# =========================================================================
-# Step 1: Fetch Stock Data (24 Months) - PARALLEL
-# =========================================================================
-# Comprehensive historical OHLCV data and technical indicators.
-
-[step.fetch_stock_data]
-type = "asx_stock_data"
-description = "Fetch 24-month daily stock data and technicals for {stock:name}"
-on_error = "continue"
-asx_code = "{stock:ticker}"
-period = "Y2"
-output_tags = ["{stock:ticker_lower}", "stock-data", "{stock:industry}"]
-
-# =========================================================================
-# Step 2: Fetch Company Announcements (24 Months) - PARALLEL
-# =========================================================================
-# Official ASX announcements for fundamental analysis and NOISE vs SIGNAL.
-
-[step.fetch_announcements]
-type = "asx_announcements"
-description = "Fetch ASX announcements for {stock:name} fundamental analysis"
-on_error = "continue"
-asx_code = "{stock:ticker}"
-period = "Y2"
-limit = 50
-output_tags = ["{stock:ticker_lower}", "announcements", "{stock:industry}"]
-
-# =========================================================================
-# Step 3: Search Financial News & Analyst Coverage - PARALLEL
-# =========================================================================
-# Web search for analyst ratings, financial news, and growth catalysts.
-
-[step.search_financial_news]
-type = "web_search"
-description = "Search financial news, analyst coverage, and growth catalysts for {stock:name}"
-on_error = "continue"
-api_key = "{google_gemini_api_key}"
-query = """ASX:{stock:ticker} {stock:name}
-- financial results earnings revenue profit analyst ratings
-- broker recommendations price targets dividend news
-- growth catalysts expansion plans market opportunities
-site:afr.com OR site:theaustralian.com.au OR site:stockhead.com.au OR site:hotcopper.com.au OR site:marketindex.com.au"""
-output_tags = ["{stock:ticker_lower}", "financial-news", "{stock:industry}"]
-depth = 3
-breadth = 3
-
-# =========================================================================
-# Step 4: Search Industry Outlook & Sector Trends - PARALLEL
-# =========================================================================
-# Research industry outlook and macro factors affecting the sector.
-
-[step.search_industry]
-type = "web_search"
-description = "Search for {stock:industry} sector industry outlook and trends"
-on_error = "continue"
-api_key = "{google_gemini_api_key}"
-query = """Australian {stock:industry} sector outlook 2025 2026:
-- industry trends growth drivers headwinds
-- RBA interest rate impact on {stock:industry}
-- regulatory environment changes
-- market analysis forecast"""
-output_tags = ["{stock:ticker_lower}", "industry-outlook", "{stock:industry}"]
-depth = 2
-breadth = 3
-
-# =========================================================================
-# Step 5: Search Competitor Analysis - PARALLEL
-# =========================================================================
-# Research competitor positioning and relative performance.
-
-[step.search_competitors]
-type = "web_search"
-description = "Search for {stock:industry} competitor comparison for {stock:name}"
-on_error = "continue"
-api_key = "{google_gemini_api_key}"
-query = """ASX {stock:industry} comparison {stock:name}:
-- competitors market share performance 2025
-- peer comparison valuation metrics
-- competitive advantages disadvantages
-- industry leaders disruptors"""
-output_tags = ["{stock:ticker_lower}", "competitors", "{stock:industry}"]
-depth = 2
-breadth = 3
-
-# =========================================================================
 # SEQUENTIAL ANALYSIS PHASE
 # =========================================================================
-# Summary steps run sequentially after all parallel data collection completes.
-# Each step builds on the previous analysis.
+# Analysis steps run sequentially, consuming data collected by asx-stock-data.
+# Data is found via filter_tags containing {stock:ticker_lower}.
 
 # =========================================================================
-# Step 6: Analyze Announcements - NOISE vs SIGNAL
+# Step 1: Analyze Announcements - NOISE vs SIGNAL
 # =========================================================================
 # Critical analysis of announcement quality vs price impact.
-# Waits for all parallel steps via depends on last parallel step.
 
 [step.analyze_announcements]
 type = "summary"
 description = "Analyze announcements against share price movements to identify NOISE vs SIGNAL"
-depends = "search_competitors"
 on_error = "continue"
 filter_tags = ["{stock:ticker_lower}"]
 api_key = "{google_gemini_api_key}"
@@ -255,6 +159,47 @@ Identify specific targets or milestones mentioned in past announcements that hav
 
 **Vanishing Promise Score**: X broken/delayed promises / Y total promises made = Z%
 
+### FY/EARNINGS ANNOUNCEMENT DEEP DIVE
+
+Focus specifically on Financial Year and quarterly earnings announcements (4C, 4E, Annual Reports, Half-Year Results):
+
+| Date | Announcement Type | Key Metrics Disclosed | Price Impact | Vs Prior Guidance |
+|------|-------------------|----------------------|--------------|-------------------|
+| ... | FY Results / Half-Year / 4C / AGM | Revenue: $X, NPAT: $X, Cash: $X | +X% / -X% | Beat/Met/Miss |
+
+**Earnings Quality Assessment**:
+- **Revenue Growth**: X% YoY - [Accelerating / Decelerating / Stable]
+- **Profit Margin Trend**: [Expanding / Stable / Contracting] - evidence
+- **Cash Flow Quality**: Operating CF $X vs Reported Profit $X - ratio indicates [Quality/Concern]
+- **One-Off Items**: Any non-recurring gains/losses affecting headline results
+- **Guidance Reliability**: Has company historically met guidance? [Yes/No/Partial]
+
+**Key Financial Announcement Flags**:
+- Did earnings BEAT, MEET, or MISS consensus/guidance?
+- Was there a material change in guidance (upgrade/downgrade)?
+- Were there any accounting policy changes affecting comparability?
+- Is cash conversion (OCF/NPAT) healthy (>80% is good)?
+
+### COMPETITOR & INDUSTRY ALIGNMENT
+
+Compare company's announcement narrative against industry peers and sector reality:
+
+| Factor | Company Claim | Industry Reality | Alignment Status |
+|--------|---------------|------------------|------------------|
+| Market Position | [e.g., "Leading provider"] | [X% market share vs competitors] | [Aligned/Overstated/Understated] |
+| Growth Rate | [X% claimed growth] | [Sector average Y%] | [Outperforming/At par/Lagging] |
+| Margin Performance | [X% margin] | [Peer average Y%] | [Competitive/Below peers/Above peers] |
+| Technology/Product | [Claims made] | [Industry assessment] | [Verified/Unverified/Disputed] |
+
+**Industry Context Assessment**:
+- Is the company outperforming or underperforming the {stock:industry} sector?
+- Are company-specific challenges being masked as "industry headwinds"?
+- Does the growth narrative align with independent market intelligence?
+- Are competitors making similar claims (commoditized narrative)?
+
+**Competitive Position Summary**: [LEADER / STRONG / AVERAGE / WEAK / UNKNOWN]
+- Evidence: [Specific comparison points]
+
 ### INVESTOR INTELLIGENCE SUMMARY
 
 **OVERALL ASSESSMENT**: [CREDIBLE / CAUTIOUS / SKEPTICAL]
@@ -276,10 +221,10 @@ Identify specific targets or milestones mentioned in past announcements that hav
 - Adjust volatility threshold based on company size (large caps ~2%, small caps ~5%)
 - When comparing outlooks, if historical announcement data is limited, state "Insufficient historical data for credibility gap analysis"
 - Flag ALL promotional language - even if the underlying business may be legitimate"""
-output_tags = ["{stock:ticker_lower}", "announcement-analysis", "{stock:industry}"]
+output_tags = ["announcement-analysis", "{stock:ticker_lower}", "{stock:industry}"]
 
 # =========================================================================
-# Step 7: Generate Comprehensive Stock Summary
+# Step 2: Generate Comprehensive Stock Summary
 # =========================================================================
 # Combines all data into a structured analysis with growth focus.
 
@@ -291,7 +236,7 @@ on_error = "fail"
 filter_tags = ["{stock:ticker_lower}"]
 api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
-prompt = """You are a Senior Investment Strategist specializing in Australian Self-Managed Super Funds (SMSFs).
+prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
 Analyze all collected data for ASX:{stock:ticker} ({stock:name}) in the {stock:industry} sector.
 
 ## COMPANY OVERVIEW
@@ -358,7 +303,7 @@ Justification: [Cite specific metrics from stock data - price change %, RSI, SMA
 |------------|---------------------|--------------|
 | [Name] | Outperforming/Matching/Underperforming | High/Medium/Low |
 
-## AGGRESSIVE STRATEGY ALIGNMENT
+## GROWTH POTENTIAL ASSESSMENT
 
 ### Growth Potential Assessment
 | Factor | Score (1-5) | Evidence |
@@ -369,35 +314,35 @@ Justification: [Cite specific metrics from stock data - price change %, RSI, SMA
 | Management Execution | | |
 | Competitive Moat | | |
 
-**TOTAL AGGRESSIVE FIT SCORE**: X/25
+**TOTAL GROWTH FIT SCORE**: X/25
 
 ---
 IMPORTANT:
 - Use ONLY data from the provided documents
 - If data unavailable, mark as "N/A" and explain
 - Be objective and skeptical of promotional claims"""
-output_tags = ["smsf-summary", "{stock:ticker_lower}", "{stock:industry}"]
+output_tags = ["stock-summary", "{stock:ticker_lower}", "{stock:industry}"]
 
 # =========================================================================
-# Step 8: Generate Investment Recommendation
+# Step 3: Generate Investment Recommendation
 # =========================================================================
-# Final BUY/SELL/HOLD with conviction scoring, SMSF compliance,
-# trader recommendations, and alternative suggestions.
+# Final BUY/SELL/HOLD with conviction scoring, trader recommendations,
+# and alternative suggestions.
 
 [step.investment_recommendation]
 type = "summary"
 description = "Generate BUY/SELL/HOLD recommendation with conviction score for {stock:name}"
 depends = "generate_stock_summary"
 on_error = "fail"
-filter_tags = ["smsf-summary", "{stock:ticker_lower}"]
+filter_tags = ["stock-summary", "{stock:ticker_lower}"]
 api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
-prompt = """You are a Senior Investment Strategist specializing in Australian Self-Managed Super Funds (SMSFs).
+prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
 Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}).
 
-# SMSF PORTFOLIO REVIEW: ASX:{stock:ticker}
-## Prepared for: SMSF Investment Committee
-## Strategy: Aggressive 100% Australian Equities
+# STOCK ANALYSIS: ASX:{stock:ticker}
+## {stock:name}
+## Sector: {stock:industry}
 
 ---
 
@@ -413,7 +358,7 @@ Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}
 
 ---
 
-## RECOMMENDATION TABLE
+## RECOMMENDATION
 
 | Ticker | Status | Conviction (1-10) | Primary Reason |
 |--------|--------|-------------------|----------------|
@@ -449,6 +394,86 @@ Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}
 
 ---
 
+## 200MA DIP-BUY STRATEGY ASSESSMENT
+
+The 200-day Moving Average (SMA200) is a key long-term trend indicator. A "dip-buy" opportunity occurs when:
+1. Stock has been in an UPTREND (price consistently above SMA200)
+2. Price temporarily DIPS below SMA200 (the buying opportunity)
+3. Volume is NORMAL or LOW (not panic selling)
+4. Fundamentals remain INTACT (no material negative announcements)
+
+### Current 200MA Status
+
+| Metric | Value | Signal |
+|--------|-------|--------|
+| Current Price | $X.XX | |
+| SMA 200 | $X.XX | |
+| Price vs SMA200 | Above/Below by X% | ABOVE TREND / DIP / BREAKDOWN |
+| Days Above SMA200 (last 60) | X days | Strong/Moderate/Weak trend |
+| Recent Volume | X vs avg | Normal/Elevated/Panic |
+
+### Dip-Buy Opportunity Checklist
+
+**IS THIS A DIP-BUY OPPORTUNITY?** [YES / NO / WATCH]
+
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| Was ABOVE SMA200 recently (30 days) | [YES/NO] | Price was $X.XX vs SMA200 $X.XX |
+| Currently AT or BELOW SMA200 | [YES/NO] | Current $X.XX vs SMA200 $X.XX |
+| Volume NOT elevated (< 1.5x avg) | [YES/NO] | Volume X vs avg X |
+| No material negative news (30 days) | [YES/NO] | [Latest announcement summary] |
+| Announcement credibility >= 5/10 | [YES/NO] | Score: X/10 |
+| Industry outlook not NEGATIVE | [YES/NO] | Sector: [Assessment] |
+
+**Dip-Buy Verdict**:
+- **If 5+ criteria YES**: **BUY THE DIP** - Entry zone $X.XX to $X.XX (SMA200 ± 5%)
+- **If 3-4 criteria YES**: **WATCH** - Wait for [specific trigger]
+- **If < 3 criteria YES**: **NO DIP-BUY** - This is a trend breakdown, not a dip
+
+### 200MA Breakdown Warning
+
+If price is BELOW SMA200 AND fails 3+ criteria above:
+- **TREND BREAKDOWN ALERT**: This may not be a buying opportunity
+- Price below SMA200 with high volume = institutional selling
+- Price below SMA200 after negative news = fundamental deterioration
+- Recommendation: Wait for price to reclaim SMA200 before considering entry
+
+---
+
+## ENTRY/EXIT STRATEGY (200MA + Announcement Based)
+
+### BUY ENTRY RULES
+
+| Scenario | Entry Price | Trigger | Stop Loss | Target |
+|----------|-------------|---------|-----------|--------|
+| **200MA Dip-Buy** | $X.XX (at SMA200) | Price touches SMA200 from above | $X.XX (-7% below SMA200) | $X.XX (+15-20%) |
+| **Breakout Buy** | $X.XX (resistance) | Close above resistance + 1.5x volume | $X.XX (below breakout level) | $X.XX (next resistance) |
+| **Earnings Buy** | Market price | Positive earnings + guidance raise | $X.XX (-5% from entry) | Hold for re-rate |
+
+### EXIT RULES
+
+| Scenario | Trigger | Action |
+|----------|---------|--------|
+| **Stop Loss Hit** | Price closes below stop level | Full exit - no exceptions |
+| **Trend Breakdown** | Price closes > 7% below SMA200 | Exit 100% - trend invalidated |
+| **Profit Target** | Price reaches target | Exit 50%, trail stop on rest |
+| **Negative Earnings** | Earnings miss > 10% | Exit immediately |
+| **Death Cross** | SMA50 crosses below SMA200 | Reduce to 25% position |
+
+### POSITION SIZING
+
+Based on conviction score and current setup:
+
+| Conviction | Position Size | Rationale |
+|------------|--------------|-----------|
+| 8-10 (Very High) | 100% of intended allocation | Strong conviction, low risk |
+| 5-7 (Moderate) | 50% of intended allocation | Balanced risk/reward |
+| 1-4 (Low) | 25% or AVOID | High uncertainty, wait for clarity |
+
+**Recommended Position for {stock:ticker}**: [X]% based on conviction [X/10]
+
+---
+
 ## ACTIONABLE RECOMMENDATIONS
 
 ### For Traders (1-4 weeks)
@@ -472,7 +497,7 @@ Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}
 
 ---
 
-## ALTERNATIVE REPLACEMENTS
+## ALTERNATIVE STOCKS
 
 If SELL or seeking better risk-adjusted growth, consider these 2-3 ASX stocks:
 
@@ -484,41 +509,23 @@ If SELL or seeking better risk-adjusted growth, consider these 2-3 ASX stocks:
 
 ---
 
-## SMSF COMPLIANCE NOTE
+## RISK ASSESSMENT
 
-### Concentration Risk Assessment
-- **Current Concentration**: [High/Medium/Low] in {stock:industry} sector
-- **Single Stock Risk**: [Significant/Moderate/Acceptable] exposure
-- **ATO Requirement**: Per ATO guidelines, SMSFs must document investment strategy decisions
-
-### Investment Strategy Justification
-For SMSF trustees to document (per ATO requirements):
-1. **Risk/Return Profile**: {stock:ticker} is classified as [High Risk/High Return growth stock]
-2. **Diversification Consideration**: [How this affects portfolio diversification]
-3. **Liquidity Assessment**: {stock:ticker} has [adequate/limited] trading liquidity
-4. **Member Benefit Test**: Investment made solely for retirement benefits
-
-### Compliance Action Required
-[None / Review Investment Strategy document / Recommend trustee discussion]
-
----
-
-## FOLLOW-UP PROTOCOL SUPPORT
-
-This analysis supports follow-up queries:
-- "Analyze a 20% shift into [Sector X]"
-- "Stress test against a 10% market correction"
-- "Find mid-cap alternatives with higher R&D ratios"
+### Key Risks
+- **Market Risk**: [General market exposure]
+- **Sector Risk**: [Industry-specific risks]
+- **Company Risk**: [Stock-specific concerns]
+- **Liquidity**: {stock:ticker} has [adequate/limited] trading liquidity
 
 ---
 
 **DISCLAIMER**: This is general information only, not personal financial advice.
-SMSF trustees should consult licensed advisers. Only ASX-listed stocks considered.
+Consult licensed advisers before making investment decisions. Only ASX-listed stocks considered.
 
 **Analysis Date**: [Use the current date provided in the system context above]
 **Industry Sector**: {stock:industry}
 """
-output_tags = ["smsf-recommendation", "{stock:ticker_lower}", "{stock:industry}", "smsf-report", "smsf-portfolio"]
+output_tags = ["stock-recommendation", "{stock:ticker_lower}", "{stock:industry}", "stock-report", "stock-portfolio"]
 
 # =========================================================================
 # NOTE: Email handled at job definition level

@@ -13,20 +13,23 @@ timeout = "15m"
 enabled = true
 auto_start = false
 
+# Global stock variables - inherited by both steps
+[config]
+variables = [
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+]
+
 # ===========================================================================
 # Step 1: Run Individual Stock Analyses
 # ===========================================================================
+# Test version: uses simplified asx-stock-review template which includes data collection
 
-[step.run_smsf_analysis]
+[step.run_stock_analysis]
 type = "job_template"
 description = "Execute ASX stock review for test stocks"
 on_error = "continue"
 template = "asx-stock-review"
-
-# 1 test stock for fast validation (ROC is small cap, fast to analyze)
-variables = [
-    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
-]
+# Variables inherited from [config] section
 
 # ===========================================================================
 # Step 2: Generate Portfolio Summary
@@ -35,9 +38,9 @@ variables = [
 [step.generate_portfolio_summary]
 type = "summary"
 description = "Generate test portfolio summary"
-depends = "run_smsf_analysis"
+depends = "run_stock_analysis"
 on_error = "fail"
-filter_tags = ["smsf-recommendation"]
+filter_tags = ["stock-portfolio"]
 api_key = "{google_gemini_api_key}"
 prompt = """Generate a brief test portfolio summary.
 

@@ -735,20 +735,22 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	content.WriteString(fmt.Sprintf("| Volume | %s |\n", formatNumber(data.Volume)))
 	content.WriteString(fmt.Sprintf("| Avg Volume | %s |\n\n", formatNumber(data.AvgVolume)))
 
-	// Period Performance Section (like screenshot)
+	// Period Performance Section (like TradingView screenshot)
 	content.WriteString("## Period Performance\n\n")
-	content.WriteString("| Period | Price | Change ($) | Change (%) |\n")
-	content.WriteString("|--------|-------|------------|------------|\n")
+	content.WriteString("| Period | Price | Change ($) | Change (%) | 1k Shares | 1k Value |\n")
+	content.WriteString("|--------|-------|------------|------------|-----------|----------|\n")
 	periodPerf := calculatePeriodPerformance(data.HistoricalPrices, data.LastPrice)
 	for _, p := range periodPerf {
-		changeColor := ""
+		changeSign := ""
 		if p.ChangePercent > 0 {
-			changeColor = "+"
+			changeSign = "+"
 		}
-		content.WriteString(fmt.Sprintf("| %s | $%.2f | %s$%.2f | %s%.2f%% |\n",
-			p.Period, p.Price, changeColor, p.ChangeValue, changeColor, p.ChangePercent))
+		content.WriteString(fmt.Sprintf("| %s | $%.2f | %s$%.2f | %s%.2f%% | %d | $%s |\n",
+			p.Period, p.Price, changeSign, p.ChangeValue, changeSign, p.ChangePercent,
+			p.Shares1k, formatDecimal(p.Value1k)))
 	}
 	content.WriteString("\n")
+	content.WriteString("*1k Shares = shares purchasable with $1,000 at period start price. 1k Value = current value of those shares.*\n\n")
 
 	// Volume Analysis Section
 	content.WriteString("## Volume Analysis\n\n")
@@ -928,9 +930,12 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 // PeriodPerformance holds price change data for a time period
 type PeriodPerformance struct {
 	Period        string
+	Days          int
 	Price         float64
 	ChangeValue   float64
 	ChangePercent float64
+	Shares1k      int     // Number of shares $1000 would buy at period start price
+	Value1k       float64 // Current value of those shares at current price
 }
 
 // calculatePeriodPerformance calculates price changes over various periods
@@ -972,11 +977,17 @@ func calculatePeriodPerformance(prices []OHLCV, currentPrice float64) []PeriodPe
 		if closestPrice > 0 {
 			changeValue := currentPrice - closestPrice
 			changePercent := (changeValue / closestPrice) * 100
+			// Calculate $1000 investment: how many shares and current value
+			shares1k := int(1000 / closestPrice)
+			value1k := float64(shares1k) * currentPrice
 			results = append(results, PeriodPerformance{
 				Period:        period.name,
+				Days:          period.days,
 				Price:         closestPrice,
 				ChangeValue:   changeValue,
 				ChangePercent: changePercent,
+				Shares1k:      shares1k,
+				Value1k:       value1k,
 			})
 		}
 	}
@@ -1009,6 +1020,13 @@ func formatLargeNumber(n int64) string {
 		return fmt.Sprintf("%.2fM", float64(n)/1e6)
 	}
 	return formatNumber(n)
+}
+
+// formatDecimal formats a decimal number with commas and 2 decimal places
+func formatDecimal(n float64) string {
+	intPart := int64(n)
+	decPart := n - float64(intPart)
+	return fmt.Sprintf("%s.%02d", formatNumber(intPart), int(decPart*100))
 }
 
 // Ensure math is used

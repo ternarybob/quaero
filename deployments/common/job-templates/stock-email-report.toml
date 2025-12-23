@@ -24,7 +24,7 @@
 # - {stock:ticker_lower} - Lowercase ticker for filtering
 #
 # INPUT/OUTPUT LINKING:
-# This template uses input = ["smsf-recommendation", "{stock:ticker_lower}"]
+# This template uses input = ["stock-recommendation", "{stock:ticker_lower}"]
 # to find documents from asx-stock-review that have BOTH tags.
 # =========================================================================
 
@@ -44,5 +44,5 @@ on_error = "continue"
 to = "{email_recipient}"
 subject = "ASX:{stock:ticker} Investment Analysis - {stock:name} ({stock:industry})"
 # Input matches output_tags from investment_recommendation step
-# Finds documents with BOTH "smsf-recommendation" AND stock ticker tag
-input = ["smsf-recommendation", "{stock:ticker_lower}"]
+# Finds documents with BOTH "stock-recommendation" AND stock ticker tag
+input = ["stock-recommendation", "{stock:ticker_lower}"]

@@ -598,15 +598,29 @@ func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents 
 	// Add output_tags from step config (allows downstream steps to find this document)
 	if stepConfig != nil {
 		if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
+			w.logger.Debug().
+				Int("output_tags_count", len(outputTags)).
+				Msg("Found output_tags ([]interface{}) in step config")
 			for _, tag := range outputTags {
 				if tagStr, ok := tag.(string); ok && tagStr != "" {
 					tags = append(tags, tagStr)
 				}
 			}
 		} else if outputTags, ok := stepConfig["output_tags"].([]string); ok {
+			w.logger.Debug().
+				Strs("output_tags", outputTags).
+				Msg("Found output_tags ([]string) in step config")
 			tags = append(tags, outputTags...)
+		} else {
+			w.logger.Debug().
+				Str("output_tags_type", fmt.Sprintf("%T", stepConfig["output_tags"])).
+				Msg("output_tags not found or unexpected type in step config")
 		}
 	}
+
+	w.logger.Info().
+		Strs("tags", tags).
+		Msg("Creating document with tags")
 
 	// Build source document IDs
 	sourceDocIDs := make([]string, len(documents))

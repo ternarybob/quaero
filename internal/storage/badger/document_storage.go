@@ -162,22 +162,29 @@ func (s *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		return nil, fmt.Errorf("failed to list documents: %w", err)
 	}
 
-	// If tags filter is specified, filter documents that have at least one matching tag
+	s.logger.Debug().
+		Int("total_docs", len(docs)).
+		Bool("has_tags_filter", hasTags).
+		Msg("BadgerDB: ListDocuments query completed")
+
+	// If tags filter is specified, filter documents that have ALL matching tags (AND logic)
 	if hasTags {
-		tagSet := make(map[string]struct{})
-		for _, tag := range opts.Tags {
-			tagSet[tag] = struct{}{}
-		}
+		s.logger.Debug().
+			Strs("filter_tags", opts.Tags).
+			Msg("BadgerDB: Filtering by tags (AND logic)")
 
 		filtered := make([]models.Document, 0)
 		for _, doc := range docs {
-			for _, docTag := range doc.Tags {
-				if _, exists := tagSet[docTag]; exists {
-					filtered = append(filtered, doc)
-					break // Document matches at least one tag
-				}
+			if hasAllDocTags(doc.Tags, opts.Tags) {
+				filtered = append(filtered, doc)
 			}
 		}
+
+		s.logger.Debug().
+			Int("total_before_filter", len(docs)).
+			Int("total_after_filter", len(filtered)).
+			Msg("BadgerDB: Tag filtering completed")
+
 		docs = filtered
 
 		// Apply offset and limit after tag filtering
@@ -300,4 +307,19 @@ func (s *DocumentStorage) ClearAll() error {
 func (s *DocumentStorage) RebuildFTS5Index() error {
 	// No-op for Badger as we don't have FTS5
 	return nil
+}
+
+// hasAllDocTags checks if docTags contains all required tags (AND logic)
+func hasAllDocTags(docTags, requiredTags []string) bool {
+	tagSet := make(map[string]bool, len(docTags))
+	for _, tag := range docTags {
+		tagSet[tag] = true
+	}
+
+	for _, required := range requiredTags {
+		if !tagSet[required] {
+			return false
+		}
+	}
+	return true
 }

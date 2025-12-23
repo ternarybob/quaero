@@ -45,4 +45,4 @@ Based on the stock data, provide:
 
 This is a test summary - keep it brief.
 """
-output_tags = ["smsf-recommendation", "{stock:ticker_lower}", "{stock:industry}"]
+output_tags = ["stock-recommendation", "{stock:ticker_lower}", "{stock:industry}", "stock-portfolio"]

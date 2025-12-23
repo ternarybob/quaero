@@ -9,9 +9,11 @@
 # PERSONA: Senior Investment Strategist specializing in Australian SMSFs
 #
 # WORKFLOW:
-# 1. Run smsf-portfolio-review template for each stock (parallel child jobs)
-# 2. Generate consolidated portfolio summary with all stocks compared
-# 3. Email single portfolio review to SMSF Investment Committee
+# 1a. Run asx-index-review template for benchmark indices (parallel)
+# 1b. Run asx-stock-data template for each stock (data collection - parallel)
+# 2. Run asx-stock-review template for each stock (analysis - depends on 1b)
+# 3. Generate consolidated portfolio summary with all stocks compared (depends on 1a and 2)
+# 4. Email single portfolio review to SMSF Investment Committee
 # ===========================================================================
 
 id = "smsf-portfolio-daily"
@@ -24,46 +26,12 @@ timeout = "3h"
 enabled = true
 auto_start = false
 
-# ===========================================================================
-# Step 1a: Fetch Benchmark Index Data
-# ===========================================================================
-# Executes the asx-index-review template for each configured benchmark index.
-# Each index becomes a child job with data collection.
-# Runs in parallel with stock analysis (no depends).
-
-[step.fetch_benchmark_indices]
-type = "job_template"
-description = "Execute ASX Index Review template for benchmark indices"
-on_error = "continue"
-template = "asx-index-review"
-
-# Variables array - each entry creates a separate job from the template
-# Available variable keys: code, name
-# Variable references in template: {index:code}, {index:name}, {index:code_lower}
-variables = [
-    { code = "XJO", name = "S&P/ASX 200" },
-    { code = "XSO", name = "S&P/ASX Small Ordinaries" },
-]
-
-# ===========================================================================
-# Step 1b: Run Individual Stock Analyses
-# ===========================================================================
-# Executes the smsf-portfolio-review template for each stock.
-# Each stock becomes a child job with its own analysis.
-# This step completes when ALL child jobs finish.
-
-[step.run_smsf_analysis]
-type = "job_template"
-description = "Execute SMSF Portfolio Review template for each configured stock"
-on_error = "continue"
-template = "asx-stock-review"
-parallel = true
-
-# Variables array - each entry creates a separate job from the template
+# Global stock variables - inherited by both collect_stock_data and run_stock_analysis steps
 # Available variable keys: ticker, name, industry, units, avg_price, date_added
-# Variable references in template: {stock:ticker}, {stock:name}, {stock:industry}
+# Variable references in templates: {stock:ticker}, {stock:name}, {stock:industry}
 # Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
 # Portfolio data: units (number of shares), avg_price (average purchase price), date_added (YYYY-MM-DD)
+[config]
 variables = [
     # Technology & AI (High Growth)
     { ticker = "ROC", name = "RocketBoots Limited", industry = "AI", units = 10000, avg_price = 0.45, date_added = "2024-06-15" },
@@ -94,24 +62,77 @@ variables = [
 ]
 
 # ===========================================================================
-# Step 2: Generate Consolidated Portfolio Summary
+# Step 1a: Fetch Benchmark Index Data
+# ===========================================================================
+# Executes the asx-index-review template for each configured benchmark index.
+# Each index becomes a child job with data collection.
+# Runs in parallel with stock data collection (no depends).
+
+[step.fetch_benchmark_indices]
+type = "job_template"
+description = "Execute ASX Index Review template for benchmark indices"
+on_error = "continue"
+template = "asx-index-review"
+parallel = true
+
+# Benchmark variables (separate from stock variables in [config])
+# Available variable keys: code, name
+# Variable references in template: {index:code}, {index:name}, {index:code_lower}
+variables = [
+    { code = "XJO", name = "S&P/ASX 200" },
+    { code = "XSO", name = "S&P/ASX Small Ordinaries" },
+]
+
+# ===========================================================================
+# Step 1b: Collect Stock Data
+# ===========================================================================
+# Executes the asx-stock-data template for each stock (data collection only).
+# Runs in parallel with benchmark indices (no depends).
+# Variables inherited from [config] section.
+
+[step.collect_stock_data]
+type = "job_template"
+description = "Collect stock data (prices, announcements, news) for each portfolio stock"
+on_error = "continue"
+template = "asx-stock-data"
+parallel = true
+# Variables inherited from [config] section
+
+# ===========================================================================
+# Step 2: Run Individual Stock Analyses
+# ===========================================================================
+# Executes the asx-stock-review template for each stock (analysis only).
+# Depends on collect_stock_data - uses data from previous step.
+# Variables inherited from [config] section.
+
+[step.run_stock_analysis]
+type = "job_template"
+description = "Execute stock analysis template for each configured stock"
+depends = "collect_stock_data"
+on_error = "continue"
+template = "asx-stock-review"
+parallel = true
+# Variables inherited from [config] section
+
+# ===========================================================================
+# Step 3: Generate Consolidated Portfolio Summary
 # ===========================================================================
 # After all individual stock analyses complete, this step reads ALL
-# smsf-recommendation documents and creates a portfolio-level view
+# stock-recommendation documents and creates a portfolio-level view
 # with consolidated BUY|SELL|HOLD recommendations.
 
 [step.generate_portfolio_summary]
 type = "summary"
 description = "Generate consolidated SMSF aggressive portfolio review with all stocks"
-depends = "run_smsf_analysis, fetch_benchmark_indices"
+depends = "run_stock_analysis, fetch_benchmark_indices"
 on_error = "fail"
-filter_tags = ["smsf-portfolio"]
+filter_tags = ["stock-portfolio"]
 api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
 prompt = """You are a Senior Investment Strategist preparing a consolidated SMSF portfolio review for an aggressive, 100% Australian Equities fund. Generate a 30-day "If-Then" Decision Matrix and Compliance Stress Test.
 
 You have received:
-1. Individual SMSF Portfolio Review reports for multiple ASX stocks (tagged smsf-recommendation)
+1. Individual stock analysis reports for multiple ASX stocks (tagged stock-recommendation)
 2. S&P/ASX 200 (XJO) benchmark data (tagged benchmark, xjo) - use for "Portfolio Health vs S&P/ASX 200"
 3. Small Ordinaries (XSO) benchmark data (tagged benchmark, xso) - use for "Portfolio Health vs Small Ordinaries"
 4. Portfolio holdings data from the variables section (units, avg_price, date_added per stock)
@@ -411,7 +432,7 @@ Constraint: Only ASX-listed stocks considered.
 output_tags = ["smsf-portfolio-review", "smsf-portfolio", "portfolio-summary"]
 
 # ===========================================================================
-# Step 3: Email Consolidated Portfolio Report
+# Step 4: Email Consolidated Portfolio Report
 # ===========================================================================
 # Sends the single consolidated portfolio review email.
 
