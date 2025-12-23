@@ -1009,8 +1009,10 @@ recursion_depth = 2
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `template` | string | Yes | Template name (without .toml extension) |
-| `variables` | array | Yes | Array of variable objects for substitution |
+| `variables` | array | No* | Array of variable objects for substitution |
 | `parallel` | bool | No | Execute instances in parallel (default: false) |
+
+*Variables can be declared at job level in `[config]` section and inherited by steps.
 
 #### Variable Substitution
 
@@ -1019,13 +1021,41 @@ Templates use `{namespace:key}` syntax for variable placeholders:
 - `{stock:ticker_lower}` - Lowercase version
 - `{stock:ticker_upper}` - Uppercase version
 
-**Variables Format**:
+**Variables Format** (step-level):
 ```toml
+[step.run_analysis]
+type = "job_template"
+template = "stock-analysis"
 variables = [
     { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
     { ticker = "BHP", name = "BHP Group", industry = "mining" }
 ]
 ```
+
+**Global Variables** (job-level, inherited by all steps):
+```toml
+[config]
+variables = [
+    { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    { ticker = "BHP", name = "BHP Group", industry = "mining" }
+]
+
+[step.run_analysis]
+type = "job_template"
+template = "stock-analysis"
+# Variables inherited from [config] section
+
+[step.email_reports]
+type = "job_template"
+template = "stock-email"
+depends = "run_analysis"
+# Variables inherited from [config] section
+```
+
+**Variable Inheritance Rules**:
+- Step-level variables override job-level variables
+- Omitting variables in step config = inherit from job level
+- `variables = false` explicitly opts out of variable inheritance
 
 #### Outputs
 

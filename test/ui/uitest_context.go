@@ -840,6 +840,12 @@ func (t *StepExpansionTracker) GetLogLines(stepName string) []int {
 	return t.stepLogLines[stepName]
 }
 
+// ChildJobInfo tracks child job name and status from queue UI
+type ChildJobInfo struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
 // StepIconData tracks icon class and status for each step
 type StepIconData struct {
 	StepName   string
@@ -1133,4 +1139,11 @@ func captureDOMLogProgressSnapshot(utc *UITestContext) (DOMLogProgressSnapshot, 
 		return DOMLogProgressSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// containsTicker checks if a job name contains a stock ticker
+func containsTicker(name, ticker string) bool {
+	// Check for exact match or ticker with colon prefix (e.g., "ASX:ROC")
+	return strings.Contains(name, ticker) ||
+		strings.Contains(name, ":"+ticker)
 }

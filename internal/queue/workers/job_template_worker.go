@@ -74,6 +74,7 @@ func (w *JobTemplateWorker) GetType() models.WorkerType {
 
 // Init performs initialization for the job template step.
 // Validates config and loads the template file.
+// Supports global variables at job definition level that steps can inherit.
 func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -92,11 +93,28 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		return nil, fmt.Errorf("template file not found: %s", templateFile)
 	}
 
-	// Extract variables array (required)
-	// Format: variables = [{ ticker = "CBA", name = "Commonwealth Bank", industry = "banking" }]
-	variablesRaw, ok := stepConfig["variables"]
-	if !ok {
-		return nil, fmt.Errorf("'variables' array is required in step config")
+	// Extract variables - supports global (job-level) and step-level variables
+	// Priority: step-level variables override job-level variables
+	// If step has `variables = false`, skip variables entirely
+	variablesRaw, hasStepVars := stepConfig["variables"]
+
+	// Check if step explicitly opts out of variables
+	if v, isBool := variablesRaw.(bool); isBool && !v {
+		return nil, fmt.Errorf("step has variables disabled (variables = false)")
+	}
+
+	// If no step-level variables, check job definition config for global variables
+	if !hasStepVars && jobDef.Config != nil {
+		if globalVars, hasGlobalVars := jobDef.Config["variables"]; hasGlobalVars {
+			variablesRaw = globalVars
+			w.logger.Info().
+				Str("step_name", step.Name).
+				Msg("Using global variables from job definition config")
+		}
+	}
+
+	if variablesRaw == nil {
+		return nil, fmt.Errorf("'variables' array is required (at step or job level)")
 	}
 
 	variables, err := w.parseVariables(variablesRaw)
@@ -572,7 +590,10 @@ func (w *JobTemplateWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateConfig validates step configuration
+// ValidateConfig validates step configuration.
+// Note: Variables are NOT required at step level since they can be inherited
+// from job definition's global [config] section. The Init method handles
+// the full validation including global variable inheritance.
 func (w *JobTemplateWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("job_template step requires config")
@@ -583,9 +604,9 @@ func (w *JobTemplateWorker) ValidateConfig(step models.JobStep) error {
 		return fmt.Errorf("job_template step requires 'template' in config")
 	}
 
-	if _, ok := step.Config["variables"]; !ok {
-		return fmt.Errorf("job_template step requires 'variables' in config")
-	}
+	// Note: We don't require 'variables' here because they can be inherited
+	// from job definition config (global variables). The Init method will
+	// validate that variables exist either at step or job level.
 
 	return nil
 }

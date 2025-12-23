@@ -67,6 +67,9 @@ type JobDefinitionFile struct {
 
 	// Step definitions: [step.{name}] tables - use map[string]interface{} to capture all fields
 	Step map[string]map[string]interface{} `toml:"step"`
+
+	// Config section: job-level configuration (e.g., global variables)
+	Config map[string]interface{} `toml:"config"`
 }
 
 // ParseTOML parses TOML content into a JobDefinitionFile
@@ -213,6 +216,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		Extension:   f.Extension,
 		UrlPatterns: f.UrlPatterns,
 		Steps:       steps,
+		Config:      f.Config, // Job-level configuration (e.g., global variables)
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}, nil

@@ -160,12 +160,14 @@ prompt = """You are a Management Forensic Analyst & Equity Researcher specializi
 
 For EACH significant announcement, determine if price moved significantly in the 3 days after:
 
-| Date | Announcement | Price Before | Price +3 Days | Change % | SIGNAL/NOISE |
-|------|--------------|--------------|---------------|----------|--------------|
-| ... | ... | $... | $... | ...% | SIGNAL/NOISE |
+| Date | Announcement | Price Before | Price +3 Days | Change % | Volume Ratio | Classification |
+|------|--------------|--------------|---------------|----------|--------------|----------------|
+| ... | ... | $... | $... | ...% | X.Xx (vs 30d avg) | SIGNAL/NOISE/LOW-CONVICTION |
 
-**SIGNAL** = Price moved >3% in either direction within 3 trading days (use 2% for large caps)
-**NOISE** = Price moved below threshold or moved opposite to announcement sentiment
+**Classification Rules**:
+- **SIGNAL** = Price moved >3% AND volume was >1.5x the 30-day average (use 2% threshold for large caps)
+- **LOW-CONVICTION SPECULATION** = Price moved >3% BUT volume was <1.5x the 30-day average (move lacks institutional backing)
+- **NOISE** = Price moved <3% or moved opposite to announcement sentiment
 
 ### PRICE SUSTAINABILITY ANALYSIS
 
@@ -258,6 +260,7 @@ Identify specific targets or milestones mentioned in past announcements that hav
 **OVERALL ASSESSMENT**: [CREDIBLE / CAUTIOUS / SKEPTICAL]
 
 - **Signal-to-Noise Ratio**: X signal announcements / Y total announcements = Z%
+- **Low-Conviction Speculation**: X announcements (price moved but low volume - lacks institutional conviction)
 - **Pump-to-Hold Ratio**: X% (sustainable gains vs mean reversion)
 - **Retail Trap Score**: X% (promotional language without substance)
 - **Vanishing Promise Score**: X% (broken/delayed promises)
@@ -518,8 +521,8 @@ SMSF trustees should consult licensed advisers. Only ASX-listed stocks considere
 output_tags = ["smsf-recommendation", "{stock:ticker_lower}", "{stock:industry}", "smsf-report", "smsf-portfolio"]
 
 # =========================================================================
-# NOTE: Email removed from template - handled at portfolio level
+# NOTE: Email handled at job definition level
 # =========================================================================
-# Individual stock emails are removed. The portfolio-level job definition
-# (smsf-portfolio-daily.toml) consolidates all stock analyses and sends
-# a single portfolio review email.
+# This template does NOT include email. Email is configured in:
+# - asx-stocks-daily.toml: Sends individual stock emails after each analysis
+# - smsf-portfolio-daily.toml: Sends ONE consolidated portfolio email at end

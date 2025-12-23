@@ -43,6 +43,117 @@ func (m *MockLLMService) Close() error {
 	return nil
 }
 
+// MockDocumentStorage is a mock implementation of DocumentStorage for testing
+type MockDocumentStorage struct {
+	documents map[string]*models.Document
+}
+
+func NewMockDocumentStorage() *MockDocumentStorage {
+	return &MockDocumentStorage{
+		documents: make(map[string]*models.Document),
+	}
+}
+
+func (m *MockDocumentStorage) SaveDocument(doc *models.Document) error {
+	m.documents[doc.ID] = doc
+	return nil
+}
+
+func (m *MockDocumentStorage) SaveDocuments(docs []*models.Document) error {
+	for _, doc := range docs {
+		m.documents[doc.ID] = doc
+	}
+	return nil
+}
+
+func (m *MockDocumentStorage) GetDocument(id string) (*models.Document, error) {
+	return m.documents[id], nil
+}
+
+func (m *MockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType && doc.SourceID == sourceID {
+			return doc, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockDocumentStorage) UpdateDocument(doc *models.Document) error {
+	m.documents[doc.ID] = doc
+	return nil
+}
+
+func (m *MockDocumentStorage) DeleteDocument(id string) error {
+	delete(m.documents, id)
+	return nil
+}
+
+func (m *MockDocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *MockDocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *MockDocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {
+	docs := make([]*models.Document, 0, len(m.documents))
+	for _, doc := range m.documents {
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
+func (m *MockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
+	docs := make([]*models.Document, 0)
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType {
+			docs = append(docs, doc)
+		}
+	}
+	return docs, nil
+}
+
+func (m *MockDocumentStorage) CountDocuments() (int, error) {
+	return len(m.documents), nil
+}
+
+func (m *MockDocumentStorage) CountDocumentsBySource(sourceType string) (int, error) {
+	count := 0
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *MockDocumentStorage) GetStats() (*models.DocumentStats, error) {
+	return &models.DocumentStats{}, nil
+}
+
+func (m *MockDocumentStorage) GetAllTags() ([]string, error) {
+	return []string{}, nil
+}
+
+func (m *MockDocumentStorage) SetForceSyncPending(id string, pending bool) error {
+	return nil
+}
+
+func (m *MockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *MockDocumentStorage) ClearAll() error {
+	m.documents = make(map[string]*models.Document)
+	return nil
+}
+
+func (m *MockDocumentStorage) RebuildFTS5Index() error {
+	return nil
+}
+
 func TestAnalyzeBuildSystemAction_IsBuildFile(t *testing.T) {
 	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)

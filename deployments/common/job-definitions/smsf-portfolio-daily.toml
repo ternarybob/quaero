@@ -219,14 +219,27 @@ Provide binary triggers for the next 30 days for each stock:
 ### ACCUMULATION TRIGGERS (BUY More)
 | Ticker | Condition | Action | Target Units |
 |--------|-----------|--------|--------------|
-| [XXX] | If stays above [SMA 200 = $X.XX] AND [Event] occurs | BUY [X] additional units | Total: [X] units |
+| [XXX] | If stays above [SMA 200 = $X.XX] AND [Specific KPI met, e.g., 4C cash flow >$Xm OR revenue target achieved] | BUY [X] additional units | Total: [X] units |
 | ... | ... | ... | ... |
+
+**KPI Examples to Monitor**:
+- Quarterly 4C cash flow positive or >$X million
+- Revenue run-rate exceeding $X million
+- Contract wins valued at >$X million
+- Customer acquisition rate above prior quarter
 
 ### EXIT TRIGGERS (SELL)
 | Ticker | Condition | Action | Reason |
 |--------|-----------|--------|--------|
-| [XXX] | If closes below [Support = $X.XX] OR [Macro Event] occurs | SELL [X]% of position | [Risk mitigation reason] |
+| [XXX] | If closes below [Support = $X.XX] OR [Macro Threshold: US 10yr Yield >4.5% OR AUD/USD <0.62] | SELL [X]% of position | [Risk mitigation reason] |
 | ... | ... | ... | ... |
+
+**Macro Threshold Triggers**:
+- US 10-Year Treasury Yield >4.5% = Sell growth positions (valuation compression)
+- US 10-Year Treasury Yield >5.0% = Mandatory 15% cash buffer
+- AUD/USD <$0.62 = Review export-exposed holdings
+- China PMI <48 = Sell resources/infrastructure exposure
+- RBA rate hike = Reduce leverage-sensitive positions
 
 ### HOLD TRIGGERS (No Action Unless...)
 | Ticker | Watch For | Change Recommendation If |
@@ -287,15 +300,23 @@ From all individual analyses, consolidate the top 2-3 ASX stocks NOT in the port
 
 ### Liquidity Stress Test
 
-Identify if the user's position represents >10% of the stock's Average Daily Volume (ADV):
+Identify if the user's position represents >10% of the stock's Average Daily Volume (ADV) and calculate "Days to Exit":
 
-| Ticker | Units Held | Avg Daily Volume | Position as % of ADV | Liquidity Risk |
-|--------|------------|------------------|---------------------|----------------|
-| [XXX] | X | X | X% | [NORMAL / ELEVATED / DIFFICULT EXIT] |
-| ... | ... | ... | ... | ... |
+| Ticker | Units Held | Avg Daily Volume | Position as % of ADV | Days to Exit | Liquidity Risk |
+|--------|------------|------------------|---------------------|--------------|----------------|
+| [XXX] | X | X | X% | X days | [NORMAL / ELEVATED / HIGH] |
+| ... | ... | ... | ... | ... | ... |
+
+**Days to Exit Calculation**: Units Held ÷ (ADV × 0.25) = Days (assuming max 25% of daily volume per day)
+
+**Liquidity Risk Classification**:
+- **NORMAL** (<1 day): Position can be exited in a single trading session
+- **ELEVATED** (1-2 days): Position requires 1-2 days to exit without market impact
+- **HIGH LIQUIDITY RISK** (>2 days): Position takes >2 days to exit - requires staged exit strategy
 
 **Liquidity Flags**:
-- ⚠️ **DIFFICULT EXIT** (>10% of ADV): [List tickers] - May require staged exit over multiple days
+- ⚠️ **HIGH LIQUIDITY RISK** (>2 days to exit): [List tickers] - Staged exit over multiple days required
+- ⚠️ **DIFFICULT EXIT** (>10% of ADV): [List tickers] - Single-day exit would significantly impact price
 - **Action Required**: [Specific recommendations for illiquid positions]
 
 ### Concentration Warning

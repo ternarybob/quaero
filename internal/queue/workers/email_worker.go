@@ -236,7 +236,13 @@ func (w *EmailWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // resolveBody determines the email body from step configuration
-// Supports: body (direct text/markdown), body_html (HTML), body_from_document (document ID), body_from_tag (latest document with tag)
+// Supports:
+//   - body (direct text/markdown)
+//   - body_html (HTML)
+//   - body_from_document (document ID)
+//   - body_from_tag (latest document with single tag)
+//   - input (tag or array of tags to filter documents - matches output_tags from previous steps)
+//
 // All text content is converted to HTML for proper email presentation
 func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]interface{}) (textBody, htmlBody string) {
 	// Direct body text (markdown is converted to HTML)
@@ -292,6 +298,56 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 			}
 		} else {
 			w.logger.Warn().Str("tag", tag).Err(err).Msg("Failed to find document by tag for email body")
+		}
+	}
+
+	// Body from input tags (matches output_tags from previous steps)
+	// Supports single tag string or array of tags for filtering
+	if inputRaw, ok := stepConfig["input"]; ok {
+		var inputTags []string
+
+		// Handle single string or array of strings
+		switch v := inputRaw.(type) {
+		case string:
+			if v != "" {
+				inputTags = []string{v}
+			}
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					inputTags = append(inputTags, s)
+				}
+			}
+		case []string:
+			inputTags = v
+		}
+
+		if len(inputTags) > 0 {
+			w.logger.Debug().Strs("input_tags", inputTags).Msg("Looking for document by input tags for email body")
+			opts := interfaces.SearchOptions{
+				Tags:     inputTags,
+				Limit:    1,
+				OrderBy:  "created_at",
+				OrderDir: "desc",
+			}
+			results, err := w.searchService.Search(ctx, "", opts)
+			if err == nil && len(results) > 0 {
+				w.logger.Debug().Str("doc_id", results[0].ID).Msg("Found document by input tags")
+				if doc, err := w.documentStorage.GetDocument(results[0].ID); err == nil && doc != nil {
+					if doc.ContentMarkdown != "" {
+						w.logger.Debug().Int("markdown_len", len(doc.ContentMarkdown)).Msg("Document has markdown content, converting to HTML")
+						textBody = doc.ContentMarkdown
+						htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+						w.logger.Debug().Int("html_len", len(htmlBody)).Msg("HTML body after conversion")
+					} else {
+						w.logger.Warn().Str("doc_id", results[0].ID).Msg("Document has no markdown content")
+					}
+				} else {
+					w.logger.Warn().Str("doc_id", results[0].ID).Err(err).Msg("Failed to get document by ID")
+				}
+			} else {
+				w.logger.Warn().Strs("tags", inputTags).Err(err).Msg("Failed to find document by input tags for email body")
+			}
 		}
 	}
 

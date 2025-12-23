@@ -70,6 +70,11 @@ func (m *MockKeyValueStorage) GetAll(ctx context.Context) (map[string]string, er
 	return result, nil
 }
 
+func (m *MockKeyValueStorage) DeleteAll(ctx context.Context) error {
+	m.data = make(map[string]string)
+	return nil
+}
+
 func TestBuildDependencyGraphAction_NormalizePath(t *testing.T) {
 	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)

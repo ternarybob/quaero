@@ -17,9 +17,9 @@ type MockLogStorage struct {
 	mock.Mock
 }
 
-func (m *MockLogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
+func (m *MockLogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) (int, error) {
 	args := m.Called(ctx, jobID, entry)
-	return args.Error(0)
+	return args.Int(0), args.Error(1)
 }
 
 func (m *MockLogStorage) AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error {
@@ -240,6 +240,11 @@ func (m *MockJobStorage) ListStepJobs(ctx context.Context, managerID string) ([]
 func (m *MockJobStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error) {
 	args := m.Called(ctx, jobID)
 	return args.Int(0), args.Error(1)
+}
+
+func (m *MockJobStorage) ClearAllJobs(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
 }
 
 func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
