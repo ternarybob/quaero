@@ -264,6 +264,24 @@ deploy_files() {
         cp "$project_root/README.md" "$bin_dir/README.md"
     fi
 
+    # Deploy documentation to docs directory
+    local docs_dest="$bin_dir/docs"
+    mkdir -p "$docs_dest"
+
+    # Copy root README.md to docs
+    if [ -f "$project_root/README.md" ]; then
+        cp "$project_root/README.md" "$docs_dest/README.md"
+    fi
+
+    # Copy architecture documentation
+    if [ -d "$project_root/docs/architecture" ]; then
+        for file in "$project_root/docs/architecture"/*.md; do
+            if [ -f "$file" ]; then
+                cp "$file" "$docs_dest/"
+            fi
+        done
+    fi
+
     # Deploy Chrome extension
     local ext_source="$project_root/cmd/quaero-chrome-extension"
     local ext_dest="$bin_dir/quaero-chrome-extension"

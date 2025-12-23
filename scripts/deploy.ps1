@@ -312,6 +312,24 @@ if ($Target -eq "docker") {
         }
     }
 
+    # Stage documentation files
+    Write-ColorOutput "  Staging documentation..." "Gray"
+    New-Item -ItemType Directory -Path "$stagingPath\docs" -Force | Out-Null
+
+    # Copy root README.md
+    $projectReadme = Join-Path -Path $projectRoot -ChildPath "README.md"
+    if (Test-Path $projectReadme) {
+        Copy-Item -Path $projectReadme -Destination "$stagingPath\docs\" -Force
+    }
+
+    # Copy architecture documentation
+    $archDocsPath = Join-Path -Path $projectRoot -ChildPath "docs\architecture"
+    if (Test-Path $archDocsPath) {
+        Get-ChildItem -Path $archDocsPath -Filter "*.md" | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination "$stagingPath\docs\" -Force
+        }
+    }
+
     # Get version info for build args
     $versionFile = Join-Path -Path $projectRoot -ChildPath ".version"
     $version = "dev"

@@ -25,6 +25,7 @@ type Config struct {
 	Processing      ProcessingConfig   `toml:"processing"`
 	Logging         LoggingConfig      `toml:"logging"`
 	Jobs            JobsConfig         `toml:"jobs"`
+	Docs            DocsConfig         `toml:"docs"` // Documentation directory configuration (./docs/*.md)
 	Auth            AuthDirConfig      `toml:"auth"`
 	Variables       KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
 	Connectors      ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
@@ -82,6 +83,12 @@ type LoggingConfig struct {
 // JobsConfig contains configuration for job definitions
 type JobsConfig struct {
 	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
+}
+
+// DocsConfig contains configuration for documentation reference files
+type DocsConfig struct {
+	Dir        string   `toml:"dir"`        // Directory containing documentation files (default: "./docs")
+	Extensions []string `toml:"extensions"` // File extensions to scan (default: [".md"])
 }
 
 // KeysDirConfig contains configuration for key/value file loading (generic secrets/configuration)
@@ -206,6 +213,10 @@ func NewDefaultConfig() *Config {
 		},
 		Jobs: JobsConfig{
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
+		},
+		Docs: DocsConfig{
+			Dir:        "./docs",     // Default directory for documentation files
+			Extensions: []string{".md"}, // Default: only markdown files
 		},
 		Auth: AuthDirConfig{
 			CredentialsDir: "./auth", // Default directory for auth files
@@ -613,6 +624,11 @@ func applyEnvOverrides(config *Config) {
 	// Connectors configuration
 	if connectorsDir := os.Getenv("QUAERO_CONNECTORS_DIR"); connectorsDir != "" {
 		config.Connectors.Dir = connectorsDir
+	}
+
+	// Docs configuration
+	if docsDir := os.Getenv("QUAERO_DOCS_DIR"); docsDir != "" {
+		config.Docs.Dir = docsDir
 	}
 }
 
