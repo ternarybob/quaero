@@ -14,7 +14,6 @@ auto_start = true
 type = "agent"
 description = "Extract keywords from crawled documents using AI analysis"
 on_error = "fail"
-operation_type = "scan"
 agent_type = "keyword_extractor"
 filter_source_type = "crawler"
 max_keywords = 10

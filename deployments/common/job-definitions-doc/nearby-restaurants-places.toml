@@ -21,5 +21,4 @@ list_name = "Wheelers Hill Restaurants"
 location_latitude = -37.9167
 location_longitude = 145.1833
 location_radius = 2000
-filter_type = "restaurant"
-filter_min_rating = 3.5
+filters = { type = "restaurant" }

@@ -1,0 +1,30 @@
+# Documentation Loader - Startup Job
+# Loads all documentation files from the docs directory at service startup.
+# These documents are used for AI-assisted job creation and worker reference.
+
+id = "docs_loader"
+name = "Documentation Loader"
+type = "custom"
+description = "Load system documentation files for AI-assisted job creation guidance"
+tags = ["system", "documentation", "reference", "startup"]
+timeout = "5m"
+enabled = true
+auto_start = true  # Run automatically on service startup
+
+# STEP 1: Load Documentation Files
+# Scans the docs directory for markdown files and saves them as documents.
+# Documents are tagged for use by AI agents when creating new jobs.
+
+[step.load_docs]
+type = "local_dir"
+description = "Load markdown documentation from docs directory"
+dir_path = "./docs"
+extensions = [".md"]
+exclude_paths = []
+max_files = 100
+max_file_size = 1048576  # 1MB max per file
+tags = ["documentation", "reference", "worker-docs"]
+
+[error_tolerance]
+max_child_failures = 5
+failure_action = "continue"

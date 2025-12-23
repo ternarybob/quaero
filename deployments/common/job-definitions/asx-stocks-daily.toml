@@ -15,7 +15,7 @@ auto_start = false
 type = "job_template"
 description = "Execute stock analysis template for each configured stock"
 on_error = "continue"
-template = "asx-stock-analysis"
+template = "asx-stock-review"
 
 # Variables array - each entry creates a separate job from the template
 # Available variable keys: ticker, name, industry

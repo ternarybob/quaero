@@ -14,7 +14,6 @@ auto_start = false
 type = "agent"
 description = "Enrich documents with web-sourced information via AI analysis"
 on_error = "continue"
-operation_type = "enrich"
 agent_type = "web_enricher"
 api_key = "{google_search_api_key}"
 filter_tags = ["needs-enrichment"]

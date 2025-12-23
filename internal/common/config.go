@@ -215,7 +215,7 @@ func NewDefaultConfig() *Config {
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
 		},
 		Docs: DocsConfig{
-			Dir:        "./docs",     // Default directory for documentation files
+			Dir:        "./docs",        // Default directory for documentation files
 			Extensions: []string{".md"}, // Default: only markdown files
 		},
 		Auth: AuthDirConfig{

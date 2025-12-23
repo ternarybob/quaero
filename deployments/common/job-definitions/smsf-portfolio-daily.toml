@@ -60,36 +60,37 @@ template = "asx-stock-review"
 parallel = true
 
 # Variables array - each entry creates a separate job from the template
-# Available variable keys: ticker, name, industry
+# Available variable keys: ticker, name, industry, units, avg_price, date_added
 # Variable references in template: {stock:ticker}, {stock:name}, {stock:industry}
 # Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
+# Portfolio data: units (number of shares), avg_price (average purchase price), date_added (YYYY-MM-DD)
 variables = [
     # Technology & AI (High Growth)
-    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI", units = 10000, avg_price = 0.45, date_added = "2024-06-15" },
 
     # Industrials
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure", units = 5000, avg_price = 2.10, date_added = "2024-03-20" },
     # Technology
-    # { ticker = "XRO", name = "Xero Limited", industry = "technology" },
-    # { ticker = "WTC", name = "WiseTech Global", industry = "technology" },
+    # { ticker = "XRO", name = "Xero Limited", industry = "technology", units = 100, avg_price = 120.00, date_added = "2023-11-01" },
+    # { ticker = "WTC", name = "WiseTech Global", industry = "technology", units = 50, avg_price = 85.00, date_added = "2024-01-15" },
 
     # Healthcare (Growth Sector)
-    # { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
-    # { ticker = "PME", name = "Pro Medicus", industry = "healthcare" },
+    # { ticker = "CSL", name = "CSL Limited", industry = "healthcare", units = 30, avg_price = 280.00, date_added = "2023-06-01" },
+    # { ticker = "PME", name = "Pro Medicus", industry = "healthcare", units = 20, avg_price = 95.00, date_added = "2024-02-10" },
 
     # Resources & Mining (Cyclical Growth)
-    # { ticker = "BHP", name = "BHP Group", industry = "mining" },
-    # { ticker = "RIO", name = "Rio Tinto", industry = "mining" },
-    # { ticker = "FMG", name = "Fortescue Metals", industry = "mining" },
-    # { ticker = "LTR", name = "Liontown Resources", industry = "lithium" },
+    # { ticker = "BHP", name = "BHP Group", industry = "mining", units = 200, avg_price = 45.00, date_added = "2023-09-01" },
+    # { ticker = "RIO", name = "Rio Tinto", industry = "mining", units = 100, avg_price = 115.00, date_added = "2023-08-15" },
+    # { ticker = "FMG", name = "Fortescue Metals", industry = "mining", units = 300, avg_price = 22.00, date_added = "2024-04-01" },
+    # { ticker = "LTR", name = "Liontown Resources", industry = "lithium", units = 5000, avg_price = 1.20, date_added = "2024-05-01" },
 
     # Energy (Transition Play)
-    # { ticker = "WDS", name = "Woodside Energy", industry = "energy" },
-    # { ticker = "STO", name = "Santos Limited", industry = "energy" },
+    # { ticker = "WDS", name = "Woodside Energy", industry = "energy", units = 150, avg_price = 32.00, date_added = "2023-12-01" },
+    # { ticker = "STO", name = "Santos Limited", industry = "energy", units = 400, avg_price = 7.50, date_added = "2024-01-20" },
 
     # Small/Mid Cap Growth
-    # { ticker = "LNK", name = "Link Administration", industry = "fintech" },
-    # { ticker = "TYR", name = "Tyro Payments", industry = "fintech" },
+    # { ticker = "LNK", name = "Link Administration", industry = "fintech", units = 1000, avg_price = 1.80, date_added = "2024-07-01" },
+    # { ticker = "TYR", name = "Tyro Payments", industry = "fintech", units = 2000, avg_price = 0.95, date_added = "2024-06-01" },
 ]
 
 # ===========================================================================
@@ -107,14 +108,15 @@ on_error = "fail"
 filter_tags = ["smsf-portfolio"]
 api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
-prompt = """You are a Senior Investment Strategist preparing a consolidated SMSF portfolio review for an aggressive, 100% Australian Equities fund.
+prompt = """You are a Senior Investment Strategist preparing a consolidated SMSF portfolio review for an aggressive, 100% Australian Equities fund. Generate a 30-day "If-Then" Decision Matrix and Compliance Stress Test.
 
 You have received:
 1. Individual SMSF Portfolio Review reports for multiple ASX stocks (tagged smsf-recommendation)
 2. S&P/ASX 200 (XJO) benchmark data (tagged benchmark, xjo) - use for "Portfolio Health vs S&P/ASX 200"
 3. Small Ordinaries (XSO) benchmark data (tagged benchmark, xso) - use for "Portfolio Health vs Small Ordinaries"
+4. Portfolio holdings data from the variables section (units, avg_price, date_added per stock)
 
-Your task is to consolidate these into a SINGLE portfolio review document. Use the benchmark index data to assess portfolio performance relative to the market.
+Your task is to consolidate these into a SINGLE portfolio review document with risk-adjusted actions and forensic analysis.
 
 # SMSF AGGRESSIVE PORTFOLIO REVIEW: CONSOLIDATED ASSESSMENT
 ## Prepared for: SMSF Investment Committee
@@ -132,8 +134,65 @@ Based on the individual stock analyses, provide a high-level view of:
 - Number of stocks reviewed: X
 - Overall portfolio quality score: X/10
 - Aggressive strategy alignment: [Strong / Moderate / Weak]
+- Total Portfolio Value: $X (calculated from units × current price)
+- Total Unrealized Gain/Loss: $X (X%)
 
 [2-3 sentence summary of portfolio health and key actions required]
+
+---
+
+## UNREALIZED GAIN/LOSS TABLE
+
+Calculate the Unrealized Gain/Loss for each position using the provided units and avg_price:
+
+| Ticker | Units | Avg Price | Current Price | Cost Basis | Current Value | Unrealized P/L | P/L % |
+|--------|-------|-----------|---------------|------------|---------------|----------------|-------|
+| [XXX] | X | $X.XX | $X.XX | $X | $X | $X | X% |
+| ... | ... | ... | ... | ... | ... | ... | ... |
+| **TOTAL** | - | - | - | **$X** | **$X** | **$X** | **X%** |
+
+---
+
+## PERFORMANCE vs BENCHMARK (Since Date Added)
+
+Compare individual stock performance against XJO and XSO from each stock's date_added:
+
+| Ticker | Date Added | Stock Return | XJO Return (same period) | XSO Return (same period) | Alpha vs XJO | Alpha vs XSO |
+|--------|------------|--------------|--------------------------|--------------------------|--------------|--------------|
+| [XXX] | [YYYY-MM-DD] | X% | X% | X% | X% | X% |
+| ... | ... | ... | ... | ... | ... | ... |
+
+**Portfolio Alpha Summary**:
+- Stocks Outperforming XJO: X of Y
+- Stocks Outperforming XSO: X of Y
+- Weighted Portfolio Alpha vs XJO: X%
+
+---
+
+## GLOBAL MACRO & DEFENSE OVERLAY
+
+### Key Macro Indicators
+
+| Indicator | Current Level | Trend | Impact on Portfolio |
+|-----------|--------------|-------|---------------------|
+| US 10-Year Treasury Yield | X% | Rising/Stable/Falling | [Impact on growth valuations] |
+| China Industrial Demand | Strong/Moderate/Weak | Expanding/Contracting | [Impact on infrastructure/resources] |
+| RBA Cash Rate | X% | Rising/Stable/Falling | [Impact on Australian equities] |
+| AUD/USD | $X.XX | Strengthening/Weakening | [Impact on export earners] |
+
+### Macro Outlook Assessment
+
+**OVERALL MACRO ENVIRONMENT**: [BULLISH / NEUTRAL / BEARISH]
+
+**MANDATORY DEFENSIVE SIGNAL**:
+If macro indicators are assessed as "BEARISH":
+- ⚠️ **RECOMMEND**: Shift X% (suggested 10-15%) to cash buffers
+- Rationale: [Specific macro concerns]
+- Implementation: [Which positions to reduce]
+
+If "NEUTRAL" or "BULLISH":
+- ✓ No mandatory defensive action required
+- Continue monitoring: [Key indicators to watch]
 
 ---
 
@@ -150,6 +209,30 @@ Consolidate ALL stocks analyzed into this table:
 - High Conviction (7-10): X stocks
 - Moderate Conviction (4-6): X stocks
 - Low Conviction (1-3): X stocks
+
+---
+
+## 30-DAY "IF-THEN" DECISION MATRIX
+
+Provide binary triggers for the next 30 days for each stock:
+
+### ACCUMULATION TRIGGERS (BUY More)
+| Ticker | Condition | Action | Target Units |
+|--------|-----------|--------|--------------|
+| [XXX] | If stays above [SMA 200 = $X.XX] AND [Event] occurs | BUY [X] additional units | Total: [X] units |
+| ... | ... | ... | ... |
+
+### EXIT TRIGGERS (SELL)
+| Ticker | Condition | Action | Reason |
+|--------|-----------|--------|--------|
+| [XXX] | If closes below [Support = $X.XX] OR [Macro Event] occurs | SELL [X]% of position | [Risk mitigation reason] |
+| ... | ... | ... | ... |
+
+### HOLD TRIGGERS (No Action Unless...)
+| Ticker | Watch For | Change Recommendation If |
+|--------|-----------|-------------------------|
+| [XXX] | [Key event/level] | [Condition that changes to BUY or SELL] |
+| ... | ... | ... |
 
 ---
 
@@ -200,24 +283,48 @@ From all individual analyses, consolidate the top 2-3 ASX stocks NOT in the port
 
 ---
 
-## SMSF COMPLIANCE NOTE
+## SMSF LIQUIDITY & CONCENTRATION AUDIT
 
-### Concentration Risk Assessment
-The portfolio currently has:
-- **Single Stock Concentration**: [Any stock > 20% of portfolio? Flag here]
-- **Sector Concentration**: [Any sector > 40% of portfolio? Flag here]
-- **100% Equities Allocation**: Per ATO guidelines, 100% equities is permissible but requires documented justification
+### Liquidity Stress Test
 
-### Investment Strategy Alignment
+Identify if the user's position represents >10% of the stock's Average Daily Volume (ADV):
+
+| Ticker | Units Held | Avg Daily Volume | Position as % of ADV | Liquidity Risk |
+|--------|------------|------------------|---------------------|----------------|
+| [XXX] | X | X | X% | [NORMAL / ELEVATED / DIFFICULT EXIT] |
+| ... | ... | ... | ... | ... |
+
+**Liquidity Flags**:
+- ⚠️ **DIFFICULT EXIT** (>10% of ADV): [List tickers] - May require staged exit over multiple days
+- **Action Required**: [Specific recommendations for illiquid positions]
+
+### Concentration Warning
+
+**Single Stock Concentration Check** (>20% of portfolio = ATO compliance risk):
+
+| Ticker | Current Value | % of Portfolio | Status |
+|--------|--------------|----------------|--------|
+| [XXX] | $X | X% | [OK / ⚠️ OVER 20%] |
+| ... | ... | ... | ... |
+
+**Concentration Flags**:
+- ⚠️ **ATO COMPLIANCE RISK**: [List tickers exceeding 20%]
+- For "Stable yet Aggressive" strategy, holdings >20% require documented justification
+- **Recommended Action**: [Rebalancing suggestions]
+
+### SMSF Compliance Summary
+
 Per ATO requirements, SMSF trustees must ensure investments align with documented Investment Strategy:
 - **Risk Tolerance**: Aggressive (100% growth assets) - [Appropriate / Requires Review]
-- **Diversification**: [Adequate / Requires Attention]
-- **Liquidity**: [Sufficient for member needs / Review required]
+- **Diversification**: [Adequate / Requires Attention due to concentration]
+- **Liquidity**: [Sufficient / Review required due to ADV flags]
+- **Single Asset Rule**: [Compliant / Non-compliant]
 - **Insurance Needs**: [Consider life insurance requirements]
 
-### Recommended Actions for Compliance
-1. [Action 1 - if any]
-2. [Action 2 - if any]
+### Compliance Actions Required
+1. [Action 1 - if any concentration issues]
+2. [Action 2 - if any liquidity issues]
+3. [Action 3 - documentation requirements]
 
 ---
 
@@ -249,6 +356,7 @@ This analysis supports the following follow-up queries:
 - "Analyze a 20% shift into [Sector X]" - Portfolio rebalancing simulation
 - "Stress test this portfolio against a 10% market correction" - Downside scenario
 - "Find mid-cap alternatives with higher R&D-to-revenue ratios" - Growth screening
+- "Calculate portfolio impact if [Macro Event] occurs" - Scenario analysis
 
 ---
 
@@ -260,6 +368,7 @@ This analysis supports the following follow-up queries:
 | Sector Concentration | [Low/Med/High] | [Action if High] |
 | Single Stock Risk | [Low/Med/High] | [Action if High] |
 | Liquidity Risk | [Low/Med/High] | [Action if High] |
+| Macro Risk | [Low/Med/High] | [Action if High - see Defensive Signal] |
 
 **OVERALL PORTFOLIO RISK**: [Low / Moderate / High]
 
@@ -268,8 +377,8 @@ This analysis supports the following follow-up queries:
 ## NEXT REVIEW
 
 - **Recommended Review Date**: [4-6 weeks from analysis date]
-- **Key Events to Monitor**: [Upcoming earnings, economic events]
-- **Trigger for Early Review**: [Market correction > 5%, major company news]
+- **Key Events to Monitor**: [Upcoming earnings, economic events, macro indicators]
+- **Trigger for Early Review**: [Market correction > 5%, major company news, macro shift]
 
 ---
 
