@@ -329,6 +329,26 @@ function Deploy-Files {
         Copy-Item -Path $projectReadmePath -Destination $binReadmePath -Force
     }
 
+    # Deploy documentation to docs directory
+    $docsDestPath = Join-Path -Path $BinDirectory -ChildPath "docs"
+    if (-not (Test-Path $docsDestPath)) {
+        New-Item -ItemType Directory -Path $docsDestPath -Force | Out-Null
+    }
+
+    # Copy root README.md to docs
+    if (Test-Path $projectReadmePath) {
+        $docsReadmePath = Join-Path -Path $docsDestPath -ChildPath "README.md"
+        Copy-Item -Path $projectReadmePath -Destination $docsReadmePath -Force
+    }
+
+    # Copy architecture documentation
+    $archDocsPath = Join-Path -Path $ProjectRoot -ChildPath "docs\architecture"
+    if (Test-Path $archDocsPath) {
+        Get-ChildItem -Path $archDocsPath -Filter "*.md" | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $docsDestPath -Force
+        }
+    }
+
     # Deploy Chrome extension
     $extensionSourcePath = Join-Path -Path $ProjectRoot -ChildPath "cmd\quaero-chrome-extension"
     $extensionDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero-chrome-extension"

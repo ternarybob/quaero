@@ -348,6 +348,20 @@ if [ "$TARGET" = "docker" ]; then
         done
     fi
 
+    # Stage documentation files
+    echo -e "${GRAY}  Staging documentation...${NC}"
+    mkdir -p "$STAGING_PATH/docs"
+
+    # Copy root README.md
+    [ -f "$PROJECT_ROOT/README.md" ] && cp "$PROJECT_ROOT/README.md" "$STAGING_PATH/docs/"
+
+    # Copy architecture documentation
+    if [ -d "$PROJECT_ROOT/docs/architecture" ]; then
+        for file in "$PROJECT_ROOT/docs/architecture"/*.md; do
+            [ -f "$file" ] && cp "$file" "$STAGING_PATH/docs/"
+        done
+    fi
+
     # Get version info for build args
     VERSION_FILE="$PROJECT_ROOT/.version"
     VERSION="dev"

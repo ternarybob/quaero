@@ -129,6 +129,23 @@ environment = "development" # "development" or "production"
 definitions_dir = "./deployments/local/job-definitions"  # Load job definitions from local directory
 
 # =============================================================================
+# Documentation Configuration
+# =============================================================================
+# Configure the documentation directory for reference files.
+# Documentation files are used by the system for self-instruction,
+# job creation guidance, and worker reference.
+#
+# The startup documentation job scans this directory and saves all
+# matching files as documents for AI-assisted job creation.
+#
+# Default: dir="./docs", extensions=[".md"]
+# Env var: QUAERO_DOCS_DIR
+
+[docs]
+dir = "./docs"            # Directory containing documentation files
+extensions = [".md"]      # File extensions to scan (markdown by default)
+
+# =============================================================================
 # Variables Configuration
 # =============================================================================
 # Configure storage for user-defined variables (API keys, secrets, configuration values).

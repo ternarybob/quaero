@@ -289,6 +289,96 @@ output_tags = ["asx-gnp-search", "gnp"]
 
 ---
 
+### ASX Stock Data Worker
+
+**File**: `asx_stock_data_worker.go`
+
+**Purpose**: Fetches real-time and historical stock data from the ASX. Uses Markit Digital API for fundamentals and Yahoo Finance for OHLCV data. Provides accurate price data and calculates technical indicators for analysis summaries.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "BHP", "CBA") |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+
+#### Outputs
+
+- Document with comprehensive stock data including:
+  - Current price, bid/ask, price change
+  - Day range, 52-week range
+  - Volume and average volume
+  - Market cap, P/E ratio, EPS, dividend yield
+  - Historical OHLCV data (last 365 days)
+  - Technical indicators: SMA20, SMA50, SMA200, RSI14
+  - Support/resistance levels
+  - Trend signal (bullish/bearish/neutral)
+- Tags: `["asx-stock-data", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+
+#### Configuration
+
+No additional configuration required. Fetches data from public APIs.
+
+#### Example Job Definition
+
+```toml
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch real-time stock data for CBA"
+asx_code = "CBA"
+output_tags = ["banking-sector", "portfolio"]
+```
+
+---
+
+### Competitor Analysis Worker
+
+**File**: `competitor_analysis_worker.go`
+
+**Purpose**: Analyzes a target company and identifies ASX-listed competitors using LLM. Automatically fetches stock data for each identified competitor using the ASXStockDataWorker.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | Target company ASX code |
+| `prompt` | string | No | Custom prompt for competitor identification (default: identifies top 3-5 competitors) |
+| `api_key` | string | Yes | Gemini API key or KV store placeholder like `{google_api_key}` |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+
+#### Outputs
+
+- Document summarizing competitor analysis
+- Individual stock data documents for each identified competitor
+- Tags: `["competitor-analysis", "{asx_code}", ...output_tags]`
+
+#### Configuration
+
+Requires Gemini API key for LLM-based competitor identification.
+
+#### Example Job Definition
+
+```toml
+[step.analyze_competitors]
+type = "competitor_analysis"
+description = "Identify and analyze competitors for BHP"
+asx_code = "BHP"
+api_key = "{google_api_key}"
+output_tags = ["mining-sector"]
+```
+
+---
+
 ### Classify Worker
 
 **File**: `classify_worker.go`
@@ -530,6 +620,51 @@ description = "Send job results via email"
 to = "team@example.com"
 subject = "Daily Report Complete"
 body = "The daily report job has completed successfully."
+```
+
+---
+
+### Email Watcher Worker
+
+**File**: `email_watcher_worker.go`
+
+**Purpose**: Monitors email inbox for job execution commands. Reads IMAP emails with subject containing 'quaero' and parses job execution requests. Enables remote job triggering via email.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| No specific config required | - | - | Uses system IMAP configuration |
+
+#### Email Format
+
+Emails with subject containing 'quaero' are processed. The email body should contain job execution commands.
+
+#### Outputs
+
+- Parses incoming emails for job requests
+- Executes matching job definitions
+- Logs processed emails and execution results
+
+#### Prerequisites
+
+Requires IMAP configuration in Settings:
+- IMAP server host
+- IMAP port
+- Username and password
+- Folder to monitor (default: INBOX)
+
+#### Example Job Definition
+
+```toml
+[step.check_emails]
+type = "email_watcher"
+description = "Monitor inbox for job execution commands"
 ```
 
 ---
@@ -834,6 +969,67 @@ recursion_depth = 2
 
 ---
 
+### Job Template Worker
+
+**File**: `job_template_worker.go`
+
+**Purpose**: Executes job templates with variable substitution. Loads templates from `{exe}/job-templates/`, applies variable replacements using `{namespace:key}` syntax, and executes the resulting job definitions. Supports both sequential and parallel execution.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution, spawns child jobs)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `template` | string | Yes | Template name (without .toml extension) |
+| `variables` | array | Yes | Array of variable objects for substitution |
+| `parallel` | bool | No | Execute instances in parallel (default: false) |
+
+#### Variable Substitution
+
+Templates use `{namespace:key}` syntax for variable placeholders:
+- `{stock:ticker}` - Replaced with ticker value from variables
+- `{stock:ticker_lower}` - Lowercase version
+- `{stock:ticker_upper}` - Uppercase version
+
+**Variables Format**:
+```toml
+variables = [
+    { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    { ticker = "BHP", name = "BHP Group", industry = "mining" }
+]
+```
+
+#### Outputs
+
+- Executes job definition for each variable set
+- Creates child jobs visible in job hierarchy
+- Logs execution progress for each instance
+
+#### Configuration
+
+Templates must be located in `{exe}/job-templates/` directory as TOML files.
+
+#### Example Job Definition
+
+```toml
+[step.run_stock_analysis]
+type = "job_template"
+description = "Run stock analysis for multiple companies"
+template = "asx-stock-analysis"
+parallel = true
+variables = [
+    { ticker = "CBA", name = "Commonwealth Bank" },
+    { ticker = "NAB", name = "National Australia Bank" },
+    { ticker = "WBC", name = "Westpac Banking" }
+]
+```
+
+---
+
 ### Web Search Worker
 
 **File**: `web_search_worker.go`
@@ -953,6 +1149,7 @@ search:
 - Crawler Worker - Creates jobs per discovered URL
 - Code Map Worker - Creates structure/summary jobs
 - GitHub Git Worker - Processes file batches
+- Job Template Worker - Spawns template-based child jobs
 - Local Dir Worker - Processes file batches
 - Test Job Generator Worker - Creates recursive child jobs
 
@@ -960,9 +1157,12 @@ search:
 - Aggregate Summary Worker - Single aggregation task
 - Analyze Build Worker - Process documents inline
 - ASX Announcements Worker - Fetch ASX company announcements
+- ASX Stock Data Worker - Fetch stock prices and indicators
 - Classify Worker - Process documents inline
+- Competitor Analysis Worker - Identify and analyze competitors
 - Dependency Graph Worker - Single graph build
 - Email Worker - Send email notification
+- Email Watcher Worker - Monitor inbox for commands
 - GitHub Log Worker - Process individual logs
 - GitHub Repo Worker - Process individual files
 - Places Worker - Single search execution
@@ -977,14 +1177,18 @@ search:
 | Aggregate Summary | Yes | No |
 | Analyze Build | Yes | No |
 | ASX Announcements | Yes | No |
+| ASX Stock Data | Yes | No |
 | Classify | Yes | No |
 | Code Map | Yes | Yes |
+| Competitor Analysis | Yes | No |
 | Crawler | Yes | Yes |
 | Dependency Graph | Yes | No |
 | Email | Yes | No |
+| Email Watcher | Yes | No |
 | GitHub Git | Yes | Yes |
 | GitHub Log | Yes | Yes |
 | GitHub Repo | Yes | Yes |
+| Job Template | Yes | No |
 | Local Dir | Yes | Yes |
 | Places | Yes | No |
 | Summary | Yes | No |
@@ -998,11 +1202,13 @@ search:
 - Aggregate Summary Worker
 - Analyze Build Worker
 - Classify Worker
+- Competitor Analysis Worker
 - Summary Worker
 - Web Search Worker
 
 **Data Source Workers**:
 - ASX Announcements Worker
+- ASX Stock Data Worker
 - Crawler Worker
 - GitHub Git Worker
 - GitHub Log Worker
@@ -1015,6 +1221,10 @@ search:
 
 **Notification Workers**:
 - Email Worker
+- Email Watcher Worker
+
+**Orchestration Workers**:
+- Job Template Worker
 
 **Utility Workers**:
 - Code Map Worker
