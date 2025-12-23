@@ -17,22 +17,22 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Environment          string             `toml:"environment"`             // "development" or "production" - controls test URL validation
-	ClearConfigOnStartup bool               `toml:"clear_config_on_startup"` // Clear all KV configuration before loading at startup (default: false)
-	Server               ServerConfig       `toml:"server"`
-	Queue                QueueConfig        `toml:"queue"`
-	Storage              StorageConfig      `toml:"storage"`
-	Processing           ProcessingConfig   `toml:"processing"`
-	Logging              LoggingConfig      `toml:"logging"`
-	Jobs                 JobsConfig         `toml:"jobs"`
-	Auth                 AuthDirConfig      `toml:"auth"`
-	Variables            KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
-	Connectors           ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
-	Crawler              CrawlerConfig      `toml:"crawler"`
-	Search               SearchConfig       `toml:"search"`
-	WebSocket            WebSocketConfig    `toml:"websocket"`
-	PlacesAPI            PlacesAPIConfig    `toml:"places_api"`
-	Gemini               GeminiConfig       `toml:"gemini"`
+	Environment     string             `toml:"environment"`       // "development" or "production" - controls test URL validation
+	DeleteOnStartup []string           `toml:"delete_on_startup"` // Delete data categories on startup. Valid values: settings, jobs, queue, documents (default: empty = delete nothing)
+	Server          ServerConfig       `toml:"server"`
+	Queue           QueueConfig        `toml:"queue"`
+	Storage         StorageConfig      `toml:"storage"`
+	Processing      ProcessingConfig   `toml:"processing"`
+	Logging         LoggingConfig      `toml:"logging"`
+	Jobs            JobsConfig         `toml:"jobs"`
+	Auth            AuthDirConfig      `toml:"auth"`
+	Variables       KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
+	Connectors      ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
+	Crawler         CrawlerConfig      `toml:"crawler"`
+	Search          SearchConfig       `toml:"search"`
+	WebSocket       WebSocketConfig    `toml:"websocket"`
+	PlacesAPI       PlacesAPIConfig    `toml:"places_api"`
+	Gemini          GeminiConfig       `toml:"gemini"`
 }
 
 type ServerConfig struct {
@@ -157,10 +157,10 @@ type PlacesAPIConfig struct {
 // GeminiConfig contains unified Google Gemini API configuration for all AI services
 type GeminiConfig struct {
 	GoogleAPIKey       string  `toml:"google_api_key"`       // Google Gemini API key for all AI operations
-	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-2.0-flash")
-	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-2.0-flash")
-	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-2.0-flash-thinking-exp")
-	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-2.0-flash")
+	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-3-pro-preview")
+	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-3-flash-preview")
+	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-3-pro-preview")
+	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-3-pro-preview")
 	MaxTurns           int     `toml:"max_turns"`            // Maximum agent conversation turns (default: 10)
 	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
 	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "4s" for 15 RPM)
@@ -271,15 +271,15 @@ func NewDefaultConfig() *Config {
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 		Gemini: GeminiConfig{
-			GoogleAPIKey:       "",                                   // User must provide API key (no fallback)
-			AgentModel:         "gemini-2.0-flash",                   // Default model for agents
-			AgentModelFast:     "gemini-2.0-flash",                   // Fast model for simple tasks
-			AgentModelThinking: "gemini-2.0-flash-thinking-exp-1219", // Thinking model for complex reasoning
-			ChatModel:          "gemini-2.0-flash",                   // Fast, cost-effective model for chat
-			MaxTurns:           10,                                   // Reasonable limit for agent loops
-			Timeout:            "5m",                                 // 5 minutes for operations
-			RateLimit:          "4s",                                 // Default to 4s (15 RPM) for free tier
-			Temperature:        0.7,                                  // Default temperature for chat completions
+			GoogleAPIKey:       "",                       // User must provide API key (no fallback)
+			AgentModel:         "gemini-3-pro-preview",   // Default model for agents
+			AgentModelFast:     "gemini-3-flash-preview", // Fast model for simple tasks
+			AgentModelThinking: "gemini-3-pro-preview",   // Thinking model for complex reasoning (uses ThinkingConfig)
+			ChatModel:          "gemini-3-pro-preview",   // Default model for chat
+			MaxTurns:           10,                       // Reasonable limit for agent loops
+			Timeout:            "5m",                     // 5 minutes for operations
+			RateLimit:          "4s",                     // Default to 4s (15 RPM) for free tier
+			Temperature:        0.7,                      // Default temperature for chat completions
 		},
 	}
 }
@@ -748,6 +748,11 @@ func DeepCloneConfig(c *Config) *Config {
 	clone := *c
 
 	// Deep clone slice fields to prevent shared memory
+	if len(c.DeleteOnStartup) > 0 {
+		clone.DeleteOnStartup = make([]string, len(c.DeleteOnStartup))
+		copy(clone.DeleteOnStartup, c.DeleteOnStartup)
+	}
+
 	if len(c.Logging.Output) > 0 {
 		clone.Logging.Output = make([]string, len(c.Logging.Output))
 		copy(clone.Logging.Output, c.Logging.Output)

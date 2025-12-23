@@ -1,0 +1,47 @@
+# SMSF Portfolio Review - Test Configuration
+# ===========================================================================
+# Test version for UI test validation.
+# Tests child job visibility and UI reactivity.
+
+id = "smsf-portfolio-daily-test"
+name = "SMSF Aggressive Portfolio Review (Test)"
+type = "job_template"
+description = "Test job - SMSF portfolio review for 1 stock"
+tags = ["smsf", "asx", "stocks", "test", "portfolio"]
+schedule = ""
+timeout = "15m"
+enabled = true
+auto_start = false
+
+# ===========================================================================
+# Step 1: Run Individual Stock Analyses
+# ===========================================================================
+
+[step.run_smsf_analysis]
+type = "job_template"
+description = "Execute ASX stock review for test stocks"
+on_error = "continue"
+template = "asx-stock-review"
+
+# 1 test stock for fast validation (ROC is small cap, fast to analyze)
+variables = [
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+]
+
+# ===========================================================================
+# Step 2: Generate Portfolio Summary
+# ===========================================================================
+
+[step.generate_portfolio_summary]
+type = "summary"
+description = "Generate test portfolio summary"
+depends = "run_smsf_analysis"
+on_error = "fail"
+filter_tags = ["smsf-recommendation"]
+api_key = "{google_gemini_api_key}"
+prompt = """Generate a brief test portfolio summary.
+
+List the analyzed stock with its recommendation.
+This is a test - keep it brief.
+"""
+output_tags = ["smsf-portfolio-review", "test-portfolio"]

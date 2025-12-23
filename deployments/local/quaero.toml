@@ -25,18 +25,29 @@
 environment = "development" # "development" or "production"
 
 # =============================================================================
-# Configuration Reload Settings
+# Delete on Startup Settings
 # =============================================================================
-# Controls whether to clear all key/value configuration at startup before loading.
-# This ensures a clean slate by removing any stale configuration from previous runs.
+# Controls which data categories to delete at startup before loading configuration.
+# This ensures a clean slate by removing stale data from previous runs.
+#
+# Valid values (array):
+#   - "settings"  : Clear KV pairs, connectors, and job definitions
+#   - "jobs"      : Clear job definitions only
+#   - "queue"     : Clear all queue jobs/execution state
+#   - "documents" : Clear all documents
 #
 # Runtime Reload:
 # - Configuration can be reloaded at runtime via Settings > Danger Zone > Reload Configuration
 # - The reload UI provides a checkbox to optionally clear configuration before reloading
 #
-# Default: false (preserves existing configuration)
+# Default: [] (delete nothing - preserves all existing data)
+#
+# Examples:
+#   delete_on_startup = ["settings", "queue"]  # Clear settings and queue on startup
+#   delete_on_startup = ["queue"]              # Clear only queue jobs
+#   delete_on_startup = []                     # Delete nothing (default)
 
-# clear_config_on_startup = false  # Set to true to clear ALL KV config before loading
+# delete_on_startup = []
 
 # =============================================================================
 # Server Configuration
@@ -86,26 +97,24 @@ environment = "development" # "development" or "production"
 # - agent_model_fast: Optimized for simple, quick tasks (extraction, classification)
 # - agent_model_thinking: For complex reasoning tasks requiring deep analysis
 #
-# Jobs can specify model_selection in step config:
-#   model_selection = "auto"     # Automatically select based on task complexity (default)
-#   model_selection = "fast"     # Force fast model
-#   model_selection = "thinking" # Force thinking model
-#   model_selection = "default"  # Use agent_model
+# Jobs can specify thinking_level in step config:
+#   thinking_level = "LOW"      # Standard reasoning
+#   thinking_level = "HIGH"     # Deep reasoning for complex analysis
 #
-# Defaults: agent_model="gemini-2.0-flash", agent_model_fast="gemini-2.0-flash",
-#           agent_model_thinking="gemini-2.0-flash-thinking-exp-1219",
-#           chat_model="gemini-2.0-flash", max_turns=10, timeout="5m", temperature=0.7
+# Defaults: agent_model="gemini-3-pro-preview", agent_model_fast="gemini-3-flash-preview",
+#           agent_model_thinking="gemini-3-pro-preview",
+#           chat_model="gemini-3-pro-preview", max_turns=10, timeout="5m", temperature=0.7
 # Env vars: QUAERO_GEMINI_GOOGLE_API_KEY, QUAERO_GEMINI_AGENT_MODEL,
 #           QUAERO_GEMINI_AGENT_MODEL_FAST, QUAERO_GEMINI_AGENT_MODEL_THINKING,
 #           QUAERO_GEMINI_CHAT_MODEL, QUAERO_GEMINI_MAX_TURNS,
 #           QUAERO_GEMINI_TIMEOUT, QUAERO_GEMINI_TEMPERATURE
 
 # [gemini]
-# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"            # Required for all AI operations
-# agent_model = "gemini-2.0-flash"                          # Default model for agent operations
-# agent_model_fast = "gemini-2.0-flash"                     # Fast model for simple tasks
-# agent_model_thinking = "gemini-2.0-flash-thinking-exp-1219"  # Thinking model for complex reasoning
-# chat_model = "gemini-2.0-flash"                           # Model for chat operations
+# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"              # Required for all AI operations
+# agent_model = "gemini-3-pro-preview"                       # Default model for agent operations
+# agent_model_fast = "gemini-3-flash-preview"                # Fast model for simple tasks
+# agent_model_thinking = "gemini-3-pro-preview"              # Thinking model (uses ThinkingConfig)
+# chat_model = "gemini-3-pro-preview"                        # Model for chat operations
 # max_turns = 10                                             # Maximum agent conversation turns
 # timeout = "5m"                                             # Operation timeout
 # temperature = 0.7                                          # Chat completion temperature (0.0-1.0)

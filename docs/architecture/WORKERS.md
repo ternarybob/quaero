@@ -129,7 +129,7 @@ type JobWorker interface {
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required
-  agent_model: "gemini-2.0-flash"     # Model for agents
+  agent_model: "gemini-3-pro-preview"     # Model for agents
   timeout: "5m"                        # Operation timeout
   rate_limit: "4s"                     # Rate limit between requests
 ```
@@ -753,6 +753,7 @@ search_type = "text_search"
 | `filter_tags` | []string | Yes | Tags for filtering documents to include |
 | `api_key` | string | No | Gemini API key |
 | `output_tags` | []string | No | Additional tags to apply to the output document (useful for downstream steps) |
+| `thinking_level` | string | No | Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Use HIGH for complex analysis. |
 
 #### Outputs
 
@@ -765,9 +766,20 @@ search_type = "text_search"
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required
-  chat_model: "gemini-2.0-flash"      # Model for summaries
+  chat_model: "gemini-3-pro-preview"      # Model for summaries
   temperature: 0.7                     # Generation temperature
 ```
+
+#### Thinking Levels
+
+The `thinking_level` parameter controls how deeply the model reasons about the task:
+
+| Level | Use Case | Token Budget |
+|-------|----------|--------------|
+| LOW | Standard summaries | Low |
+| HIGH | Complex analysis, recommendations | Highest |
+
+**Note**: Gemini 3 Pro supports LOW and HIGH. Gemini 3 Flash additionally supports MINIMAL and MEDIUM.
 
 #### Example Job Definition
 
@@ -777,6 +789,18 @@ type = "summary"
 description = "Summarize project documentation"
 prompt = "Create a comprehensive summary of the project architecture and key components"
 filter_tags = ["documentation", "imported"]
+```
+
+**Example with thinking_level for complex analysis:**
+
+```toml
+[step.investment_recommendation]
+type = "summary"
+description = "Generate investment recommendation"
+prompt = "Analyze the stock data and generate a BUY/SELL/HOLD recommendation"
+filter_tags = ["stock-data", "announcements"]
+api_key = "{google_gemini_api_key}"
+thinking_level = "HIGH"
 ```
 
 ---
@@ -888,8 +912,8 @@ Used by: Agent Worker, Summary Worker, Web Search Worker
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required - Gemini API key
-  agent_model: "gemini-2.0-flash"     # Model for agent operations
-  chat_model: "gemini-2.0-flash"      # Model for chat/summaries
+  agent_model: "gemini-3-pro-preview"     # Model for agent operations
+  chat_model: "gemini-3-pro-preview"      # Model for chat/summaries
   max_turns: 10                        # Max agent conversation turns
   timeout: "5m"                        # Operation timeout
   rate_limit: "4s"                     # Rate limit between requests

@@ -129,6 +129,10 @@ type QueueStorage interface {
 	// MarkRunningJobsAsPending marks all running jobs as pending (for graceful shutdown)
 	// Returns the count of jobs marked as pending
 	MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error)
+
+	// ClearAllJobs deletes all queue jobs from storage (for startup cleanup)
+	// Used by delete_on_startup = ["queue"] configuration
+	ClearAllJobs(ctx context.Context) error
 }
 
 // JobDefinitionListOptions represents filtering and pagination options for listing job definitions

@@ -24,11 +24,51 @@ import (
 )
 
 // ASXStockDataWorker fetches stock price data and calculates technical indicators.
+// Supports both individual stocks (e.g., ROC, BHP) and market indices (e.g., XJO, XSO).
 type ASXStockDataWorker struct {
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+}
+
+// knownIndices maps ASX index codes to their display names.
+// These indices don't have company data in Markit API and use different Yahoo symbols.
+var knownIndices = map[string]string{
+	"XJO": "S&P/ASX 200",
+	"XSO": "S&P/ASX Small Ordinaries",
+	"XAO": "All Ordinaries",
+	"XKO": "S&P/ASX 300",
+	"XTO": "S&P/ASX 20",
+	"XFJ": "S&P/ASX 200 Financials",
+	"XMJ": "S&P/ASX 200 Materials",
+	"XEJ": "S&P/ASX 200 Energy",
+}
+
+// isIndexCode returns true if the code is a known market index
+func isIndexCode(code string) bool {
+	_, isIndex := knownIndices[strings.ToUpper(code)]
+	return isIndex
+}
+
+// getIndexName returns the display name for an index code
+func getIndexName(code string) string {
+	if name, ok := knownIndices[strings.ToUpper(code)]; ok {
+		return name
+	}
+	return code
+}
+
+// getYahooSymbol converts an ASX code to Yahoo Finance symbol format.
+// Indices use ^AXJO format, stocks use ROC.AX format.
+func getYahooSymbol(asxCode string) string {
+	code := strings.ToUpper(asxCode)
+	if isIndexCode(code) {
+		// Yahoo indices: XJO -> ^AXJO, XSO -> ^AXSO
+		return "^AX" + strings.TrimPrefix(code, "X")
+	}
+	// Regular stocks: ROC -> ROC.AX
+	return code + ".AX"
 }
 
 // Compile-time assertion
@@ -293,24 +333,37 @@ func (w *ASXStockDataWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
-// fetchStockData fetches data from multiple sources
+// fetchStockData fetches data from multiple sources.
+// For indices (XJO, XSO, etc.), only Yahoo Finance is used as Markit API doesn't support indices.
 func (w *ASXStockDataWorker) fetchStockData(ctx context.Context, asxCode, period string) (*StockData, error) {
 	stockData := &StockData{
 		Symbol:      asxCode,
 		LastUpdated: time.Now(),
 	}
 
-	// Fetch from Markit Digital API (header)
-	if err := w.fetchMarkitHeader(ctx, asxCode, stockData); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to fetch Markit header data")
+	// Check if this is an index code
+	isIndex := isIndexCode(asxCode)
+
+	if isIndex {
+		// For indices, use predefined name and skip Markit API
+		stockData.CompanyName = getIndexName(asxCode)
+		w.logger.Info().
+			Str("asx_code", asxCode).
+			Str("index_name", stockData.CompanyName).
+			Msg("Fetching index data (Markit API skipped)")
+	} else {
+		// Fetch from Markit Digital API (header) - stocks only
+		if err := w.fetchMarkitHeader(ctx, asxCode, stockData); err != nil {
+			w.logger.Warn().Err(err).Msg("Failed to fetch Markit header data")
+		}
+
+		// Fetch from Markit Digital API (key-statistics) - stocks only
+		if err := w.fetchMarkitStats(ctx, asxCode, stockData); err != nil {
+			w.logger.Warn().Err(err).Msg("Failed to fetch Markit stats data")
+		}
 	}
 
-	// Fetch from Markit Digital API (key-statistics)
-	if err := w.fetchMarkitStats(ctx, asxCode, stockData); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to fetch Markit stats data")
-	}
-
-	// Fetch historical data from Yahoo Finance
+	// Fetch historical data from Yahoo Finance (works for both stocks and indices)
 	if err := w.fetchYahooHistory(ctx, asxCode, period, stockData); err != nil {
 		w.logger.Warn().Err(err).Msg("Failed to fetch Yahoo historical data")
 	}
@@ -394,7 +447,8 @@ func (w *ASXStockDataWorker) fetchMarkitStats(ctx context.Context, asxCode strin
 	return nil
 }
 
-// fetchYahooHistory fetches historical OHLCV from Yahoo Finance
+// fetchYahooHistory fetches historical OHLCV from Yahoo Finance.
+// Uses getYahooSymbol to handle both stocks (ROC.AX) and indices (^AXJO).
 func (w *ASXStockDataWorker) fetchYahooHistory(ctx context.Context, asxCode, period string, data *StockData) error {
 	// Convert period to Yahoo format
 	yahooRange := "1y"
@@ -413,8 +467,10 @@ func (w *ASXStockDataWorker) fetchYahooHistory(ctx context.Context, asxCode, per
 		yahooRange = "5y"
 	}
 
-	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s.AX?interval=1d&range=%s",
-		strings.ToUpper(asxCode), yahooRange)
+	// Get the correct Yahoo symbol (handles both stocks and indices)
+	yahooSymbol := getYahooSymbol(asxCode)
+	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=%s",
+		yahooSymbol, yahooRange)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -647,11 +703,18 @@ func determineTrend(price, sma20, sma50, sma200, rsi float64) string {
 	return "NEUTRAL"
 }
 
-// createDocument creates a document from stock data
+// createDocument creates a document from stock data.
+// For indices, uses "asx_index" source type and adds index-specific tags.
 func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	var content strings.Builder
 
-	content.WriteString(fmt.Sprintf("# ASX:%s Stock Data - %s\n\n", asxCode, data.CompanyName))
+	isIndex := isIndexCode(asxCode)
+
+	if isIndex {
+		content.WriteString(fmt.Sprintf("# ASX Index: %s (%s)\n\n", data.CompanyName, asxCode))
+	} else {
+		content.WriteString(fmt.Sprintf("# ASX:%s Stock Data - %s\n\n", asxCode, data.CompanyName))
+	}
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
 
 	// Data Sources Section
@@ -794,8 +857,13 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 		content.WriteString("```\n\n")
 	}
 
-	// Build tags
-	tags := []string{"asx-stock-data", strings.ToLower(asxCode)}
+	// Build tags - different for indices vs stocks
+	var tags []string
+	if isIndex {
+		tags = []string{"asx-index", strings.ToLower(asxCode), "benchmark"}
+	} else {
+		tags = []string{"asx-stock-data", strings.ToLower(asxCode)}
+	}
 	tags = append(tags, fmt.Sprintf("date:%s", time.Now().Format("2006-01-02")))
 
 	if jobDef != nil && len(jobDef.Tags) > 0 {
@@ -807,6 +875,7 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 	metadata := map[string]interface{}{
 		"asx_code":       asxCode,
 		"company_name":   data.CompanyName,
+		"is_index":       isIndex,
 		"last_price":     data.LastPrice,
 		"price_change":   data.PriceChange,
 		"change_percent": data.ChangePercent,
@@ -824,13 +893,26 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 		"parent_job_id":  parentJobID,
 	}
 
+	// Set source type and URL based on whether this is an index or stock
+	sourceType := "asx_stock_data"
+	sourceID := fmt.Sprintf("asx:%s:stock_data", asxCode)
+	docURL := fmt.Sprintf("https://www.asx.com.au/markets/company/%s", asxCode)
+	title := fmt.Sprintf("ASX:%s Stock Data & Technical Analysis", asxCode)
+
+	if isIndex {
+		sourceType = "asx_index"
+		sourceID = fmt.Sprintf("asx:%s:index_data", asxCode)
+		docURL = fmt.Sprintf("https://www.asx.com.au/indices/%s", strings.ToLower(asxCode))
+		title = fmt.Sprintf("ASX Index: %s (%s) - Market Data & Technical Analysis", data.CompanyName, asxCode)
+	}
+
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "asx_stock_data",
-		SourceID:        fmt.Sprintf("asx:%s:stock_data", asxCode),
-		URL:             fmt.Sprintf("https://www.asx.com.au/markets/company/%s", asxCode),
-		Title:           fmt.Sprintf("ASX:%s Stock Data & Technical Analysis", asxCode),
+		SourceType:      sourceType,
+		SourceID:        sourceID,
+		URL:             docURL,
+		Title:           title,
 		ContentMarkdown: content.String(),
 		DetailLevel:     models.DetailLevelFull,
 		Metadata:        metadata,

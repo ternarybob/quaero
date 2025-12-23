@@ -82,7 +82,7 @@ func validateInput(input map[string]interface{}) (string, string, int, error) {
 // Parameters:
 //   - ctx: Context for cancellation control
 //   - client: genai client for API calls
-//   - modelName: Model name to use (e.g., "gemini-2.0-flash")
+//   - modelName: Model name to use (e.g., "gemini-3-pro-preview")
 //   - input: Map containing document_id, content, and max_keywords
 //
 // Returns:

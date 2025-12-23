@@ -376,46 +376,60 @@ function Deploy-Files {
     }
 
     # Deploy job-definitions from common directory first, then local overrides
+    # Only copy files that don't already exist in destination (preserve user edits)
     $jobDefsDestPath = Join-Path -Path $BinDirectory -ChildPath "job-definitions"
     if (-not (Test-Path $jobDefsDestPath)) {
         New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
     }
 
-    # Copy from common first (base layer)
+    # Copy from common first (base layer) - only if not exists
     $commonJobDefsPath = Join-Path -Path $commonConfigPath -ChildPath "job-definitions"
     if (Test-Path $commonJobDefsPath) {
         Get-ChildItem -Path $commonJobDefsPath -File | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $jobDefsDestPath -Force
+            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $_.FullName -Destination $destFile
+            }
         }
     }
 
-    # Copy from local to override (if any deployment-specific definitions exist)
+    # Copy from local (deployment-specific) - only if not exists
     $localJobDefsPath = Join-Path -Path $localConfigPath -ChildPath "job-definitions"
     if (Test-Path $localJobDefsPath) {
         Get-ChildItem -Path $localJobDefsPath -File | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $jobDefsDestPath -Force
+            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $_.FullName -Destination $destFile
+            }
         }
     }
 
     # Deploy job-templates from common directory first, then local overrides
+    # Only copy files that don't already exist in destination (preserve user edits)
     $jobTemplatesDestPath = Join-Path -Path $BinDirectory -ChildPath "job-templates"
     if (-not (Test-Path $jobTemplatesDestPath)) {
         New-Item -ItemType Directory -Path $jobTemplatesDestPath -Force | Out-Null
     }
 
-    # Copy from common first (base layer)
+    # Copy from common first (base layer) - only if not exists
     $commonJobTemplatesPath = Join-Path -Path $commonConfigPath -ChildPath "job-templates"
     if (Test-Path $commonJobTemplatesPath) {
         Get-ChildItem -Path $commonJobTemplatesPath -File | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $jobTemplatesDestPath -Force
+            $destFile = Join-Path -Path $jobTemplatesDestPath -ChildPath $_.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $_.FullName -Destination $destFile
+            }
         }
     }
 
-    # Copy from local to override (if any deployment-specific templates exist)
+    # Copy from local (deployment-specific) - only if not exists
     $localJobTemplatesPath = Join-Path -Path $localConfigPath -ChildPath "job-templates"
     if (Test-Path $localJobTemplatesPath) {
         Get-ChildItem -Path $localJobTemplatesPath -File | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $jobTemplatesDestPath -Force
+            $destFile = Join-Path -Path $jobTemplatesDestPath -ChildPath $_.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $_.FullName -Destination $destFile
+            }
         }
     }
 

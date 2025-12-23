@@ -261,14 +261,45 @@ func (a *App) initDatabase() error {
 		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
 
-	// Clear all TOML-loaded config data if clear_config_on_startup is enabled
+	// Process delete_on_startup array - delete specified data categories
 	// This ensures a clean slate before loading fresh configuration from files
-	if a.Config.ClearConfigOnStartup {
-		a.Logger.Info().Msg("clear_config_on_startup enabled - clearing all TOML-loaded configuration data")
-		if err := a.StorageManager.ClearAllConfigData(context.Background()); err != nil {
-			a.Logger.Error().Err(err).Msg("Failed to clear config data on startup")
-		} else {
-			a.Logger.Info().Msg("All TOML-loaded configuration data cleared successfully")
+	// Each category is processed independently; errors don't prevent other categories from running
+	for _, category := range a.Config.DeleteOnStartup {
+		switch category {
+		case "settings":
+			// Clear KV pairs, connectors, and job definitions
+			a.Logger.Info().Msg("delete_on_startup: clearing settings (KV pairs, connectors, job definitions)")
+			if err := a.StorageManager.ClearAllConfigData(context.Background()); err != nil {
+				a.Logger.Error().Err(err).Str("category", category).Msg("Failed to clear settings data on startup")
+			} else {
+				a.Logger.Info().Msg("Settings data cleared successfully")
+			}
+		case "jobs":
+			// Clear job definitions only
+			a.Logger.Info().Msg("delete_on_startup: clearing job definitions")
+			if err := a.StorageManager.JobDefinitionStorage().DeleteAllJobDefinitions(context.Background()); err != nil {
+				a.Logger.Error().Err(err).Str("category", category).Msg("Failed to clear job definitions on startup")
+			} else {
+				a.Logger.Info().Msg("Job definitions cleared successfully")
+			}
+		case "queue":
+			// Clear all queue jobs/execution state
+			a.Logger.Info().Msg("delete_on_startup: clearing queue jobs")
+			if err := a.StorageManager.QueueStorage().ClearAllJobs(context.Background()); err != nil {
+				a.Logger.Error().Err(err).Str("category", category).Msg("Failed to clear queue jobs on startup")
+			} else {
+				a.Logger.Info().Msg("Queue jobs cleared successfully")
+			}
+		case "documents":
+			// Clear all documents
+			a.Logger.Info().Msg("delete_on_startup: clearing all documents")
+			if err := a.StorageManager.DocumentStorage().ClearAll(); err != nil {
+				a.Logger.Error().Err(err).Str("category", category).Msg("Failed to clear documents on startup")
+			} else {
+				a.Logger.Info().Msg("Documents cleared successfully")
+			}
+		default:
+			a.Logger.Warn().Str("category", category).Msg("Unknown delete_on_startup category - skipping")
 		}
 	}
 
@@ -860,6 +891,7 @@ func (a *App) initServices() error {
 		jobs.NewService(a.StorageManager.KeyValueStorage(), a.AgentService, a.Logger),
 		a.Orchestrator,
 		jobMgr,
+		a.EventService,
 		a.Logger,
 		"./job-templates", // Templates directory relative to executable
 	)

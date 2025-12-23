@@ -109,7 +109,7 @@ func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfac
 
 	// Set default model name if not specified
 	if geminiConfig.ChatModel == "" {
-		geminiConfig.ChatModel = "gemini-2.0-flash"
+		geminiConfig.ChatModel = "gemini-3-pro-preview"
 	}
 
 	// Parse timeout duration
@@ -146,7 +146,7 @@ func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfac
 
 // Chat generates a completion response based on the conversation history.
 //
-// This method uses the gemini-2.0-flash model for fast and cost-effective
+// This method uses the gemini-3-pro-preview model for high-quality
 // chat completions. The messages slice should contain the full conversation
 // context in chronological order, including system prompts, user messages,
 // and previous assistant responses.

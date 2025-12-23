@@ -16,6 +16,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"google.golang.org/genai"
 )
 
@@ -354,18 +355,66 @@ Query: %s`, breadth, query)
 		Str("parent_job_id", parentJobID).
 		Msg("Executing Gemini web search")
 
-	// Make the API call
-	resp, err := client.Models.GenerateContent(
-		searchCtx,
-		"gemini-2.0-flash",
-		[]*genai.Content{
-			genai.NewContentFromText(systemPrompt, genai.RoleUser),
-		},
-		config,
-	)
-	if err != nil {
-		results.Errors = append(results.Errors, fmt.Sprintf("Initial search failed: %v", err))
-		return results, err
+	// Make the API call with retry logic for rate limiting
+	// Uses 45-60 second backoffs to respect Gemini quota windows
+	var resp *genai.GenerateContentResponse
+	var apiErr error
+
+	retryConfig := llm.NewDefaultRetryConfig()
+
+	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
+		resp, apiErr = client.Models.GenerateContent(
+			searchCtx,
+			"gemini-3-pro-preview",
+			[]*genai.Content{
+				genai.NewContentFromText(systemPrompt, genai.RoleUser),
+			},
+			config,
+		)
+
+		if apiErr == nil {
+			break
+		}
+
+		if attempt == retryConfig.MaxRetries {
+			break
+		}
+
+		// Calculate backoff - use API-provided delay for rate limit errors
+		var backoff time.Duration
+		if llm.IsRateLimitError(apiErr) {
+			apiDelay := llm.ExtractRetryDelay(apiErr)
+			backoff = retryConfig.CalculateBackoff(attempt, apiDelay)
+			w.logger.Warn().
+				Int("attempt", attempt+1).
+				Dur("backoff", backoff).
+				Dur("api_delay", apiDelay).
+				Str("query", query).
+				Err(apiErr).
+				Msg("Rate limit hit during web search, waiting before retry")
+		} else {
+			// Non-rate-limit errors: shorter backoff
+			backoff = time.Duration(attempt+1) * 2 * time.Second
+			w.logger.Warn().
+				Int("attempt", attempt+1).
+				Dur("backoff", backoff).
+				Str("query", query).
+				Err(apiErr).
+				Msg("Retrying web search")
+		}
+
+		select {
+		case <-searchCtx.Done():
+			results.Errors = append(results.Errors, fmt.Sprintf("Context cancelled during retry: %v", searchCtx.Err()))
+			return results, searchCtx.Err()
+		case <-time.After(backoff):
+			// Continue to next retry attempt
+		}
+	}
+
+	if apiErr != nil {
+		results.Errors = append(results.Errors, fmt.Sprintf("Search failed after %d retries: %v", retryConfig.MaxRetries, apiErr))
+		return results, apiErr
 	}
 
 	// Extract response content
@@ -429,7 +478,7 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 
 		resp, err := client.Models.GenerateContent(
 			ctx,
-			"gemini-2.0-flash",
+			"gemini-3-pro-preview",
 			[]*genai.Content{
 				genai.NewContentFromText(fmt.Sprintf("Provide additional details on: %s", followUpQuery), genai.RoleUser),
 			},

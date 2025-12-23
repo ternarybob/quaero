@@ -17,6 +17,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"google.golang.org/genai"
 )
 
@@ -169,6 +170,37 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Msg("filter_limit applied to prevent token overflow")
 	}
 
+	// Extract output_validation patterns (optional - for validating LLM output)
+	var validationPatterns []string
+	if patterns, ok := stepConfig["output_validation"].([]interface{}); ok {
+		for _, p := range patterns {
+			if pattern, ok := p.(string); ok && pattern != "" {
+				validationPatterns = append(validationPatterns, pattern)
+			}
+		}
+	} else if patterns, ok := stepConfig["output_validation"].([]string); ok {
+		validationPatterns = patterns
+	}
+
+	if len(validationPatterns) > 0 {
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Int("validation_patterns", len(validationPatterns)).
+			Msg("Output validation enabled")
+	}
+
+	// Extract thinking_level (optional - controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH)
+	var thinkingLevel string
+	if level, ok := stepConfig["thinking_level"].(string); ok {
+		thinkingLevel = strings.ToUpper(level)
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Str("thinking_level", thinkingLevel).
+			Msg("Thinking level configured")
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -197,12 +229,14 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		Strategy:             interfaces.ProcessingStrategyInline, // Synchronous execution
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"prompt":       prompt,
-			"filter_tags":  filterTags,
-			"api_key":      apiKey,
-			"documents":    documents,
-			"step_config":  stepConfig,
-			"filter_limit": filterLimit,
+			"prompt":              prompt,
+			"filter_tags":         filterTags,
+			"api_key":             apiKey,
+			"documents":           documents,
+			"step_config":         stepConfig,
+			"filter_limit":        filterLimit,
+			"validation_patterns": validationPatterns,
+			"thinking_level":      thinkingLevel,
 		},
 	}, nil
 }
@@ -253,13 +287,32 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
+	// Extract thinking level for Gemini configuration
+	thinkingLevel, _ := initResult.Metadata["thinking_level"].(string)
+
 	// Generate summary
-	summaryContent, err := w.generateSummary(ctx, client, prompt, documents, stepID)
+	summaryContent, err := w.generateSummary(ctx, client, prompt, documents, stepID, thinkingLevel)
 	if err != nil {
 		w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
 			fmt.Sprintf("Summary generation failed: %v", err), nil)
 		return "", fmt.Errorf("summary generation failed: %w", err)
+	}
+
+	// Validate output if patterns are specified
+	if validationPatterns, ok := initResult.Metadata["validation_patterns"].([]string); ok && len(validationPatterns) > 0 {
+		if err := w.validateOutput(summaryContent, validationPatterns); err != nil {
+			w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Output validation failed")
+			w.logJobEvent(ctx, stepID, step.Name, "error",
+				fmt.Sprintf("Output validation failed: %v", err), nil)
+			return "", err
+		}
+		w.logger.Info().
+			Str("step_name", step.Name).
+			Int("patterns_verified", len(validationPatterns)).
+			Msg("Output validation passed")
+		w.logJobEvent(ctx, stepID, step.Name, "info",
+			fmt.Sprintf("Output validation passed: %d patterns verified", len(validationPatterns)), nil)
 	}
 
 	// Create summary document
@@ -325,11 +378,61 @@ func (w *SummaryWorker) ValidateConfig(step models.JobStep) error {
 		return fmt.Errorf("summary step requires 'filter_tags' in config")
 	}
 
+	// Validate output_validation format if specified
+	if validation, ok := step.Config["output_validation"]; ok {
+		switch v := validation.(type) {
+		case []interface{}:
+			// Valid array format - check all elements are strings
+			for i, item := range v {
+				if _, ok := item.(string); !ok {
+					return fmt.Errorf("output_validation[%d] must be a string", i)
+				}
+			}
+		case []string:
+			// Valid string array format
+		default:
+			return fmt.Errorf("output_validation must be an array of strings")
+		}
+	}
+
 	return nil
 }
 
-// generateSummary generates a summary from documents using Gemini
-func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string) (string, error) {
+// validateOutput checks if the summary contains all required patterns.
+// Returns an error listing missing patterns if validation fails.
+func (w *SummaryWorker) validateOutput(content string, patterns []string) error {
+	var missing []string
+	for _, pattern := range patterns {
+		if !strings.Contains(content, pattern) {
+			missing = append(missing, pattern)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("summary output validation failed - missing required sections: %v", missing)
+	}
+	return nil
+}
+
+// parseThinkingLevel converts a string thinking level to the genai.ThinkingLevel constant.
+// Valid levels: MINIMAL, LOW, MEDIUM, HIGH. Returns empty string for invalid levels.
+func parseThinkingLevel(level string) genai.ThinkingLevel {
+	switch strings.ToUpper(level) {
+	case "MINIMAL":
+		return genai.ThinkingLevelMinimal
+	case "LOW":
+		return genai.ThinkingLevelLow
+	case "MEDIUM":
+		return genai.ThinkingLevelMedium
+	case "HIGH":
+		return genai.ThinkingLevelHigh
+	default:
+		return "" // No thinking config when not specified
+	}
+}
+
+// generateSummary generates a summary from documents using Gemini.
+// thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH.
+func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder
 	docsContent.WriteString("# Documents to Summarize\n\n")
@@ -350,8 +453,14 @@ func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Clien
 		docsContent.WriteString("\n\n---\n\n")
 	}
 
-	// Build the full prompt
+	// Get current date for the analysis
+	currentDate := time.Now().Format("January 2, 2006")
+
+	// Build the full prompt with current date context
 	systemPrompt := fmt.Sprintf(`You are an expert document analyst and summarizer.
+
+## Current Date
+Today's date is %s. Use this as the analysis date in your output. Do NOT use any other date.
 
 ## Task
 %s
@@ -363,36 +472,55 @@ func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Clien
 - Include relevant details, patterns, and insights from the documents
 - If the task asks for specific information (like architecture), focus on that aspect
 - Be thorough but concise
+- Always use the current date provided above for any "Analysis Date" fields
 
 ## Documents
 
-%s`, prompt, docsContent.String())
+%s`, currentDate, prompt, docsContent.String())
+
+	// Use gemini-3-pro-preview as the base model - thinking level controls reasoning depth
+	model := "gemini-3-pro-preview"
+
+	// Parse thinking level and configure ThinkingConfig if specified
+	parsedLevel := parseThinkingLevel(thinkingLevel)
 
 	w.logger.Debug().
 		Int("document_count", len(documents)).
 		Str("parent_job_id", parentJobID).
+		Str("model", model).
+		Str("thinking_level", thinkingLevel).
 		Msg("Executing Gemini summary generation")
 
 	// Execute with timeout
 	summaryCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	// Configure generation
+	// Configure generation with optional ThinkingConfig
 	config := &genai.GenerateContentConfig{
 		Temperature: genai.Ptr(float32(0.3)),
 	}
 
-	// Make the API call with retry logic
+	// Add ThinkingConfig if a valid thinking level was specified
+	if parsedLevel != "" {
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			ThinkingLevel: parsedLevel,
+		}
+		w.logger.Debug().
+			Str("thinking_level", thinkingLevel).
+			Msg("ThinkingConfig enabled")
+	}
+
+	// Make the API call with retry logic for rate limiting
+	// Uses 45-60 second backoffs to respect Gemini quota windows
 	var resp *genai.GenerateContentResponse
 	var apiErr error
 
-	const maxRetries = 3
-	const initialBackoff = 2 * time.Second
+	retryConfig := llm.NewDefaultRetryConfig()
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
 		resp, apiErr = client.Models.GenerateContent(
 			summaryCtx,
-			"gemini-2.0-flash",
+			model,
 			[]*genai.Content{
 				genai.NewContentFromText(systemPrompt, genai.RoleUser),
 			},
@@ -403,27 +531,41 @@ func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Clien
 			break
 		}
 
-		if attempt == maxRetries {
+		if attempt == retryConfig.MaxRetries {
 			break
 		}
 
-		// Wait before retrying with exponential backoff
-		multiplier := uint(1) << uint(attempt)
-		backoff := initialBackoff * time.Duration(multiplier)
-		select {
-		case <-summaryCtx.Done():
-			return "", fmt.Errorf("context cancelled during retry: %w", summaryCtx.Err())
-		case <-time.After(backoff):
+		// Calculate backoff - use API-provided delay for rate limit errors
+		var backoff time.Duration
+		if llm.IsRateLimitError(apiErr) {
+			apiDelay := llm.ExtractRetryDelay(apiErr)
+			backoff = retryConfig.CalculateBackoff(attempt, apiDelay)
+			w.logger.Warn().
+				Int("attempt", attempt+1).
+				Dur("backoff", backoff).
+				Dur("api_delay", apiDelay).
+				Err(apiErr).
+				Msg("Rate limit hit, waiting before retry")
+		} else {
+			// Non-rate-limit errors: shorter backoff
+			backoff = time.Duration(attempt+1) * 2 * time.Second
 			w.logger.Warn().
 				Int("attempt", attempt+1).
 				Dur("backoff", backoff).
 				Err(apiErr).
 				Msg("Retrying summary generation")
 		}
+
+		select {
+		case <-summaryCtx.Done():
+			return "", fmt.Errorf("context cancelled during retry: %w", summaryCtx.Err())
+		case <-time.After(backoff):
+			// Continue to next retry attempt
+		}
 	}
 
 	if apiErr != nil {
-		return "", fmt.Errorf("failed to generate summary after %d retries: %w", maxRetries, apiErr)
+		return "", fmt.Errorf("failed to generate summary after %d retries: %w", retryConfig.MaxRetries, apiErr)
 	}
 
 	// Extract response text

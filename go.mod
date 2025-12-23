@@ -24,7 +24,7 @@ require (
 	github.com/yuin/goldmark v1.7.1
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/time v0.14.0
-	google.golang.org/genai v1.34.0
+	google.golang.org/genai v1.40.0
 )
 
 require (

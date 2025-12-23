@@ -157,11 +157,11 @@ func TestConfigReplacement_Integration(t *testing.T) {
 	config := &Config{
 		LLM: LLMConfig{
 			GoogleAPIKey:  "{gemini-api-key}",
-			ChatModelName: "gemini-2.0-flash",
+			ChatModelName: "gemini-3-pro-preview",
 		},
 		Agent: AgentConfig{
 			GoogleAPIKey: "{agent-api-key}",
-			ModelName:    "gemini-2.0-flash",
+			ModelName:    "gemini-3-pro-preview",
 		},
 		PlacesAPI: PlacesAPIConfig{
 			APIKey: "{places-api-key}",
@@ -182,9 +182,9 @@ func TestConfigReplacement_Integration(t *testing.T) {
 
 	// Assert replacements
 	assert.Equal(t, "sk-gemini-12345", config.LLM.GoogleAPIKey)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.ChatModelName)
+	assert.Equal(t, "gemini-3-pro-preview", config.LLM.ChatModelName)
 	assert.Equal(t, "sk-agent-67890", config.Agent.GoogleAPIKey)
-	assert.Equal(t, "gemini-2.0-flash", config.Agent.ModelName)
+	assert.Equal(t, "gemini-3-pro-preview", config.Agent.ModelName)
 	assert.Equal(t, "sk-places-abcde", config.PlacesAPI.APIKey)
 	assert.Equal(t, "/data/quaero.db", config.Storage.Badger.Path)
 	assert.Equal(t, "custom_queue", config.Queue.QueueName)

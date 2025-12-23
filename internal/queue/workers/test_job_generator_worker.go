@@ -186,7 +186,7 @@ func (w *TestJobGeneratorWorker) Execute(ctx context.Context, job *models.QueueJ
 		w.jobMgr.AddJobLog(ctx, job.ID, "error", errorMsg)
 		w.jobMgr.SetJobError(ctx, job.ID, errorMsg)
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
-		return fmt.Errorf(errorMsg)
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	// Mark job as completed

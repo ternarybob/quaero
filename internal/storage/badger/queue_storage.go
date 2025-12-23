@@ -752,3 +752,45 @@ func (s *QueueStorage) MarkRunningJobsAsPending(ctx context.Context, reason stri
 
 	return count, nil
 }
+
+// ClearAllJobs deletes all queue jobs from storage
+// Used by delete_on_startup = ["queue"] configuration
+func (s *QueueStorage) ClearAllJobs(ctx context.Context) error {
+	s.logger.Info().Msg("Clearing all queue jobs from storage")
+
+	// 1. Delete ALL JobStatusRecord entries (including orphaned ones)
+	// This must be done independently of QueueJob lookup because status records
+	// may exist without corresponding queue jobs (e.g., after partial cleanup)
+	var allStatusRecords []JobStatusRecord
+	if err := s.db.Store().Find(&allStatusRecords, nil); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to list status records for deletion")
+	} else {
+		statusDeletedCount := 0
+		for _, record := range allStatusRecords {
+			if err := s.db.Store().Delete(record.JobID, &JobStatusRecord{}); err != nil && err != badgerhold.ErrNotFound {
+				s.logger.Warn().Err(err).Str("job_id", record.JobID).Msg("Failed to delete job status record")
+				continue
+			}
+			statusDeletedCount++
+		}
+		s.logger.Info().Int("deleted_count", statusDeletedCount).Msg("Cleared all job status records")
+	}
+
+	// 2. Delete ALL QueueJob entries
+	var allJobs []models.QueueJob
+	if err := s.db.Store().Find(&allJobs, nil); err != nil {
+		return fmt.Errorf("failed to list jobs for deletion: %w", err)
+	}
+
+	jobDeletedCount := 0
+	for _, job := range allJobs {
+		if err := s.db.Store().Delete(job.ID, &models.QueueJob{}); err != nil && err != badgerhold.ErrNotFound {
+			s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to delete queue job")
+			continue
+		}
+		jobDeletedCount++
+	}
+
+	s.logger.Info().Int("deleted_count", jobDeletedCount).Msg("Cleared all queue jobs from storage")
+	return nil
+}

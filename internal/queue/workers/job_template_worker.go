@@ -38,6 +38,7 @@ type JobTemplateWorker struct {
 	jobService    *jobs.Service
 	orchestrator  JobTemplateOrchestrator
 	jobMgr        *queue.Manager
+	eventService  interfaces.EventService
 	logger        arbor.ILogger
 	templatesDir  string
 }
@@ -51,6 +52,7 @@ func NewJobTemplateWorker(
 	jobService *jobs.Service,
 	orchestrator JobTemplateOrchestrator,
 	jobMgr *queue.Manager,
+	eventService interfaces.EventService,
 	logger arbor.ILogger,
 	templatesDir string,
 ) *JobTemplateWorker {
@@ -59,6 +61,7 @@ func NewJobTemplateWorker(
 		jobService:    jobService,
 		orchestrator:  orchestrator,
 		jobMgr:        jobMgr,
+		eventService:  eventService,
 		logger:        logger,
 		templatesDir:  templatesDir,
 	}
@@ -122,14 +125,8 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 	// Create work items for each variable set
 	workItems := make([]interfaces.WorkItem, len(variables))
 	for i, varSet := range variables {
-		// Use first key in varSet as identifier (e.g., ticker)
-		var identifier string
-		for _, v := range varSet {
-			if s, ok := v.(string); ok {
-				identifier = s
-				break
-			}
-		}
+		// Use stable identifier extraction (ticker > name > id > first string)
+		identifier := getVariableIdentifier(varSet)
 
 		workItems[i] = interfaces.WorkItem{
 			ID:     fmt.Sprintf("template-%d-%s", i, identifier),
@@ -174,6 +171,27 @@ func (w *JobTemplateWorker) parseVariables(raw interface{}) ([]map[string]interf
 	}
 
 	return result, nil
+}
+
+// getVariableIdentifier extracts a stable identifier from variable set.
+// Priority: "ticker" > "name" > "id" > first string value.
+// This avoids non-deterministic behavior from Go's random map iteration order.
+func getVariableIdentifier(varSet map[string]interface{}) string {
+	// Try well-known identifier keys in order of priority
+	for _, key := range []string{"ticker", "name", "id"} {
+		if val, ok := varSet[key]; ok {
+			if s, ok := val.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	// Fallback: first string value found (for backward compatibility)
+	for _, v := range varSet {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return "unknown"
 }
 
 // templateJobResult holds the result of executing a single template instance
@@ -227,14 +245,8 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	var preparedJobs []preparedJob
 
 	for i, varSet := range variables {
-		// Get identifier for logging
-		var identifier string
-		for _, v := range varSet {
-			if s, ok := v.(string); ok {
-				identifier = s
-				break
-			}
-		}
+		// Get identifier for logging (stable extraction: ticker > name > id)
+		identifier := getVariableIdentifier(varSet)
 
 		// Apply variable substitution to template
 		processedContent := w.substituteTemplateVariables(string(templateContent), varSet)
@@ -368,6 +380,23 @@ func (w *JobTemplateWorker) executeSequential(ctx context.Context, stepID string
 			Str("job_id", executedJobID).
 			Msg("Successfully executed templated job")
 
+		// Publish job spawn event to notify UI of new child job
+		if w.eventService != nil {
+			spawnEvent := interfaces.Event{
+				Type: interfaces.EventJobSpawn,
+				Payload: map[string]interface{}{
+					"parent_job_id": stepID,
+					"child_job_id":  executedJobID,
+					"job_type":      "job_template",
+					"name":          pj.identifier,
+					"timestamp":     time.Now().Format(time.RFC3339),
+				},
+			}
+			if pubErr := w.eventService.Publish(ctx, spawnEvent); pubErr != nil {
+				w.logger.Warn().Err(pubErr).Str("child_job_id", executedJobID).Msg("Failed to publish job spawn event")
+			}
+		}
+
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed job %s for %s", executedJobID[:8], pj.identifier))
 		}
@@ -422,6 +451,24 @@ func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, 
 
 			// Execute the job definition - this creates the manager job and executes it
 			executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, job.jobDef, nil, nil)
+
+			// Publish job spawn event immediately after job creation (before acquiring lock)
+			// This ensures the UI sees spawned jobs as soon as they're created
+			if err == nil && w.eventService != nil {
+				spawnEvent := interfaces.Event{
+					Type: interfaces.EventJobSpawn,
+					Payload: map[string]interface{}{
+						"parent_job_id": stepID,
+						"child_job_id":  executedJobID,
+						"job_type":      "job_template",
+						"name":          job.identifier,
+						"timestamp":     time.Now().Format(time.RFC3339),
+					},
+				}
+				if pubErr := w.eventService.Publish(ctx, spawnEvent); pubErr != nil {
+					w.logger.Warn().Err(pubErr).Str("child_job_id", executedJobID).Msg("Failed to publish job spawn event")
+				}
+			}
 
 			mu.Lock()
 			if err != nil {
@@ -518,9 +565,11 @@ func (w *JobTemplateWorker) substituteTemplateVariables(content string, variable
 	return result
 }
 
-// ReturnsChildJobs returns true since we spawn child job executions
+// ReturnsChildJobs returns false since ExecuteJobDefinition runs jobs synchronously.
+// The child jobs complete within CreateJobs before it returns, so the orchestrator
+// doesn't need to wait for them separately.
 func (w *JobTemplateWorker) ReturnsChildJobs() bool {
-	return true
+	return false
 }
 
 // ValidateConfig validates step configuration

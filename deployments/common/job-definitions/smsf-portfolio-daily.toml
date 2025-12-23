@@ -1,7 +1,7 @@
 # SMSF Aggressive Portfolio Review - Daily Analysis Job
 # ===========================================================================
 # This job orchestrates the SMSF Portfolio Review for an aggressive SMSF
-# portfolio. It runs individual stock analyses using the smsf-portfolio-review
+# portfolio. It runs individual stock analyses using the asx-stock-review
 # template, then consolidates all results into a single portfolio review with
 # BUY|SELL|HOLD recommendations and SMSF compliance notes.
 #
@@ -25,7 +25,28 @@ enabled = true
 auto_start = false
 
 # ===========================================================================
-# Step 1: Run Individual Stock Analyses
+# Step 1a: Fetch Benchmark Index Data
+# ===========================================================================
+# Executes the asx-index-review template for each configured benchmark index.
+# Each index becomes a child job with data collection.
+# Runs in parallel with stock analysis (no depends).
+
+[step.fetch_benchmark_indices]
+type = "job_template"
+description = "Execute ASX Index Review template for benchmark indices"
+on_error = "continue"
+template = "asx-index-review"
+
+# Variables array - each entry creates a separate job from the template
+# Available variable keys: code, name
+# Variable references in template: {index:code}, {index:name}, {index:code_lower}
+variables = [
+    { code = "XJO", name = "S&P/ASX 200" },
+    { code = "XSO", name = "S&P/ASX Small Ordinaries" },
+]
+
+# ===========================================================================
+# Step 1b: Run Individual Stock Analyses
 # ===========================================================================
 # Executes the smsf-portfolio-review template for each stock.
 # Each stock becomes a child job with its own analysis.
@@ -35,7 +56,8 @@ auto_start = false
 type = "job_template"
 description = "Execute SMSF Portfolio Review template for each configured stock"
 on_error = "continue"
-template = "smsf-portfolio-review"
+template = "asx-stock-review"
+parallel = true
 
 # Variables array - each entry creates a separate job from the template
 # Available variable keys: ticker, name, industry
@@ -45,6 +67,8 @@ variables = [
     # Technology & AI (High Growth)
     { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
 
+    # Industrials
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
     # Technology
     # { ticker = "XRO", name = "Xero Limited", industry = "technology" },
     # { ticker = "WTC", name = "WiseTech Global", industry = "technology" },
@@ -78,18 +102,24 @@ variables = [
 [step.generate_portfolio_summary]
 type = "summary"
 description = "Generate consolidated SMSF aggressive portfolio review with all stocks"
-depends = "run_smsf_analysis"
+depends = "run_smsf_analysis, fetch_benchmark_indices"
 on_error = "fail"
-filter_tags = ["smsf-recommendation"]
+filter_tags = ["smsf-portfolio"]
 api_key = "{google_gemini_api_key}"
+thinking_level = "HIGH"
 prompt = """You are a Senior Investment Strategist preparing a consolidated SMSF portfolio review for an aggressive, 100% Australian Equities fund.
 
-You have received individual SMSF Portfolio Review reports for multiple ASX stocks. Your task is to consolidate these into a SINGLE portfolio review document.
+You have received:
+1. Individual SMSF Portfolio Review reports for multiple ASX stocks (tagged smsf-recommendation)
+2. S&P/ASX 200 (XJO) benchmark data (tagged benchmark, xjo) - use for "Portfolio Health vs S&P/ASX 200"
+3. Small Ordinaries (XSO) benchmark data (tagged benchmark, xso) - use for "Portfolio Health vs Small Ordinaries"
+
+Your task is to consolidate these into a SINGLE portfolio review document. Use the benchmark index data to assess portfolio performance relative to the market.
 
 # SMSF AGGRESSIVE PORTFOLIO REVIEW: CONSOLIDATED ASSESSMENT
 ## Prepared for: SMSF Investment Committee
 ## Strategy: Aggressive 100% Australian Equities
-## Analysis Date: [Current Date]
+## Analysis Date: [Use the current date provided in the system context above]
 
 ---
 

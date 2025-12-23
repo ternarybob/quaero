@@ -198,6 +198,11 @@ func (m *MockKVStorage) Delete(ctx context.Context, key string) error {
 	return args.Error(0)
 }
 
+func (m *MockKVStorage) DeleteAll(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
 func (m *MockKVStorage) List(ctx context.Context) ([]interfaces.KeyValuePair, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
@@ -444,6 +449,7 @@ func TestSummaryWorker_createDocument(t *testing.T) {
 		docs,
 		jobDef,
 		"parent-job-id",
+		nil,
 	)
 
 	assert.NoError(t, err)
@@ -486,6 +492,7 @@ func TestSummaryWorker_createDocument_WithoutJobDef(t *testing.T) {
 		docs,
 		nil,
 		"parent-id",
+		nil,
 	)
 
 	assert.NoError(t, err)

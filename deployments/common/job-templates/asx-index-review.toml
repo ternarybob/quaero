@@ -1,0 +1,46 @@
+# ASX Index Review Job Template
+# =========================================================================
+# Collects ASX market index data for benchmark comparison.
+# Used by portfolio jobs to compare stock performance vs market indices.
+#
+# FEATURES:
+# - Fetches index price data from Yahoo Finance
+# - Calculates technical indicators (SMA, RSI)
+# - Tags output for portfolio summary consumption
+#
+# USAGE:
+# This template is designed to be invoked via a job_template step with variables:
+#   variables = [
+#     { code = "XJO", name = "S&P/ASX 200" },
+#     { code = "XSO", name = "S&P/ASX Small Ordinaries" }
+#   ]
+#
+# VARIABLE SYNTAX:
+# - {index:code} - ASX index code (e.g., XJO, XSO)
+# - {index:name} - Index display name
+# - {index:code_lower} - Lowercase index code for tags
+# =========================================================================
+
+id = "asx-index-{index:code_lower}"
+name = "ASX Index: {index:name} ({index:code})"
+type = "index_analysis"
+description = "Fetch benchmark data for {index:name} ({index:code}) for portfolio comparison"
+tags = ["asx", "index", "benchmark", "{index:code_lower}"]
+schedule = ""
+timeout = "10m"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Step 1: Fetch Index Data
+# =========================================================================
+# Fetches 6 months of index price data and calculates technical indicators.
+# Output is tagged for portfolio summary step to consume.
+
+[step.fetch_index_data]
+type = "asx_stock_data"
+description = "Fetch {index:name} index data for benchmark comparison"
+on_error = "continue"
+asx_code = "{index:code}"
+period = "M6"
+output_tags = ["benchmark", "{index:code_lower}", "asx-index", "smsf-portfolio"]

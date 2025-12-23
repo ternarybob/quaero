@@ -297,43 +297,61 @@ deploy_files() {
     fi
 
     # Deploy job-definitions from common directory first, then local overrides
+    # Only copy files that don't already exist in destination (preserve user edits)
     mkdir -p "$bin_dir/job-definitions"
 
-    # Copy from common first (base layer)
+    # Copy from common first (base layer) - only if not exists
     if [ -d "$common_config/job-definitions" ]; then
         for file in "$common_config/job-definitions"/*.toml; do
             if [ -f "$file" ]; then
-                cp "$file" "$bin_dir/job-definitions/"
+                local filename=$(basename "$file")
+                local dest_file="$bin_dir/job-definitions/$filename"
+                if [ ! -f "$dest_file" ]; then
+                    cp "$file" "$dest_file"
+                fi
             fi
         done
     fi
 
-    # Copy from local to override (if any deployment-specific definitions exist)
+    # Copy from local (deployment-specific) - only if not exists
     if [ -d "$local_config/job-definitions" ]; then
         for file in "$local_config/job-definitions"/*.toml; do
             if [ -f "$file" ]; then
-                cp "$file" "$bin_dir/job-definitions/"
+                local filename=$(basename "$file")
+                local dest_file="$bin_dir/job-definitions/$filename"
+                if [ ! -f "$dest_file" ]; then
+                    cp "$file" "$dest_file"
+                fi
             fi
         done
     fi
 
     # Deploy job-templates from common directory first, then local overrides
+    # Only copy files that don't already exist in destination (preserve user edits)
     mkdir -p "$bin_dir/job-templates"
 
-    # Copy from common first (base layer)
+    # Copy from common first (base layer) - only if not exists
     if [ -d "$common_config/job-templates" ]; then
         for file in "$common_config/job-templates"/*.toml; do
             if [ -f "$file" ]; then
-                cp "$file" "$bin_dir/job-templates/"
+                local filename=$(basename "$file")
+                local dest_file="$bin_dir/job-templates/$filename"
+                if [ ! -f "$dest_file" ]; then
+                    cp "$file" "$dest_file"
+                fi
             fi
         done
     fi
 
-    # Copy from local to override (if any deployment-specific templates exist)
+    # Copy from local (deployment-specific) - only if not exists
     if [ -d "$local_config/job-templates" ]; then
         for file in "$local_config/job-templates"/*.toml; do
             if [ -f "$file" ]; then
-                cp "$file" "$bin_dir/job-templates/"
+                local filename=$(basename "$file")
+                local dest_file="$bin_dir/job-templates/$filename"
+                if [ ! -f "$dest_file" ]; then
+                    cp "$file" "$dest_file"
+                fi
             fi
         done
     fi

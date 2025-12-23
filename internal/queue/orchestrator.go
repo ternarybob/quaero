@@ -136,6 +136,26 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		// Log warning but continue
 	}
 
+	// Publish job created event to notify UI immediately
+	if o.eventService != nil {
+		createdEvent := interfaces.Event{
+			Type: interfaces.EventJobCreated,
+			Payload: map[string]interface{}{
+				"job_id":      managerID,
+				"status":      "running",
+				"name":        jobDef.Name,
+				"type":        "manager",
+				"source_type": jobDef.SourceType,
+				"total_steps": len(jobDef.Steps),
+				"timestamp":   time.Now().Format(time.RFC3339),
+			},
+		}
+		// Publish synchronously to ensure UI sees job immediately
+		if err := o.eventService.Publish(ctx, createdEvent); err != nil {
+			// Log but don't fail
+		}
+	}
+
 	// Publish job status change event to notify UI
 	if o.eventService != nil {
 		statusEvent := interfaces.Event{

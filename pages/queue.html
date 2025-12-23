@@ -1908,18 +1908,32 @@
                         }
                     };
 
+                    // Listen for server restart events - reload stats from fresh server
+                    this.serverRestartHandler = () => {
+                        console.log('[JobStatsHeader] Server restart detected - reloading stats');
+                        this.loadStats();
+                    };
+
                     // Guard against double-registration
                     if (this.jobStatsUpdateHandler) {
                         window.removeEventListener('jobStats:update', this.jobStatsUpdateHandler);
                     }
+                    if (this.serverRestartHandler) {
+                        window.removeEventListener('jobList:serverRestart', this.serverRestartHandler);
+                    }
 
                     window.addEventListener('jobStats:update', this.jobStatsUpdateHandler);
+                    window.addEventListener('jobList:serverRestart', this.serverRestartHandler);
 
                     // Cleanup on component destroy
                     this.$watch('$el', (el) => {
                         if (!el && this.jobStatsUpdateHandler) {
                             window.removeEventListener('jobStats:update', this.jobStatsUpdateHandler);
                             this.jobStatsUpdateHandler = null;
+                        }
+                        if (!el && this.serverRestartHandler) {
+                            window.removeEventListener('jobList:serverRestart', this.serverRestartHandler);
+                            this.serverRestartHandler = null;
                         }
                     });
 

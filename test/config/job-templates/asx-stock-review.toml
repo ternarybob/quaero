@@ -1,0 +1,48 @@
+# ASX Stock Review Job Template (Test Version)
+# =========================================================================
+# Test version of the ASX stock review for UI test validation.
+# Simplified steps for faster test execution.
+
+id = "asx-review-{stock:ticker_lower}"
+name = "ASX Stock Review: {stock:ticker}"
+type = "stock_analysis"
+description = "Test stock analysis for {stock:name} (ASX:{stock:ticker})"
+tags = ["asx", "stock-review", "{stock:ticker_lower}", "{stock:industry}"]
+schedule = ""
+timeout = "15m"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Step 1: Fetch Stock Data - PARALLEL
+# =========================================================================
+
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch stock data for {stock:name}"
+on_error = "continue"
+asx_code = "{stock:ticker}"
+period = "M6"
+output_tags = ["{stock:ticker_lower}", "stock-data", "{stock:industry}"]
+
+# =========================================================================
+# Step 2: Generate Investment Recommendation (Simplified for tests)
+# =========================================================================
+
+[step.investment_recommendation]
+type = "summary"
+description = "Generate recommendation for {stock:name}"
+depends = "fetch_stock_data"
+on_error = "fail"
+filter_tags = ["{stock:ticker_lower}"]
+api_key = "{google_gemini_api_key}"
+prompt = """Generate a brief investment recommendation for ASX:{stock:ticker} ({stock:name}).
+
+Based on the stock data, provide:
+1. Current price and trend
+2. Recommendation: BUY / SELL / HOLD
+3. Brief rationale (1-2 sentences)
+
+This is a test summary - keep it brief.
+"""
+output_tags = ["smsf-recommendation", "{stock:ticker_lower}", "{stock:industry}"]

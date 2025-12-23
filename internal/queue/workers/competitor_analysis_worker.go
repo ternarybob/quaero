@@ -282,7 +282,7 @@ Return the JSON array now:`, asxCode, prompt, asxCode)
 
 	resp, err := client.Models.GenerateContent(
 		llmCtx,
-		"gemini-2.0-flash",
+		"gemini-3-pro-preview",
 		[]*genai.Content{
 			genai.NewContentFromText(systemPrompt, genai.RoleUser),
 		},

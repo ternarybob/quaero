@@ -107,7 +107,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		Msg("Agent service: Resolved Google API key")
 
 	if config.AgentModel == "" {
-		config.AgentModel = "gemini-2.0-flash" // Default to fast model
+		config.AgentModel = "gemini-3-pro-preview" // Default to pro model
 	}
 
 	// Parse timeout duration
