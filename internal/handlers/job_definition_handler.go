@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
@@ -38,6 +41,7 @@ type JobDefinitionHandler struct {
 	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	storageManager    interfaces.StorageManager  // For reloading job definitions from disk
 	definitionsDir    string                     // Path to job definitions directory
+	templatesDir      string                     // Path to job templates directory
 	validationService *validation.TOMLValidationService
 	jobService        *jobs.Service              // Business logic for job definitions
 	documentService   interfaces.DocumentService // For direct document capture
@@ -56,6 +60,7 @@ func NewJobDefinitionHandler(
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	storageManager interfaces.StorageManager, // For reloading job definitions from disk
 	definitionsDir string, // Path to job definitions directory
+	templatesDir string, // Path to job templates directory
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
 	documentService interfaces.DocumentService, // For direct document capture from extension
 	logger arbor.ILogger,
@@ -95,6 +100,7 @@ func NewJobDefinitionHandler(
 		kvStorage:         kvStorage,
 		storageManager:    storageManager,
 		definitionsDir:    definitionsDir,
+		templatesDir:      templatesDir,
 		validationService: validation.NewTOMLValidationService(logger),
 		jobService:        jobs.NewService(kvStorage, agentService, logger),
 		documentService:   documentService,
@@ -752,6 +758,119 @@ func (h *JobDefinitionHandler) ReloadJobDefinitionsHandler(w http.ResponseWriter
 		"success": true,
 		"loaded":  loaded,
 		"message": fmt.Sprintf("Reloaded %d job definitions from %s", loaded, h.definitionsDir),
+	})
+}
+
+// JobTemplateInfo represents a job template summary for the API response
+type JobTemplateInfo struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	Steps       []string `json:"steps"` // Step names only
+}
+
+// ListJobTemplatesHandler handles GET /api/job-templates
+// Lists all job templates from the templates directory
+func (h *JobDefinitionHandler) ListJobTemplatesHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	h.logger.Debug().Str("dir", h.templatesDir).Msg("Listing job templates")
+
+	if h.templatesDir == "" {
+		h.logger.Warn().Msg("Templates directory not configured")
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"templates": []JobTemplateInfo{},
+		})
+		return
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(h.templatesDir); os.IsNotExist(err) {
+		h.logger.Warn().Str("dir", h.templatesDir).Msg("Templates directory does not exist")
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"templates": []JobTemplateInfo{},
+		})
+		return
+	}
+
+	// Read all TOML files from templates directory
+	var templates []JobTemplateInfo
+	err := filepath.Walk(h.templatesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and non-TOML files
+		if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), ".toml") {
+			return nil
+		}
+
+		// Read and parse the TOML file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("file", path).Msg("Failed to read template file")
+			return nil // Continue with other files
+		}
+
+		// Parse basic template info from TOML
+		var templateData struct {
+			ID          string                 `toml:"id"`
+			Name        string                 `toml:"name"`
+			Type        string                 `toml:"type"`
+			Description string                 `toml:"description"`
+			Tags        []string               `toml:"tags"`
+			Step        map[string]interface{} `toml:"step"`
+		}
+
+		if err := toml.Unmarshal(content, &templateData); err != nil {
+			h.logger.Warn().Err(err).Str("file", path).Msg("Failed to parse template TOML")
+			return nil // Continue with other files
+		}
+
+		// Extract step names
+		var stepNames []string
+		for stepName := range templateData.Step {
+			stepNames = append(stepNames, stepName)
+		}
+
+		// Use filename (without .toml) as ID if not specified
+		id := templateData.ID
+		if id == "" {
+			id = strings.TrimSuffix(info.Name(), ".toml")
+		}
+
+		// Use ID as name if not specified
+		name := templateData.Name
+		if name == "" {
+			name = id
+		}
+
+		templates = append(templates, JobTemplateInfo{
+			ID:          id,
+			Name:        name,
+			Type:        templateData.Type,
+			Description: templateData.Description,
+			Tags:        templateData.Tags,
+			Steps:       stepNames,
+		})
+
+		return nil
+	})
+
+	if err != nil {
+		h.logger.Error().Err(err).Str("dir", h.templatesDir).Msg("Failed to list templates")
+		WriteError(w, http.StatusInternalServerError, "Failed to list templates")
+		return
+	}
+
+	h.logger.Info().Int("count", len(templates)).Str("dir", h.templatesDir).Msg("Listed job templates")
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"templates": templates,
 	})
 }
 

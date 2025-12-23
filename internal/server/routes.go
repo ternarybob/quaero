@@ -81,6 +81,9 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)
 	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes)
 
+	// API routes - Job Templates (read-only list of templates from disk)
+	mux.HandleFunc("/api/job-templates", s.app.JobDefinitionHandler.ListJobTemplatesHandler)
+
 	// API routes - Key/Value Store
 	mux.HandleFunc("/api/kv", s.handleKVRoute)   // GET (list), POST (create)
 	mux.HandleFunc("/api/kv/", s.handleKVRoutes) // GET/PUT/DELETE /{key}

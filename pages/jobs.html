@@ -34,7 +34,7 @@
                                 <i class="fas fa-plus"></i>
                                 <span>Add Job</span>
                             </button>
-                            <button class="btn btn-sm" @click="loadJobDefinitions()" title="Refresh Job Definitions">
+                            <button class="btn btn-sm" @click="confirmReloadAll()" title="Reload All Jobs and Templates from TOML files">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                         </section>
@@ -129,20 +129,97 @@
                                             :title="isJobExecuting(jobDef.id) ? 'Job execution in progress...' : (jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : 'Run Job')" aria-label="Run Job">
                                             <i :class="isJobExecuting(jobDef.id) ? 'fas fa-spinner fa-spin' : 'fas fa-play'"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)"
-                                            :disabled="jobDef.job_type === 'system' || jobDef.runtime_status === 'disabled'"
-                                            :title="jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : (jobDef.job_type === 'system' ? 'System jobs cannot be edited' : 'Edit Job Definition')" aria-label="Edit Job">
-                                            <i class="fas fa-edit"></i>
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-refresh'" class="btn btn-sm" @click="confirmReloadJob(jobDef.id, jobDef.name)"
+                                            :disabled="isJobReloading(jobDef.id)"
+                                            :title="isJobReloading(jobDef.id) ? 'Reloading...' : 'Reload this job from TOML file'" aria-label="Reload Job">
+                                            <i :class="isJobReloading(jobDef.id) ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'"></i>
                                         </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'" class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)" :disabled="jobDef.type !== 'crawler'"
                                             title="Download as TOML" aria-label="Download Job" x-show="jobDef.type === 'crawler'">
                                             <i class="fas fa-download"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'" class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)"
-                                            :disabled="jobDef.job_type === 'system' || jobDef.runtime_status === 'disabled'"
-                                            :title="jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : (jobDef.job_type === 'system' ? 'System jobs cannot be deleted' : 'Delete Job Definition')" aria-label="Delete Job">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= JOB TEMPLATES PANEL ============================= -->
+
+        <!-- Job Templates List Component -->
+        <section style="margin-top: 1.5rem;" x-data="jobTemplatesManagement">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Job Templates</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" @click="loadJobTemplates()" title="Refresh Job Templates">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <!-- Loading State -->
+                    <template x-if="loading">
+                        <div class="loading loading-lg"></div>
+                    </template>
+
+                    <!-- Empty State -->
+                    <template x-if="!loading && jobTemplates.length === 0">
+                        <div class="empty">
+                            <div class="empty-icon">
+                                <i class="fas fa-file-code fa-3x"></i>
+                            </div>
+                            <p class="empty-title h5">No job templates found</p>
+                            <p class="empty-subtitle">Templates are loaded from the job-templates directory</p>
+                        </div>
+                    </template>
+
+                    <!-- Job Template Cards -->
+                    <template x-for="template in jobTemplates" :key="template.id">
+                        <div class="card" style="margin-bottom: 0.8rem;">
+                            <div class="card-body">
+                                <div class="columns">
+                                    <!-- Left side: Content -->
+                                    <div class="column col-12">
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <i class="fas fa-file-code" style="color: #6c757d;"></i>
+                                            <div class="card-title h5" x-text="template.name"></div>
+                                            <!-- Type Badge -->
+                                            <span class="label label-secondary" x-text="template.type"></span>
+                                        </div>
+                                        <div class="card-subtitle text-gray" x-text="template.description || 'No description provided'"></div>
+
+                                        <!-- Metadata -->
+                                        <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                            <!-- Template ID -->
+                                            <div>
+                                                <i class="fas fa-fingerprint"></i>
+                                                <span x-text="template.id"></span>
+                                            </div>
+
+                                            <!-- Tags -->
+                                            <template x-if="template.tags && template.tags.length > 0">
+                                                <div>
+                                                    <i class="fas fa-tags"></i>
+                                                    <span x-text="template.tags.join(', ')"></span>
+                                                </div>
+                                            </template>
+
+                                            <!-- Steps Count -->
+                                            <template x-if="template.steps && template.steps.length > 0">
+                                                <div>
+                                                    <i class="fas fa-list-ol"></i>
+                                                    <span x-text="template.steps.length + ' step' + (template.steps.length > 1 ? 's' : '')"></span>
+                                                </div>
+                                            </template>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

@@ -83,6 +83,7 @@ type LoggingConfig struct {
 // JobsConfig contains configuration for job definitions
 type JobsConfig struct {
 	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
+	TemplatesDir   string `toml:"templates_dir"`   // Directory containing job template files (TOML)
 }
 
 // DocsConfig contains configuration for documentation reference files
@@ -213,6 +214,7 @@ func NewDefaultConfig() *Config {
 		},
 		Jobs: JobsConfig{
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
+			TemplatesDir:   "./job-templates",   // Default directory for job template files
 		},
 		Docs: DocsConfig{
 			Dir:        "./docs",        // Default directory for documentation files

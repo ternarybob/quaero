@@ -151,7 +151,7 @@ func (utc *UITestContext) getCurrentURL() (string, error) {
 	return url, err
 }
 
-// TestJobsPageActionButtons verifies Run and Edit buttons exist on job cards
+// TestJobsPageActionButtons verifies Run and Refresh buttons exist on job cards
 func TestJobsPageActionButtons(t *testing.T) {
 	utc := NewUITestContext(t, 2*time.Minute)
 	defer utc.Cleanup()
@@ -166,11 +166,11 @@ func TestJobsPageActionButtons(t *testing.T) {
 	// Wait for Alpine.js to load jobs
 	time.Sleep(2 * time.Second)
 
-	// Check that Run and Edit buttons exist for at least one job
-	var hasRunButton, hasEditButton bool
+	// Check that Run and Refresh buttons exist for at least one job
+	var hasRunButton, hasRefreshButton bool
 	err := chromedp.Run(utc.Ctx,
 		chromedp.Evaluate(`document.querySelectorAll('button[id$="-run"]').length > 0`, &hasRunButton),
-		chromedp.Evaluate(`document.querySelectorAll('button[id$="-edit"]').length > 0`, &hasEditButton),
+		chromedp.Evaluate(`document.querySelectorAll('button[id$="-refresh"]').length > 0`, &hasRefreshButton),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check for action buttons: %v", err)
@@ -181,47 +181,11 @@ func TestJobsPageActionButtons(t *testing.T) {
 	if !hasRunButton {
 		t.Error("No Run buttons found on Jobs page")
 	}
-	if !hasEditButton {
-		t.Error("No Edit buttons found on Jobs page")
+	if !hasRefreshButton {
+		t.Error("No Refresh buttons found on Jobs page")
 	}
 
-	utc.Log("✓ Found Run and Edit buttons on Jobs page")
-}
-
-// TestJobsPageEditNavigation verifies clicking Edit navigates to job add page
-func TestJobsPageEditNavigation(t *testing.T) {
-	utc := NewUITestContext(t, 2*time.Minute)
-	defer utc.Cleanup()
-
-	utc.Log("--- Testing Edit Navigation ---")
-
-	// Navigate to Jobs page
-	if err := utc.Navigate(utc.JobsURL); err != nil {
-		t.Fatalf("Failed to navigate to Jobs page: %v", err)
-	}
-
-	// Wait for Alpine.js to load jobs
-	time.Sleep(2 * time.Second)
-
-	// Find and click the first Edit button
-	err := chromedp.Run(utc.Ctx,
-		chromedp.WaitVisible(`button[id$="-edit"]`, chromedp.ByQuery),
-		chromedp.Click(`button[id$="-edit"]`, chromedp.ByQuery),
-		chromedp.Sleep(1*time.Second),
-	)
-	if err != nil {
-		t.Fatalf("Failed to click Edit button: %v", err)
-	}
-
-	utc.Screenshot("after_edit_click")
-
-	// Verify navigation to job add page
-	currentURL, _ := utc.getCurrentURL()
-	if !strings.Contains(currentURL, "/jobs/add") {
-		t.Fatalf("Expected URL to contain '/jobs/add', got %s", currentURL)
-	}
-
-	utc.Log("✓ Edit navigation verified")
+	utc.Log("✓ Found Run and Refresh buttons on Jobs page")
 }
 
 // TestJobsPageRunConfirmation verifies the Run confirmation modal appears and can be cancelled

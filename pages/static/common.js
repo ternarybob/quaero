@@ -432,6 +432,8 @@ document.addEventListener('alpine:init', () => {
         loading: true,
         modalTriggerElement: null,
         executingJobIds: new Set(), // Track in-flight job execution requests
+        reloadingJobIds: new Set(), // Track in-flight job reload requests
+        reloadingAll: false, // Track global reload state
 
         init() {
             window.debugLog('JobDefinitionsManagement', 'Initializing component');
@@ -441,6 +443,87 @@ document.addEventListener('alpine:init', () => {
 
         isJobExecuting(jobDefId) {
             return this.executingJobIds.has(jobDefId);
+        },
+
+        isJobReloading(jobDefId) {
+            return this.reloadingJobIds.has(jobDefId);
+        },
+
+        async confirmReloadAll() {
+            const confirmed = await window.confirmAction({
+                title: 'Reload All Jobs & Templates',
+                message: 'This will reload ALL job definitions and templates from TOML files on disk. Any unsaved changes will be lost. Continue?',
+                confirmText: 'Reload All',
+                type: 'warning'
+            });
+
+            if (!confirmed) {
+                return;
+            }
+
+            this.reloadingAll = true;
+            window.debugLog('JobDefinitionsManagement', 'Reloading all job definitions from disk');
+
+            try {
+                const response = await fetch('/api/job-definitions/reload', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to reload job definitions');
+                }
+
+                const result = await response.json();
+                window.showNotification(result.message || 'Job definitions reloaded successfully', 'success');
+                await this.loadJobDefinitions();
+            } catch (err) {
+                window.debugError('JobDefinitionsManagement', 'Error reloading job definitions:', err);
+                window.showNotification('Failed to reload: ' + err.message, 'error');
+            } finally {
+                this.reloadingAll = false;
+            }
+        },
+
+        async confirmReloadJob(jobDefId, jobDefName) {
+            if (this.reloadingJobIds.has(jobDefId)) {
+                window.showNotification('Job reload already in progress', 'warning');
+                return;
+            }
+
+            const confirmed = await window.confirmAction({
+                title: 'Reload Job Definition',
+                message: `This will reload "${jobDefName}" from its TOML file on disk. Any unsaved changes will be lost. Continue?`,
+                confirmText: 'Reload',
+                type: 'warning'
+            });
+
+            if (!confirmed) {
+                return;
+            }
+
+            this.reloadingJobIds.add(jobDefId);
+            window.debugLog('JobDefinitionsManagement', 'Reloading job definition:', jobDefId);
+
+            try {
+                // Use the general reload endpoint - it reloads all but we show per-job feedback
+                const response = await fetch('/api/job-definitions/reload', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to reload job definition');
+                }
+
+                window.showNotification(`"${jobDefName}" reloaded successfully`, 'success');
+                await this.loadJobDefinitions();
+            } catch (err) {
+                window.debugError('JobDefinitionsManagement', 'Error reloading job definition:', err);
+                window.showNotification('Failed to reload: ' + err.message, 'error');
+            } finally {
+                this.reloadingJobIds.delete(jobDefId);
+            }
         },
 
         async loadJobDefinitions() {
@@ -855,6 +938,53 @@ document.addEventListener('alpine:init', () => {
                 return jobDef ? jobDef.name : postJobId + ' (deleted)';
             });
             return 'Post-jobs:\n' + names.join('\n');
+        }
+    }));
+
+    // Job Templates Management Component (for jobs.html - read-only list)
+    Alpine.data('jobTemplatesManagement', () => ({
+        jobTemplates: [],
+        loading: true,
+
+        init() {
+            window.debugLog('JobTemplatesManagement', 'Initializing component');
+            this.loadJobTemplates();
+        },
+
+        async loadJobTemplates() {
+            window.debugLog('JobTemplatesManagement', 'Loading job templates from /api/job-templates');
+            this.loading = true;
+            try {
+                const response = await fetch('/api/job-templates');
+                window.debugLog('JobTemplatesManagement', 'Response status:', response.status);
+                if (!response.ok) {
+                    // If 404, templates API not implemented yet - show empty state
+                    if (response.status === 404) {
+                        this.jobTemplates = [];
+                        this.loading = false;
+                        return;
+                    }
+                    throw new Error('Failed to fetch job templates');
+                }
+
+                const data = await response.json();
+                window.debugLog('JobTemplatesManagement', 'Job templates received:', data);
+
+                // API returns { templates: [...] } or array directly
+                if (data && data.templates) {
+                    this.jobTemplates = Array.isArray(data.templates) ? data.templates : [];
+                } else if (Array.isArray(data)) {
+                    this.jobTemplates = data;
+                } else {
+                    this.jobTemplates = [];
+                }
+
+                this.loading = false;
+            } catch (err) {
+                window.debugError('JobTemplatesManagement', 'Error loading job templates:', err);
+                this.loading = false;
+                // Don't show notification for missing API - it's expected until implemented
+            }
         }
     }));
 
