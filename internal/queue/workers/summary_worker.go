@@ -452,7 +452,7 @@ func parseThinkingLevel(level string) genai.ThinkingLevel {
 
 // generateSummary generates a summary from documents using Gemini.
 // thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH.
-// model overrides the default gemini-3-pro-preview model (e.g., "gemini-3-flash").
+// model overrides the default gemini-3-pro-preview model (e.g., "gemini-3-flash-preview").
 func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder

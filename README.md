@@ -109,8 +109,8 @@ path = "./data"
 
 [gemini]
 google_api_key = "YOUR_API_KEY"  # Required for AI features
-agent_model = "gemini-3-pro-preview"
-chat_model = "gemini-3-pro-preview"
+agent_model = "gemini-3-flash-preview"
+chat_model = "gemini-3-flash-preview"
 rate_limit = "4s"  # 15 RPM free tier
 
 [search]

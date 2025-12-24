@@ -129,7 +129,7 @@ type JobWorker interface {
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required
-  agent_model: "gemini-3-pro-preview"     # Model for agents
+  agent_model: "gemini-3-flash-preview"   # Model for agents
   timeout: "5m"                        # Operation timeout
   rate_limit: "4s"                     # Rate limit between requests
 ```
@@ -901,7 +901,7 @@ search_type = "text_search"
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required
-  chat_model: "gemini-3-pro-preview"      # Model for summaries
+  chat_model: "gemini-3-flash-preview"    # Model for summaries
   temperature: 0.7                     # Generation temperature
 ```
 
@@ -1138,8 +1138,8 @@ Used by: Agent Worker, Summary Worker, Web Search Worker
 ```yaml
 gemini:
   google_api_key: "your-api-key"      # Required - Gemini API key
-  agent_model: "gemini-3-pro-preview"     # Model for agent operations
-  chat_model: "gemini-3-pro-preview"      # Model for chat/summaries
+  agent_model: "gemini-3-flash-preview"   # Model for agent operations
+  chat_model: "gemini-3-flash-preview"    # Model for chat/summaries
   max_turns: 10                        # Max agent conversation turns
   timeout: "5m"                        # Operation timeout
   rate_limit: "4s"                     # Rate limit between requests

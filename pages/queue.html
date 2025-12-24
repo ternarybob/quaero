@@ -2777,7 +2777,7 @@
                         const params = new URLSearchParams();
                         params.append('limit', this.pageSize);
                         params.append('offset', (this.currentPage - 1) * this.pageSize);
-                        params.append('order_by', 'created_at');
+                        params.append('order_by', 'started_at');
                         params.append('order_dir', 'DESC');
 
                         // Always fetch parent jobs only

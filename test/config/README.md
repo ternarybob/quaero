@@ -105,7 +105,7 @@ Configuration values are resolved in this order (highest to lowest priority):
 ```toml
 [agent]
 google_api_key = ""
-model_name = "gemini-3-pro-preview"
+model_name = "gemini-3-flash-preview"
 ```
 
 **Override config** (`test-quaero-no-variables.toml`):

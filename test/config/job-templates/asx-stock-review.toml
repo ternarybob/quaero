@@ -35,7 +35,7 @@ description = "Generate recommendation for {stock:name}"
 depends = "fetch_stock_data"
 on_error = "fail"
 filter_tags = ["{stock:ticker_lower}"]
-model = "gemini-3-flash"
+model = "gemini-3-flash-preview"
 prompt = """Generate a brief investment recommendation for ASX:{stock:ticker} ({stock:name}).
 
 Based on the stock data, provide:

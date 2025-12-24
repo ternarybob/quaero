@@ -517,7 +517,7 @@ The LLM service provides embeddings and chat using Google ADK (Agent Development
 
 **Embedding Model:** `gemini-embedding-001` with 768-dimension output (matches database schema)
 
-**Chat Model:** `gemini-3-pro-preview` (high-quality, same as agent service)
+**Chat Model:** `gemini-3-flash-preview` (default, cost-efficient)
 
 **No Offline Mode:** Requires Google Gemini API key - no local inference or mock mode available
 
@@ -528,7 +528,7 @@ The LLM service provides embeddings and chat using Google ADK (Agent Development
 [llm]
 google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required
 embed_model_name = "gemini-embedding-001"      # Default
-chat_model_name = "gemini-3-pro-preview"           # Default
+chat_model_name = "gemini-3-flash-preview"         # Default
 timeout = "5m"                                  # Operation timeout
 embed_dimension = 768                           # Must match storage config
 ```
@@ -675,7 +675,7 @@ Update document.Metadata[agent_type] → Publish event
 **Model Initialization:**
 - Uses `gemini.NewModel(ctx, modelName, clientConfig)` from `google.golang.org/adk/model/gemini`
 - Client config: `APIKey`, `Backend: genai.BackendGeminiAPI`
-- Default model: `gemini-3-pro-preview` (high-quality)
+- Default model: `gemini-3-flash-preview` (cost-efficient)
 - Model shared across all agents for efficiency
 - Initialization happens once at service startup
 
@@ -760,7 +760,7 @@ use_keywords = true  # Access metadata["keyword_extractor"]["keywords"]
 ```toml
 [agent]
 google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required
-model_name = "gemini-3-pro-preview"                # Default
+model_name = "gemini-3-flash-preview"              # Default
 max_turns = 10                                  # Agent conversation turns
 timeout = "5m"                                  # Execution timeout
 ```

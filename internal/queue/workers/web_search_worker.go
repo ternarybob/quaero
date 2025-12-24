@@ -124,8 +124,8 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		breadth = 5
 	}
 
-	// Extract model (optional, default gemini-3-flash)
-	model := "gemini-3-flash"
+	// Extract model (optional, default gemini-3-flash-preview)
+	model := "gemini-3-flash-preview"
 	if m, ok := stepConfig["model"].(string); ok && m != "" {
 		model = m
 	}
@@ -245,7 +245,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 
 	// Default model fallback
 	if model == "" {
-		model = "gemini-3-flash"
+		model = "gemini-3-flash-preview"
 	}
 
 	// Check cache settings

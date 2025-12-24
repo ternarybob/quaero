@@ -46,7 +46,7 @@ type = "summary"
 description = "Analyze announcements against share price movements to identify NOISE vs SIGNAL"
 on_error = "continue"
 filter_tags = ["{stock:ticker_lower}"]
-model = "gemini-3-flash"
+model = "gemini-3-flash-preview"
 thinking_level = "HIGH"
 prompt = """You are a Management Forensic Analyst & Equity Researcher specializing in separating NOISE from SIGNAL in corporate communications and identifying the "Vanishing Promise" and "Pump-to-Hold" ratio.
 
@@ -238,7 +238,7 @@ description = "Generate comprehensive stock summary for {stock:name} with growth
 depends = "analyze_announcements"
 on_error = "fail"
 filter_tags = ["{stock:ticker_lower}"]
-model = "gemini-3-flash"
+model = "gemini-3-flash-preview"
 thinking_level = "HIGH"
 prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
 Analyze all collected data for ASX:{stock:ticker} ({stock:name}) in the {stock:industry} sector.
