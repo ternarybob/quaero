@@ -3,6 +3,7 @@ module github.com/ternarybob/quaero
 go 1.25.3
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.19.0
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d

@@ -101,6 +101,9 @@ type App struct {
 	// LLM service (Google ADK)
 	LLMService interfaces.LLMService
 
+	// Provider factory (multi-provider support: Gemini, Claude)
+	ProviderFactory *llm.ProviderFactory
+
 	// Chat service (agent-based)
 	ChatService interfaces.ChatService
 
@@ -411,6 +414,20 @@ func (a *App) initServices() error {
 			a.Logger.Debug().Msg("LLM service initialized and health check passed")
 		}
 	}
+
+	// 3.7. Initialize Provider Factory (multi-provider support: Gemini, Claude)
+	// The provider factory enables workers to use different AI providers (Gemini, Claude)
+	// based on the model specified in job/step configuration.
+	a.ProviderFactory = llm.NewProviderFactory(
+		&a.Config.Gemini,
+		&a.Config.Claude,
+		&a.Config.LLM,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Logger.Debug().
+		Str("default_provider", string(a.Config.LLM.DefaultProvider)).
+		Msg("Provider factory initialized for multi-provider AI support")
 
 	// Initialize event service (already created in New() before LogService setup)
 
@@ -788,6 +805,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", competitorAnalysisWorker.GetType().String()).Msg("Competitor Analysis worker registered")
 
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
+	// Supports multi-provider AI (Gemini, Claude) via provider factory
 	summaryWorker := workers.NewSummaryWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
@@ -795,6 +813,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.ProviderFactory,
 	)
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
