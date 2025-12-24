@@ -1,6 +1,6 @@
 ---
 name: 3agents
-description: Adversarial 3-agent loop - CORRECTNESS over SPEED
+description: Adversarial 4-agent loop (3 core + documentarian) - CORRECTNESS over SPEED. Steps are MANDATORY.
 ---
 
 Execute: $ARGUMENTS
@@ -20,15 +20,17 @@ mkdir -p $WORKDIR
 
 ## AGENTS
 
-1. **ARCHITECT** - Assesses requirements, reads architecture docs, creates step documentation with clear acceptance criteria
+1. **ARCHITECT** - Assesses requirements, reads architecture docs, creates step documentation with clear acceptance criteria (STEPS ARE MANDATORY)
 2. **WORKER** - Implements steps according to step documentation, following skills and architecture
 3. **VALIDATOR** - Adversarial reviewer: validates against requirements, architecture, AND skills. Default: REJECT
+4. **DOCUMENTARIAN** - Updates `docs/architecture` after all steps complete to reflect new patterns, decisions, and configuration
 
 **ADVERSARIAL RELATIONSHIPS:**
 ```
-WORKER ←→ VALIDATOR : Hostile opposition - VALIDATOR assumes bugs exist
-ARCHITECT → WORKER  : Clear requirements - WORKER must follow precisely
-ARCHITECT → VALIDATOR: Requirements are LAW - VALIDATOR enforces compliance
+WORKER ←→ VALIDATOR    : Hostile opposition - VALIDATOR assumes bugs exist
+ARCHITECT → WORKER     : Clear requirements - WORKER must follow precisely
+ARCHITECT → VALIDATOR  : Requirements are LAW - VALIDATOR enforces compliance
+DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture docs
 ```
 
 ## RULES
@@ -38,6 +40,16 @@ ARCHITECT → VALIDATOR: Requirements are LAW - VALIDATOR enforces compliance
 - **ADVERSARIAL by default** - Challenge, don't agree
 - **Requirements are LAW** - No interpretation, no "good enough"
 - **Skills are enforceable** - Violations = automatic REJECT
+- **STEPS ARE MANDATORY** - Every task MUST have step documentation with validation against architecture and requirements. No exceptions.
+
+### Configuration Directory Rules
+**`./bin` is UNTRACKED (UAT environment):**
+- Changes CAN be made directly to `./bin` for testing/UAT purposes
+- **HOWEVER** - all configuration changes MUST be mirrored to:
+  - `./deployments/common` - Production-ready configuration
+  - `./test/config` - Test configuration
+- VALIDATOR must verify configuration parity between these directories
+- Any change to `./bin` without corresponding changes to deployments/test = **REJECT**
 
 ### Skill Compliance (MANDATORY)
 - **Refactoring**: `.claude/skills/refactoring/SKILL.md` - ALWAYS applies
@@ -438,6 +450,70 @@ If VALIDATOR rejects at iteration 5:
    - `.claude/skills/go/SKILL.md`: Added pattern for <X>
    - (or "No updates required")
    ```
+
+### PHASE 5: ARCHITECTURE DOCUMENTATION
+
+**Purpose:** Update `docs/architecture` to reflect any architectural decisions, patterns, or changes discovered during implementation.
+
+**Trigger:** Executes automatically after PHASE 4 (COMPLETE) finishes successfully.
+
+#### Step 5.1: Review Implementation Artifacts
+1. **Re-read all workdir artifacts:**
+   - `$WORKDIR/architect-analysis.md` - Original architecture decisions
+   - `$WORKDIR/step_*_implementation.md` - Implementation details
+   - `$WORKDIR/step_*_validation.md` - Validation findings
+   - `$WORKDIR/summary.md` - Final summary
+
+2. **Identify documentation updates needed:**
+   - New patterns introduced
+   - Architecture decisions made
+   - Integration points added
+   - Configuration changes
+
+#### Step 5.2: Update Architecture Documents
+1. **Review existing architecture docs:**
+   - `docs/architecture/ARCHITECTURE.md` - Main architecture document
+   - `docs/architecture/README.md` - Architecture overview
+   - Domain-specific docs (WORKERS.md, QUEUE_*.md, etc.)
+
+2. **For each significant change, update the appropriate doc:**
+   - Add new sections for new components/patterns
+   - Update existing sections if behavior changed
+   - Add cross-references between related sections
+   - Document configuration requirements (especially deployments/common and test/config)
+
+#### Step 5.3: Write Architecture Update Summary
+**Write `$WORKDIR/architecture-updates.md`:**
+```markdown
+# Architecture Documentation Updates
+
+## Documents Modified
+| Document | Section | Change Type | Description |
+|----------|---------|-------------|-------------|
+| ARCHITECTURE.md | <section> | Added/Updated | <description> |
+| WORKERS.md | <section> | Added/Updated | <description> |
+
+## New Patterns Documented
+- <Pattern name>: <Brief description>
+- <Pattern name>: <Brief description>
+
+## Configuration Documentation
+- `deployments/common`: <What was documented>
+- `test/config`: <What was documented>
+
+## Cross-References Added
+- <Doc A> ↔ <Doc B>: <Relationship documented>
+
+## Deferred Documentation
+- <Item>: <Reason deferred, e.g., "needs further discussion">
+```
+
+#### Step 5.4: Verification
+1. **Ensure consistency:**
+   - Architecture docs match actual implementation
+   - Configuration paths are accurate
+   - No contradictions between documents
+2. **Update timestamps/version notes** if the project uses them
 
 ## INVOKE
 ```
