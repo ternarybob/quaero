@@ -104,7 +104,7 @@ func NewClaudeService(claudeConfig *common.ClaudeConfig, storageManager interfac
 
 	// Set default model name if not specified
 	if claudeConfig.Model == "" {
-		claudeConfig.Model = "claude-sonnet-4-20250514"
+		claudeConfig.Model = "claude-haiku-3-5-20241022"
 	}
 
 	// Parse timeout duration

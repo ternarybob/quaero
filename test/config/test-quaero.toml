@@ -42,14 +42,14 @@ definitions_dir = "./job-definitions"  # Directory for job definition files
 api_key = "{google_places_api_key}"  # Required for places search jobs
 
 # =============================================================================
-# Gemini Configuration (Google ADK - unified for agents and chat)
+# Gemini Configuration (Google Gemini API)
 # =============================================================================
 [gemini]
-google_api_key = "{google_gemini_api_key}"    # Loaded from variables
-agent_model = "gemini-3-flash-preview"  # Gemini 3 Flash - Pro-level intelligence at Flash speed
-chat_model = "gemini-3-flash-preview"   # Gemini 3 Flash - Pro-level intelligence at Flash speed
-timeout = "5m"                            # Operation timeout
-temperature = 0.7                         # Chat completion temperature
+api_key = "{google_gemini_api_key}"   # Loaded from variables
+model = "gemini-3-flash-preview"      # Model for AI operations
+thinking = "NORMAL"                   # Default thinking level
+timeout = "5m"                        # Operation timeout
+temperature = 0.7                     # Completion temperature
 
 
 # =============================================================================

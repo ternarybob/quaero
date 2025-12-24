@@ -1,0 +1,64 @@
+# ASX Stocks Daily Analysis - Template Orchestration Job
+# This job runs data collection, then stock analysis, then emails each report.
+#
+# WORKFLOW:
+# 1. Run asx-stock-data template for each stock (data collection - parallel)
+# 2. Run asx-stock-review template for each stock (analysis - depends on step 1)
+# 3. Run stock-email-report template for each stock (email - depends on step 2)
+#
+# VARIABLES:
+# Global variables are declared once at job level in [config] section.
+# All steps inherit these variables automatically.
+
+id = "asx-stocks-daily"
+name = "ASX Daily Stock Analysis (Multiple Stocks)"
+type = "job_template"
+description = "Runs ASX stock data collection, analysis, and individual email reports"
+tags = ["asx", "stocks", "daily", "template", "email"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# Global variables - inherited by all steps that use job_template
+# Available variable keys: ticker, name, industry
+# Variable references in templates: {stock:ticker}, {stock:name}, {stock:industry}
+# Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
+[config]
+variables = [
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    # { ticker = "WES", name = "Wesfarmers", industry = "retail" },
+    # { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
+    # { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
+    # { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+]
+
+# Step 1: Collect stock data for each stock
+[step.collect_stock_data]
+type = "job_template"
+description = "Collect stock data (prices, announcements, news) for each stock"
+on_error = "continue"
+template = "asx-stock-data"
+parallel = true
+# Variables inherited from [config] section
+
+# Step 2: Run stock analysis for each stock (uses collected data)
+[step.run_stock_analysis]
+type = "job_template"
+description = "Execute stock analysis template for each configured stock"
+depends = "collect_stock_data"
+on_error = "continue"
+template = "asx-stock-review"
+parallel = true
+# Variables inherited from [config] section
+
+# Step 3: Email individual stock reports
+[step.email_stock_reports]
+type = "job_template"
+description = "Email individual stock analysis reports"
+depends = "run_stock_analysis"
+on_error = "continue"
+template = "stock-email-report"
+parallel = true
+# Variables inherited from [config] section

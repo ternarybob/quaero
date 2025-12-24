@@ -83,41 +83,36 @@ environment = "development" # "development" or "production"
 # api_key = "YOUR_GOOGLE_PLACES_API_KEY"  # Required for places search jobs
 
 # =============================================================================
-# Gemini Configuration (Google ADK - Unified for Agents and Chat)
+# Gemini Configuration (Google Gemini API)
 # =============================================================================
-# Configure AI services for agents (keyword extraction) and chat completions.
-# Both services use the same Google Gemini API key and models.
+# Configure Google Gemini API for AI operations (agents, chat, summaries).
 # Requires Google Gemini API key from: https://aistudio.google.com/app/apikey
 #
 # IMPORTANT: Gemini services require a valid API key. No offline fallback is available.
-# If the API key is missing or invalid, agent and chat operations will fail immediately.
+# If the API key is missing or invalid, operations will fail immediately.
 #
-# Model Selection Strategy:
-# - agent_model: Default model for standard agent operations
-# - agent_model_fast: Optimized for simple, quick tasks (extraction, classification)
-# - agent_model_thinking: For complex reasoning tasks requiring deep analysis
+# Thinking Levels:
+# - NONE/MINIMAL: No extended thinking (fastest)
+# - LOW: Light reasoning
+# - NORMAL: Standard reasoning (default)
+# - HIGH: Deep reasoning (slowest, most thorough)
 #
-# Jobs can specify thinking_level in step config:
-#   thinking_level = "LOW"      # Standard reasoning
-#   thinking_level = "HIGH"     # Deep reasoning for complex analysis
+# Jobs can override model and thinking in step config:
+#   model = "gemini-2.5-flash-preview-05-20"  # Explicit model override
+#   thinking_level = "HIGH"                    # Deep reasoning for complex analysis
 #
-# Defaults: agent_model="gemini-3-flash-preview", agent_model_fast="gemini-3-flash-preview",
-#           agent_model_thinking="gemini-3-flash-preview",
-#           chat_model="gemini-3-flash-preview", max_turns=10, timeout="5m", temperature=0.7
-# Env vars: QUAERO_GEMINI_GOOGLE_API_KEY, QUAERO_GEMINI_AGENT_MODEL,
-#           QUAERO_GEMINI_AGENT_MODEL_FAST, QUAERO_GEMINI_AGENT_MODEL_THINKING,
-#           QUAERO_GEMINI_CHAT_MODEL, QUAERO_GEMINI_MAX_TURNS,
-#           QUAERO_GEMINI_TIMEOUT, QUAERO_GEMINI_TEMPERATURE
+# Defaults: model="gemini-3-flash-preview", thinking="NORMAL",
+#           max_turns=10, timeout="5m", temperature=0.7
+# Env vars: QUAERO_GEMINI_API_KEY, QUAERO_GEMINI_MODEL, QUAERO_GEMINI_THINKING,
+#           QUAERO_GEMINI_MAX_TURNS, QUAERO_GEMINI_TIMEOUT, QUAERO_GEMINI_TEMPERATURE
 
 # [gemini]
-# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"              # Required for all AI operations
-# agent_model = "gemini-3-flash-preview"                     # Default model for agent operations
-# agent_model_fast = "gemini-3-flash-preview"                # Fast model for simple tasks
-# agent_model_thinking = "gemini-3-flash-preview"            # Thinking model (uses ThinkingConfig)
-# chat_model = "gemini-3-flash-preview"                      # Model for chat operations
-# max_turns = 10                                             # Maximum agent conversation turns
-# timeout = "5m"                                             # Operation timeout
-# temperature = 0.7                                          # Chat completion temperature (0.0-1.0)
+# api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all AI operations
+# model = "gemini-3-flash-preview"        # Model for AI operations
+# thinking = "NORMAL"                     # Default thinking level
+# max_turns = 10                          # Maximum agent conversation turns
+# timeout = "5m"                          # Operation timeout
+# temperature = 0.7                       # Completion temperature (0.0-1.0)
 
 # =============================================================================
 # Claude Configuration (Anthropic API)
@@ -126,45 +121,43 @@ environment = "development" # "development" or "production"
 # Requires Anthropic API key from: https://console.anthropic.com/
 #
 # IMPORTANT: Claude services require a valid API key. No offline fallback is available.
-# If the API key is missing or invalid, Claude operations will fail immediately.
+# If the API key is missing or invalid, operations will fail immediately.
 #
-# Model Selection:
-# - model: Default model for standard operations (claude-sonnet-4-20250514)
-# - model_fast: Fast model for simple tasks (claude-haiku-3-5-20241022)
-# - model_thinking: For complex reasoning (claude-sonnet-4-20250514)
+# Thinking Levels:
+# - NORMAL: Standard reasoning (default)
+# - HIGH: Deep reasoning for complex analysis
 #
 # Jobs can specify the model in step config:
 #   model = "claude-sonnet-4-20250514"           # Explicit Claude model
 #   model = "claude/claude-sonnet-4-20250514"    # With provider prefix
+#   thinking_level = "HIGH"                      # Deep reasoning
 #
-# Defaults: model="claude-sonnet-4-20250514", model_fast="claude-haiku-3-5-20241022",
-#           model_thinking="claude-sonnet-4-20250514",
+# Defaults: model="claude-haiku-3-5-20241022", thinking="NORMAL",
 #           max_tokens=8192, timeout="5m", temperature=0.7
 # Env vars: ANTHROPIC_API_KEY, QUAERO_CLAUDE_API_KEY, QUAERO_CLAUDE_MODEL,
-#           QUAERO_CLAUDE_MODEL_FAST, QUAERO_CLAUDE_MODEL_THINKING,
-#           QUAERO_CLAUDE_MAX_TOKENS, QUAERO_CLAUDE_TIMEOUT, QUAERO_CLAUDE_TEMPERATURE
+#           QUAERO_CLAUDE_THINKING, QUAERO_CLAUDE_MAX_TOKENS,
+#           QUAERO_CLAUDE_TIMEOUT, QUAERO_CLAUDE_TEMPERATURE
 
 # [claude]
-# api_key = "YOUR_ANTHROPIC_API_KEY"                         # Required for Claude operations
-# model = "claude-sonnet-4-20250514"                         # Default model for operations
-# model_fast = "claude-haiku-3-5-20241022"                   # Fast model for simple tasks
-# model_thinking = "claude-sonnet-4-20250514"                # Thinking model for complex reasoning
-# max_tokens = 8192                                          # Maximum tokens in response
-# timeout = "5m"                                             # Operation timeout
-# temperature = 0.7                                          # Completion temperature (0.0-1.0)
+# api_key = "YOUR_ANTHROPIC_API_KEY"       # Required for Claude operations
+# model = "claude-haiku-3-5-20241022"      # Model for AI operations
+# thinking = "NORMAL"                      # Default thinking level
+# max_tokens = 8192                        # Maximum tokens in response
+# timeout = "5m"                           # Operation timeout
+# temperature = 0.7                        # Completion temperature (0.0-1.0)
 
 # =============================================================================
 # LLM Provider Configuration (Multi-Provider Support)
 # =============================================================================
 # Configure the default AI provider for operations.
-# Individual jobs/steps can override this by specifying a model with provider prefix.
+# Individual jobs/steps can override by specifying a model with provider prefix.
 #
 # Supported providers:
 # - gemini: Google Gemini API (default)
 # - claude: Anthropic Claude API
 #
 # Model selection in jobs:
-# - "gemini-3-flash" or "gemini/gemini-3-flash" -> Uses Gemini
+# - "gemini-3-flash-preview" or "gemini/gemini-3-flash-preview" -> Uses Gemini
 # - "claude-sonnet-4-20250514" or "claude/claude-sonnet-4-20250514" -> Uses Claude
 # - Empty or no model specified -> Uses default provider
 #
@@ -172,7 +165,7 @@ environment = "development" # "development" or "production"
 # Env vars: QUAERO_LLM_DEFAULT_PROVIDER
 
 # [llm]
-# default_provider = "gemini"                                # Default provider: "gemini" or "claude"
+# default_provider = "gemini"  # Default provider: "gemini" or "claude"
 
 # =============================================================================
 # Job Definitions Configuration

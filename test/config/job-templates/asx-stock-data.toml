@@ -1,0 +1,42 @@
+# ASX Stock Data Collection Template (Test Version)
+# =========================================================================
+# Simplified version for testing - fetches only stock data (no web searches).
+# This speeds up test execution while still testing the caching mechanism.
+#
+# USAGE:
+# This template is invoked via a job_template step with variables:
+#   variables = [
+#     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" }
+#   ]
+#
+# VARIABLE SYNTAX:
+# - {stock:ticker} - ASX ticker code (e.g., GNP)
+# - {stock:name} - Company name
+# - {stock:industry} - Industry classification
+# - {stock:ticker_lower} - Lowercase ticker for URLs/tags
+# =========================================================================
+
+id = "asx-data-{stock:ticker_lower}"
+name = "ASX Stock Data: {stock:ticker}"
+type = "stock_data"
+description = "Data collection for {stock:name} (ASX:{stock:ticker}) - test version"
+tags = ["asx", "stock-data", "{stock:ticker_lower}", "{stock:industry}"]
+schedule = ""
+timeout = "10m"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Step 1: Fetch Stock Data (6 Months - shorter for tests)
+# =========================================================================
+# Fetches OHLCV data and technical indicators.
+# Uses default cache_hours=24 - second run within 24hrs should use cache.
+
+[step.fetch_stock_data]
+type = "asx_stock_data"
+description = "Fetch stock data and technicals for {stock:name}"
+on_error = "continue"
+asx_code = "{stock:ticker}"
+period = "M6"
+output_tags = ["stock-data", "{stock:ticker_lower}", "{stock:industry}"]
+# Note: cache_hours defaults to 24 if not specified

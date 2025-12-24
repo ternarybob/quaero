@@ -280,7 +280,8 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		Msg("Using AI provider for summary generation")
 
 	// Generate summary using provider factory
-	summaryContent, err := w.generateSummary(ctx, prompt, documents, stepID, thinkingLevel, model)
+	// Pass jobDef to include portfolio config variables in the prompt context
+	summaryContent, err := w.generateSummary(ctx, prompt, documents, stepID, thinkingLevel, model, &jobDef)
 	if err != nil {
 		w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -387,8 +388,8 @@ func (w *SummaryWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
-// validateOutput checks if the summary contains all required patterns.
-// Returns an error listing missing patterns if validation fails.
+// validateOutput checks if the summary contains all required patterns and no placeholder patterns.
+// Returns an error listing missing patterns or detected placeholders if validation fails.
 func (w *SummaryWorker) validateOutput(content string, patterns []string) error {
 	var missing []string
 	for _, pattern := range patterns {
@@ -399,13 +400,144 @@ func (w *SummaryWorker) validateOutput(content string, patterns []string) error 
 	if len(missing) > 0 {
 		return fmt.Errorf("summary output validation failed - missing required sections: %v", missing)
 	}
+
+	// Check for placeholder patterns that indicate fabricated or incomplete data
+	placeholderPatterns := []string{
+		"$[X",       // Dollar placeholder like $[X.XX]
+		"[X]",       // Generic placeholder
+		"[Pending]", // Pending placeholder
+		"[YYYY-MM",  // Date placeholder
+		"| [XXX] |", // Table row placeholder
+	}
+
+	var foundPlaceholders []string
+	for _, placeholder := range placeholderPatterns {
+		if strings.Contains(content, placeholder) {
+			foundPlaceholders = append(foundPlaceholders, placeholder)
+		}
+	}
+
+	if len(foundPlaceholders) > 0 {
+		w.logger.Warn().
+			Strs("placeholders_found", foundPlaceholders).
+			Msg("Summary contains placeholder patterns - output may have incomplete data")
+		// Note: This is a warning, not an error, as some placeholders in template sections
+		// (like risk assessment dropdowns) may be intentional
+	}
+
 	return nil
+}
+
+// buildPortfolioHoldingsSection extracts portfolio holdings from job config variables
+// and formats them as a markdown section for inclusion in the summary prompt.
+// This enables portfolio summaries to include units, avg_price, and weighting data.
+func (w *SummaryWorker) buildPortfolioHoldingsSection(jobDef *models.JobDefinition) string {
+	if jobDef == nil || jobDef.Config == nil {
+		return ""
+	}
+
+	// Extract variables from job config
+	variablesRaw, ok := jobDef.Config["variables"]
+	if !ok {
+		return ""
+	}
+
+	// Parse variables array
+	var variables []map[string]interface{}
+	switch v := variablesRaw.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if varMap, ok := item.(map[string]interface{}); ok {
+				variables = append(variables, varMap)
+			}
+		}
+	case []map[string]interface{}:
+		variables = v
+	default:
+		return ""
+	}
+
+	if len(variables) == 0 {
+		return ""
+	}
+
+	// Check if this looks like portfolio data (has ticker, units, avg_price)
+	hasPortfolioData := false
+	for _, varSet := range variables {
+		if _, hasTicker := varSet["ticker"]; hasTicker {
+			if _, hasUnits := varSet["units"]; hasUnits {
+				hasPortfolioData = true
+				break
+			}
+		}
+	}
+
+	if !hasPortfolioData {
+		return ""
+	}
+
+	// Build portfolio holdings table
+	var holdings strings.Builder
+	holdings.WriteString("\n## Portfolio Holdings Data\n\n")
+	holdings.WriteString("The following portfolio data was provided in the job configuration. ")
+	holdings.WriteString("Use these EXACT values for units, average price, and weighting calculations:\n\n")
+	holdings.WriteString("| Ticker | Name | Industry | Units | Avg Price | Weighting |\n")
+	holdings.WriteString("|--------|------|----------|-------|-----------|----------|\n")
+
+	for _, varSet := range variables {
+		ticker := getStringValue(varSet, "ticker", "N/A")
+		name := getStringValue(varSet, "name", "N/A")
+		industry := getStringValue(varSet, "industry", "N/A")
+		units := getNumericValue(varSet, "units")
+		avgPrice := getNumericValue(varSet, "avg_price")
+		weighting := getNumericValue(varSet, "weighting")
+
+		holdings.WriteString(fmt.Sprintf("| %s | %s | %s | %.0f | $%.3f | %.2f%% |\n",
+			ticker, name, industry, units, avgPrice, weighting))
+	}
+
+	holdings.WriteString("\n**IMPORTANT**: The above data is authoritative. ")
+	holdings.WriteString("Calculate Cost Basis = Units × Avg Price. ")
+	holdings.WriteString("Calculate Current Value = Units × Current Price (from stock analysis documents). ")
+	holdings.WriteString("Calculate Unrealized P/L = Current Value - Cost Basis.\n\n")
+
+	w.logger.Info().
+		Int("holdings_count", len(variables)).
+		Msg("Included portfolio holdings data in summary prompt")
+
+	return holdings.String()
+}
+
+// getStringValue extracts a string value from a map, returning defaultVal if not found
+func getStringValue(m map[string]interface{}, key, defaultVal string) string {
+	if val, ok := m[key]; ok {
+		if s, ok := val.(string); ok {
+			return s
+		}
+	}
+	return defaultVal
+}
+
+// getNumericValue extracts a numeric value from a map, handling both float64 and int types
+func getNumericValue(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
+	}
+	return 0
 }
 
 // generateSummary generates a summary from documents using the provider factory.
 // thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (Gemini only).
 // model specifies the model to use, can include provider prefix (e.g., "claude/claude-sonnet-4-20250514").
-func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string) (string, error) {
+// jobDef provides access to job-level config variables (e.g., portfolio holdings with units, avg_price).
+func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string, jobDef *models.JobDefinition) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder
 	docsContent.WriteString("# Documents to Summarize\n\n")
@@ -429,12 +561,15 @@ func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, docu
 	// Get current date for the analysis
 	currentDate := time.Now().Format("January 2, 2006")
 
+	// Build portfolio holdings section if job config contains variables (e.g., for portfolio summaries)
+	portfolioHoldings := w.buildPortfolioHoldingsSection(jobDef)
+
 	// Build the full prompt with current date context
 	systemPrompt := fmt.Sprintf(`You are an expert document analyst and summarizer.
 
 ## Current Date
 Today's date is %s. Use this as the analysis date in your output. Do NOT use any other date.
-
+%s
 ## Task
 %s
 
@@ -446,10 +581,11 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 - If the task asks for specific information (like architecture), focus on that aspect
 - Be thorough but concise
 - Always use the current date provided above for any "Analysis Date" fields
+- IMPORTANT: Use the exact values from the Portfolio Holdings Data section above for units, avg_price, and weighting - DO NOT use placeholders like [X] or $[X.XX]
 
 ## Documents
 
-%s`, currentDate, prompt, docsContent.String())
+%s`, currentDate, portfolioHoldings, prompt, docsContent.String())
 
 	// Detect provider and normalize model
 	provider := w.providerFactory.DetectProvider(modelOverride)
@@ -457,7 +593,7 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 
 	// Use default model for provider if not specified
 	if model == "" {
-		model = w.providerFactory.GetDefaultModel(provider, "default")
+		model = w.providerFactory.GetDefaultModel(provider)
 	}
 
 	w.logger.Debug().

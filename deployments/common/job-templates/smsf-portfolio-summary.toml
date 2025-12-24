@@ -41,11 +41,30 @@ filter_tags = ["stock-portfolio"]
 thinking_level = "HIGH"
 prompt = """You are a Senior Investment Strategist preparing a practical SMSF portfolio review. Generate a 30-day "If-Then" Decision Matrix with clear BUY|HOLD|SELL recommendations backed by technical data and signal/noise analysis.
 
-You have received:
+## DATA AVAILABILITY
+
+### Data You HAVE Access To:
 1. Individual stock analysis reports for multiple ASX stocks (tagged stock-recommendation)
-2. S&P/ASX 200 (XJO) benchmark data (tagged benchmark, xjo) - use for "Portfolio Health vs S&P/ASX 200"
-3. Small Ordinaries (XSO) benchmark data (tagged benchmark, xso) - use for "Portfolio Health vs Small Ordinaries"
-4. Portfolio holdings data from the variables section (units, avg_price, date_added per stock)
+   - Current prices, technical indicators, company analysis
+2. S&P/ASX 200 (XJO) benchmark data (tagged benchmark, xjo)
+3. Small Ordinaries (XSO) benchmark data (tagged benchmark, xso)
+4. Portfolio holdings data (from Portfolio Holdings Data section above):
+   - Ticker, Name, Industry
+   - Units held
+   - Average purchase price (avg_price)
+   - Portfolio weighting
+
+### Data You DO NOT Have Access To:
+- Date when each position was added (date_added)
+- Historical prices at purchase date
+- Historical benchmark prices at purchase date
+- Time-weighted returns
+
+### CRITICAL: DO NOT FABRICATE DATA
+- NEVER invent dates, historical prices, or time-based performance metrics
+- NEVER include a "Date Added" column - this data does not exist
+- NEVER calculate "Alpha since purchase" or "Performance since Date Added"
+- If data is not available, omit that section entirely - do NOT use placeholders
 
 Your task is to consolidate these into a SINGLE portfolio review document with risk-adjusted actions and forensic analysis.
 
@@ -74,29 +93,17 @@ Based on the individual stock analyses, provide a high-level view of:
 
 ## UNREALIZED GAIN/LOSS TABLE
 
-Calculate the Unrealized Gain/Loss for each position using the provided units and avg_price:
+Calculate the Unrealized Gain/Loss for each position using:
+- Units and Avg Price from the Portfolio Holdings Data section (EXACT values - do not estimate)
+- Current Price from the individual stock analysis documents
+
+**IMPORTANT**: Replace all placeholder values below with ACTUAL calculated values. Do NOT leave any [X], $[X.XX], or similar placeholders in the output.
 
 | Ticker | Units | Avg Price | Current Price | Cost Basis | Current Value | Unrealized P/L | P/L % |
 |--------|-------|-----------|---------------|------------|---------------|----------------|-------|
-| [XXX] | X | $X.XX | $X.XX | $X | $X | $X | X% |
-| ... | ... | ... | ... | ... | ... | ... | ... |
-| **TOTAL** | - | - | - | **$X** | **$X** | **$X** | **X%** |
+| (Use actual ticker) | (From holdings) | (From holdings) | (From analysis) | (Units × Avg) | (Units × Current) | (Value - Cost) | ((P/L ÷ Cost) × 100) |
+| **TOTAL** | - | - | - | **(sum)** | **(sum)** | **(sum)** | **(weighted avg)** |
 
----
-
-## PERFORMANCE vs BENCHMARK (Since Date Added)
-
-Compare individual stock performance against XJO and XSO from each stock's date_added:
-
-| Ticker | Date Added | Stock Return | XJO Return (same period) | XSO Return (same period) | Alpha vs XJO | Alpha vs XSO |
-|--------|------------|--------------|--------------------------|--------------------------|--------------|--------------|
-| [XXX] | [YYYY-MM-DD] | X% | X% | X% | X% | X% |
-| ... | ... | ... | ... | ... | ... | ... |
-
-**Portfolio Alpha Summary**:
-- Stocks Outperforming XJO: X of Y
-- Stocks Outperforming XSO: X of Y
-- Weighted Portfolio Alpha vs XJO: X%
 
 ---
 
@@ -340,3 +347,11 @@ SMSF trustees should consult licensed advisers for investment decisions.
 Constraint: Only ASX-listed stocks considered.
 """
 output_tags = ["smsf-portfolio-review", "smsf-portfolio", "portfolio-summary"]
+
+# Validation patterns - ensure required sections are present with actual content
+# The summary worker will verify these patterns exist in the output
+output_validation = [
+    "## UNREALIZED GAIN/LOSS TABLE",
+    "## STOCK-BY-STOCK RECOMMENDATION TABLE",
+    "## EXECUTIVE SUMMARY"
+]

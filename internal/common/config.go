@@ -166,27 +166,24 @@ type PlacesAPIConfig struct {
 
 // GeminiConfig contains unified Google Gemini API configuration for all AI services
 type GeminiConfig struct {
-	GoogleAPIKey       string  `toml:"google_api_key"`       // Google Gemini API key for all AI operations
-	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-3-flash-preview")
-	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-3-flash-preview")
-	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-3-flash-preview")
-	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-3-flash-preview")
-	MaxTurns           int     `toml:"max_turns"`            // Maximum agent conversation turns (default: 10)
-	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
-	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "4s" for 15 RPM)
-	Temperature        float32 `toml:"temperature"`          // Chat completion temperature (default: 0.7)
+	APIKey      string  `toml:"api_key"`     // Google Gemini API key for all AI operations
+	Model       string  `toml:"model"`       // Model for AI operations (default: "gemini-3-flash-preview")
+	Thinking    string  `toml:"thinking"`    // Default thinking level: NONE, LOW, NORMAL, MEDIUM, HIGH (default: "NORMAL")
+	MaxTurns    int     `toml:"max_turns"`   // Maximum agent conversation turns (default: 10)
+	Timeout     string  `toml:"timeout"`     // Operation timeout as duration string (default: "5m")
+	RateLimit   string  `toml:"rate_limit"`  // Rate limit duration string (default: "4s" for 15 RPM)
+	Temperature float32 `toml:"temperature"` // Chat completion temperature (default: 0.7)
 }
 
 // ClaudeConfig contains Anthropic Claude API configuration for AI services
 type ClaudeConfig struct {
-	APIKey             string  `toml:"api_key"`              // Anthropic API key for Claude operations
-	Model              string  `toml:"model"`                // Default Claude model (default: "claude-sonnet-4-20250514")
-	ModelFast          string  `toml:"model_fast"`           // Fast model for simple tasks (default: "claude-haiku-3-5-20241022")
-	ModelThinking      string  `toml:"model_thinking"`       // Thinking model for complex reasoning (default: "claude-sonnet-4-20250514")
-	MaxTokens          int     `toml:"max_tokens"`           // Maximum tokens in response (default: 8192)
-	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
-	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "1s")
-	Temperature        float32 `toml:"temperature"`          // Completion temperature (default: 0.7)
+	APIKey      string  `toml:"api_key"`     // Anthropic API key for Claude operations
+	Model       string  `toml:"model"`       // Model for AI operations (default: "claude-haiku-3-5-20241022")
+	Thinking    string  `toml:"thinking"`    // Default thinking level: NONE, LOW, NORMAL, MEDIUM, HIGH (default: "NORMAL")
+	MaxTokens   int     `toml:"max_tokens"`  // Maximum tokens in response (default: 8192)
+	Timeout     string  `toml:"timeout"`     // Operation timeout as duration string (default: "5m")
+	RateLimit   string  `toml:"rate_limit"`  // Rate limit duration string (default: "1s")
+	Temperature float32 `toml:"temperature"` // Completion temperature (default: 0.7)
 }
 
 // LLMProvider represents the AI provider type
@@ -313,25 +310,22 @@ func NewDefaultConfig() *Config {
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 		Gemini: GeminiConfig{
-			GoogleAPIKey:       "",                       // User must provide API key (no fallback)
-			AgentModel:         "gemini-3-flash-preview", // Default model for agents
-			AgentModelFast:     "gemini-3-flash-preview", // Fast model for simple tasks
-			AgentModelThinking: "gemini-3-flash-preview", // Thinking model for complex reasoning (uses ThinkingConfig)
-			ChatModel:          "gemini-3-flash-preview", // Default model for chat
-			MaxTurns:           10,                       // Reasonable limit for agent loops
-			Timeout:            "5m",                     // 5 minutes for operations
-			RateLimit:          "4s",                     // Default to 4s (15 RPM) for free tier
-			Temperature:        0.7,                      // Default temperature for chat completions
+			APIKey:      "",                       // User must provide API key (no fallback)
+			Model:       "gemini-3-flash-preview", // Model for AI operations
+			Thinking:    "NORMAL",                 // Default thinking level
+			MaxTurns:    10,                       // Reasonable limit for agent loops
+			Timeout:     "5m",                     // 5 minutes for operations
+			RateLimit:   "4s",                     // Default to 4s (15 RPM) for free tier
+			Temperature: 0.7,                      // Default temperature for chat completions
 		},
 		Claude: ClaudeConfig{
-			APIKey:        "",                         // User must provide API key (ANTHROPIC_API_KEY or config)
-			Model:         "claude-sonnet-4-20250514", // Default model for Claude operations
-			ModelFast:     "claude-haiku-3-5-20241022", // Fast model for simple tasks
-			ModelThinking: "claude-sonnet-4-20250514", // Thinking model for complex reasoning
-			MaxTokens:     8192,                       // Default max tokens
-			Timeout:       "5m",                       // 5 minutes for operations
-			RateLimit:     "1s",                       // Default rate limit
-			Temperature:   0.7,                        // Default temperature
+			APIKey:      "",                          // User must provide API key (ANTHROPIC_API_KEY or config)
+			Model:       "claude-haiku-3-5-20241022", // Model for AI operations
+			Thinking:    "NORMAL",                    // Default thinking level
+			MaxTokens:   8192,                        // Default max tokens
+			Timeout:     "5m",                        // 5 minutes for operations
+			RateLimit:   "1s",                        // Default rate limit
+			Temperature: 0.7,                         // Default temperature
 		},
 		LLM: LLMConfig{
 			DefaultProvider: LLMProviderGemini, // Default to Gemini for backward compatibility
@@ -623,20 +617,21 @@ func applyEnvOverrides(config *Config) {
 	}
 
 	// Gemini configuration
-	if apiKey := os.Getenv("QUAERO_GEMINI_GOOGLE_API_KEY"); apiKey != "" {
-		config.Gemini.GoogleAPIKey = apiKey
+	// New unified env var (priority) then deprecated env var (backward compat)
+	if apiKey := os.Getenv("QUAERO_GEMINI_API_KEY"); apiKey != "" {
+		config.Gemini.APIKey = apiKey
+	} else if apiKey := os.Getenv("QUAERO_GEMINI_GOOGLE_API_KEY"); apiKey != "" {
+		config.Gemini.APIKey = apiKey // Deprecated: backward compatibility
 	}
-	if agentModel := os.Getenv("QUAERO_GEMINI_AGENT_MODEL"); agentModel != "" {
-		config.Gemini.AgentModel = agentModel
+	if model := os.Getenv("QUAERO_GEMINI_MODEL"); model != "" {
+		config.Gemini.Model = model
+	} else if defaultModel := os.Getenv("QUAERO_GEMINI_DEFAULT_MODEL"); defaultModel != "" {
+		config.Gemini.Model = defaultModel // Deprecated: backward compatibility
+	} else if agentModel := os.Getenv("QUAERO_GEMINI_AGENT_MODEL"); agentModel != "" {
+		config.Gemini.Model = agentModel // Deprecated: backward compatibility
 	}
-	if agentModelFast := os.Getenv("QUAERO_GEMINI_AGENT_MODEL_FAST"); agentModelFast != "" {
-		config.Gemini.AgentModelFast = agentModelFast
-	}
-	if agentModelThinking := os.Getenv("QUAERO_GEMINI_AGENT_MODEL_THINKING"); agentModelThinking != "" {
-		config.Gemini.AgentModelThinking = agentModelThinking
-	}
-	if chatModel := os.Getenv("QUAERO_GEMINI_CHAT_MODEL"); chatModel != "" {
-		config.Gemini.ChatModel = chatModel
+	if thinking := os.Getenv("QUAERO_GEMINI_THINKING"); thinking != "" {
+		config.Gemini.Thinking = thinking
 	}
 	if maxTurns := os.Getenv("QUAERO_GEMINI_MAX_TURNS"); maxTurns != "" {
 		if mt, err := strconv.Atoi(maxTurns); err == nil {
@@ -664,12 +659,11 @@ func applyEnvOverrides(config *Config) {
 	}
 	if model := os.Getenv("QUAERO_CLAUDE_MODEL"); model != "" {
 		config.Claude.Model = model
+	} else if defaultModel := os.Getenv("QUAERO_CLAUDE_DEFAULT_MODEL"); defaultModel != "" {
+		config.Claude.Model = defaultModel // Deprecated: backward compatibility
 	}
-	if modelFast := os.Getenv("QUAERO_CLAUDE_MODEL_FAST"); modelFast != "" {
-		config.Claude.ModelFast = modelFast
-	}
-	if modelThinking := os.Getenv("QUAERO_CLAUDE_MODEL_THINKING"); modelThinking != "" {
-		config.Claude.ModelThinking = modelThinking
+	if thinking := os.Getenv("QUAERO_CLAUDE_THINKING"); thinking != "" {
+		config.Claude.Thinking = thinking
 	}
 	if maxTokens := os.Getenv("QUAERO_CLAUDE_MAX_TOKENS"); maxTokens != "" {
 		if mt, err := strconv.Atoi(maxTokens); err == nil {
@@ -729,14 +723,14 @@ func ApplyFlagOverrides(config *Config, port int, host string) {
 // Resolution order: environment variables → KV store → config fallback → error
 // This ensures QUAERO_* environment variables always take precedence
 func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, name string, configFallback string) (string, error) {
-	// Map of KV store key names to environment variable names
+	// Map of KV store key names to environment variable names (new and deprecated)
 	// Environment variables have highest priority
-	keyToEnvMapping := map[string]string{
-		"google_api_key":    "QUAERO_GEMINI_GOOGLE_API_KEY",
-		"anthropic_api_key": "QUAERO_CLAUDE_API_KEY",
-		"claude_api_key":    "QUAERO_CLAUDE_API_KEY",
-		// Add more mappings as needed
-		// "places_api_key": "QUAERO_PLACES_API_KEY", // If we move this to KV store
+	// Order: new name first, then deprecated name for backward compatibility
+	keyToEnvMapping := map[string][]string{
+		"gemini_api_key":    {"QUAERO_GEMINI_API_KEY", "QUAERO_GEMINI_GOOGLE_API_KEY"},
+		"google_api_key":    {"QUAERO_GEMINI_API_KEY", "QUAERO_GEMINI_GOOGLE_API_KEY"}, // Legacy KV store key
+		"anthropic_api_key": {"QUAERO_CLAUDE_API_KEY"},
+		"claude_api_key":    {"QUAERO_CLAUDE_API_KEY"},
 	}
 
 	// For Claude, also check the standard ANTHROPIC_API_KEY env var
@@ -746,11 +740,12 @@ func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, na
 		}
 	}
 
-	// Check environment variable first (highest priority)
-	if envVarName, hasMappedEnv := keyToEnvMapping[name]; hasMappedEnv {
-		if envValue := os.Getenv(envVarName); envValue != "" {
-			// Environment variable takes priority over everything
-			return envValue, nil
+	// Check environment variables (highest priority, try new names first)
+	if envVarNames, hasMappedEnv := keyToEnvMapping[name]; hasMappedEnv {
+		for _, envVarName := range envVarNames {
+			if envValue := os.Getenv(envVarName); envValue != "" {
+				return envValue, nil
+			}
 		}
 	}
 

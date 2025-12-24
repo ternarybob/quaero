@@ -88,9 +88,9 @@ type Service struct {
 func NewService(config *common.GeminiConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*Service, error) {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google_api_key", config.GoogleAPIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "gemini_api_key", config.APIKey)
 	if err != nil {
-		return nil, fmt.Errorf("Google API key is required for agent service (set via KV store, QUAERO_GEMINI_GOOGLE_API_KEY, or gemini.google_api_key in config): %w", err)
+		return nil, fmt.Errorf("Gemini API key is required for agent service (set via KV store, QUAERO_GEMINI_API_KEY, or gemini.api_key in config): %w", err)
 	}
 
 	// Debug logging: Log API key details (masked for security)
@@ -106,8 +106,8 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		Bool("api_key_empty", apiKey == "").
 		Msg("Agent service: Resolved Google API key")
 
-	if config.AgentModel == "" {
-		config.AgentModel = "gemini-3-flash-preview" // Default to flash-preview for cost efficiency
+	if config.Model == "" {
+		config.Model = "gemini-3-flash-preview" // Default to flash-preview for cost efficiency
 	}
 
 	// Parse timeout duration
@@ -125,7 +125,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	// Initialize direct genai client
 	logger.Debug().
 		Str("backend", "GeminiAPI").
-		Str("model", config.AgentModel).
+		Str("model", config.Model).
 		Msg("Agent service: Initializing genai client")
 
 	genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -147,7 +147,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		config:      config,
 		logger:      logger,
 		client:      genaiClient,
-		modelName:   config.AgentModel,
+		modelName:   config.Model,
 		agents:      make(map[string]AgentExecutor),
 		timeout:     timeout,
 		rateLimit:   rateLimit,
@@ -171,7 +171,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	service.RegisterAgent(entityRecognizer)
 
 	logger.Debug().
-		Str("model", config.AgentModel).
+		Str("model", config.Model).
 		Int("max_turns", config.MaxTurns).
 		Dur("timeout", timeout).
 		Dur("rate_limit", rateLimit).
@@ -374,81 +374,24 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 }
 
 // selectModel selects the appropriate model based on model_selection strategy
+// Note: With unified model config, all selections return the same model.
+// Step-level model override can be used if a different model is needed.
 func (s *Service) selectModel(selection ModelSelection, agentType string, input map[string]interface{}) string {
-	switch selection {
-	case ModelSelectionFast:
-		if s.config.AgentModelFast != "" {
-			s.logger.Debug().
-				Str("model", s.config.AgentModelFast).
-				Str("selection", "fast").
-				Msg("Selected fast model")
-			return s.config.AgentModelFast
-		}
-	case ModelSelectionThinking:
-		if s.config.AgentModelThinking != "" {
-			s.logger.Debug().
-				Str("model", s.config.AgentModelThinking).
-				Str("selection", "thinking").
-				Msg("Selected thinking model")
-			return s.config.AgentModelThinking
-		}
-	case ModelSelectionAuto:
-		// Auto-select based on agent type and content characteristics
-		selectedModel := s.autoSelectModel(agentType, input)
-		s.logger.Debug().
-			Str("model", selectedModel).
-			Str("selection", "auto").
-			Str("agent_type", agentType).
-			Msg("Auto-selected model")
-		return selectedModel
-	case ModelSelectionDefault:
-		// Use default model
-	}
-	return s.modelName
+	// All model selections now use the single configured model
+	// Step-level "model" override can be used for specific requirements
+	s.logger.Debug().
+		Str("model", s.config.Model).
+		Str("selection", string(selection)).
+		Msg("Selected model")
+	return s.config.Model
 }
 
 // autoSelectModel automatically selects the best model based on agent type and input characteristics
+// Note: With unified model config, this always returns the configured model.
+// Step-level model override can be used if a different model is needed.
 func (s *Service) autoSelectModel(agentType string, input map[string]interface{}) string {
-	// Agent types that benefit from thinking model (complex reasoning)
-	thinkingAgents := map[string]bool{
-		"category_classifier": true,
-		"entity_recognizer":   true,
-		"sentiment_analyzer":  true,
-		"relation_extractor":  true,
-		"question_answerer":   true,
-		"content_summarizer":  true,
-	}
-
-	// Agent types that work well with fast model (simple extraction)
-	fastAgents := map[string]bool{
-		"keyword_extractor": true,
-		"metadata_enricher": true,
-		"rule_classifier":   true, // Rule-based, but if LLM is used
-	}
-
-	// Check content length for complexity assessment
-	contentLength := 0
-	if content, ok := input["content"].(string); ok {
-		contentLength = len(content)
-	}
-
-	// Large documents (>10KB) might benefit from thinking model
-	largeDocument := contentLength > 10*1024
-
-	// Select model based on agent type and content size
-	if thinkingAgents[agentType] || largeDocument {
-		if s.config.AgentModelThinking != "" {
-			return s.config.AgentModelThinking
-		}
-	}
-
-	if fastAgents[agentType] && !largeDocument {
-		if s.config.AgentModelFast != "" {
-			return s.config.AgentModelFast
-		}
-	}
-
-	// Default to standard model
+	// With unified model config, always use the configured model
+	// Step-level "model" override can be used for specific requirements
 	return s.modelName
 }
 

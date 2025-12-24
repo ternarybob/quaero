@@ -102,14 +102,14 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*GeminiService, error) {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google_api_key", geminiConfig.GoogleAPIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "gemini_api_key", geminiConfig.APIKey)
 	if err != nil {
-		return nil, fmt.Errorf("Google API key is required for LLM service (set via KV store, QUAERO_GEMINI_GOOGLE_API_KEY, or gemini.google_api_key in config): %w", err)
+		return nil, fmt.Errorf("Gemini API key is required for LLM service (set via KV store, QUAERO_GEMINI_API_KEY, or gemini.api_key in config): %w", err)
 	}
 
 	// Set default model name if not specified
-	if geminiConfig.ChatModel == "" {
-		geminiConfig.ChatModel = "gemini-3-flash-preview"
+	if geminiConfig.Model == "" {
+		geminiConfig.Model = "gemini-3-flash-preview"
 	}
 
 	// Parse timeout duration
@@ -136,7 +136,7 @@ func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfac
 	}
 
 	logger.Debug().
-		Str("chat_model", geminiConfig.ChatModel).
+		Str("model", geminiConfig.Model).
 		Dur("timeout", timeout).
 		Float32("temperature", geminiConfig.Temperature).
 		Msg("Gemini LLM service initialized successfully")
@@ -225,7 +225,7 @@ func (s *GeminiService) HealthCheck(ctx context.Context) error {
 	}
 
 	s.logger.Debug().
-		Str("chat_model", s.config.ChatModel).
+		Str("model", s.config.Model).
 		Msg("Gemini LLM service health check passed")
 
 	return nil
@@ -320,7 +320,7 @@ func (s *GeminiService) generateCompletion(ctx context.Context, messages []inter
 	}
 
 	// Generate completion using direct GenerateContent call
-	resp, err := s.client.Models.GenerateContent(ctx, s.config.ChatModel, geminiContents, config)
+	resp, err := s.client.Models.GenerateContent(ctx, s.config.Model, geminiContents, config)
 	if err != nil {
 		return "", fmt.Errorf("chat generation failed: %w", err)
 	}

@@ -50,15 +50,15 @@ type Provider interface {
 
 // ProviderFactory creates and manages AI providers
 type ProviderFactory struct {
-	geminiConfig  *common.GeminiConfig
-	claudeConfig  *common.ClaudeConfig
-	llmConfig     *common.LLMConfig
-	kvStorage     interfaces.KeyValueStorage
-	logger        arbor.ILogger
-	geminiClient  *genai.Client
-	claudeClient  anthropic.Client
-	geminiAPIKey  string
-	claudeAPIKey  string
+	geminiConfig *common.GeminiConfig
+	claudeConfig *common.ClaudeConfig
+	llmConfig    *common.LLMConfig
+	kvStorage    interfaces.KeyValueStorage
+	logger       arbor.ILogger
+	geminiClient *genai.Client
+	claudeClient anthropic.Client
+	geminiAPIKey string
+	claudeAPIKey string
 }
 
 // NewProviderFactory creates a new provider factory
@@ -125,28 +125,14 @@ func (f *ProviderFactory) NormalizeModel(model string) string {
 }
 
 // GetDefaultModel returns the default model for a provider
-func (f *ProviderFactory) GetDefaultModel(provider ProviderType, modelType string) string {
+func (f *ProviderFactory) GetDefaultModel(provider ProviderType) string {
 	switch provider {
 	case ProviderClaude:
-		switch modelType {
-		case "fast":
-			return f.claudeConfig.ModelFast
-		case "thinking":
-			return f.claudeConfig.ModelThinking
-		default:
-			return f.claudeConfig.Model
-		}
+		return f.claudeConfig.Model
 	case ProviderGemini:
-		switch modelType {
-		case "fast":
-			return f.geminiConfig.AgentModelFast
-		case "thinking":
-			return f.geminiConfig.AgentModelThinking
-		default:
-			return f.geminiConfig.AgentModel
-		}
+		return f.geminiConfig.Model
 	default:
-		return f.geminiConfig.AgentModel
+		return f.geminiConfig.Model
 	}
 }
 
@@ -156,10 +142,10 @@ func (f *ProviderFactory) GetGeminiClient(ctx context.Context) (*genai.Client, e
 		return f.geminiClient, nil
 	}
 
-	// Resolve API key
-	apiKey, err := common.ResolveAPIKey(ctx, f.kvStorage, "google_api_key", f.geminiConfig.GoogleAPIKey)
+	// Resolve API key (supports both new "gemini_api_key" and legacy "google_api_key")
+	apiKey, err := common.ResolveAPIKey(ctx, f.kvStorage, "gemini_api_key", f.geminiConfig.APIKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve Google API key: %w", err)
+		return nil, fmt.Errorf("failed to resolve Gemini API key: %w", err)
 	}
 
 	// Create client
@@ -337,7 +323,7 @@ func (f *ProviderFactory) generateWithGemini(ctx context.Context, request *Conte
 
 	// Use default model if not specified
 	if model == "" {
-		model = f.geminiConfig.AgentModel
+		model = f.geminiConfig.Model
 	}
 
 	// Convert messages to Gemini format

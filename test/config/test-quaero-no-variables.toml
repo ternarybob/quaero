@@ -19,4 +19,4 @@ level = "debug"
 min_event_level = "debug"
 
 [gemini]
-google_api_key = ""  # Disabled for tests
+api_key = ""  # Disabled for tests
