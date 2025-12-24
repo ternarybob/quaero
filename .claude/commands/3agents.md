@@ -19,22 +19,43 @@ mkdir -p $WORKDIR
 
 ## AGENTS
 
-1. **ARCHITECT** - Assesses requirements, architecture, creates step documentation
-2. **WORKER** - Implements steps according to step documentation
-3. **VALIDATOR** - Reviews completed step and code against step documentation
+1. **ARCHITECT** - Assesses requirements, reads architecture docs, creates step documentation with clear acceptance criteria
+2. **WORKER** - Implements steps according to step documentation, following skills and architecture
+3. **VALIDATOR** - Adversarial reviewer: validates against requirements, architecture, AND skills. Default: REJECT
 
-**WORKER and VALIDATOR are ADVERSARIAL** - WORKER must rework if VALIDATOR finds misaligned code.
+**ADVERSARIAL RELATIONSHIPS:**
+```
+WORKER ←→ VALIDATOR : Hostile opposition - VALIDATOR assumes bugs exist
+ARCHITECT → WORKER  : Clear requirements - WORKER must follow precisely
+ARCHITECT → VALIDATOR: Requirements are LAW - VALIDATOR enforces compliance
+```
 
 ## RULES
 
-- Agents are ADVERSARIAL - challenge, don't agree
-- Follow ALL patterns in `.claude/skills/refactoring/SKILL.md`
-- Apply `.claude/skills/go/SKILL.md` for Go changes
-- Apply `.claude/skills/frontend/SKILL.md` for frontend changes
-- Apply `.claude/skills/monitoring/SKILL.md` for UI test changes (screenshots, monitoring, results)
-- **Update skills** where they don't match requirements or discovered patterns
+### Core Principles
+- **CORRECTNESS over SPEED** - Take time to get it right
+- **ADVERSARIAL by default** - Challenge, don't agree
+- **Requirements are LAW** - No interpretation, no "good enough"
+- **Skills are enforceable** - Violations = automatic REJECT
+
+### Skill Compliance (MANDATORY)
+- **Refactoring**: `.claude/skills/refactoring/SKILL.md` - ALWAYS applies
+- **Go**: `.claude/skills/go/SKILL.md` - for any Go code changes
+- **Frontend**: `.claude/skills/frontend/SKILL.md` - for any frontend changes
+- **Monitoring**: `.claude/skills/monitoring/SKILL.md` - for UI test changes
+
+### Validation Rules
+- VALIDATOR must READ skill files, not rely on memory
+- VALIDATOR must verify EACH checklist item in applicable skills
+- VALIDATOR must trace requirements to code (with line numbers)
+- VALIDATOR must document architecture compliance with evidence
+- **Update skills** where patterns are missing or outdated
+
+### Prohibitions
 - NEVER modify tests to make code pass
-- Iterate until CORRECT, not "good enough"
+- NEVER skip skill compliance checks
+- NEVER approve without requirements traceability
+- NEVER iterate on assumptions - verify against docs
 
 ## WORKFLOW
 
@@ -147,100 +168,274 @@ For each step (starting with `step_1.md`):
 
 ### PHASE 2: VALIDATOR
 
-**Purpose:** Review completed step against step documentation. **Default stance: REJECT until proven correct.**
+**Purpose:** Adversarial review of completed step against requirements, architecture, and skills. **Default stance: REJECT until proven correct.**
+
+**CRITICAL:** The VALIDATOR must be hostile to the WORKER's implementation. Challenge every decision. Assume bugs exist until proven otherwise.
 
 For the current step:
 
-1. **Run build first** - FAIL = immediate REJECT
-2. **Read step documentation** (`$WORKDIR/step_N.md`)
-3. **Read implementation doc** (`$WORKDIR/step_N_implementation.md`)
-4. **Verify EACH acceptance criterion** with concrete evidence
-5. **Review code against:**
-   - Step documentation requirements
-   - Architecture patterns from `architect-analysis.md`
-   - Applicable skills
-6. **Check for violations:**
-   - Anti-creation violations (unnecessary new files)
-   - Skill non-compliance
-   - Architecture misalignment
-7. **Write `$WORKDIR/step_N_validation.md`:**
-   ```markdown
-   # Step N Validation
+#### Step 2.1: Build Verification
+1. **Run build first** - FAIL = immediate REJECT (no exceptions)
+2. Run any tests specified in step documentation
 
-   ## Build Status
-   - Command: `<command>`
-   - Result: PASS/FAIL
+#### Step 2.2: Requirements Verification
+1. **Re-read `$WORKDIR/requirements.md`** - the original requirements
+2. **Cross-reference step requirements** from `$WORKDIR/step_N.md`
+3. **For EACH requirement addressed by this step:**
+   - Find the specific code that implements it
+   - Verify behavior matches requirement intent (not just letter)
+   - Challenge: Does implementation handle edge cases?
 
-   ## Acceptance Criteria
-   - [x] AC-1: PASS - <evidence>
-   - [ ] AC-2: FAIL - <reason>
+#### Step 2.3: Architecture Compliance Check
+1. **Re-read architecture documents:**
+   - `docs/architecture/ARCHITECTURE.md`
+   - Any domain-specific architecture docs from architect-analysis.md
+2. **Verify against architecture patterns:**
+   - Does code follow established architectural boundaries?
+   - Are dependencies injected correctly?
+   - Does it use existing extension points?
+   - Challenge: Could this break existing functionality?
 
-   ## Architecture Compliance
-   - Status: PASS/FAIL
-   - Evidence: <specific code references>
+#### Step 2.4: Skill Compliance Audit
+**Read and verify against EACH applicable skill:**
 
-   ## Skill Compliance
-   - Status: PASS/FAIL
-   - Evidence: <specific patterns checked>
+**Refactoring Skill (`.claude/skills/refactoring/SKILL.md`):**
+- [ ] EXTEND > MODIFY > CREATE priority followed?
+- [ ] If new file created: Written justification exists?
+- [ ] Follows EXACT patterns from existing codebase?
+- [ ] Minimum viable change (not over-engineered)?
+- [ ] No parallel structures or duplicated logic?
 
-   ## Issues Found
-   1. <Issue description>
-      - Expected: <what should be>
-      - Actual: <what is>
-      - Fix required: <specific action>
+**Go Skill (`.claude/skills/go/SKILL.md`) - if Go code changed:**
+- [ ] Error handling: All errors wrapped with context (`%w`)?
+- [ ] Logging: Uses arbor, never fmt.Println/log.Printf?
+- [ ] DI: Constructor injection, no global state?
+- [ ] Handlers: Thin handlers, logic in services?
+- [ ] Context: ctx passed to all I/O operations?
+- [ ] Build: Used scripts, not `go build` directly?
 
-   ## Verdict: PASS/REJECT
+**Frontend Skill (`.claude/skills/frontend/SKILL.md`) - if frontend changed:**
+- [ ] Templates: Server-side Go templates only?
+- [ ] JS: Alpine.js only, no other frameworks?
+- [ ] CSS: Bulma only, no inline styles?
+- [ ] No direct DOM manipulation (use Alpine)?
+- [ ] WebSockets for real-time (not polling)?
 
-   ## Skill Updates Identified
-   - <Skill path>: <pattern that should be documented>
-   ```
+**Monitoring Skill (`.claude/skills/monitoring/SKILL.md`) - if UI tests changed:**
+- [ ] Uses UITestContext with defer Cleanup()?
+- [ ] Screenshots at key moments?
+- [ ] Structured logging with utc.Log()?
+- [ ] All chromedp errors checked?
+- [ ] No hardcoded waits without purpose?
+
+#### Step 2.5: Adversarial Challenges
+**VALIDATOR must ask these questions and find evidence:**
+1. What could break due to this change?
+2. Is there a simpler way to achieve the same result?
+3. Are there any hidden assumptions in the implementation?
+4. Would a new developer understand this code?
+5. Does this match how similar features are implemented elsewhere?
+
+#### Step 2.6: Write Validation Report
+**Write `$WORKDIR/step_N_validation.md`:**
+```markdown
+# Step N Validation
+
+## Build Status
+- Command: `<command>`
+- Result: PASS/FAIL
+
+## Requirements Traceability
+| REQ | Requirement Text | Code Location | Verified | Notes |
+|-----|------------------|---------------|----------|-------|
+| REQ-1 | <text> | `file.go:42` | ✓/✗ | <evidence or issue> |
+| REQ-2 | <text> | `file.go:78` | ✓/✗ | <evidence or issue> |
+
+## Acceptance Criteria
+- [x] AC-1: PASS - <concrete evidence with code reference>
+- [ ] AC-2: FAIL - <specific failure reason>
+
+## Architecture Compliance
+- Status: PASS/FAIL
+- Docs verified: <list of architecture docs checked>
+- Patterns followed: <specific patterns confirmed>
+- Violations: <any architectural violations found>
+
+## Skill Compliance Audit
+
+### Refactoring Skill
+- Status: PASS/FAIL
+- EXTEND > MODIFY > CREATE: <evidence>
+- Pattern compliance: <evidence>
+- Violations: <list any anti-creation violations>
+
+### Go/Frontend/Monitoring Skill (as applicable)
+- Status: PASS/FAIL
+- Checklist results: <reference completed checklist above>
+- Anti-patterns found: <list specific violations>
+
+## Adversarial Findings
+1. **Challenge:** <question asked>
+   - **Finding:** <what was discovered>
+   - **Action:** None required / MUST FIX
+
+## Issues Found (BLOCKING)
+1. <Issue description>
+   - Requirement violated: <REQ-N or AC-N>
+   - Expected: <what should be based on requirements/skills>
+   - Actual: <what the code does>
+   - Evidence: `<file:line>` - <code snippet>
+   - Fix required: <specific action WORKER must take>
+
+## Verdict: PASS/REJECT
+
+### If REJECT:
+WORKER must address ALL blocking issues before re-validation.
+Maximum iterations remaining: <5 - current_iteration>
+
+## Skill Updates Identified
+- <Skill path>: <pattern that should be documented>
+```
 
 ### PHASE 3: ITERATE (per step, max 5 iterations)
 
+**ADVERSARIAL ITERATION PROTOCOL:**
+
 ```
-VALIDATOR REJECT → WORKER reads step_N_validation.md
-                        ↓
-                Address ALL issues listed
-                        ↓
-                Update step_N_implementation.md
-                        ↓
-                VALIDATOR re-validates
-                        ↓
-                PASS → Move to next step (back to WORKER)
-                REJECT → Loop (max 5)
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ITERATION LOOP (max 5 per step)                  │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  VALIDATOR REJECT                                                   │
+│       ↓                                                             │
+│  WORKER reads step_N_validation.md                                  │
+│       ↓                                                             │
+│  WORKER must address EVERY blocking issue (no partial fixes)        │
+│       ↓                                                             │
+│  WORKER updates step_N_implementation.md with:                      │
+│       - Iteration number                                            │
+│       - Each issue addressed with evidence                          │
+│       - Code changes made                                           │
+│       ↓                                                             │
+│  VALIDATOR re-reads requirements.md and step_N.md (fresh eyes)      │
+│       ↓                                                             │
+│  VALIDATOR performs FULL validation (not just checking fixes)       │
+│       ↓                                                             │
+│  PASS → Move to next step     REJECT → Loop (max 5)                 │
+│                                                                     │
+│  ⚠ ITERATION 5 REJECT = TASK FAILURE (escalate to architect)       │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+**WORKER Iteration Response Template:**
+Update `$WORKDIR/step_N_implementation.md`:
+```markdown
+## Iteration <N> Response
+
+### Issues Addressed
+1. **Issue:** <issue from validation>
+   - **Root cause:** <why this happened>
+   - **Fix applied:** <what was changed>
+   - **Evidence:** `<file:line>` - <code snippet>
+   - **Verification:** <how to verify fix works>
+
+### Additional Changes
+- <any other changes made during fix>
+
+### Ready for Re-validation
+```
+
+**VALIDATOR Re-validation Rules:**
+1. **Start fresh** - Re-read requirements and step docs (don't rely on memory)
+2. **Verify ALL previous issues fixed** - not just marked as fixed
+3. **Look for regression** - Did fixes break something else?
+4. **Look for NEW issues** - Fresh review may find issues missed before
+5. **Increase scrutiny each iteration** - If iteration 3+, be MORE critical
+
+**Escalation at Iteration 5:**
+If VALIDATOR rejects at iteration 5:
+1. **Write `$WORKDIR/step_N_escalation.md`:**
+   ```markdown
+   # Step N Escalation
+
+   ## Iteration History
+   - Iteration 1: <summary of issues>
+   - Iteration 2: <summary of issues>
+   ...
+
+   ## Persistent Issues
+   - <issues that keep reappearing>
+
+   ## Root Cause Analysis
+   - <why worker cannot satisfy requirements>
+
+   ## Recommendation
+   - [ ] Requirements unclear - needs ARCHITECT clarification
+   - [ ] Architecture issue - needs redesign
+   - [ ] Skill gap - pattern not documented
+   - [ ] Other: <explanation>
+   ```
+2. Return to ARCHITECT for reassessment
 
 **After each step PASS:**
 - WORKER proceeds to next step (`step_N+1.md`)
+- Iteration count resets to 0 for new step
 - If no more steps, proceed to PHASE 4
 
 ### PHASE 4: COMPLETE
 
-1. **Final build verification**
-2. **Update `$WORKDIR/requirements.md`** - all boxes checked [x]
-3. **Update skills** based on identified patterns:
+1. **Final build verification** - must pass
+2. **Final requirements verification:**
+   - Re-read `$WORKDIR/requirements.md`
+   - Verify ALL requirements marked complete with evidence
+3. **Skill updates:**
    - Review all `step_N_validation.md` for "Skill Updates Identified"
-   - Modify `.claude/skills/*/SKILL.md` files as needed
+   - Apply updates to `.claude/skills/*/SKILL.md` files
 4. **Write `$WORKDIR/summary.md`:**
    ```markdown
    # Task Summary
 
-   ## Requirements Status
-   - [x] REQ-1: <requirement>
-   - [x] REQ-2: <requirement>
+   ## Final Build
+   - Command: `<build command>`
+   - Result: PASS
+
+   ## Requirements Traceability Matrix
+   | REQ | Requirement | Status | Implemented In | Validated In |
+   |-----|-------------|--------|----------------|--------------|
+   | REQ-1 | <text> | ✓ | step_1 | step_1_validation.md |
+   | REQ-2 | <text> | ✓ | step_2 | step_2_validation.md |
+
+   ## Acceptance Criteria Summary
+   | AC | Criterion | Status | Evidence |
+   |----|-----------|--------|----------|
+   | AC-1 | <text> | ✓ | `file.go:42` - <description> |
 
    ## Steps Completed
-   1. Step 1: <title> - <iterations to pass>
-   2. Step 2: <title> - <iterations to pass>
+   | Step | Title | Iterations | Key Decisions |
+   |------|-------|------------|---------------|
+   | 1 | <title> | 2 | <decision made> |
+   | 2 | <title> | 1 | <decision made> |
 
-   ## Files Changed
-   - <list of all files>
-
-   ## Skills Updated
-   - <skill path>: <what was added/changed>
+   ## Skill Compliance Summary
+   | Skill | Applied | Violations Fixed | Updates Made |
+   |-------|---------|------------------|--------------|
+   | Refactoring | ✓ | 0 | None |
+   | Go | ✓ | 1 (bare error) | Added error pattern |
+   | Frontend | N/A | - | - |
+   | Monitoring | N/A | - | - |
 
    ## Architecture Compliance
-   - All changes align with: <architecture docs referenced>
+   - Docs verified: <list of architecture docs>
+   - Patterns followed: <key patterns>
+   - No violations
+
+   ## Files Changed
+   - `path/to/file.go`: <summary of changes>
+   - `path/to/file.html`: <summary of changes>
+
+   ## Skills Updated
+   - `.claude/skills/go/SKILL.md`: Added pattern for <X>
+   - (or "No updates required")
    ```
 
 ## INVOKE
