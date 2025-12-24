@@ -41,7 +41,7 @@ description = "Generate test portfolio summary"
 depends = "run_stock_analysis"
 on_error = "fail"
 filter_tags = ["stock-portfolio"]
-api_key = "{google_gemini_api_key}"
+model = "gemini-3-flash"
 prompt = """Generate a brief test portfolio summary.
 
 List the analyzed stock with its recommendation.

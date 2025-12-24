@@ -96,7 +96,7 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		return nil, fmt.Errorf("filter_tags is required in step config")
 	}
 
-	// Get API key from step config
+	// Get API key from step config, fallback to global google_gemini_api_key
 	var apiKey string
 	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
 		// Check if it's still a placeholder (orchestrator failed to resolve)
@@ -116,10 +116,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		} else {
 			apiKey = apiKeyValue
 		}
-	}
-
-	if apiKey == "" {
-		return nil, fmt.Errorf("api_key is required for summary")
+	} else {
+		// No api_key in step config - try global google_gemini_api_key
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "google_gemini_api_key", "")
+		if err != nil {
+			return nil, fmt.Errorf("api_key not specified and failed to resolve google_gemini_api_key from storage: %w", err)
+		}
+		apiKey = resolvedAPIKey
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Msg("Using global google_gemini_api_key from storage")
 	}
 
 	// Extract filter_limit from step config (prevents token overflow on large codebases)
@@ -201,6 +208,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Msg("Thinking level configured")
 	}
 
+	// Extract model (optional - overrides default gemini-3-pro-preview)
+	var model string
+	if m, ok := stepConfig["model"].(string); ok && m != "" {
+		model = m
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Str("model", model).
+			Msg("Model override configured")
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -237,6 +255,7 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			"filter_limit":        filterLimit,
 			"validation_patterns": validationPatterns,
 			"thinking_level":      thinkingLevel,
+			"model":               model,
 		},
 	}, nil
 }
@@ -287,11 +306,12 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	// Extract thinking level for Gemini configuration
+	// Extract thinking level and model for Gemini configuration
 	thinkingLevel, _ := initResult.Metadata["thinking_level"].(string)
+	model, _ := initResult.Metadata["model"].(string)
 
 	// Generate summary
-	summaryContent, err := w.generateSummary(ctx, client, prompt, documents, stepID, thinkingLevel)
+	summaryContent, err := w.generateSummary(ctx, client, prompt, documents, stepID, thinkingLevel, model)
 	if err != nil {
 		w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -432,7 +452,8 @@ func parseThinkingLevel(level string) genai.ThinkingLevel {
 
 // generateSummary generates a summary from documents using Gemini.
 // thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH.
-func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string) (string, error) {
+// model overrides the default gemini-3-pro-preview model (e.g., "gemini-3-flash").
+func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder
 	docsContent.WriteString("# Documents to Summarize\n\n")
@@ -478,8 +499,11 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 
 %s`, currentDate, prompt, docsContent.String())
 
-	// Use gemini-3-pro-preview as the base model - thinking level controls reasoning depth
-	model := "gemini-3-pro-preview"
+	// Use passed model or default to gemini-3-pro-preview
+	model := modelOverride
+	if model == "" {
+		model = "gemini-3-pro-preview"
+	}
 
 	// Parse thinking level and configure ThinkingConfig if specified
 	parsedLevel := parseThinkingLevel(thinkingLevel)

@@ -124,7 +124,13 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		breadth = 5
 	}
 
-	// Get API key from step config
+	// Extract model (optional, default gemini-3-flash)
+	model := "gemini-3-flash"
+	if m, ok := stepConfig["model"].(string); ok && m != "" {
+		model = m
+	}
+
+	// Get API key from step config, fallback to global google_gemini_api_key
 	var apiKey string
 	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
 		// Check if it's still a placeholder (orchestrator failed to resolve)
@@ -144,10 +150,17 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		} else {
 			apiKey = apiKeyValue
 		}
-	}
-
-	if apiKey == "" {
-		return nil, fmt.Errorf("api_key is required for web_search")
+	} else {
+		// No api_key in step config - try global google_gemini_api_key
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "google_gemini_api_key", "")
+		if err != nil {
+			return nil, fmt.Errorf("api_key not specified and failed to resolve google_gemini_api_key from storage: %w", err)
+		}
+		apiKey = resolvedAPIKey
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Msg("Using global google_gemini_api_key from storage")
 	}
 
 	w.logger.Info().
@@ -156,6 +169,7 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
+		Str("model", model).
 		Msg("Web search worker initialized")
 
 	// Create a single work item representing the search
@@ -181,6 +195,7 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			"query":       query,
 			"depth":       depth,
 			"breadth":     breadth,
+			"model":       model,
 			"api_key":     apiKey,
 			"step_config": stepConfig,
 		},
@@ -224,8 +239,14 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	query, _ := initResult.Metadata["query"].(string)
 	depth, _ := initResult.Metadata["depth"].(int)
 	breadth, _ := initResult.Metadata["breadth"].(int)
+	model, _ := initResult.Metadata["model"].(string)
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
+
+	// Default model fallback
+	if model == "" {
+		model = "gemini-3-flash"
+	}
 
 	// Check cache settings
 	cacheHours := 24
@@ -264,6 +285,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
+		Str("model", model).
 		Str("step_id", stepID).
 		Bool("force_refresh", forceRefresh).
 		Msg("Starting web search from init result")
@@ -288,7 +310,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	// Execute web search
-	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, stepID)
+	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, model, stepID)
 	if err != nil {
 		w.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -375,7 +397,7 @@ func (w *WebSearchWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // executeWebSearch performs the web search using Gemini SDK with GoogleSearch grounding
-func (w *WebSearchWorker) executeWebSearch(ctx context.Context, client *genai.Client, query string, depth, breadth int, parentJobID string) (*WebSearchResults, error) {
+func (w *WebSearchWorker) executeWebSearch(ctx context.Context, client *genai.Client, query string, depth, breadth int, model, parentJobID string) (*WebSearchResults, error) {
 	results := &WebSearchResults{
 		Query:      query,
 		SearchDate: time.Now(),
@@ -416,7 +438,7 @@ Query: %s`, breadth, query)
 	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
 		resp, apiErr = client.Models.GenerateContent(
 			searchCtx,
-			"gemini-3-pro-preview",
+			model,
 			[]*genai.Content{
 				genai.NewContentFromText(systemPrompt, genai.RoleUser),
 			},
@@ -425,6 +447,16 @@ Query: %s`, breadth, query)
 
 		if apiErr == nil {
 			break
+		}
+
+		// Check for quota exhaustion (limit: 0) - fail fast, don't retry
+		if llm.IsQuotaExhaustedError(apiErr) {
+			w.logger.Error().
+				Str("query", query).
+				Err(apiErr).
+				Msg("Quota exhausted (limit: 0) - check billing/plan for this model")
+			results.Errors = append(results.Errors, "Quota exhausted (limit: 0) - check billing/plan for this model")
+			return results, fmt.Errorf("quota exhausted (limit: 0): %w", apiErr)
 		}
 
 		if attempt == retryConfig.MaxRetries {
@@ -502,14 +534,14 @@ Query: %s`, breadth, query)
 
 	// Execute follow-up searches if depth > 1
 	if depth > 1 && len(results.SearchQueries) > 0 {
-		w.executeFollowUpSearches(searchCtx, client, config, results, depth-1, breadth, parentJobID)
+		w.executeFollowUpSearches(searchCtx, client, config, results, depth-1, breadth, model, parentJobID)
 	}
 
 	return results, nil
 }
 
 // executeFollowUpSearches performs follow-up searches to explore the topic in depth
-func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *genai.Client, config *genai.GenerateContentConfig, results *WebSearchResults, remainingDepth, breadth int, parentJobID string) {
+func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *genai.Client, config *genai.GenerateContentConfig, results *WebSearchResults, remainingDepth, breadth int, model, parentJobID string) {
 	if remainingDepth <= 0 {
 		return
 	}
@@ -529,7 +561,7 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 
 		resp, err := client.Models.GenerateContent(
 			ctx,
-			"gemini-3-pro-preview",
+			model,
 			[]*genai.Content{
 				genai.NewContentFromText(fmt.Sprintf("Provide additional details on: %s", followUpQuery), genai.RoleUser),
 			},

@@ -165,10 +165,10 @@ type PlacesAPIConfig struct {
 // GeminiConfig contains unified Google Gemini API configuration for all AI services
 type GeminiConfig struct {
 	GoogleAPIKey       string  `toml:"google_api_key"`       // Google Gemini API key for all AI operations
-	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-3-pro-preview")
-	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-3-flash-preview")
-	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-3-pro-preview")
-	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-3-pro-preview")
+	AgentModel         string  `toml:"agent_model"`          // Gemini model for agent operations (default: "gemini-3-flash")
+	AgentModelFast     string  `toml:"agent_model_fast"`     // Fast model variant for simple tasks (default: "gemini-3-flash")
+	AgentModelThinking string  `toml:"agent_model_thinking"` // Thinking model variant for complex reasoning (default: "gemini-3-flash")
+	ChatModel          string  `toml:"chat_model"`           // Gemini model for chat operations (default: "gemini-3-flash")
 	MaxTurns           int     `toml:"max_turns"`            // Maximum agent conversation turns (default: 10)
 	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
 	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "4s" for 15 RPM)
@@ -284,15 +284,15 @@ func NewDefaultConfig() *Config {
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 		Gemini: GeminiConfig{
-			GoogleAPIKey:       "",                       // User must provide API key (no fallback)
-			AgentModel:         "gemini-3-pro-preview",   // Default model for agents
-			AgentModelFast:     "gemini-3-flash-preview", // Fast model for simple tasks
-			AgentModelThinking: "gemini-3-pro-preview",   // Thinking model for complex reasoning (uses ThinkingConfig)
-			ChatModel:          "gemini-3-pro-preview",   // Default model for chat
-			MaxTurns:           10,                       // Reasonable limit for agent loops
-			Timeout:            "5m",                     // 5 minutes for operations
-			RateLimit:          "4s",                     // Default to 4s (15 RPM) for free tier
-			Temperature:        0.7,                      // Default temperature for chat completions
+			GoogleAPIKey:       "",               // User must provide API key (no fallback)
+			AgentModel:         "gemini-3-flash", // Default model for agents
+			AgentModelFast:     "gemini-3-flash", // Fast model for simple tasks
+			AgentModelThinking: "gemini-3-flash", // Thinking model for complex reasoning (uses ThinkingConfig)
+			ChatModel:          "gemini-3-flash", // Default model for chat
+			MaxTurns:           10,               // Reasonable limit for agent loops
+			Timeout:            "5m",             // 5 minutes for operations
+			RateLimit:          "4s",             // Default to 4s (15 RPM) for free tier
+			Temperature:        0.7,              // Default temperature for chat completions
 		},
 	}
 }

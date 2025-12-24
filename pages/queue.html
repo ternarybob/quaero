@@ -4661,18 +4661,21 @@
                 async _doFetchStepLogs(jobId, stepName, stepIdx) {
                     const key = `${jobId}:${stepName}`;
 
-                    // Mark as in-flight
+                    // Get step job ID from tree data - the API needs the step job ID, not parent job ID
+                    // Check this BEFORE marking as in-flight to avoid orphaned entries
+                    const treeData = this.jobTreeData[jobId];
+                    const stepJobId = treeData?.steps?.[stepIdx]?.step_id;
+                    if (!stepJobId) {
+                        // Step hasn't started yet (no step job created) - nothing to fetch
+                        // This is normal for pending steps, not an error
+                        console.log('[Queue] No step_id yet for step', stepName, '- step pending');
+                        return;
+                    }
+
+                    // Mark as in-flight AFTER validating we have a step_id
                     this._stepFetchInFlight.add(key);
 
                     try {
-                        // Get step job ID from tree data - the API needs the step job ID, not parent job ID
-                        const treeData = this.jobTreeData[jobId];
-                        const stepJobId = treeData?.steps?.[stepIdx]?.step_id;
-                        if (!stepJobId) {
-                            console.warn('[Queue] No step_id found for step', stepName, 'at index', stepIdx);
-                            return;
-                        }
-
                         // Use step log limit for fetching - matches display limit to avoid wasteful fetches
                         const limit = this.getStepLogLimit(jobId, stepName);
                         const level = this.getTreeLogLevelFilter(jobId);

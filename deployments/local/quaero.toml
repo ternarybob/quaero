@@ -101,9 +101,9 @@ environment = "development" # "development" or "production"
 #   thinking_level = "LOW"      # Standard reasoning
 #   thinking_level = "HIGH"     # Deep reasoning for complex analysis
 #
-# Defaults: agent_model="gemini-3-pro-preview", agent_model_fast="gemini-3-flash-preview",
-#           agent_model_thinking="gemini-3-pro-preview",
-#           chat_model="gemini-3-pro-preview", max_turns=10, timeout="5m", temperature=0.7
+# Defaults: agent_model="gemini-3-flash", agent_model_fast="gemini-3-flash",
+#           agent_model_thinking="gemini-3-flash",
+#           chat_model="gemini-3-flash", max_turns=10, timeout="5m", temperature=0.7
 # Env vars: QUAERO_GEMINI_GOOGLE_API_KEY, QUAERO_GEMINI_AGENT_MODEL,
 #           QUAERO_GEMINI_AGENT_MODEL_FAST, QUAERO_GEMINI_AGENT_MODEL_THINKING,
 #           QUAERO_GEMINI_CHAT_MODEL, QUAERO_GEMINI_MAX_TURNS,
@@ -111,10 +111,10 @@ environment = "development" # "development" or "production"
 
 # [gemini]
 # google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"              # Required for all AI operations
-# agent_model = "gemini-3-pro-preview"                       # Default model for agent operations
-# agent_model_fast = "gemini-3-flash-preview"                # Fast model for simple tasks
-# agent_model_thinking = "gemini-3-pro-preview"              # Thinking model (uses ThinkingConfig)
-# chat_model = "gemini-3-pro-preview"                        # Model for chat operations
+# agent_model = "gemini-3-flash"                             # Default model for agent operations
+# agent_model_fast = "gemini-3-flash"                        # Fast model for simple tasks
+# agent_model_thinking = "gemini-3-flash"                    # Thinking model (uses ThinkingConfig)
+# chat_model = "gemini-3-flash"                              # Model for chat operations
 # max_turns = 10                                             # Maximum agent conversation turns
 # timeout = "5m"                                             # Operation timeout
 # temperature = 0.7                                          # Chat completion temperature (0.0-1.0)

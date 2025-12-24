@@ -73,7 +73,6 @@ output_tags = ["announcements", "{stock:ticker_lower}", "{stock:industry}"]
 type = "web_search"
 description = "Search financial news and analyst coverage for {stock:name}"
 on_error = "continue"
-api_key = "{google_gemini_api_key}"
 query = """ASX:{stock:ticker} {stock:name}
 - financial results earnings revenue profit analyst ratings
 - broker recommendations price targets dividend news
@@ -92,7 +91,6 @@ breadth = 3
 type = "web_search"
 description = "Search for {stock:industry} sector industry outlook and trends"
 on_error = "continue"
-api_key = "{google_gemini_api_key}"
 query = """Australian {stock:industry} sector outlook 2025 2026:
 - industry trends growth drivers headwinds
 - RBA interest rate impact on {stock:industry}
@@ -111,7 +109,6 @@ breadth = 3
 type = "web_search"
 description = "Search for {stock:industry} competitor comparison for {stock:name}"
 on_error = "continue"
-api_key = "{google_gemini_api_key}"
 query = """ASX {stock:industry} comparison {stock:name}:
 - competitors market share performance 2025
 - peer comparison valuation metrics

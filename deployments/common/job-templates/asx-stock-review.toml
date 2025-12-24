@@ -46,7 +46,7 @@ type = "summary"
 description = "Analyze announcements against share price movements to identify NOISE vs SIGNAL"
 on_error = "continue"
 filter_tags = ["{stock:ticker_lower}"]
-api_key = "{google_gemini_api_key}"
+model = "gemini-3-flash"
 thinking_level = "HIGH"
 prompt = """You are a Management Forensic Analyst & Equity Researcher specializing in separating NOISE from SIGNAL in corporate communications and identifying the "Vanishing Promise" and "Pump-to-Hold" ratio.
 
@@ -221,7 +221,11 @@ Compare company's announcement narrative against industry peers and sector reali
 - Adjust volatility threshold based on company size (large caps ~2%, small caps ~5%)
 - When comparing outlooks, if historical announcement data is limited, state "Insufficient historical data for credibility gap analysis"
 - Flag ALL promotional language - even if the underlying business may be legitimate"""
-output_tags = ["announcement-analysis", "{stock:ticker_lower}", "{stock:industry}"]
+output_tags = [
+    "announcement-analysis",
+    "{stock:ticker_lower}",
+    "{stock:industry}",
+]
 
 # =========================================================================
 # Step 2: Generate Comprehensive Stock Summary
@@ -234,7 +238,7 @@ description = "Generate comprehensive stock summary for {stock:name} with growth
 depends = "analyze_announcements"
 on_error = "fail"
 filter_tags = ["{stock:ticker_lower}"]
-api_key = "{google_gemini_api_key}"
+model = "gemini-3-flash"
 thinking_level = "HIGH"
 prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
 Analyze all collected data for ASX:{stock:ticker} ({stock:name}) in the {stock:industry} sector.
@@ -337,7 +341,6 @@ description = "Generate BUY/SELL/HOLD recommendation with conviction score for {
 depends = "generate_stock_summary"
 on_error = "fail"
 filter_tags = ["stock-summary", "{stock:ticker_lower}"]
-api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
 prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
 Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}).
@@ -529,7 +532,13 @@ Consult licensed advisers before making investment decisions. Only ASX-listed st
 **Analysis Date**: [Use the current date provided in the system context above]
 **Industry Sector**: {stock:industry}
 """
-output_tags = ["stock-recommendation", "{stock:ticker_lower}", "{stock:industry}", "stock-report", "stock-portfolio"]
+output_tags = [
+    "stock-recommendation",
+    "{stock:ticker_lower}",
+    "{stock:industry}",
+    "stock-report",
+    "stock-portfolio",
+]
 
 # =========================================================================
 # NOTE: Email handled at job definition level

@@ -56,6 +56,21 @@ func IsRateLimitError(err error) bool {
 		strings.Contains(errStr, "quota")
 }
 
+// IsQuotaExhaustedError checks if an error indicates permanent quota exhaustion.
+// This differs from rate limits: quota exhaustion means the daily/monthly quota
+// is fully consumed (limit: 0), while rate limits are temporary per-minute caps.
+// Quota exhaustion should NOT be retried - fail fast and inform the user.
+func IsQuotaExhaustedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// "limit: 0" or "limit:0" indicates the quota is zero (no requests allowed)
+	// This is different from "limit: 1000" which would be a rate limit
+	return strings.Contains(errStr, "limit: 0") ||
+		strings.Contains(errStr, "limit:0")
+}
+
 // retryDelayRegex matches "Please retry in Xs" or "retryDelay:Xs" patterns
 var retryDelayRegex = regexp.MustCompile(`(?i)(?:Please retry in |retryDelay[:\s]+)(\d+(?:\.\d+)?)\s*s`)
 
