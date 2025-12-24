@@ -1,11 +1,11 @@
-# SMSF Aggressive Portfolio Review - Daily Analysis Job
+# SMSF Portfolio Review - Daily Analysis Job
 # ===========================================================================
-# This job orchestrates the SMSF Portfolio Review for an aggressive SMSF
+# This job orchestrates the SMSF Portfolio Review for a diversified SMSF
 # portfolio. It runs individual stock analyses using the asx-stock-review
 # template, then consolidates all results into a single portfolio review with
 # BUY|SELL|HOLD recommendations and SMSF compliance notes.
 #
-# STRATEGY: Aggressive 100% Australian Equities
+# STRATEGY: Diversified Australian Equities with ETF exposure
 # PERSONA: Senior Investment Strategist specializing in Australian SMSFs
 #
 # WORKFLOW:
@@ -17,48 +17,63 @@
 # ===========================================================================
 
 id = "smsf-portfolio-daily"
-name = "SMSF Aggressive Portfolio Review"
+name = "SMSF Portfolio Review"
 type = "job_template"
-description = "Senior Investment Strategist review for aggressive SMSF portfolio - BUY|SELL|HOLD recommendations with conviction scoring"
-tags = ["smsf", "aggressive", "asx", "stocks", "daily", "template", "portfolio"]
+description = "Senior Investment Strategist review for SMSF portfolio - BUY|SELL|HOLD recommendations with conviction scoring"
+tags = ["smsf", "asx", "stocks", "daily", "template", "portfolio"]
 schedule = ""
 timeout = "3h"
 enabled = true
 auto_start = false
 
 # Global stock variables - inherited by both collect_stock_data and run_stock_analysis steps
-# Available variable keys: ticker, name, industry, units, avg_price, date_added
+# Available variable keys: ticker, name, industry, units, avg_price, weighting
 # Variable references in templates: {stock:ticker}, {stock:name}, {stock:industry}
 # Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
-# Portfolio data: units (number of shares), avg_price (average purchase price), date_added (YYYY-MM-DD)
+# Portfolio data: units (number of shares), avg_price (average purchase price), weighting (% of portfolio)
 [config]
 variables = [
-    # Technology & AI (High Growth)
-    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI", units = 10000, avg_price = 0.45, date_added = "2024-06-15" },
+    # =========================================================================
+    # ETFs & Index Funds (Defensive/Core)
+    # =========================================================================
+    { ticker = "AAA", name = "Betashares Australian High Interest Cash ETF", industry = "cash-etf", units = 198, avg_price = 50.235, weighting = 3.04 },
+    { ticker = "VACF", name = "Vanguard Australian Corporate Fixed Interest Index ETF", industry = "bond-etf", units = 193, avg_price = 51.666, weighting = 3.05 },
+    { ticker = "VGS", name = "Vanguard MSCI Index International Shares ETF", industry = "global-etf", units = 64, avg_price = 154.031, weighting = 3.01 },
+    { ticker = "PMGOLD", name = "Perth Mint Gold", industry = "gold-etf", units = 597, avg_price = 66.747, weighting = 12.21 },
 
-    # Industrials
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure", units = 5000, avg_price = 2.10, date_added = "2024-03-20" },
-    # Technology
-    # { ticker = "XRO", name = "Xero Limited", industry = "technology", units = 100, avg_price = 120.00, date_added = "2023-11-01" },
-    # { ticker = "WTC", name = "WiseTech Global", industry = "technology", units = 50, avg_price = 85.00, date_added = "2024-01-15" },
+    # =========================================================================
+    # Large Cap Blue Chips (Stable Income)
+    # =========================================================================
+    { ticker = "WES", name = "Wesfarmers Limited", industry = "retail", units = 122, avg_price = 81.209, weighting = 3.03 },
+    { ticker = "WOW", name = "Woolworths Group Limited", industry = "retail", units = 339, avg_price = 29.329, weighting = 3.04 },
 
-    # Healthcare (Growth Sector)
-    # { ticker = "CSL", name = "CSL Limited", industry = "healthcare", units = 30, avg_price = 280.00, date_added = "2023-06-01" },
-    # { ticker = "PME", name = "Pro Medicus", industry = "healthcare", units = 20, avg_price = 95.00, date_added = "2024-02-10" },
+    # =========================================================================
+    # Energy & Utilities (Income & Defensive)
+    # =========================================================================
+    { ticker = "APA", name = "APA Group", industry = "energy-infrastructure", units = 2129, avg_price = 9.321, weighting = 6.07 },
 
-    # Resources & Mining (Cyclical Growth)
-    # { ticker = "BHP", name = "BHP Group", industry = "mining", units = 200, avg_price = 45.00, date_added = "2023-09-01" },
-    # { ticker = "RIO", name = "Rio Tinto", industry = "mining", units = 100, avg_price = 115.00, date_added = "2023-08-15" },
-    # { ticker = "FMG", name = "Fortescue Metals", industry = "mining", units = 300, avg_price = 22.00, date_added = "2024-04-01" },
-    # { ticker = "LTR", name = "Liontown Resources", industry = "lithium", units = 5000, avg_price = 1.20, date_added = "2024-05-01" },
+    # =========================================================================
+    # Financials & Services
+    # =========================================================================
+    { ticker = "ASB", name = "Austal Limited", industry = "defence-shipbuilding", units = 2915, avg_price = 6.819, weighting = 6.11 },
+    { ticker = "GDG", name = "Generation Development Group", industry = "financial-services", units = 3406, avg_price = 5.831, weighting = 6.07 },
+    { ticker = "PNC", name = "Pioneer Credit Limited", industry = "financial-services", units = 28772, avg_price = 0.684, weighting = 6.03 },
 
-    # Energy (Transition Play)
-    # { ticker = "WDS", name = "Woodside Energy", industry = "energy", units = 150, avg_price = 32.00, date_added = "2023-12-01" },
-    # { ticker = "STO", name = "Santos Limited", industry = "energy", units = 400, avg_price = 7.50, date_added = "2024-01-20" },
+    # =========================================================================
+    # Technology & Growth
+    # =========================================================================
+    { ticker = "ACDC", name = "Global X Battery Tech & Lithium ETF", industry = "battery-tech-etf", units = 141, avg_price = 141.001, weighting = 6.08 },
+    { ticker = "DOW", name = "Downer EDI Limited", industry = "engineering-services", units = 2487, avg_price = 7.991, weighting = 6.08 },
+    { ticker = "SEMI", name = "ETFS Semiconductor ETF", industry = "semiconductor-etf", units = 864, avg_price = 23.113, weighting = 6.10 },
+    { ticker = "MYG", name = "Mayfield Group Holdings", industry = "technology", units = 6778, avg_price = 2.950, weighting = 6.11 },
 
-    # Small/Mid Cap Growth
-    # { ticker = "LNK", name = "Link Administration", industry = "fintech", units = 1000, avg_price = 1.80, date_added = "2024-07-01" },
-    # { ticker = "TYR", name = "Tyro Payments", industry = "fintech", units = 2000, avg_price = 0.95, date_added = "2024-06-01" },
+    # =========================================================================
+    # Infrastructure & Industrials
+    # =========================================================================
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure", units = 3159, avg_price = 6.303, weighting = 5.97 },
+    { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure", units = 4925, avg_price = 4.025, weighting = 6.01 },
+    { ticker = "SRG", name = "SRG Global Limited", industry = "engineering-services", units = 6621, avg_price = 3.000, weighting = 6.05 },
+    { ticker = "SSM", name = "Service Stream Limited", industry = "infrastructure-services", units = 8619, avg_price = 2.269, weighting = 5.96 },
 ]
 
 # ===========================================================================
@@ -123,13 +138,13 @@ parallel = true
 
 [step.generate_portfolio_summary]
 type = "summary"
-description = "Generate consolidated SMSF aggressive portfolio review with all stocks"
+description = "Generate consolidated SMSF portfolio review with practical investment recommendations"
 depends = "run_stock_analysis, fetch_benchmark_indices"
 on_error = "fail"
 filter_tags = ["stock-portfolio"]
 api_key = "{google_gemini_api_key}"
 thinking_level = "HIGH"
-prompt = """You are a Senior Investment Strategist preparing a consolidated SMSF portfolio review for an aggressive, 100% Australian Equities fund. Generate a 30-day "If-Then" Decision Matrix and Compliance Stress Test.
+prompt = """You are a Senior Investment Strategist preparing a practical SMSF portfolio review. Generate a 30-day "If-Then" Decision Matrix with clear BUY|HOLD|SELL recommendations backed by technical data and signal/noise analysis.
 
 You have received:
 1. Individual stock analysis reports for multiple ASX stocks (tagged stock-recommendation)
@@ -139,9 +154,9 @@ You have received:
 
 Your task is to consolidate these into a SINGLE portfolio review document with risk-adjusted actions and forensic analysis.
 
-# SMSF AGGRESSIVE PORTFOLIO REVIEW: CONSOLIDATED ASSESSMENT
+# SMSF PORTFOLIO REVIEW: PRACTICAL INVESTMENT ASSESSMENT
 ## Prepared for: SMSF Investment Committee
-## Strategy: Aggressive 100% Australian Equities
+## Strategy: Diversified Australian Equities with ETF Exposure
 ## Analysis Date: [Use the current date provided in the system context above]
 
 ---
@@ -154,7 +169,7 @@ Your task is to consolidate these into a SINGLE portfolio review document with r
 Based on the individual stock analyses, provide a high-level view of:
 - Number of stocks reviewed: X
 - Overall portfolio quality score: X/10
-- Aggressive strategy alignment: [Strong / Moderate / Weak]
+- Portfolio strategy alignment: [Strong / Moderate / Weak]
 - Total Portfolio Value: $X (calculated from units × current price)
 - Total Unrealized Gain/Loss: $X (X%)
 
@@ -351,13 +366,13 @@ Identify if the user's position represents >10% of the stock's Average Daily Vol
 
 **Concentration Flags**:
 - ⚠️ **ATO COMPLIANCE RISK**: [List tickers exceeding 20%]
-- For "Stable yet Aggressive" strategy, holdings >20% require documented justification
+- For diversified strategy, holdings >20% require documented justification
 - **Recommended Action**: [Rebalancing suggestions]
 
 ### SMSF Compliance Summary
 
 Per ATO requirements, SMSF trustees must ensure investments align with documented Investment Strategy:
-- **Risk Tolerance**: Aggressive (100% growth assets) - [Appropriate / Requires Review]
+- **Risk Tolerance**: Growth-oriented (diversified equities with ETF exposure) - [Appropriate / Requires Review]
 - **Diversification**: [Adequate / Requires Attention due to concentration]
 - **Liquidity**: [Sufficient / Review required due to ADV flags]
 - **Single Asset Rule**: [Compliant / Non-compliant]
@@ -438,9 +453,9 @@ output_tags = ["smsf-portfolio-review", "smsf-portfolio", "portfolio-summary"]
 
 [step.email_portfolio_report]
 type = "email"
-description = "Email consolidated SMSF aggressive portfolio review"
+description = "Email consolidated SMSF portfolio review"
 depends = "generate_portfolio_summary"
 on_error = "fail"
 to = "bobmcallan@gmail.com"
-subject = "SMSF Aggressive Portfolio Review - Consolidated Stock Analysis"
+subject = "SMSF Portfolio Review - Practical Investment Analysis"
 body_from_tag = "smsf-portfolio-review"
