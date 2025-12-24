@@ -132,12 +132,21 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		parallel = p
 	}
 
+	// Optional: delay between parallel job starts (default 2000ms to avoid rate limiting)
+	parallelDelayMs := 2000
+	if d, ok := stepConfig["parallel_delay_ms"].(float64); ok {
+		parallelDelayMs = int(d)
+	} else if d, ok := stepConfig["parallel_delay_ms"].(int); ok {
+		parallelDelayMs = d
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("template", template).
 		Int("variable_sets", len(variables)).
 		Bool("parallel", parallel).
+		Int("parallel_delay_ms", parallelDelayMs).
 		Msg("Job template worker initialized")
 
 	// Create work items for each variable set
@@ -160,11 +169,12 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"template":      template,
-			"template_file": templateFile,
-			"variables":     variables,
-			"parallel":      parallel,
-			"step_config":   stepConfig,
+			"template":          template,
+			"template_file":     templateFile,
+			"variables":         variables,
+			"parallel":          parallel,
+			"parallel_delay_ms": parallelDelayMs,
+			"step_config":       stepConfig,
 		},
 	}, nil
 }
@@ -235,6 +245,7 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	templateFile, _ := initResult.Metadata["template_file"].(string)
 	variables, _ := initResult.Metadata["variables"].([]map[string]interface{})
 	parallel, _ := initResult.Metadata["parallel"].(bool)
+	parallelDelayMs, _ := initResult.Metadata["parallel_delay_ms"].(int)
 
 	w.logger.Info().
 		Str("phase", "run").
@@ -243,12 +254,13 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		Int("instances", len(variables)).
 		Str("step_id", stepID).
 		Bool("parallel", parallel).
+		Int("parallel_delay_ms", parallelDelayMs).
 		Msg("Starting job template execution")
 
 	if w.jobMgr != nil {
 		mode := "sequential"
 		if parallel {
-			mode = "parallel"
+			mode = fmt.Sprintf("parallel, %dms delay", parallelDelayMs)
 		}
 		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Executing template '%s' with %d variable sets (%s)", template, len(variables), mode))
 	}
@@ -328,8 +340,8 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	var results []templateJobResult
 
 	if parallel {
-		// Parallel execution: spawn all jobs concurrently
-		results = w.executeParallel(ctx, stepID, preparedJobs, len(variables))
+		// Parallel execution: spawn jobs with staggered starts to avoid rate limiting
+		results = w.executeParallel(ctx, stepID, preparedJobs, len(variables), parallelDelayMs)
 	} else {
 		// Sequential execution: run one at a time (original behavior)
 		results = w.executeSequential(ctx, stepID, preparedJobs, len(variables))
@@ -429,9 +441,10 @@ func (w *JobTemplateWorker) executeSequential(ctx context.Context, stepID string
 	return results
 }
 
-// executeParallel spawns all template jobs concurrently and waits for completion.
+// executeParallel spawns template jobs with staggered starts and waits for completion.
 // Jobs are created by ExecuteJobDefinition and appear in the UI as they start.
-func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, preparedJobs []preparedJob, totalCount int) []templateJobResult {
+// parallelDelayMs controls the delay between job starts to avoid rate limiting.
+func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, preparedJobs []preparedJob, totalCount int, parallelDelayMs int) []templateJobResult {
 	results := make([]templateJobResult, len(preparedJobs))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -439,10 +452,11 @@ func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, 
 	w.logger.Info().
 		Int("job_count", len(preparedJobs)).
 		Str("step_id", stepID).
-		Msg("Spawning parallel template jobs")
+		Int("parallel_delay_ms", parallelDelayMs).
+		Msg("Spawning parallel template jobs with staggered starts")
 
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawning %d parallel jobs...", len(preparedJobs)))
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawning %d parallel jobs with %dms delay between starts...", len(preparedJobs), parallelDelayMs))
 	}
 
 	// Log all jobs that will be spawned
@@ -452,8 +466,13 @@ func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, 
 		}
 	}
 
-	// Execute all jobs in parallel goroutines
+	// Execute all jobs in parallel goroutines with staggered starts
 	for i, pj := range preparedJobs {
+		// Stagger job starts to avoid rate limiting (skip delay for first job)
+		if i > 0 && parallelDelayMs > 0 {
+			time.Sleep(time.Duration(parallelDelayMs) * time.Millisecond)
+		}
+
 		wg.Add(1)
 		go func(idx int, job preparedJob) {
 			defer wg.Done()

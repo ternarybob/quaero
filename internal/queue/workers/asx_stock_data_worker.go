@@ -244,6 +244,15 @@ func (w *ASXStockDataWorker) Init(ctx context.Context, step models.JobStep, jobD
 	}, nil
 }
 
+// isCacheFresh checks if a document was synced within the cache window
+func (w *ASXStockDataWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
+	if doc == nil || doc.LastSynced == nil {
+		return false
+	}
+	cacheWindow := time.Duration(cacheHours) * time.Hour
+	return time.Since(*doc.LastSynced) < cacheWindow
+}
+
 // CreateJobs fetches stock data and stores as document
 func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
@@ -258,11 +267,49 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 	period, _ := initResult.Metadata["period"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
+	// Check cache settings
+	cacheHours := 24
+	if ch, ok := stepConfig["cache_hours"].(float64); ok {
+		cacheHours = int(ch)
+	}
+	forceRefresh := false
+	if fr, ok := stepConfig["force_refresh"].(bool); ok {
+		forceRefresh = fr
+	}
+
+	// Check for cached data before fetching
+	if !forceRefresh && cacheHours > 0 {
+		sourceType := "asx_stock_data"
+		if isIndexCode(asxCode) {
+			sourceType = "asx_index"
+		}
+		sourceID := fmt.Sprintf("asx:%s:stock_data", asxCode)
+		if isIndexCode(asxCode) {
+			sourceID = fmt.Sprintf("asx:%s:index_data", asxCode)
+		}
+
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && w.isCacheFresh(existingDoc, cacheHours) {
+			w.logger.Info().
+				Str("asx_code", asxCode).
+				Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+				Int("cache_hours", cacheHours).
+				Msg("Using cached stock data")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("ASX:%s - Using cached data (last synced: %s)",
+						asxCode, existingDoc.LastSynced.Format("2006-01-02 15:04")))
+			}
+			return stepID, nil
+		}
+	}
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("step_name", step.Name).
 		Str("asx_code", asxCode).
 		Str("period", period).
+		Bool("force_refresh", forceRefresh).
 		Msg("Fetching ASX stock data")
 
 	if w.jobMgr != nil {

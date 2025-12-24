@@ -6,6 +6,8 @@ package workers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -185,6 +187,24 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	}, nil
 }
 
+// queryToSourceID generates a stable source ID from a query string
+func (w *WebSearchWorker) queryToSourceID(query string) string {
+	// Normalize: lowercase, trim whitespace
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	// Hash for stable, URL-safe ID
+	hash := sha256.Sum256([]byte(normalized))
+	return "web_search:" + hex.EncodeToString(hash[:8]) // First 8 bytes = 16 chars
+}
+
+// isCacheFresh checks if a document was synced within the cache window
+func (w *WebSearchWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
+	if doc == nil || doc.LastSynced == nil {
+		return false
+	}
+	cacheWindow := time.Duration(cacheHours) * time.Hour
+	return time.Since(*doc.LastSynced) < cacheWindow
+}
+
 // CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
 // Creates a document with the search results and source URLs.
 // Returns the step job ID since web search executes synchronously.
@@ -207,6 +227,36 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
+	// Check cache settings
+	cacheHours := 24
+	if ch, ok := stepConfig["cache_hours"].(float64); ok {
+		cacheHours = int(ch)
+	}
+	forceRefresh := false
+	if fr, ok := stepConfig["force_refresh"].(bool); ok {
+		forceRefresh = fr
+	}
+
+	// Check for cached web search results before executing search
+	sourceID := w.queryToSourceID(query)
+	if !forceRefresh && cacheHours > 0 {
+		existingDoc, err := w.documentStorage.GetDocumentBySource("web_search", sourceID)
+		if err == nil && w.isCacheFresh(existingDoc, cacheHours) {
+			w.logger.Info().
+				Str("query", query).
+				Str("source_id", sourceID).
+				Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+				Int("cache_hours", cacheHours).
+				Msg("Using cached web search results")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("Using cached search results (last synced: %s)",
+						existingDoc.LastSynced.Format("2006-01-02 15:04")))
+			}
+			return stepID, nil
+		}
+	}
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("originator", "worker").
@@ -215,6 +265,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Int("depth", depth).
 		Int("breadth", breadth).
 		Str("step_id", stepID).
+		Bool("force_refresh", forceRefresh).
 		Msg("Starting web search from init result")
 
 	// Log step start for UI
@@ -245,8 +296,8 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("web search failed: %w", err)
 	}
 
-	// Create document from results
-	doc, err := w.createDocument(results, query, &jobDef, stepID, stepConfig)
+	// Create document from results (use stable sourceID for caching)
+	doc, err := w.createDocument(results, query, &jobDef, stepID, sourceID, stepConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -515,8 +566,9 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 	}
 }
 
-// createDocument creates a Document from the search results
-func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
+// createDocument creates a Document from the search results.
+// sourceID is a stable identifier based on the query hash (for caching).
+func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, sourceID string, stepConfig map[string]interface{}) (*models.Document, error) {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Web Search Results: %s\n\n", query))
@@ -608,7 +660,7 @@ func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
 		SourceType:      "web_search",
-		SourceID:        parentJobID,
+		SourceID:        sourceID, // Stable ID for caching
 		Title:           fmt.Sprintf("Web Search: %s", query),
 		ContentMarkdown: content.String(),
 		DetailLevel:     models.DetailLevelFull,
