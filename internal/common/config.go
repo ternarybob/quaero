@@ -34,6 +34,8 @@ type Config struct {
 	WebSocket       WebSocketConfig    `toml:"websocket"`
 	PlacesAPI       PlacesAPIConfig    `toml:"places_api"`
 	Gemini          GeminiConfig       `toml:"gemini"`
+	Claude          ClaudeConfig       `toml:"claude"`
+	LLM             LLMConfig          `toml:"llm"`
 }
 
 type ServerConfig struct {
@@ -175,6 +177,33 @@ type GeminiConfig struct {
 	Temperature        float32 `toml:"temperature"`          // Chat completion temperature (default: 0.7)
 }
 
+// ClaudeConfig contains Anthropic Claude API configuration for AI services
+type ClaudeConfig struct {
+	APIKey             string  `toml:"api_key"`              // Anthropic API key for Claude operations
+	Model              string  `toml:"model"`                // Default Claude model (default: "claude-sonnet-4-20250514")
+	ModelFast          string  `toml:"model_fast"`           // Fast model for simple tasks (default: "claude-haiku-3-5-20241022")
+	ModelThinking      string  `toml:"model_thinking"`       // Thinking model for complex reasoning (default: "claude-sonnet-4-20250514")
+	MaxTokens          int     `toml:"max_tokens"`           // Maximum tokens in response (default: 8192)
+	Timeout            string  `toml:"timeout"`              // Operation timeout as duration string (default: "5m")
+	RateLimit          string  `toml:"rate_limit"`           // Rate limit duration string (default: "1s")
+	Temperature        float32 `toml:"temperature"`          // Completion temperature (default: 0.7)
+}
+
+// LLMProvider represents the AI provider type
+type LLMProvider string
+
+const (
+	// LLMProviderGemini uses Google Gemini API
+	LLMProviderGemini LLMProvider = "gemini"
+	// LLMProviderClaude uses Anthropic Claude API
+	LLMProviderClaude LLMProvider = "claude"
+)
+
+// LLMConfig contains unified configuration for all AI providers
+type LLMConfig struct {
+	DefaultProvider LLMProvider `toml:"default_provider"` // Default provider: "gemini" or "claude" (default: "gemini")
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -293,6 +322,19 @@ func NewDefaultConfig() *Config {
 			Timeout:            "5m",                     // 5 minutes for operations
 			RateLimit:          "4s",                     // Default to 4s (15 RPM) for free tier
 			Temperature:        0.7,                      // Default temperature for chat completions
+		},
+		Claude: ClaudeConfig{
+			APIKey:        "",                         // User must provide API key (ANTHROPIC_API_KEY or config)
+			Model:         "claude-sonnet-4-20250514", // Default model for Claude operations
+			ModelFast:     "claude-haiku-3-5-20241022", // Fast model for simple tasks
+			ModelThinking: "claude-sonnet-4-20250514", // Thinking model for complex reasoning
+			MaxTokens:     8192,                       // Default max tokens
+			Timeout:       "5m",                       // 5 minutes for operations
+			RateLimit:     "1s",                       // Default rate limit
+			Temperature:   0.7,                        // Default temperature
+		},
+		LLM: LLMConfig{
+			DefaultProvider: LLMProviderGemini, // Default to Gemini for backward compatibility
 		},
 	}
 }
@@ -613,6 +655,44 @@ func applyEnvOverrides(config *Config) {
 		}
 	}
 
+	// Claude configuration
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		config.Claude.APIKey = apiKey
+	}
+	if apiKey := os.Getenv("QUAERO_CLAUDE_API_KEY"); apiKey != "" {
+		config.Claude.APIKey = apiKey // QUAERO_ prefix takes priority
+	}
+	if model := os.Getenv("QUAERO_CLAUDE_MODEL"); model != "" {
+		config.Claude.Model = model
+	}
+	if modelFast := os.Getenv("QUAERO_CLAUDE_MODEL_FAST"); modelFast != "" {
+		config.Claude.ModelFast = modelFast
+	}
+	if modelThinking := os.Getenv("QUAERO_CLAUDE_MODEL_THINKING"); modelThinking != "" {
+		config.Claude.ModelThinking = modelThinking
+	}
+	if maxTokens := os.Getenv("QUAERO_CLAUDE_MAX_TOKENS"); maxTokens != "" {
+		if mt, err := strconv.Atoi(maxTokens); err == nil {
+			config.Claude.MaxTokens = mt
+		}
+	}
+	if timeout := os.Getenv("QUAERO_CLAUDE_TIMEOUT"); timeout != "" {
+		config.Claude.Timeout = timeout
+	}
+	if rateLimit := os.Getenv("QUAERO_CLAUDE_RATE_LIMIT"); rateLimit != "" {
+		config.Claude.RateLimit = rateLimit
+	}
+	if temperature := os.Getenv("QUAERO_CLAUDE_TEMPERATURE"); temperature != "" {
+		if t, err := strconv.ParseFloat(temperature, 32); err == nil {
+			config.Claude.Temperature = float32(t)
+		}
+	}
+
+	// LLM provider configuration
+	if provider := os.Getenv("QUAERO_LLM_DEFAULT_PROVIDER"); provider != "" {
+		config.LLM.DefaultProvider = LLMProvider(provider)
+	}
+
 	// Auth configuration
 	if authDir := os.Getenv("QUAERO_AUTH_CREDENTIALS_DIR"); authDir != "" {
 		config.Auth.CredentialsDir = authDir
@@ -652,9 +732,18 @@ func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, na
 	// Map of KV store key names to environment variable names
 	// Environment variables have highest priority
 	keyToEnvMapping := map[string]string{
-		"google_api_key": "QUAERO_GEMINI_GOOGLE_API_KEY",
+		"google_api_key":    "QUAERO_GEMINI_GOOGLE_API_KEY",
+		"anthropic_api_key": "QUAERO_CLAUDE_API_KEY",
+		"claude_api_key":    "QUAERO_CLAUDE_API_KEY",
 		// Add more mappings as needed
 		// "places_api_key": "QUAERO_PLACES_API_KEY", // If we move this to KV store
+	}
+
+	// For Claude, also check the standard ANTHROPIC_API_KEY env var
+	if name == "anthropic_api_key" || name == "claude_api_key" {
+		if envValue := os.Getenv("ANTHROPIC_API_KEY"); envValue != "" {
+			return envValue, nil
+		}
 	}
 
 	// Check environment variable first (highest priority)

@@ -120,6 +120,61 @@ environment = "development" # "development" or "production"
 # temperature = 0.7                                          # Chat completion temperature (0.0-1.0)
 
 # =============================================================================
+# Claude Configuration (Anthropic API)
+# =============================================================================
+# Configure Anthropic Claude API for AI operations.
+# Requires Anthropic API key from: https://console.anthropic.com/
+#
+# IMPORTANT: Claude services require a valid API key. No offline fallback is available.
+# If the API key is missing or invalid, Claude operations will fail immediately.
+#
+# Model Selection:
+# - model: Default model for standard operations (claude-sonnet-4-20250514)
+# - model_fast: Fast model for simple tasks (claude-haiku-3-5-20241022)
+# - model_thinking: For complex reasoning (claude-sonnet-4-20250514)
+#
+# Jobs can specify the model in step config:
+#   model = "claude-sonnet-4-20250514"           # Explicit Claude model
+#   model = "claude/claude-sonnet-4-20250514"    # With provider prefix
+#
+# Defaults: model="claude-sonnet-4-20250514", model_fast="claude-haiku-3-5-20241022",
+#           model_thinking="claude-sonnet-4-20250514",
+#           max_tokens=8192, timeout="5m", temperature=0.7
+# Env vars: ANTHROPIC_API_KEY, QUAERO_CLAUDE_API_KEY, QUAERO_CLAUDE_MODEL,
+#           QUAERO_CLAUDE_MODEL_FAST, QUAERO_CLAUDE_MODEL_THINKING,
+#           QUAERO_CLAUDE_MAX_TOKENS, QUAERO_CLAUDE_TIMEOUT, QUAERO_CLAUDE_TEMPERATURE
+
+# [claude]
+# api_key = "YOUR_ANTHROPIC_API_KEY"                         # Required for Claude operations
+# model = "claude-sonnet-4-20250514"                         # Default model for operations
+# model_fast = "claude-haiku-3-5-20241022"                   # Fast model for simple tasks
+# model_thinking = "claude-sonnet-4-20250514"                # Thinking model for complex reasoning
+# max_tokens = 8192                                          # Maximum tokens in response
+# timeout = "5m"                                             # Operation timeout
+# temperature = 0.7                                          # Completion temperature (0.0-1.0)
+
+# =============================================================================
+# LLM Provider Configuration (Multi-Provider Support)
+# =============================================================================
+# Configure the default AI provider for operations.
+# Individual jobs/steps can override this by specifying a model with provider prefix.
+#
+# Supported providers:
+# - gemini: Google Gemini API (default)
+# - claude: Anthropic Claude API
+#
+# Model selection in jobs:
+# - "gemini-3-flash" or "gemini/gemini-3-flash" -> Uses Gemini
+# - "claude-sonnet-4-20250514" or "claude/claude-sonnet-4-20250514" -> Uses Claude
+# - Empty or no model specified -> Uses default provider
+#
+# Defaults: default_provider="gemini"
+# Env vars: QUAERO_LLM_DEFAULT_PROVIDER
+
+# [llm]
+# default_provider = "gemini"                                # Default provider: "gemini" or "claude"
+
+# =============================================================================
 # Job Definitions Configuration
 # =============================================================================
 # Job definitions are user-defined workflows stored as TOML/JSON files.

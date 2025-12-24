@@ -13,12 +13,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/llm"
-	"google.golang.org/genai"
 )
 
 // SummaryWorker handles corpus summary generation from tagged documents.
@@ -31,6 +29,7 @@ type SummaryWorker struct {
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
+	providerFactory *llm.ProviderFactory
 }
 
 // Compile-time assertion: SummaryWorker implements DefinitionWorker interface
@@ -44,6 +43,7 @@ func NewSummaryWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	providerFactory *llm.ProviderFactory,
 ) *SummaryWorker {
 	return &SummaryWorker{
 		searchService:   searchService,
@@ -52,6 +52,7 @@ func NewSummaryWorker(
 		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
+		providerFactory: providerFactory,
 	}
 }
 
@@ -62,12 +63,12 @@ func (w *SummaryWorker) GetType() models.WorkerType {
 
 // Init performs the initialization/setup phase for a summary step.
 // This is where we:
-//   - Extract and validate configuration (prompt, filter_tags)
-//   - Resolve API key from storage
+//   - Extract and validate configuration (prompt, filter_tags, model)
 //   - Query documents matching the filter criteria
 //   - Return the document list as metadata for CreateJobs
 //
 // The Init phase does NOT generate the summary - it only validates and prepares.
+// API key resolution is handled by the provider factory during generation.
 func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -94,39 +95,6 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 
 	if len(filterTags) == 0 {
 		return nil, fmt.Errorf("filter_tags is required in step config")
-	}
-
-	// Get API key from step config, fallback to global google_gemini_api_key
-	var apiKey string
-	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
-		// Check if it's still a placeholder (orchestrator failed to resolve)
-		if len(apiKeyValue) > 2 && apiKeyValue[0] == '{' && apiKeyValue[len(apiKeyValue)-1] == '}' {
-			// Try to resolve the placeholder manually
-			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
-			resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
-			}
-			apiKey = resolvedAPIKey
-			w.logger.Info().
-				Str("phase", "init").
-				Str("step_name", step.Name).
-				Str("api_key_name", cleanAPIKeyName).
-				Msg("Resolved API key placeholder from storage")
-		} else {
-			apiKey = apiKeyValue
-		}
-	} else {
-		// No api_key in step config - try global google_gemini_api_key
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "google_gemini_api_key", "")
-		if err != nil {
-			return nil, fmt.Errorf("api_key not specified and failed to resolve google_gemini_api_key from storage: %w", err)
-		}
-		apiKey = resolvedAPIKey
-		w.logger.Info().
-			Str("phase", "init").
-			Str("step_name", step.Name).
-			Msg("Using global google_gemini_api_key from storage")
 	}
 
 	// Extract filter_limit from step config (prevents token overflow on large codebases)
@@ -208,14 +176,19 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Msg("Thinking level configured")
 	}
 
-	// Extract model (optional - overrides default gemini-3-pro-preview)
+	// Extract model (optional - can include provider prefix like "claude/claude-sonnet-4-20250514")
+	// Supported formats:
+	//   - "gemini-3-flash" or "gemini/gemini-3-flash" -> Gemini
+	//   - "claude-sonnet-4-20250514" or "claude/claude-sonnet-4-20250514" -> Claude
 	var model string
 	if m, ok := stepConfig["model"].(string); ok && m != "" {
 		model = m
+		provider := w.providerFactory.DetectProvider(model)
 		w.logger.Info().
 			Str("phase", "init").
 			Str("step_name", step.Name).
 			Str("model", model).
+			Str("detected_provider", string(provider)).
 			Msg("Model override configured")
 	}
 
@@ -249,13 +222,12 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		Metadata: map[string]interface{}{
 			"prompt":              prompt,
 			"filter_tags":         filterTags,
-			"api_key":             apiKey,
 			"documents":           documents,
 			"step_config":         stepConfig,
 			"filter_limit":        filterLimit,
 			"validation_patterns": validationPatterns,
 			"thinking_level":      thinkingLevel,
-			"model":               model,
+			"model":               model, // Can include provider prefix like "claude/claude-sonnet-4-20250514"
 		},
 	}, nil
 }
@@ -276,7 +248,6 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	// Extract metadata from init result
 	prompt, _ := initResult.Metadata["prompt"].(string)
 	filterTags, _ := initResult.Metadata["filter_tags"].([]string)
-	apiKey, _ := initResult.Metadata["api_key"].(string)
 	documents, _ := initResult.Metadata["documents"].([]*models.Document)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
@@ -295,23 +266,21 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 			"filter_tags": filterTags,
 		})
 
-	// Initialize Gemini client
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		w.logJobEvent(ctx, stepID, step.Name, "error",
-			fmt.Sprintf("Failed to create Gemini client: %v", err), nil)
-		return "", fmt.Errorf("failed to create Gemini client: %w", err)
-	}
-
-	// Extract thinking level and model for Gemini configuration
+	// Extract thinking level and model for LLM configuration
 	thinkingLevel, _ := initResult.Metadata["thinking_level"].(string)
 	model, _ := initResult.Metadata["model"].(string)
 
-	// Generate summary
-	summaryContent, err := w.generateSummary(ctx, client, prompt, documents, stepID, thinkingLevel, model)
+	// Detect provider from model name
+	provider := w.providerFactory.DetectProvider(model)
+	w.logger.Info().
+		Str("phase", "run").
+		Str("step_name", step.Name).
+		Str("model", model).
+		Str("provider", string(provider)).
+		Msg("Using AI provider for summary generation")
+
+	// Generate summary using provider factory
+	summaryContent, err := w.generateSummary(ctx, prompt, documents, stepID, thinkingLevel, model)
 	if err != nil {
 		w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -433,27 +402,10 @@ func (w *SummaryWorker) validateOutput(content string, patterns []string) error 
 	return nil
 }
 
-// parseThinkingLevel converts a string thinking level to the genai.ThinkingLevel constant.
-// Valid levels: MINIMAL, LOW, MEDIUM, HIGH. Returns empty string for invalid levels.
-func parseThinkingLevel(level string) genai.ThinkingLevel {
-	switch strings.ToUpper(level) {
-	case "MINIMAL":
-		return genai.ThinkingLevelMinimal
-	case "LOW":
-		return genai.ThinkingLevelLow
-	case "MEDIUM":
-		return genai.ThinkingLevelMedium
-	case "HIGH":
-		return genai.ThinkingLevelHigh
-	default:
-		return "" // No thinking config when not specified
-	}
-}
-
-// generateSummary generates a summary from documents using Gemini.
-// thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH.
-// model overrides the default gemini-3-pro-preview model (e.g., "gemini-3-flash-preview").
-func (w *SummaryWorker) generateSummary(ctx context.Context, client *genai.Client, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string) (string, error) {
+// generateSummary generates a summary from documents using the provider factory.
+// thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (Gemini only).
+// model specifies the model to use, can include provider prefix (e.g., "claude/claude-sonnet-4-20250514").
+func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder
 	docsContent.WriteString("# Documents to Summarize\n\n")
@@ -499,110 +451,54 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 
 %s`, currentDate, prompt, docsContent.String())
 
-	// Use passed model or default to gemini-3-pro-preview
-	model := modelOverride
-	if model == "" {
-		model = "gemini-3-pro-preview"
-	}
+	// Detect provider and normalize model
+	provider := w.providerFactory.DetectProvider(modelOverride)
+	model := w.providerFactory.NormalizeModel(modelOverride)
 
-	// Parse thinking level and configure ThinkingConfig if specified
-	parsedLevel := parseThinkingLevel(thinkingLevel)
+	// Use default model for provider if not specified
+	if model == "" {
+		model = w.providerFactory.GetDefaultModel(provider, "default")
+	}
 
 	w.logger.Debug().
 		Int("document_count", len(documents)).
 		Str("parent_job_id", parentJobID).
 		Str("model", model).
+		Str("provider", string(provider)).
 		Str("thinking_level", thinkingLevel).
-		Msg("Executing Gemini summary generation")
+		Msg("Executing summary generation with provider")
 
 	// Execute with timeout
 	summaryCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	// Configure generation with optional ThinkingConfig
-	config := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.3)),
+	// Build content request for provider factory
+	request := &llm.ContentRequest{
+		Messages: []interfaces.Message{
+			{Role: "user", Content: systemPrompt},
+		},
+		Model:         model,
+		Temperature:   0.3,
+		ThinkingLevel: thinkingLevel, // Only used by Gemini
 	}
 
-	// Add ThinkingConfig if a valid thinking level was specified
-	if parsedLevel != "" {
-		config.ThinkingConfig = &genai.ThinkingConfig{
-			ThinkingLevel: parsedLevel,
-		}
-		w.logger.Debug().
-			Str("thinking_level", thinkingLevel).
-			Msg("ThinkingConfig enabled")
+	// Generate content using provider factory (handles retries internally)
+	resp, err := w.providerFactory.GenerateContent(summaryCtx, request)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate summary: %w", err)
 	}
 
-	// Make the API call with retry logic for rate limiting
-	// Uses 45-60 second backoffs to respect Gemini quota windows
-	var resp *genai.GenerateContentResponse
-	var apiErr error
-
-	retryConfig := llm.NewDefaultRetryConfig()
-
-	for attempt := 0; attempt <= retryConfig.MaxRetries; attempt++ {
-		resp, apiErr = client.Models.GenerateContent(
-			summaryCtx,
-			model,
-			[]*genai.Content{
-				genai.NewContentFromText(systemPrompt, genai.RoleUser),
-			},
-			config,
-		)
-
-		if apiErr == nil {
-			break
-		}
-
-		if attempt == retryConfig.MaxRetries {
-			break
-		}
-
-		// Calculate backoff - use API-provided delay for rate limit errors
-		var backoff time.Duration
-		if llm.IsRateLimitError(apiErr) {
-			apiDelay := llm.ExtractRetryDelay(apiErr)
-			backoff = retryConfig.CalculateBackoff(attempt, apiDelay)
-			w.logger.Warn().
-				Int("attempt", attempt+1).
-				Dur("backoff", backoff).
-				Dur("api_delay", apiDelay).
-				Err(apiErr).
-				Msg("Rate limit hit, waiting before retry")
-		} else {
-			// Non-rate-limit errors: shorter backoff
-			backoff = time.Duration(attempt+1) * 2 * time.Second
-			w.logger.Warn().
-				Int("attempt", attempt+1).
-				Dur("backoff", backoff).
-				Err(apiErr).
-				Msg("Retrying summary generation")
-		}
-
-		select {
-		case <-summaryCtx.Done():
-			return "", fmt.Errorf("context cancelled during retry: %w", summaryCtx.Err())
-		case <-time.After(backoff):
-			// Continue to next retry attempt
-		}
+	if resp.Text == "" {
+		return "", fmt.Errorf("empty response from %s API", resp.Provider)
 	}
 
-	if apiErr != nil {
-		return "", fmt.Errorf("failed to generate summary after %d retries: %w", retryConfig.MaxRetries, apiErr)
-	}
+	w.logger.Debug().
+		Str("provider", string(resp.Provider)).
+		Str("model", resp.Model).
+		Int("response_length", len(resp.Text)).
+		Msg("Summary generation completed")
 
-	// Extract response text
-	if resp == nil || len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("no response from Gemini API")
-	}
-
-	responseText := resp.Text()
-	if responseText == "" {
-		return "", fmt.Errorf("empty response from Gemini API")
-	}
-
-	return responseText, nil
+	return resp.Text, nil
 }
 
 // createDocument creates a Document from the summary results
