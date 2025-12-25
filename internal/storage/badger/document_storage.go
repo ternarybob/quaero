@@ -186,8 +186,15 @@ func (s *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 			Msg("BadgerDB: Tag filtering completed")
 
 		docs = filtered
+	}
 
-		// Apply offset and limit after tag filtering
+	// Apply sorting based on OrderBy and OrderDir
+	if opts != nil && opts.OrderBy != "" {
+		sortDocuments(docs, opts.OrderBy, opts.OrderDir)
+	}
+
+	// Apply offset and limit after sorting
+	if opts != nil {
 		if opts.Offset > 0 && opts.Offset < len(docs) {
 			docs = docs[opts.Offset:]
 		} else if opts.Offset >= len(docs) {
@@ -322,4 +329,41 @@ func hasAllDocTags(docTags, requiredTags []string) bool {
 		}
 	}
 	return true
+}
+
+// sortDocuments sorts a slice of documents by the specified field and direction.
+// Supports: created_at, updated_at (default: created_at).
+// Direction: "asc" or "desc" (default: "desc").
+func sortDocuments(docs []models.Document, orderBy, orderDir string) {
+	if len(docs) == 0 {
+		return
+	}
+
+	// Determine sort direction (default: descending = newest first)
+	ascending := false
+	if orderDir == "asc" {
+		ascending = true
+	}
+
+	sort.Slice(docs, func(i, j int) bool {
+		var ti, tj time.Time
+
+		switch orderBy {
+		case "created_at":
+			ti = docs[i].CreatedAt
+			tj = docs[j].CreatedAt
+		case "updated_at":
+			ti = docs[i].UpdatedAt
+			tj = docs[j].UpdatedAt
+		default:
+			// Default to created_at
+			ti = docs[i].CreatedAt
+			tj = docs[j].CreatedAt
+		}
+
+		if ascending {
+			return ti.Before(tj)
+		}
+		return ti.After(tj)
+	})
 }

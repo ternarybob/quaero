@@ -116,9 +116,24 @@ func (s *Service) GetFreshDocument(ctx context.Context, tags []string, config mo
 		return docs[i].LastSynced.After(*docs[j].LastSynced)
 	})
 
+	// Extract requested content hash for cache invalidation
+	requestedHash := info.ContentHash
+
 	// Find the first fresh document (revision 1 is preferred)
 	for _, doc := range docs {
 		docInfo := models.ParseCacheTags(doc.Tags)
+
+		// If a content hash was requested, verify the document has the same hash
+		// This ensures that when prompt/template content changes, old cached docs are skipped
+		if requestedHash != "" && docInfo.ContentHash != requestedHash {
+			s.logger.Debug().
+				Str("doc_id", doc.ID).
+				Str("doc_hash", docInfo.ContentHash).
+				Str("requested_hash", requestedHash).
+				Msg("Cache hash mismatch - skipping document")
+			continue
+		}
+
 		if docInfo.Revision == 1 && s.IsFresh(doc, config) {
 			s.logger.Debug().
 				Str("doc_id", doc.ID).

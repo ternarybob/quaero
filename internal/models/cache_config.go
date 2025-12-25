@@ -157,10 +157,11 @@ func ResolveCacheConfig(jobConfig, stepConfig map[string]interface{}) CacheConfi
 
 // CacheTagInfo holds parsed cache tag information
 type CacheTagInfo struct {
-	JobDefID string
-	RunDate  string
-	StepName string
-	Revision int
+	JobDefID    string
+	RunDate     string
+	StepName    string
+	Revision    int
+	ContentHash string // Content hash for cache invalidation (from hash: tag)
 }
 
 // GenerateCacheTags creates deterministic cache tags for a step execution.
@@ -219,6 +220,8 @@ func ParseCacheTags(tags []string) *CacheTagInfo {
 			info.StepName = strings.TrimPrefix(tag, "step:")
 		case strings.HasPrefix(tag, "rev:"):
 			fmt.Sscanf(tag, "rev:%d", &info.Revision)
+		case strings.HasPrefix(tag, "hash:"):
+			info.ContentHash = strings.TrimPrefix(tag, "hash:")
 		}
 	}
 	return info

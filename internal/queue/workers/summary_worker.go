@@ -227,9 +227,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		}
 	}
 
-	// Compute content hash from prompt for cache invalidation
-	// When prompt changes, hash changes, causing cache miss
-	hash := md5.Sum([]byte(prompt))
+	// Compute content hash from prompt AND document IDs for cache invalidation
+	// When prompt changes OR document set changes, hash changes, causing cache miss
+	// This ensures that adding/removing stocks to a job triggers re-generation
+	var hashInput strings.Builder
+	hashInput.WriteString(prompt)
+	hashInput.WriteString("|docs:")
+	for _, doc := range documents {
+		hashInput.WriteString(doc.ID)
+		hashInput.WriteString(",")
+	}
+	hash := md5.Sum([]byte(hashInput.String()))
 	contentHash := hex.EncodeToString(hash[:])[:8] // First 8 chars of MD5 hex
 
 	return &interfaces.WorkerInitResult{

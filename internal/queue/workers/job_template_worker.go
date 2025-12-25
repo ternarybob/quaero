@@ -132,7 +132,7 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 	if templateSingleton {
 		// Template declares singleton mode - runs once, ignores parent variables for iteration
 		variables = []map[string]interface{}{
-			{"_singleton": true}, // Placeholder to trigger single execution
+			{"_singleton": true, "_template": template}, // Placeholder to trigger single execution
 		}
 		w.logger.Info().
 			Str("step_name", step.Name).
@@ -140,7 +140,7 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 	} else if v, isBool := variablesRaw.(bool); isBool && !v {
 		// Step explicitly opts out of iteration - use singleton mode (backward compatibility)
 		variables = []map[string]interface{}{
-			{"_singleton": true}, // Placeholder to trigger single execution
+			{"_singleton": true, "_template": template}, // Placeholder to trigger single execution
 		}
 		w.logger.Info().
 			Str("step_name", step.Name).
@@ -175,7 +175,7 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		// If no parent variables found, use SINGLETON mode (run template once)
 		if !inheritedFromParent {
 			variables = []map[string]interface{}{
-				{"_singleton": true}, // Placeholder to trigger single execution
+				{"_singleton": true, "_template": template}, // Placeholder to trigger single execution
 			}
 			w.logger.Info().
 				Str("step_name", step.Name).
@@ -268,6 +268,15 @@ func (w *JobTemplateWorker) parseVariables(raw interface{}) ([]map[string]interf
 // Priority: "ticker" > "name" > "id" > first string value.
 // This avoids non-deterministic behavior from Go's random map iteration order.
 func getVariableIdentifier(varSet map[string]interface{}) string {
+	// Check for singleton mode first - use template name or "singleton" as identifier
+	if _, isSingleton := varSet["_singleton"]; isSingleton {
+		// In singleton mode, try to get template name from context, otherwise use "singleton"
+		if tmpl, ok := varSet["_template"].(string); ok && tmpl != "" {
+			return tmpl
+		}
+		return "singleton"
+	}
+
 	// Try well-known identifier keys in order of priority
 	for _, key := range []string{"ticker", "name", "id"} {
 		if val, ok := varSet[key]; ok {

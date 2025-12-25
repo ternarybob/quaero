@@ -926,26 +926,42 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 		tags = models.MergeTags(tags, cacheTags)
 	}
 
+	// Build period performance for metadata (structured data for downstream consumption)
+	// Note: periodPerf was already calculated above for the markdown content, reuse it here
+	var periodPerfMeta []map[string]interface{}
+	for _, p := range periodPerf {
+		periodPerfMeta = append(periodPerfMeta, map[string]interface{}{
+			"period":         p.Period,
+			"days":           p.Days,
+			"price":          p.Price,
+			"change_value":   p.ChangeValue,
+			"change_percent": p.ChangePercent,
+			"shares_1k":      p.Shares1k,
+			"value_1k":       p.Value1k,
+		})
+	}
+
 	// Build metadata
 	metadata := map[string]interface{}{
-		"asx_code":       asxCode,
-		"company_name":   data.CompanyName,
-		"is_index":       isIndex,
-		"last_price":     data.LastPrice,
-		"price_change":   data.PriceChange,
-		"change_percent": data.ChangePercent,
-		"market_cap":     data.MarketCap,
-		"pe_ratio":       data.PERatio,
-		"week52_low":     data.Week52Low,
-		"week52_high":    data.Week52High,
-		"sma20":          data.SMA20,
-		"sma50":          data.SMA50,
-		"sma200":         data.SMA200,
-		"rsi14":          data.RSI14,
-		"support":        data.Support,
-		"resistance":     data.Resistance,
-		"trend_signal":   data.TrendSignal,
-		"parent_job_id":  parentJobID,
+		"asx_code":           asxCode,
+		"company_name":       data.CompanyName,
+		"is_index":           isIndex,
+		"last_price":         data.LastPrice,
+		"price_change":       data.PriceChange,
+		"change_percent":     data.ChangePercent,
+		"market_cap":         data.MarketCap,
+		"pe_ratio":           data.PERatio,
+		"week52_low":         data.Week52Low,
+		"week52_high":        data.Week52High,
+		"sma20":              data.SMA20,
+		"sma50":              data.SMA50,
+		"sma200":             data.SMA200,
+		"rsi14":              data.RSI14,
+		"support":            data.Support,
+		"resistance":         data.Resistance,
+		"trend_signal":       data.TrendSignal,
+		"parent_job_id":      parentJobID,
+		"period_performance": periodPerfMeta, // Structured price change data for 7D, 1M, 3M, 6M, 1Y, 2Y
 	}
 
 	// Set source type and URL based on whether this is an index or stock

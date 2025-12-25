@@ -130,7 +130,11 @@ prompt = """You are a Senior Investment Strategist and Compliance Officer prepar
   - Format: "1.2M avg, ↑ 25% (1M)" or "850K avg, ↓ 15% (1W)"
   - Shows if last week/month volume is above (↑) or below (↓) long-term average
 - **Tech Opinion**: Review of 200MA and key technical levels
-- **Signal/Noise**: Is the company narrative credible? (Use the Signal-to-Noise metric from analysis)
+- **Signal/Noise**: Company narrative credibility - HIGHER IS BETTER
+  - Definition: % of announcements that actually moved share price (Signal) vs PR fluff that didn't (Noise)
+  - 🟢 High (>50%): Credible management, announcements have substance
+  - 🟠 Medium (25-50%): Mixed credibility, some announcements are noise
+  - 🔴 Low (<25%): Mostly PR noise, be skeptical of company narrative
 - **Review Trigger**: Specific event to watch (e.g. "Next Earnings", "Price < $X")
 
 ---

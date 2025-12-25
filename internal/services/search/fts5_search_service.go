@@ -47,11 +47,21 @@ func (s *FTS5SearchService) Search(
 			limit = 1000 // Higher default for list operations
 		}
 
+		// Use caller's OrderBy/OrderDir or default to updated_at DESC
+		orderBy := opts.OrderBy
+		if orderBy == "" {
+			orderBy = "updated_at"
+		}
+		orderDir := opts.OrderDir
+		if orderDir == "" {
+			orderDir = "desc"
+		}
+
 		listOpts := &interfaces.ListOptions{
 			Limit:    limit,
 			Offset:   opts.Offset,
-			OrderBy:  "updated_at",
-			OrderDir: "desc",
+			OrderBy:  orderBy,
+			OrderDir: orderDir,
 		}
 
 		results, err = s.storage.ListDocuments(listOpts)
