@@ -802,6 +802,28 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
+	// Copy job-templates directory to bin/job-templates (for job template worker)
+	jobTemplatesSourcePath, err := filepath.Abs("../config/job-templates")
+	if err != nil {
+		return fmt.Errorf("failed to resolve job-templates source path: %w", err)
+	}
+
+	jobTemplatesDestPath := filepath.Join(binDir, "job-templates")
+
+	// Remove existing job-templates directory if it exists
+	if _, err := os.Stat(jobTemplatesDestPath); err == nil {
+		if err := os.RemoveAll(jobTemplatesDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing job-templates directory: %w", err)
+		}
+	}
+
+	// Copy job-templates directory
+	if err := env.copyDir(jobTemplatesSourcePath, jobTemplatesDestPath); err != nil {
+		return fmt.Errorf("failed to copy job-templates directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Job templates copied from %s to: %s\n", jobTemplatesSourcePath, jobTemplatesDestPath)
+
 	// Copy variables directory to bin/variables (for variables and key/value storage)
 	variablesSourcePath, err := filepath.Abs("../config/variables")
 	if err != nil {

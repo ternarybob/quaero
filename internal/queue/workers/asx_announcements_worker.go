@@ -210,7 +210,7 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 	// Store each announcement as a document
 	savedCount := 0
 	for _, ann := range announcements {
-		doc := w.createDocument(ann, asxCode, &jobDef, stepID, outputTags)
+		doc := w.createDocument(ctx, ann, asxCode, &jobDef, stepID, outputTags)
 		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Warn().Err(err).Str("headline", ann.Headline).Msg("Failed to save announcement document")
 			continue
@@ -360,7 +360,7 @@ func (w *ASXAnnouncementsWorker) calculateCutoffDate(period string) time.Time {
 }
 
 // createDocument creates a Document from an ASX announcement
-func (w *ASXAnnouncementsWorker) createDocument(ann ASXAnnouncement, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXAnnouncementsWorker) createDocument(ctx context.Context, ann ASXAnnouncement, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# ASX Announcement: %s\n\n", ann.Headline))
@@ -403,6 +403,12 @@ func (w *ASXAnnouncementsWorker) createDocument(ann ASXAnnouncement, asxCode str
 
 	// Add output_tags from step config
 	tags = append(tags, outputTags...)
+
+	// Apply cache tags from context
+	cacheTags := queue.GetCacheTagsFromContext(ctx)
+	if len(cacheTags) > 0 {
+		tags = models.MergeTags(tags, cacheTags)
+	}
 
 	// Build metadata
 	metadata := map[string]interface{}{

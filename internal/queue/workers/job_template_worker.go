@@ -8,6 +8,8 @@ package workers
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,6 +77,8 @@ func (w *JobTemplateWorker) GetType() models.WorkerType {
 // Init performs initialization for the job template step.
 // Validates config and loads the template file.
 // Supports global variables at job definition level that steps can inherit.
+// Singleton mode can be declared in the template config (singleton = true) or
+// in the step config (variables = false) for backward compatibility.
 func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -93,37 +97,90 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		return nil, fmt.Errorf("template file not found: %s", templateFile)
 	}
 
-	// Extract variables - supports global (job-level) and step-level variables
-	// Priority: step-level variables override job-level variables
-	// If step has `variables = false`, skip variables entirely
-	variablesRaw, hasStepVars := stepConfig["variables"]
-
-	// Check if step explicitly opts out of variables
-	if v, isBool := variablesRaw.(bool); isBool && !v {
-		return nil, fmt.Errorf("step has variables disabled (variables = false)")
+	// Load template to check its config for singleton mode
+	// This allows templates to declare they run once (singleton = true)
+	templateContent, err := os.ReadFile(templateFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read template file: %w", err)
 	}
 
-	// If no step-level variables, check job definition config for global variables
-	if !hasStepVars && jobDef.Config != nil {
-		if globalVars, hasGlobalVars := jobDef.Config["variables"]; hasGlobalVars {
-			variablesRaw = globalVars
+	templateJobFile, err := jobs.ParseTOML(templateContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	// Check if template declares singleton mode in its [config] section
+	templateSingleton := false
+	if templateJobFile.Config != nil {
+		if s, ok := templateJobFile.Config["singleton"].(bool); ok && s {
+			templateSingleton = true
 			w.logger.Info().
 				Str("step_name", step.Name).
-				Msg("Using global variables from job definition config")
+				Str("template", template).
+				Msg("Template declares singleton=true - will run once")
 		}
 	}
 
-	if variablesRaw == nil {
-		return nil, fmt.Errorf("'variables' array is required (at step or job level)")
-	}
+	// Extract variables - supports global (job-level) and step-level variables
+	// Priority: template singleton > step variables > job-level variables
+	// Template singleton mode takes precedence over all variable settings
+	variablesRaw, hasStepVars := stepConfig["variables"]
 
-	variables, err := w.parseVariables(variablesRaw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid 'variables' format: %w", err)
-	}
+	var variables []map[string]interface{}
 
-	if len(variables) == 0 {
-		return nil, fmt.Errorf("'variables' array cannot be empty")
+	// Check for singleton mode: template config (singleton=true) or step config (variables=false)
+	if templateSingleton {
+		// Template declares singleton mode - runs once, ignores parent variables for iteration
+		variables = []map[string]interface{}{
+			{"_singleton": true}, // Placeholder to trigger single execution
+		}
+		w.logger.Info().
+			Str("step_name", step.Name).
+			Msg("Using singleton mode from template config")
+	} else if v, isBool := variablesRaw.(bool); isBool && !v {
+		// Step explicitly opts out of iteration - use singleton mode (backward compatibility)
+		variables = []map[string]interface{}{
+			{"_singleton": true}, // Placeholder to trigger single execution
+		}
+		w.logger.Info().
+			Str("step_name", step.Name).
+			Msg("variables=false - using singleton mode (template runs once)")
+	} else if hasStepVars && variablesRaw != nil {
+		// Step has explicit variables array - use them for iteration
+		var err error
+		variables, err = w.parseVariables(variablesRaw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'variables' format: %w", err)
+		}
+		if len(variables) == 0 {
+			return nil, fmt.Errorf("'variables' array cannot be empty")
+		}
+	} else {
+		// No step-level variables - inherit from parent config.variables for iteration
+		inheritedFromParent := false
+		if jobDef.Config != nil {
+			if parentVarsRaw, ok := jobDef.Config["variables"]; ok && parentVarsRaw != nil {
+				parentVars, err := w.parseVariables(parentVarsRaw)
+				if err == nil && len(parentVars) > 0 {
+					variables = parentVars
+					inheritedFromParent = true
+					w.logger.Info().
+						Str("step_name", step.Name).
+						Int("variable_count", len(parentVars)).
+						Msg("Inheriting variables from job config [config].variables for iteration")
+				}
+			}
+		}
+
+		// If no parent variables found, use SINGLETON mode (run template once)
+		if !inheritedFromParent {
+			variables = []map[string]interface{}{
+				{"_singleton": true}, // Placeholder to trigger single execution
+			}
+			w.logger.Info().
+				Str("step_name", step.Name).
+				Msg("No variables available - using singleton mode (template runs once)")
+		}
 	}
 
 	// Optional: execute in parallel or sequential
@@ -163,11 +220,17 @@ func (w *JobTemplateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		}
 	}
 
+	// Compute content hash from template file for cache invalidation
+	// When template content changes, hash changes, causing cache miss
+	hash := md5.Sum(templateContent)
+	contentHash := hex.EncodeToString(hash[:])[:8] // First 8 chars of MD5 hex
+
 	return &interfaces.WorkerInitResult{
 		WorkItems:            workItems,
 		TotalCount:           len(variables),
 		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
+		ContentHash:          contentHash, // For cache invalidation when template changes
 		Metadata: map[string]interface{}{
 			"template":          template,
 			"template_file":     templateFile,
@@ -303,6 +366,20 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 				w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to convert template for %s: %v", identifier, err))
 			}
 			continue
+		}
+
+		// INHERIT PARENT CONFIG: Merge parent job config into child job config
+		// This allows global variables (e.g. portfolio holdings) to be passed to the template job
+		if jobDef.Config != nil {
+			if templatedJobDef.Config == nil {
+				templatedJobDef.Config = make(map[string]interface{})
+			}
+			for k, v := range jobDef.Config {
+				// Only inherit if not already defined in the template
+				if _, exists := templatedJobDef.Config[k]; !exists {
+					templatedJobDef.Config[k] = v
+				}
+			}
 		}
 
 		// Generate unique ID if not set or if it conflicts

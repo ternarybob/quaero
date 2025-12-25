@@ -25,6 +25,11 @@ auto_start = false
 # Variable references in templates: {stock:ticker}, {stock:name}, {stock:industry}
 # Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
 [config]
+# Cache configuration - enables 24h rolling cache for all steps
+cache_type = "rolling_time"
+cache_hours = 24
+revisions = 1
+
 variables = [
     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
     # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },

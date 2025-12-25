@@ -1865,6 +1865,62 @@ func (h *JobHandler) GetJobStructureHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetJobChildrenHandler returns child jobs of a parent job
+// GET /api/jobs/{id}/children
+func (h *JobHandler) GetJobChildrenHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/children
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify parent job exists
+	_, err := h.jobManager.GetJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Parent job not found")
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Get child jobs using JobListOptions with ParentID filter
+	childOpts := &interfaces.JobListOptions{
+		ParentID: jobID,
+		Limit:    1000,
+		Offset:   0,
+	}
+	childJobs, err := h.jobStorage.ListJobs(ctx, childOpts)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get child jobs")
+		http.Error(w, "Failed to get child jobs", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to maps for JSON response
+	jobs := make([]map[string]interface{}, 0, len(childJobs))
+	for _, job := range childJobs {
+		jobMap := convertJobToMap(job)
+		jobMap["parent_id"] = job.ParentID
+		jobs = append(jobs, jobMap)
+	}
+
+	response := map[string]interface{}{
+		"jobs":  jobs,
+		"count": len(jobs),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // convertJobToMap converts a QueueJobState struct to a map for JSON response enrichment
 // IMPORTANT: Converts the Config field to a flexible map[string]interface{} for executor-agnostic display
 // Extracts document_count from metadata for easier UI access

@@ -1,0 +1,54 @@
+# Stock Email Report Template
+# =========================================================================
+# Simple email template for sending individual stock analysis reports.
+# Designed to run AFTER asx-stock-review completes, sending each stock's
+# recommendation via email.
+#
+# USAGE:
+# Add as a second step in job definitions that need individual stock emails.
+# Variables can be declared globally at job level - no need to duplicate.
+#
+#   [config]
+#   variables = [{ ticker = "ROC", name = "RocketBoots", industry = "AI" }]
+#
+#   [step.email_reports]
+#   type = "job_template"
+#   template = "stock-email-report"
+#   depends = "run_stock_analysis"
+#   # Variables inherited from [config] section
+#
+# VARIABLE SYNTAX:
+# - {stock:ticker} - ASX ticker code (e.g., ROC)
+# - {stock:name} - Company name
+# - {stock:industry} - Industry classification
+# - {stock:ticker_lower} - Lowercase ticker for filtering
+#
+# INPUT/OUTPUT LINKING:
+# This template uses input = ["stock-recommendation", "{stock:ticker_lower}"]
+# to find documents from asx-stock-review that have BOTH tags.
+# =========================================================================
+
+id = "stock-email-{stock:ticker_lower}"
+name = "Email Report: {stock:ticker}"
+type = "email_report"
+description = "Email investment analysis report for {stock:name} (ASX:{stock:ticker})"
+schedule = ""
+timeout = "5m"
+enabled = true
+auto_start = false
+
+# Cache configuration - enables 24h rolling cache for all steps
+[config]
+cache_type = "rolling_time"
+cache_hours = 24
+revisions = 1
+
+[step.send_email]
+type = "email"
+description = "Send {stock:name} (ASX:{stock:ticker}) investment analysis via email"
+on_error = "continue"
+to = "{email_recipient}"
+subject = "ASX:{stock:ticker} Investment Analysis - {stock:name} ({stock:industry})"
+# Input matches output_tags from investment_recommendation step
+# Finds documents with BOTH "stock-recommendation" AND stock ticker tag
+input = ["stock-recommendation", "{stock:ticker_lower}"]

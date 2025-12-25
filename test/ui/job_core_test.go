@@ -5,7 +5,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 	"time"
 

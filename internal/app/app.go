@@ -25,6 +25,7 @@ import (
 	"github.com/ternarybob/quaero/internal/queue/workers"
 	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
+	"github.com/ternarybob/quaero/internal/services/cache"
 	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/config"
 	"github.com/ternarybob/quaero/internal/services/connectors"
@@ -501,6 +502,12 @@ func (a *App) initServices() error {
 	stepMgr := queue.NewStepManager(a.Logger)
 	a.StepManager = stepMgr
 	a.Logger.Debug().Msg("Step manager initialized")
+
+	// 5.8.2 Initialize Cache Service and wire to StepManager
+	cacheService := cache.NewService(a.StorageManager.DocumentStorage(), a.Logger)
+	stepMgr.SetCacheService(cacheService)
+	stepMgr.SetJobManager(jobMgr)
+	a.Logger.Debug().Msg("Cache service initialized and wired to step manager")
 
 	// 5.9. Initialize job processor (replaces worker pool)
 	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)

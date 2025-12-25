@@ -7,6 +7,8 @@ package workers
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -106,6 +108,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 	} else if limitInt64, ok := stepConfig["filter_limit"].(int64); ok && limitInt64 > 0 {
 		filterLimit = int(limitInt64)
 	}
+
+	// Extract max_iterations (optional - for critique loop)
+	maxIterations := 0
+	if max, ok := stepConfig["max_iterations"].(int); ok && max > 0 {
+		maxIterations = max
+	} else if maxFloat, ok := stepConfig["max_iterations"].(float64); ok && maxFloat > 0 {
+		maxIterations = int(maxFloat)
+	}
+
+	// Extract critique_prompt (optional - for critique loop)
+	critiquePrompt, _ := stepConfig["critique_prompt"].(string)
 
 	// Query documents matching filter tags
 	opts := interfaces.SearchOptions{
@@ -214,11 +227,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		}
 	}
 
+	// Compute content hash from prompt for cache invalidation
+	// When prompt changes, hash changes, causing cache miss
+	hash := md5.Sum([]byte(prompt))
+	contentHash := hex.EncodeToString(hash[:])[:8] // First 8 chars of MD5 hex
+
 	return &interfaces.WorkerInitResult{
 		WorkItems:            workItems,
 		TotalCount:           len(documents),
 		Strategy:             interfaces.ProcessingStrategyInline, // Synchronous execution
 		SuggestedConcurrency: 1,
+		ContentHash:          contentHash, // For cache invalidation when prompt changes
 		Metadata: map[string]interface{}{
 			"prompt":              prompt,
 			"filter_tags":         filterTags,
@@ -228,6 +247,8 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			"validation_patterns": validationPatterns,
 			"thinking_level":      thinkingLevel,
 			"model":               model, // Can include provider prefix like "claude/claude-sonnet-4-20250514"
+			"max_iterations":      maxIterations,
+			"critique_prompt":     critiquePrompt,
 		},
 	}, nil
 }
@@ -281,12 +302,84 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 
 	// Generate summary using provider factory
 	// Pass jobDef to include portfolio config variables in the prompt context
-	summaryContent, err := w.generateSummary(ctx, prompt, documents, stepID, thinkingLevel, model, &jobDef)
-	if err != nil {
-		w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
-		w.logJobEvent(ctx, stepID, step.Name, "error",
-			fmt.Sprintf("Summary generation failed: %v", err), nil)
-		return "", fmt.Errorf("summary generation failed: %w", err)
+
+	// INITIAL DRAFT GENERATION
+	currentPrompt := prompt
+	var summaryContent string
+	var err error
+
+	// Extract iteration config from initResult metadata (added in Init step)
+	maxIterations := 0
+	if max, ok := initResult.Metadata["max_iterations"].(int); ok {
+		maxIterations = max
+	}
+	critiquePrompt, _ := initResult.Metadata["critique_prompt"].(string)
+
+	// If no critique configured, just run once
+	if maxIterations <= 0 || critiquePrompt == "" {
+		summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+		if err != nil {
+			w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
+			w.logJobEvent(ctx, stepID, step.Name, "error",
+				fmt.Sprintf("Summary generation failed: %v", err), nil)
+			return "", fmt.Errorf("summary generation failed: %w", err)
+		}
+	} else {
+		// ITERATIVE CRITIQUE LOOP
+		w.logger.Info().
+			Str("step_name", step.Name).
+			Int("max_iterations", maxIterations).
+			Msg("Starting iterative summary generation with critique")
+
+		for i := 0; i <= maxIterations; i++ {
+			iterationLabel := fmt.Sprintf("Iteration %d/%d", i+1, maxIterations+1)
+			w.logJobEvent(ctx, stepID, step.Name, "info",
+				fmt.Sprintf("Generating draft (%s)", iterationLabel), nil)
+
+			// 1. Generate Draft (or Refined Draft)
+			summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+			if err != nil {
+				w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed in loop")
+				return "", fmt.Errorf("summary generation failed (iter %d): %w", i, err)
+			}
+
+			// If this was the last iteration, break and save
+			if i == maxIterations {
+				break
+			}
+
+			// 2. Generate Critique
+			w.logJobEvent(ctx, stepID, step.Name, "info",
+				fmt.Sprintf("Critiquing draft (%s)", iterationLabel), nil)
+
+			critique, err := w.generateCritique(ctx, critiquePrompt, summaryContent, stepID, model)
+			if err != nil {
+				w.logger.Warn().Err(err).Msg("Critique generation failed, proceeding with current draft")
+				break
+			}
+
+			// 3. Check Signal
+			if strings.Contains(strings.ToUpper(critique), "NO_CHANGES_NEEDED") {
+				w.logger.Info().Msg("Critique passed with NO_CHANGES_NEEDED")
+				w.logJobEvent(ctx, stepID, step.Name, "info", "Critique passed - no changes needed", nil)
+				break
+			}
+
+			// 4. Update Prompts for Next Loop
+			w.logger.Info().Str("critique_length", fmt.Sprintf("%d", len(critique))).Msg("Critique received, refining...")
+
+			// Append critique to the prompt for the next run
+			currentPrompt = fmt.Sprintf(`%s
+
+---
+## PREVIOUS DRAFT CRITIQUE (MUST ADDRESS)
+The following is a critique of your previous draft. You must address EVERY issue raised here in your next version:
+
+%s
+
+---
+`, prompt, critique)
+		}
 	}
 
 	// Validate output if patterns are specified
@@ -306,7 +399,7 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	}
 
 	// Create summary document
-	doc, err := w.createDocument(summaryContent, prompt, documents, &jobDef, stepID, stepConfig)
+	doc, err := w.createDocument(ctx, summaryContent, prompt, documents, &jobDef, stepID, stepConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -432,13 +525,27 @@ func (w *SummaryWorker) validateOutput(content string, patterns []string) error 
 // and formats them as a markdown section for inclusion in the summary prompt.
 // This enables portfolio summaries to include units, avg_price, and weighting data.
 func (w *SummaryWorker) buildPortfolioHoldingsSection(jobDef *models.JobDefinition) string {
-	if jobDef == nil || jobDef.Config == nil {
+	if jobDef == nil {
+		w.logger.Warn().Msg("buildPortfolioHoldingsSection: jobDef is nil")
 		return ""
 	}
+	if jobDef.Config == nil {
+		w.logger.Warn().Msg("buildPortfolioHoldingsSection: jobDef.Config is nil")
+		return ""
+	}
+
+	w.logger.Debug().
+		Int("config_size", len(jobDef.Config)).
+		Msg("buildPortfolioHoldingsSection: inspecting config")
 
 	// Extract variables from job config
 	variablesRaw, ok := jobDef.Config["variables"]
 	if !ok {
+		w.logger.Warn().Msg("buildPortfolioHoldingsSection: 'variables' key not found in jobDef.Config")
+		// Debug print keys
+		for k := range jobDef.Config {
+			w.logger.Debug().Str("key", k).Msg("Config key available")
+		}
 		return ""
 	}
 
@@ -446,20 +553,26 @@ func (w *SummaryWorker) buildPortfolioHoldingsSection(jobDef *models.JobDefiniti
 	var variables []map[string]interface{}
 	switch v := variablesRaw.(type) {
 	case []interface{}:
+		w.logger.Debug().Int("count", len(v)).Msg("Found variables as []interface{}")
 		for _, item := range v {
 			if varMap, ok := item.(map[string]interface{}); ok {
 				variables = append(variables, varMap)
 			}
 		}
 	case []map[string]interface{}:
+		w.logger.Debug().Int("count", len(v)).Msg("Found variables as []map[string]interface{}")
 		variables = v
 	default:
+		w.logger.Warn().Str("type", fmt.Sprintf("%T", variablesRaw)).Msg("buildPortfolioHoldingsSection: variables has unexpected type")
 		return ""
 	}
 
 	if len(variables) == 0 {
+		w.logger.Warn().Msg("buildPortfolioHoldingsSection: formatted variables list is empty")
 		return ""
 	}
+
+	w.logger.Debug().Int("variables_count", len(variables)).Msg("buildPortfolioHoldingsSection: parsing variables for portfolio data")
 
 	// Check if this looks like portfolio data (has ticker, units, avg_price)
 	hasPortfolioData := false
@@ -638,7 +751,7 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 }
 
 // createDocument creates a Document from the summary results
-func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
+func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
 	// Build tags - include job name and any job-level tags
 	tags := []string{"summary"}
 	if jobDef != nil {
@@ -672,6 +785,15 @@ func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents 
 				Str("output_tags_type", fmt.Sprintf("%T", stepConfig["output_tags"])).
 				Msg("output_tags not found or unexpected type in step config")
 		}
+	}
+
+	// Add cache tags from context (for caching/deduplication)
+	cacheTags := queue.GetCacheTagsFromContext(ctx)
+	if len(cacheTags) > 0 {
+		tags = models.MergeTags(tags, cacheTags)
+		w.logger.Debug().
+			Strs("cache_tags", cacheTags).
+			Msg("Applied cache tags to document")
 	}
 
 	w.logger.Info().
@@ -726,4 +848,53 @@ func (w *SummaryWorker) logJobEvent(ctx context.Context, parentJobID, _, level, 
 		return
 	}
 	w.jobMgr.AddJobLog(ctx, parentJobID, level, message)
+}
+
+// generateCritique generates a critique of the draft summary
+func (w *SummaryWorker) generateCritique(ctx context.Context, critiquePrompt, draftContent, parentJobID, modelOverride string) (string, error) {
+	// Build system prompt for critique
+	systemPrompt := fmt.Sprintf(`You are a strict document reviewer and editor.
+Your task is to critique the following Draft Document based on the Rules provided.
+
+## RULES
+%s
+
+## INSTRUCTIONS
+1. Analyze the Draft Document below.
+2. If the document follows all rules and is accurate, output EXACTLY: "NO_CHANGES_NEEDED"
+3. If there are issues (data mismatch, bad formatting, forbidden sections, tone issues), LIST THEM SPECIFICALLY.
+4. Be pedantic about data accuracy.
+
+## DRAFT DOCUMENT
+%s`, critiquePrompt, draftContent)
+
+	// Use lightweight model for critique if possible, or same as generation
+	// For now using the same model as generation to ensure reasoning capability
+
+	// Detect provider and normalize model
+	provider := w.providerFactory.DetectProvider(modelOverride)
+	model := w.providerFactory.NormalizeModel(modelOverride)
+
+	if model == "" {
+		model = w.providerFactory.GetDefaultModel(provider)
+	}
+
+	w.logger.Debug().Msg("Executing critique generation")
+
+	critiqueCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	request := &llm.ContentRequest{
+		Messages: []interfaces.Message{
+			{Role: "user", Content: systemPrompt},
+		},
+		Model:       model,
+		Temperature: 0.1, // Low temp for critique
+	}
+
+	resp, err := w.providerFactory.GenerateContent(critiqueCtx, request)
+	if err != nil {
+		return "", err
+	}
+	return resp.Text, nil
 }

@@ -87,9 +87,12 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	// Parse tags (comma separated)
+	// Parse tags (comma separated) - support both "tags" and "tag" query params
 	var tags []string
 	tagsParam := query.Get("tags")
+	if tagsParam == "" {
+		tagsParam = query.Get("tag") // Support singular "tag" as well
+	}
 	if tagsParam != "" {
 		tags = strings.Split(tagsParam, ",")
 	}

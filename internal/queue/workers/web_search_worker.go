@@ -319,7 +319,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	// Create document from results (use stable sourceID for caching)
-	doc, err := w.createDocument(results, query, &jobDef, stepID, sourceID, stepConfig)
+	doc, err := w.createDocument(ctx, results, query, &jobDef, stepID, sourceID, stepConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -600,7 +600,7 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 
 // createDocument creates a Document from the search results.
 // sourceID is a stable identifier based on the query hash (for caching).
-func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, sourceID string, stepConfig map[string]interface{}) (*models.Document, error) {
+func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, sourceID string, stepConfig map[string]interface{}) (*models.Document, error) {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Web Search Results: %s\n\n", query))
@@ -668,6 +668,12 @@ func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string
 		} else if outputTags, ok := stepConfig["output_tags"].([]string); ok {
 			tags = append(tags, outputTags...)
 		}
+	}
+
+	// Add cache tags from context (for caching/deduplication)
+	cacheTags := queue.GetCacheTagsFromContext(ctx)
+	if len(cacheTags) > 0 {
+		tags = models.MergeTags(tags, cacheTags)
 	}
 
 	// Build metadata

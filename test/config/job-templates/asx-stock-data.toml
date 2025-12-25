@@ -1,16 +1,21 @@
-# ASX Stock Data Collection Template (Test Version)
+# ASX Stock Data Collection Template
 # =========================================================================
-# Simplified version for testing - fetches only stock data (no web searches).
-# This speeds up test execution while still testing the caching mechanism.
+# Pure data collection for a single ASX stock - NO analysis.
+# Collects: stock prices, announcements, financial news, industry outlook,
+# and competitor information.
+#
+# This template is designed to be run BEFORE analysis templates.
+# All data is tagged with {stock:ticker_lower} for downstream consumption.
 #
 # USAGE:
 # This template is invoked via a job_template step with variables:
 #   variables = [
-#     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" }
+#     { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+#     { ticker = "XRO", name = "Xero Limited", industry = "technology" }
 #   ]
 #
 # VARIABLE SYNTAX:
-# - {stock:ticker} - ASX ticker code (e.g., GNP)
+# - {stock:ticker} - ASX ticker code (e.g., ROC)
 # - {stock:name} - Company name
 # - {stock:industry} - Industry classification
 # - {stock:ticker_lower} - Lowercase ticker for URLs/tags
@@ -19,24 +24,102 @@
 id = "asx-data-{stock:ticker_lower}"
 name = "ASX Stock Data: {stock:ticker}"
 type = "stock_data"
-description = "Data collection for {stock:name} (ASX:{stock:ticker}) - test version"
+description = "Data collection for {stock:name} (ASX:{stock:ticker}) - prices, announcements, news, industry outlook"
 tags = ["asx", "stock-data", "{stock:ticker_lower}", "{stock:industry}"]
 schedule = ""
-timeout = "10m"
+timeout = "15m"
 enabled = true
 auto_start = false
 
+# Cache configuration - inherit from parent or use 24h rolling
+[config]
+cache_type = "rolling_time"
+cache_hours = 24
+revisions = 1
+
 # =========================================================================
-# Step 1: Fetch Stock Data (6 Months - shorter for tests)
+# PARALLEL DATA COLLECTION
 # =========================================================================
-# Fetches OHLCV data and technical indicators.
-# Uses default cache_hours=24 - second run within 24hrs should use cache.
+# All steps run in parallel (no depends) for maximum speed.
+# Each step produces tagged output for analysis templates to consume.
+
+# =========================================================================
+# Step 1: Fetch Stock Data (24 Months)
+# =========================================================================
+# Comprehensive historical OHLCV data and technical indicators.
 
 [step.fetch_stock_data]
 type = "asx_stock_data"
-description = "Fetch stock data and technicals for {stock:name}"
+description = "Fetch 24-month daily stock data and technicals for {stock:name}"
 on_error = "continue"
 asx_code = "{stock:ticker}"
-period = "M6"
+period = "Y2"
 output_tags = ["stock-data", "{stock:ticker_lower}", "{stock:industry}"]
-# Note: cache_hours defaults to 24 if not specified
+
+# =========================================================================
+# Step 2: Fetch Company Announcements (24 Months)
+# =========================================================================
+# Official ASX announcements for fundamental analysis.
+
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch ASX announcements for {stock:name}"
+on_error = "continue"
+asx_code = "{stock:ticker}"
+period = "Y2"
+limit = 50
+output_tags = ["announcements", "{stock:ticker_lower}", "{stock:industry}"]
+
+# =========================================================================
+# Step 3: Search Financial News & Analyst Coverage
+# =========================================================================
+# Web search for analyst ratings, financial news, and growth catalysts.
+
+[step.search_financial_news]
+type = "web_search"
+description = "Search financial news and analyst coverage for {stock:name}"
+on_error = "continue"
+query = """ASX:{stock:ticker} {stock:name}
+- financial results earnings revenue profit analyst ratings
+- broker recommendations price targets dividend news
+- growth catalysts expansion plans market opportunities
+site:afr.com OR site:theaustralian.com.au OR site:stockhead.com.au OR site:hotcopper.com.au OR site:marketindex.com.au"""
+output_tags = ["financial-news", "{stock:ticker_lower}", "{stock:industry}"]
+depth = 3
+breadth = 3
+
+# =========================================================================
+# Step 4: Search Industry Outlook & Sector Trends
+# =========================================================================
+# Research industry outlook and macro factors affecting the sector.
+
+[step.search_industry]
+type = "web_search"
+description = "Search for {stock:industry} sector industry outlook and trends"
+on_error = "continue"
+query = """Australian {stock:industry} sector outlook 2025 2026:
+- industry trends growth drivers headwinds
+- RBA interest rate impact on {stock:industry}
+- regulatory environment changes
+- market analysis forecast"""
+output_tags = ["industry-outlook", "{stock:ticker_lower}", "{stock:industry}"]
+depth = 2
+breadth = 3
+
+# =========================================================================
+# Step 5: Search Competitor Analysis
+# =========================================================================
+# Research competitor positioning and relative performance.
+
+[step.search_competitors]
+type = "web_search"
+description = "Search for {stock:industry} competitor comparison for {stock:name}"
+on_error = "continue"
+query = """ASX {stock:industry} comparison {stock:name}:
+- competitors market share performance 2025
+- peer comparison valuation metrics
+- competitive advantages disadvantages
+- industry leaders disruptors"""
+output_tags = ["competitors", "{stock:ticker_lower}", "{stock:industry}"]
+depth = 2
+breadth = 3

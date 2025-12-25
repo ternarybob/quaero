@@ -2778,7 +2778,7 @@
                         params.append('limit', this.pageSize);
                         params.append('offset', (this.currentPage - 1) * this.pageSize);
                         params.append('order_by', 'started_at');
-                        params.append('order_dir', 'DESC');
+                        params.append('order_dir', 'ASC'); // Oldest first (top), newest last (bottom)
 
                         // Always fetch parent jobs only
                         params.append('parent_id', 'root');
@@ -3653,7 +3653,7 @@
 
                             if (response.ok) {
                                 job = await response.json();
-                                this.allJobs.unshift(job); // Insert at beginning (newest first)
+                                this.allJobs.push(job); // Insert at end (oldest first at top, newest at bottom)
                                 jobIndex = 0;
                             }
                         } catch (error) {
@@ -3758,14 +3758,14 @@
                             const matchesFilters = window.matchesActiveFilters(job);
 
                             if (matchesFilters) {
-                                // Insert at correct position (sorted by created_at DESC)
+                                // Insert at correct position (sorted by created_at ASC - oldest first)
                                 const insertIndex = this.filteredJobs.findIndex(j => {
-                                    return new Date(j.created_at) < new Date(job.created_at);
+                                    return new Date(j.created_at) > new Date(job.created_at);
                                 });
                                 if (insertIndex >= 0) {
                                     this.filteredJobs.splice(insertIndex, 0, job);
                                 } else {
-                                    this.filteredJobs.push(job);
+                                    this.filteredJobs.push(job); // Newest goes at end
                                 }
                             }
                             // If doesn't match filters, don't add to filteredJobs (as before)

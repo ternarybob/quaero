@@ -191,6 +191,11 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			s.app.JobHandler.GetJobTreeHandler(w, r)
 			return
 		}
+		// Check if it's /api/jobs/{id}/children (list child jobs)
+		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/children") {
+			s.app.JobHandler.GetJobChildrenHandler(w, r)
+			return
+		}
 		// Check if it's /api/jobs/{id}/logs/aggregated (must come before /logs check)
 		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/logs/aggregated") {
 			s.app.JobHandler.GetAggregatedJobLogsHandler(w, r)

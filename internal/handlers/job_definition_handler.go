@@ -572,6 +572,23 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		Int("step_count", len(jobDef.Steps)).
 		Msg("Executing job definition")
 
+	// Create manager job synchronously to get the job ID immediately
+	// This allows returning the actual job ID in the response
+	managerJobID, err := h.orchestrator.CreateManagerJob(ctx, jobDef)
+	if err != nil {
+		h.logger.Error().
+			Err(err).
+			Str("job_def_id", jobDef.ID).
+			Msg("Failed to create manager job")
+		WriteError(w, http.StatusInternalServerError, "Failed to create job")
+		return
+	}
+
+	h.logger.Debug().
+		Str("job_def_id", jobDef.ID).
+		Str("manager_job_id", managerJobID).
+		Msg("Created manager job, starting async execution")
+
 	// Launch goroutine to execute job definition asynchronously
 	go func() {
 		// Recover from panics to prevent server crash and log the error
@@ -580,29 +597,32 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 				h.logger.Error().
 					Str("panic", fmt.Sprintf("%v", r)).
 					Str("job_def_id", jobDef.ID).
+					Str("manager_job_id", managerJobID).
 					Msg("PANIC in job definition execution goroutine")
 			}
 		}()
 
 		bgCtx := context.Background()
 
-		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+		// Continue execution with the pre-created manager job ID
+		err := h.orchestrator.ExecuteJobDefinitionWithID(bgCtx, managerJobID, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
 				Str("job_def_id", jobDef.ID).
+				Str("manager_job_id", managerJobID).
 				Msg("Job definition execution failed")
 			return
 		}
 
 		h.logger.Debug().
 			Str("job_def_id", jobDef.ID).
-			Str("parent_job_id", parentJobID).
+			Str("manager_job_id", managerJobID).
 			Msg("Job definition execution completed successfully")
 	}()
 
 	response := map[string]interface{}{
-		"job_id":   jobDef.ID,
+		"job_id":   managerJobID,
 		"job_name": jobDef.Name,
 		"status":   "running",
 		"message":  "Job execution started",

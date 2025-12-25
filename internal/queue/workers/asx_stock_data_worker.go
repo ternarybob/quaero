@@ -342,7 +342,7 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 	}
 
 	// Create and save document
-	doc := w.createDocument(stockData, asxCode, &jobDef, stepID, outputTags)
+	doc := w.createDocument(ctx, stockData, asxCode, &jobDef, stepID, outputTags)
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
 		w.logger.Warn().Err(err).Msg("Failed to save stock data document")
 		return "", fmt.Errorf("failed to save stock data: %w", err)
@@ -752,7 +752,7 @@ func determineTrend(price, sma20, sma50, sma200, rsi float64) string {
 
 // createDocument creates a document from stock data.
 // For indices, uses "asx_index" source type and adds index-specific tags.
-func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	var content strings.Builder
 
 	isIndex := isIndexCode(asxCode)
@@ -919,6 +919,12 @@ func (w *ASXStockDataWorker) createDocument(data *StockData, asxCode string, job
 		tags = append(tags, jobDef.Tags...)
 	}
 	tags = append(tags, outputTags...)
+
+	// Add cache tags from context (for caching/deduplication)
+	cacheTags := queue.GetCacheTagsFromContext(ctx)
+	if len(cacheTags) > 0 {
+		tags = models.MergeTags(tags, cacheTags)
+	}
 
 	// Build metadata
 	metadata := map[string]interface{}{

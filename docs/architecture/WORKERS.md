@@ -1014,6 +1014,11 @@ recursion_depth = 2
 
 *Variables can be declared at job level in `[config]` section and inherited by steps.
 
+**Template Config** (in template's `[config]` section):
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `singleton` | bool | No | If true, template runs once regardless of parent variables |
+
 #### Variable Substitution
 
 Templates use `{namespace:key}` syntax for variable placeholders:
@@ -1053,9 +1058,10 @@ depends = "run_analysis"
 ```
 
 **Variable Inheritance Rules**:
-- Step-level variables override job-level variables
-- Omitting variables in step config = inherit from job level
-- `variables = false` explicitly opts out of variable inheritance
+- Template `singleton = true` takes precedence - runs once, parent variables inherited for data access only
+- Step-level variables override job-level variables for iteration
+- Omitting variables in step config = inherit from job level for iteration
+- `variables = false` in step explicitly opts out of variable iteration (backward compatibility)
 
 #### Outputs
 
@@ -1069,6 +1075,7 @@ Templates must be located in `{exe}/job-templates/` directory as TOML files.
 
 #### Example Job Definition
 
+**Iterating Template** (runs once per variable set):
 ```toml
 [step.run_stock_analysis]
 type = "job_template"
@@ -1080,6 +1087,21 @@ variables = [
     { ticker = "NAB", name = "National Australia Bank" },
     { ticker = "WBC", name = "Westpac Banking" }
 ]
+```
+
+**Singleton Template** (template declares it runs once):
+```toml
+# In the template file (portfolio-summary.toml):
+[config]
+singleton = true  # Template runs once, not iterating over variables
+
+# In the job definition:
+[step.generate_summary]
+type = "job_template"
+template = "portfolio-summary"
+depends = "run_stock_analysis"
+# No variables needed - template declares singleton mode
+# Parent config.variables still inherited for data access within template steps
 ```
 
 ---

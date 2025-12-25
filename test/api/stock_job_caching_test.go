@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 )
 
 // TestStockJobCaching_DocumentsNotUpdatedWithin24Hours tests that:
-// 1. First job execution creates documents
+// 1. First job execution creates documents with correct variable substitution
 // 2. Second job execution (within 24hrs) uses cached documents
 // 3. Document LastSynced is NOT updated on second run
+// 4. Variables are correctly substituted (no {stock:ticker} placeholders)
 func TestStockJobCaching_DocumentsNotUpdatedWithin24Hours(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
@@ -22,8 +24,8 @@ func TestStockJobCaching_DocumentsNotUpdatedWithin24Hours(t *testing.T) {
 
 	helper := env.NewHTTPTestHelper(t)
 
-	// Clean up any existing documents with stock-data tag
-	t.Log("Step 0: Cleaning up existing stock-data documents")
+	// Clean up any existing documents with stock-data tag ONLY on first run
+	t.Log("Step 0: Cleaning up existing stock-data documents (first run only)")
 	cleanupDocumentsByTag(t, helper, "stock-data")
 
 	// Step 1: Load the asx-stocks-daily job definition
@@ -39,6 +41,22 @@ func TestStockJobCaching_DocumentsNotUpdatedWithin24Hours(t *testing.T) {
 	// Wait for job completion
 	status1 := waitForJobCompletion(t, helper, jobID1, 5*time.Minute)
 	t.Logf("First job completed with status: %s", status1)
+
+	// Step 2b: Verify variable substitution - job title should NOT contain placeholders
+	t.Log("Step 2b: Verifying variable substitution in child jobs")
+	childJobs := getChildJobs(t, helper, jobID1)
+	variableSubstitutionOK := true
+	for _, job := range childJobs {
+		name := job["name"].(string)
+		// Job names should NOT contain unsubstituted placeholders like {stock:ticker}
+		if strings.Contains(name, "{stock:") || strings.Contains(name, "{ticker}") {
+			t.Errorf("✗ Job name contains unsubstituted variable: %s", name)
+			variableSubstitutionOK = false
+		} else {
+			t.Logf("✓ Job name properly substituted: %s", name)
+		}
+	}
+	assert.True(t, variableSubstitutionOK, "All job names should have variables substituted")
 
 	// Step 3: Query documents created by first run
 	t.Log("Step 3: Querying documents created by first run")
@@ -56,14 +74,31 @@ func TestStockJobCaching_DocumentsNotUpdatedWithin24Hours(t *testing.T) {
 		}
 	}
 
-	// Step 4: Execute job a second time immediately
-	t.Log("Step 4: Executing job second time - should use cached documents")
+	// Step 4: Execute job a second time immediately (NO cleanup - testing caching)
+	t.Log("Step 4: Executing job second time - should use cached documents (NO data cleanup)")
+	// NOTE: We explicitly do NOT clean up documents here to test caching behavior
 	jobID2 := executeJobDefinition(t, helper, "asx-stocks-daily")
 	require.NotEmpty(t, jobID2, "Second job execution should return job ID")
 
 	// Wait for job completion
 	status2 := waitForJobCompletion(t, helper, jobID2, 5*time.Minute)
 	t.Logf("Second job completed with status: %s", status2)
+
+	// Step 4b: Verify variable substitution on second run (critical for caching test)
+	t.Log("Step 4b: Verifying variable substitution in second run's child jobs")
+	childJobs2 := getChildJobs(t, helper, jobID2)
+	variableSubstitutionOK2 := true
+	for _, job := range childJobs2 {
+		name := job["name"].(string)
+		// Job names should NOT contain unsubstituted placeholders like {stock:ticker}
+		if strings.Contains(name, "{stock:") || strings.Contains(name, "{ticker}") {
+			t.Errorf("✗ Second run job name contains unsubstituted variable: %s", name)
+			variableSubstitutionOK2 = false
+		} else {
+			t.Logf("✓ Second run job name properly substituted: %s", name)
+		}
+	}
+	assert.True(t, variableSubstitutionOK2, "Second run: All job names should have variables substituted")
 
 	// Step 5: Query documents after second run
 	t.Log("Step 5: Querying documents after second run")
@@ -142,4 +177,39 @@ func cleanupDocumentsByTag(t *testing.T, helper *common.HTTPTestHelper, tag stri
 			}
 		}
 	}
+}
+
+// getChildJobs retrieves child jobs of a parent job
+func getChildJobs(t *testing.T, helper *common.HTTPTestHelper, parentJobID string) []map[string]interface{} {
+	resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s/children", parentJobID))
+	if err != nil {
+		t.Logf("Warning: Failed to get child jobs: %v", err)
+		return []map[string]interface{}{}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: GET /api/jobs/%s/children returned %d", parentJobID, resp.StatusCode)
+		return []map[string]interface{}{}
+	}
+
+	var result map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse child jobs response: %v", err)
+		return []map[string]interface{}{}
+	}
+
+	jobs, ok := result["jobs"].([]interface{})
+	if !ok {
+		return []map[string]interface{}{}
+	}
+
+	var childJobs []map[string]interface{}
+	for _, j := range jobs {
+		if job, ok := j.(map[string]interface{}); ok {
+			childJobs = append(childJobs, job)
+		}
+	}
+
+	return childJobs
 }

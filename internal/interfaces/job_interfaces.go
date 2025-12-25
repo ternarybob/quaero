@@ -134,6 +134,10 @@ type WorkerInitResult struct {
 	Metadata map[string]interface{}
 	// Errors contains non-fatal errors encountered during initialization
 	Errors []string
+	// ContentHash is a hash of the prompt/template content for cache invalidation.
+	// When the content changes, the hash changes, causing a cache miss.
+	// Format: first 8 characters of MD5 hex digest (e.g., "a1b2c3d4")
+	ContentHash string
 }
 
 // DefinitionWorker is the interface for workers that handle job definition steps.

@@ -1,48 +1,554 @@
-# ASX Stock Review Job Template (Test Version)
+# ASX Stock Review Analysis Template
 # =========================================================================
-# Test version of the ASX stock review for UI test validation.
-# Simplified steps for faster test execution.
+# Stock analysis for a single ASX stock - uses data from asx-stock-data template.
+# Performs: announcement analysis, stock summary, investment recommendation.
+#
+# PREREQUISITE: Data must be collected first using asx-stock-data template.
+# This template finds collected data via filter_tags using {stock:ticker_lower}.
+#
+# USAGE:
+# This template is invoked via a job_template step with variables:
+#   variables = [
+#     { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+#     { ticker = "XRO", name = "Xero Limited", industry = "technology" }
+#   ]
+#
+# VARIABLE SYNTAX:
+# - {stock:ticker} - ASX ticker code (e.g., ROC)
+# - {stock:name} - Company name
+# - {stock:industry} - Industry classification
+# - {stock:ticker_lower} - Lowercase ticker for filtering
+# =========================================================================
 
 id = "asx-review-{stock:ticker_lower}"
 name = "ASX Stock Review: {stock:ticker}"
 type = "stock_analysis"
-description = "Test stock analysis for {stock:name} (ASX:{stock:ticker})"
+description = "Investment analysis for {stock:name} (ASX:{stock:ticker}) - uses collected data"
 tags = ["asx", "stock-review", "{stock:ticker_lower}", "{stock:industry}"]
 schedule = ""
-timeout = "15m"
+timeout = "20m"
 enabled = true
 auto_start = false
 
-# =========================================================================
-# Step 1: Fetch Stock Data - PARALLEL
-# =========================================================================
-
-[step.fetch_stock_data]
-type = "asx_stock_data"
-description = "Fetch stock data for {stock:name}"
-on_error = "continue"
-asx_code = "{stock:ticker}"
-period = "M6"
-output_tags = ["{stock:ticker_lower}", "stock-data", "{stock:industry}"]
+# Cache configuration - enables 24h rolling cache for all steps
+[config]
+cache_type = "rolling_time"
+cache_hours = 24
+revisions = 1
 
 # =========================================================================
-# Step 2: Generate Investment Recommendation (Simplified for tests)
+# SEQUENTIAL ANALYSIS PHASE
 # =========================================================================
+# Analysis steps run sequentially, consuming data collected by asx-stock-data.
+# Data is found via filter_tags containing {stock:ticker_lower}.
 
-[step.investment_recommendation]
+# =========================================================================
+# Step 1: Analyze Announcements - NOISE vs SIGNAL
+# =========================================================================
+# Critical analysis of announcement quality vs price impact.
+
+[step.analyze_announcements]
 type = "summary"
-description = "Generate recommendation for {stock:name}"
-depends = "fetch_stock_data"
+description = "Analyze announcements against share price movements to identify NOISE vs SIGNAL"
+on_error = "continue"
+filter_tags = ["{stock:ticker_lower}"]
+model = "gemini-3-flash-preview"
+thinking_level = "HIGH"
+prompt = """You are a Management Forensic Analyst & Equity Researcher specializing in separating NOISE from SIGNAL in corporate communications and identifying the "Vanishing Promise" and "Pump-to-Hold" ratio.
+
+**COMPANY**: ASX:{stock:ticker} ({stock:name}) - {stock:industry} sector
+
+**YOUR TASK**: Analyze each ASX announcement against the historical share price data to determine if announcements actually moved the stock price or were just PR noise. Additionally, conduct forensic analysis of management credibility and promise delivery.
+
+**OUTPUT FORMAT**: Start your response DIRECTLY with "### ANNOUNCEMENT-PRICE CORRELATION TABLE" - do NOT include any preamble, introduction, persona description, or phrases like "Here is..." or "I will analyze...". Output ONLY the structured analysis below.
+
+**INPUT DOCUMENTS**:
+1. Stock Data document - Contains historical daily prices and technicals for {stock:ticker}
+2. Announcements document - Contains dated announcements with headlines for {stock:ticker}
+
+### ANNOUNCEMENT-PRICE CORRELATION TABLE
+
+For EACH significant announcement, determine if price moved significantly in the 3 days after:
+
+| Date | Announcement | Price Before | Price +3 Days | Change % | Volume Ratio | Classification |
+|------|--------------|--------------|---------------|----------|--------------|----------------|
+| ... | ... | $... | $... | ...% | X.Xx (vs 30d avg) | SIGNAL/NOISE/LOW-CONVICTION |
+
+**Classification Rules**:
+- **SIGNAL** = Price moved >3% AND volume was >1.5x the 30-day average (use 2% threshold for large caps)
+- **LOW-CONVICTION SPECULATION** = Price moved >3% BUT volume was <1.5x the 30-day average (move lacks institutional backing)
+- **NOISE** = Price moved <3% or moved opposite to announcement sentiment
+
+### PRICE SUSTAINABILITY ANALYSIS
+
+For EVERY "Signal" announcement (>3% move), verify if the price held its gains:
+
+| Date | Announcement | Price +3 Days | Price +5 Days | Held Gains? | Classification |
+|------|--------------|---------------|---------------|-------------|----------------|
+| ... | ... | $... | $... | Yes/No | SUSTAINABLE / MEAN REVERSION |
+
+**SUSTAINABLE** = Price held gains for 5+ trading days
+**MEAN REVERSION (Pump and Fade)** = Price returned to pre-announcement levels within 5 days
+
+**Pump-to-Hold Ratio**: X sustainable / Y total signals = Z%
+
+### SIGNAL ANNOUNCEMENTS (Price Movers)
+List announcements that ACTUALLY moved the share price with evidence:
+- Date, headline, price change, why it was material
+
+### NOISE ANNOUNCEMENTS (PR Fluff)
+List announcements that had NO material price impact despite positive spin:
+- Date, headline, expected vs actual price reaction
+
+### RETAIL TRAP FILTER
+
+**Promotional Language Flags**:
+Explicitly identify announcements containing these RED FLAG phrases WITHOUT specific KPI backing or audited financial metrics:
+- "Transformational" / "Transformative"
+- "World-class" / "World-leading"
+- "Next-gen" / "Next-generation"
+- "Game-changing" / "Disruptive"
+- "Strategic" (without quantified value)
+- "Significant" (without dollar amounts)
+- "Strong pipeline" (without conversion rates)
+
+| Date | Announcement | Promotional Term | KPI Backing? | TRAP/LEGITIMATE |
+|------|--------------|------------------|--------------|-----------------|
+| ... | ... | ... | Yes/No | TRAP/LEGITIMATE |
+
+**Retail Trap Score**: X trap announcements / Y total announcements with promotional language
+
+### CRITICAL ANALYSIS: PR vs REALITY
+
+**Company Narrative Credibility Score: X/10**
+
+1. **Track Record of Promises vs Delivery**
+   - What did management promise in past announcements?
+   - Were those targets met? Evidence from subsequent announcements.
+
+2. **Pattern Detection**
+   - Does the company frequently announce "significant" deals that don't move the stock?
+   - Are announcements timed to coincide with capital raises or insider activity?
+
+3. **Information Quality**
+   - Do announcements contain specific metrics or vague language?
+   - Are financial impacts quantified or left ambiguous?
+
+4. **Red Flags Identified**
+   - Promotional language without substance
+   - Frequent "strategic partnership" announcements with no follow-up
+   - Management changes with minimal explanation
+   - Dilutive capital raises disguised as "growth funding"
+
+### MANAGEMENT CREDIBILITY GAP AUDIT
+
+Compare the "Strategic Outlook" of the current/recent announcement against reports from 6 and 12 months ago:
+
+1. **6-Month Comparison**:
+   - What was promised 6 months ago?
+   - What has been delivered/omitted?
+   - Credibility Gap: [None / Minor / Significant / Critical]
+
+2. **12-Month Comparison**:
+   - What was promised 12 months ago?
+   - What has been delivered/omitted?
+   - Credibility Gap: [None / Minor / Significant / Critical]
+
+### VANISHING PROMISES TABLE
+
+Identify specific targets or milestones mentioned in past announcements that have been omitted, delayed, or renamed:
+
+| Date | Promise Made (6-12 Months Ago) | Current Status | Credibility Impact |
+|------|-------------------------------|----------------|-------------------|
+| [Date] | [e.g., "Launching in Q4 2024"] | [e.g., "Delayed to 2026 / Omitted / Renamed to..."] | [Critical/Significant/Neutral] |
+| ... | ... | ... | ... |
+
+**Vanishing Promise Score**: X broken/delayed promises / Y total promises made = Z%
+
+### FY/EARNINGS ANNOUNCEMENT DEEP DIVE
+
+Focus specifically on Financial Year and quarterly earnings announcements (4C, 4E, Annual Reports, Half-Year Results):
+
+| Date | Announcement Type | Key Metrics Disclosed | Price Impact | Vs Prior Guidance |
+|------|-------------------|----------------------|--------------|-------------------|
+| ... | FY Results / Half-Year / 4C / AGM | Revenue: $X, NPAT: $X, Cash: $X | +X% / -X% | Beat/Met/Miss |
+
+**Earnings Quality Assessment**:
+- **Revenue Growth**: X% YoY - [Accelerating / Decelerating / Stable]
+- **Profit Margin Trend**: [Expanding / Stable / Contracting] - evidence
+- **Cash Flow Quality**: Operating CF $X vs Reported Profit $X - ratio indicates [Quality/Concern]
+- **One-Off Items**: Any non-recurring gains/losses affecting headline results
+- **Guidance Reliability**: Has company historically met guidance? [Yes/No/Partial]
+
+**Key Financial Announcement Flags**:
+- Did earnings BEAT, MEET, or MISS consensus/guidance?
+- Was there a material change in guidance (upgrade/downgrade)?
+- Were there any accounting policy changes affecting comparability?
+- Is cash conversion (OCF/NPAT) healthy (>80% is good)?
+
+### COMPETITOR & INDUSTRY ALIGNMENT
+
+Compare company's announcement narrative against industry peers and sector reality:
+
+| Factor | Company Claim | Industry Reality | Alignment Status |
+|--------|---------------|------------------|------------------|
+| Market Position | [e.g., "Leading provider"] | [X% market share vs competitors] | [Aligned/Overstated/Understated] |
+| Growth Rate | [X% claimed growth] | [Sector average Y%] | [Outperforming/At par/Lagging] |
+| Margin Performance | [X% margin] | [Peer average Y%] | [Competitive/Below peers/Above peers] |
+| Technology/Product | [Claims made] | [Industry assessment] | [Verified/Unverified/Disputed] |
+
+**Industry Context Assessment**:
+- Is the company outperforming or underperforming the {stock:industry} sector?
+- Are company-specific challenges being masked as "industry headwinds"?
+- Does the growth narrative align with independent market intelligence?
+- Are competitors making similar claims (commoditized narrative)?
+
+**Competitive Position Summary**: [LEADER / STRONG / AVERAGE / WEAK / UNKNOWN]
+- Evidence: [Specific comparison points]
+
+### INVESTOR INTELLIGENCE SUMMARY
+
+**OVERALL ASSESSMENT**: [CREDIBLE / CAUTIOUS / SKEPTICAL]
+
+- **Signal-to-Noise Ratio**: X signal announcements / Y total announcements = Z%
+- **Low-Conviction Speculation**: X announcements (price moved but low volume - lacks institutional conviction)
+- **Pump-to-Hold Ratio**: X% (sustainable gains vs mean reversion)
+- **Retail Trap Score**: X% (promotional language without substance)
+- **Vanishing Promise Score**: X% (broken/delayed promises)
+- **Key Takeaway**: [One sentence on whether to trust company announcements]
+
+---
+**CRITICAL RULES**:
+- Use ONLY prices from the Stock Data document
+- If you cannot find price data for an announcement date, state "Price data unavailable - CANNOT VERIFY"
+- Be skeptical - assume all announcements are noise until proven otherwise
+- Call out promotional language explicitly
+- IF YOU DO NOT HAVE DATA, SAY "UNKNOWN" - never fabricate or estimate
+- Adjust volatility threshold based on company size (large caps ~2%, small caps ~5%)
+- When comparing outlooks, if historical announcement data is limited, state "Insufficient historical data for credibility gap analysis"
+- Flag ALL promotional language - even if the underlying business may be legitimate"""
+output_tags = [
+    "announcement-analysis",
+    "{stock:ticker_lower}",
+    "{stock:industry}",
+]
+
+# =========================================================================
+# Step 2: Generate Comprehensive Stock Summary
+# =========================================================================
+# Combines all data into a structured analysis with growth focus.
+
+[step.generate_stock_summary]
+type = "summary"
+description = "Generate comprehensive stock summary for {stock:name} with growth metrics"
+depends = "analyze_announcements"
 on_error = "fail"
 filter_tags = ["{stock:ticker_lower}"]
 model = "gemini-3-flash-preview"
-prompt = """Generate a brief investment recommendation for ASX:{stock:ticker} ({stock:name}).
+thinking_level = "HIGH"
+prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
+Analyze all collected data for ASX:{stock:ticker} ({stock:name}) in the {stock:industry} sector.
 
-Based on the stock data, provide:
-1. Current price and trend
-2. Recommendation: BUY / SELL / HOLD
-3. Brief rationale (1-2 sentences)
+**OUTPUT FORMAT**: Start your response DIRECTLY with "## COMPANY OVERVIEW" - do NOT include any preamble, introduction, persona description, or phrases like "Here is..." or "I will analyze...". Output ONLY the structured analysis below.
 
-This is a test summary - keep it brief.
+## COMPANY OVERVIEW
+- Company: {stock:name} (ASX:{stock:ticker})
+- Industry: {stock:industry}
+- Classification: [Large Cap / Mid Cap / Small Cap / Micro Cap]
+- Brief description and business model
+
+## PERFORMANCE CLASSIFICATION
+Based on the 12-24 month stock data, classify this holding as:
+
+**LAGGARD** (Underperforming) | **PERFORMING** (Meeting expectations) | **OVER-PERFORMER** (Exceeding expectations)
+
+Justification: [Cite specific metrics from stock data - price change %, RSI, SMA alignment]
+
+## PRICE ACTION ANALYSIS
+
+### Current Position
+| Metric | Value | Signal |
+|--------|-------|--------|
+| Last Price | $ (or "UNAVAILABLE") | |
+| vs SMA 20 | Above/Below by $X (X%) | Bullish/Bearish |
+| vs SMA 50 | Above/Below by $X (X%) | Bullish/Bearish |
+| vs SMA 200 | Above/Below by $X (X%) | Bullish/Bearish |
+| RSI (14) | X | Overbought/Oversold/Neutral |
+| 52-Week Position | X% (Low $X, High $X) | |
+
+### Technical Verdict
+- **Trend**: [Description of current trend with evidence FROM THE DATA]
+- **Key Levels**: Support $X, Resistance $X
+- **Pattern**: [Any chart patterns identified - or "No clear pattern"]
+
+## FUNDAMENTAL ANALYSIS
+
+### Financial Metrics (from announcements and news)
+| Metric | Value | Trend | Signal |
+|--------|-------|-------|--------|
+| Revenue Growth | % | Accelerating/Stable/Declining | |
+| Earnings Growth | % | Accelerating/Stable/Declining | |
+| Profit Margins | % | Expanding/Stable/Contracting | |
+| Debt Level | | Low/Moderate/High | |
+| Cash Position | | Strong/Adequate/Weak | |
+
+### Key Announcements Impact
+- Earnings/Dividends: [Impact assessment]
+- Leadership Changes: [Impact assessment]
+- Strategic Initiatives: [Impact assessment]
+- Capital Raising: [Impact assessment]
+
+## ANNOUNCEMENT QUALITY (from NOISE vs SIGNAL analysis)
+- **Credibility Score**: X/10
+- **Signal-to-Noise Ratio**: X%
+- **Management Reliability**: [Assessment]
+
+## INDUSTRY & COMPETITIVE ANALYSIS
+
+### {stock:industry} Sector Outlook
+- **Industry Growth Rate**: [Above/At/Below GDP growth]
+- **Macro Factors**: [RBA rates, inflation, regulatory environment]
+- **Headwinds/Tailwinds**: [Key factors from search data]
+
+### Competitive Positioning
+| Competitor | Relative Performance | Threat Level |
+|------------|---------------------|--------------|
+| [Name] | Outperforming/Matching/Underperforming | High/Medium/Low |
+
+## GROWTH POTENTIAL ASSESSMENT
+
+### Growth Potential Assessment
+| Factor | Score (1-5) | Evidence |
+|--------|-------------|----------|
+| High-Growth Potential | | |
+| Capital Appreciation Upside | | |
+| Sector Disruption Potential | | |
+| Management Execution | | |
+| Competitive Moat | | |
+
+**TOTAL GROWTH FIT SCORE**: X/25
+
+---
+IMPORTANT:
+- Use ONLY data from the provided documents
+- If data unavailable, mark as "N/A" and explain
+- Be objective and skeptical of promotional claims"""
+output_tags = ["stock-summary", "{stock:ticker_lower}", "{stock:industry}"]
+
+# =========================================================================
+# Step 3: Generate Investment Recommendation
+# =========================================================================
+# Final BUY/SELL/HOLD with conviction scoring, trader recommendations,
+# and alternative suggestions.
+
+[step.investment_recommendation]
+type = "summary"
+description = "Generate BUY/SELL/HOLD recommendation with conviction score for {stock:name}"
+depends = "generate_stock_summary"
+on_error = "fail"
+filter_tags = ["stock-summary", "{stock:ticker_lower}"]
+thinking_level = "HIGH"
+prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
+Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}).
+
+**OUTPUT FORMAT**: Start your response DIRECTLY with "# STOCK ANALYSIS:" - do NOT include any preamble, introduction, persona description, or phrases like "Here is..." or "I will analyze...". Output ONLY the structured recommendation below.
+
+# STOCK ANALYSIS: ASX:{stock:ticker}
+## {stock:name}
+## Sector: {stock:industry}
+
+---
+
+## EXECUTIVE SUMMARY
+
+| Assessment | Rating | Confidence |
+|------------|--------|------------|
+| Technical Outlook | BULLISH / BEARISH / NEUTRAL | HIGH / MEDIUM / LOW |
+| Announcement Credibility | HIGH / MEDIUM / LOW | |
+| Signal-to-Noise Ratio | X% | |
+| {stock:industry} Sector Outlook | POSITIVE / NEUTRAL / NEGATIVE | |
+| Competitive Position | LEADER / STRONG / MODERATE / WEAK | |
+
+---
+
+## RECOMMENDATION
+
+| Ticker | Status | Conviction (1-10) | Primary Reason |
+|--------|--------|-------------------|----------------|
+| {stock:ticker} | **[BUY / SELL / HOLD]** | **[1-10]** | [One-line reason] |
+
+### Conviction Scale
+- 1-3: Low conviction - high uncertainty
+- 4-6: Moderate conviction - balanced factors
+- 7-8: High conviction - strong directional view
+- 9-10: Very high conviction - exceptional opportunity/risk
+
+---
+
+## DETAILED JUSTIFICATION
+
+### For BUY Recommendation:
+- **Growth Catalyst 1**: [Specific evidence]
+- **Growth Catalyst 2**: [Specific evidence]
+- **Valuation Support**: [Why current price is attractive]
+- **Technical Entry**: [Chart-based entry rationale]
+
+### For HOLD Recommendation:
+- **Reason for Not Selling**: [Specific evidence]
+- **Reason for Not Buying More**: [Why wait]
+- **Watch Points**: [What would change recommendation]
+- **Expected Holding Period**: [Timeframe]
+
+### For SELL Recommendation:
+- **Exit Reason 1**: [Specific concern with evidence]
+- **Exit Reason 2**: [Supporting concern]
+- **Opportunity Cost**: [Better alternatives exist]
+- **Exit Strategy**: [Immediate / Staged]
+
+---
+
+## 200MA DIP-BUY STRATEGY ASSESSMENT
+
+The 200-day Moving Average (SMA200) is a key long-term trend indicator. A "dip-buy" opportunity occurs when:
+1. Stock has been in an UPTREND (price consistently above SMA200)
+2. Price temporarily DIPS below SMA200 (the buying opportunity)
+3. Volume is NORMAL or LOW (not panic selling)
+4. Fundamentals remain INTACT (no material negative announcements)
+
+### Current 200MA Status
+
+| Metric | Value | Signal |
+|--------|-------|--------|
+| Current Price | $X.XX | |
+| SMA 200 | $X.XX | |
+| Price vs SMA200 | Above/Below by X% | ABOVE TREND / DIP / BREAKDOWN |
+| Days Above SMA200 (last 60) | X days | Strong/Moderate/Weak trend |
+| Recent Volume | X vs avg | Normal/Elevated/Panic |
+
+### Dip-Buy Opportunity Checklist
+
+**IS THIS A DIP-BUY OPPORTUNITY?** [YES / NO / WATCH]
+
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| Was ABOVE SMA200 recently (30 days) | [YES/NO] | Price was $X.XX vs SMA200 $X.XX |
+| Currently AT or BELOW SMA200 | [YES/NO] | Current $X.XX vs SMA200 $X.XX |
+| Volume NOT elevated (< 1.5x avg) | [YES/NO] | Volume X vs avg X |
+| No material negative news (30 days) | [YES/NO] | [Latest announcement summary] |
+| Announcement credibility >= 5/10 | [YES/NO] | Score: X/10 |
+| Industry outlook not NEGATIVE | [YES/NO] | Sector: [Assessment] |
+
+**Dip-Buy Verdict**:
+- **If 5+ criteria YES**: **BUY THE DIP** - Entry zone $X.XX to $X.XX (SMA200 ± 5%)
+- **If 3-4 criteria YES**: **WATCH** - Wait for [specific trigger]
+- **If < 3 criteria YES**: **NO DIP-BUY** - This is a trend breakdown, not a dip
+
+### 200MA Breakdown Warning
+
+If price is BELOW SMA200 AND fails 3+ criteria above:
+- **TREND BREAKDOWN ALERT**: This may not be a buying opportunity
+- Price below SMA200 with high volume = institutional selling
+- Price below SMA200 after negative news = fundamental deterioration
+- Recommendation: Wait for price to reclaim SMA200 before considering entry
+
+---
+
+## ENTRY/EXIT STRATEGY (200MA + Announcement Based)
+
+### BUY ENTRY RULES
+
+| Scenario | Entry Price | Trigger | Stop Loss | Target |
+|----------|-------------|---------|-----------|--------|
+| **200MA Dip-Buy** | $X.XX (at SMA200) | Price touches SMA200 from above | $X.XX (-7% below SMA200) | $X.XX (+15-20%) |
+| **Breakout Buy** | $X.XX (resistance) | Close above resistance + 1.5x volume | $X.XX (below breakout level) | $X.XX (next resistance) |
+| **Earnings Buy** | Market price | Positive earnings + guidance raise | $X.XX (-5% from entry) | Hold for re-rate |
+
+### EXIT RULES
+
+| Scenario | Trigger | Action |
+|----------|---------|--------|
+| **Stop Loss Hit** | Price closes below stop level | Full exit - no exceptions |
+| **Trend Breakdown** | Price closes > 7% below SMA200 | Exit 100% - trend invalidated |
+| **Profit Target** | Price reaches target | Exit 50%, trail stop on rest |
+| **Negative Earnings** | Earnings miss > 10% | Exit immediately |
+| **Death Cross** | SMA50 crosses below SMA200 | Reduce to 25% position |
+
+### POSITION SIZING
+
+Based on conviction score and current setup:
+
+| Conviction | Position Size | Rationale |
+|------------|--------------|-----------|
+| 8-10 (Very High) | 100% of intended allocation | Strong conviction, low risk |
+| 5-7 (Moderate) | 50% of intended allocation | Balanced risk/reward |
+| 1-4 (Low) | 25% or AVOID | High uncertainty, wait for clarity |
+
+**Recommended Position for {stock:ticker}**: [X]% based on conviction [X/10]
+
+---
+
+## ACTIONABLE RECOMMENDATIONS
+
+### For Traders (1-4 weeks)
+**SIGNAL: BUY / HOLD / SELL / NO TRADE**
+- Entry: $X.XX (or "Wait for confirmation")
+- Stop Loss: $X.XX (X% below entry)
+- Target: $X.XX (X% upside)
+- Risk/Reward: X:1
+- **CONFIDENCE**: HIGH / MEDIUM / LOW
+
+### For Investors (6-12 months)
+**SIGNAL: BUY / HOLD / SELL**
+- Accumulate below: $X.XX
+- Sell above: $X.XX
+- Key catalyst to watch: [Upcoming events/results]
+
+### Dividend Investors (if applicable)
+- Current yield: X% (or "N/A")
+- Expected yield: X%
+- Ex-dividend dates to watch
+
+---
+
+## ALTERNATIVE STOCKS
+
+If SELL or seeking better risk-adjusted growth, consider these 2-3 ASX stocks:
+
+| Alternative | Ticker | Industry | Why Better | Risk Level |
+|-------------|--------|----------|------------|------------|
+| [Company 1] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
+| [Company 2] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
+| [Company 3] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
+
+---
+
+## RISK ASSESSMENT
+
+### Key Risks
+- **Market Risk**: [General market exposure]
+- **Sector Risk**: [Industry-specific risks]
+- **Company Risk**: [Stock-specific concerns]
+- **Liquidity**: {stock:ticker} has [adequate/limited] trading liquidity
+
+---
+
+**DISCLAIMER**: This is general information only, not personal financial advice.
+Consult licensed advisers before making investment decisions. Only ASX-listed stocks considered.
+
+**Analysis Date**: [Use the current date provided in the system context above]
+**Industry Sector**: {stock:industry}
 """
-output_tags = ["stock-recommendation", "{stock:ticker_lower}", "{stock:industry}", "stock-portfolio"]
+output_tags = [
+    "stock-recommendation",
+    "{stock:ticker_lower}",
+    "{stock:industry}",
+    "stock-report",
+    "stock-portfolio",
+]
+
+# =========================================================================
+# NOTE: Email handled at job definition level
+# =========================================================================
+# This template does NOT include email. Email is configured in:
+# - asx-stocks-daily.toml: Sends individual stock emails after each analysis
+# - smsf-portfolio-daily.toml: Sends ONE consolidated portfolio email at end

@@ -33,47 +33,47 @@ auto_start = false
 # Portfolio data: units (number of shares), avg_price (average purchase price), weighting (% of portfolio)
 [config]
 variables = [
-    # =========================================================================
-    # ETFs & Index Funds (Defensive/Core)
-    # =========================================================================
-    { ticker = "AAA", name = "Betashares Australian High Interest Cash ETF", industry = "cash-etf", units = 198, avg_price = 50.235, weighting = 3.04 },
-    { ticker = "VACF", name = "Vanguard Australian Corporate Fixed Interest Index ETF", industry = "bond-etf", units = 193, avg_price = 51.666, weighting = 3.05 },
-    { ticker = "VGS", name = "Vanguard MSCI Index International Shares ETF", industry = "global-etf", units = 64, avg_price = 154.031, weighting = 3.01 },
-    { ticker = "PMGOLD", name = "Perth Mint Gold", industry = "gold-etf", units = 597, avg_price = 66.747, weighting = 12.21 },
+    # # =========================================================================
+    # # ETFs & Index Funds (Defensive/Core)
+    # # =========================================================================
+    # { ticker = "AAA", name = "Betashares Australian High Interest Cash ETF", industry = "cash-etf", units = 198, avg_price = 50.235, weighting = 3.04 },
+    # { ticker = "VACF", name = "Vanguard Australian Corporate Fixed Interest Index ETF", industry = "bond-etf", units = 193, avg_price = 51.666, weighting = 3.05 },
+    # { ticker = "VGS", name = "Vanguard MSCI Index International Shares ETF", industry = "global-etf", units = 64, avg_price = 154.031, weighting = 3.01 },
+    # { ticker = "PMGOLD", name = "Perth Mint Gold", industry = "gold-etf", units = 597, avg_price = 66.747, weighting = 12.21 },
 
-    # =========================================================================
-    # Large Cap Blue Chips (Stable Income)
-    # =========================================================================
-    { ticker = "WES", name = "Wesfarmers Limited", industry = "retail", units = 122, avg_price = 81.209, weighting = 3.03 },
-    { ticker = "WOW", name = "Woolworths Group Limited", industry = "retail", units = 339, avg_price = 29.329, weighting = 3.04 },
+    # # =========================================================================
+    # # Large Cap Blue Chips (Stable Income)
+    # # =========================================================================
+    # { ticker = "WES", name = "Wesfarmers Limited", industry = "retail", units = 122, avg_price = 81.209, weighting = 3.03 },
+    # { ticker = "WOW", name = "Woolworths Group Limited", industry = "retail", units = 339, avg_price = 29.329, weighting = 3.04 },
 
-    # =========================================================================
-    # Energy & Utilities (Income & Defensive)
-    # =========================================================================
-    { ticker = "APA", name = "APA Group", industry = "energy-infrastructure", units = 2129, avg_price = 9.321, weighting = 6.07 },
+    # # =========================================================================
+    # # Energy & Utilities (Income & Defensive)
+    # # =========================================================================
+    # { ticker = "APA", name = "APA Group", industry = "energy-infrastructure", units = 2129, avg_price = 9.321, weighting = 6.07 },
 
-    # =========================================================================
-    # Financials & Services
-    # =========================================================================
-    { ticker = "ASB", name = "Austal Limited", industry = "defence-shipbuilding", units = 2915, avg_price = 6.819, weighting = 6.11 },
-    { ticker = "GDG", name = "Generation Development Group", industry = "financial-services", units = 3406, avg_price = 5.831, weighting = 6.07 },
-    { ticker = "PNC", name = "Pioneer Credit Limited", industry = "financial-services", units = 28772, avg_price = 0.684, weighting = 6.03 },
+    # # =========================================================================
+    # # Financials & Services
+    # # =========================================================================
+    # { ticker = "ASB", name = "Austal Limited", industry = "defence-shipbuilding", units = 2915, avg_price = 6.819, weighting = 6.11 },
+    # { ticker = "GDG", name = "Generation Development Group", industry = "financial-services", units = 3406, avg_price = 5.831, weighting = 6.07 },
+    # { ticker = "PNC", name = "Pioneer Credit Limited", industry = "financial-services", units = 28772, avg_price = 0.684, weighting = 6.03 },
 
-    # =========================================================================
-    # Technology & Growth
-    # =========================================================================
-    { ticker = "ACDC", name = "Global X Battery Tech & Lithium ETF", industry = "battery-tech-etf", units = 141, avg_price = 141.001, weighting = 6.08 },
-    { ticker = "DOW", name = "Downer EDI Limited", industry = "engineering-services", units = 2487, avg_price = 7.991, weighting = 6.08 },
-    { ticker = "SEMI", name = "ETFS Semiconductor ETF", industry = "semiconductor-etf", units = 864, avg_price = 23.113, weighting = 6.10 },
-    { ticker = "MYG", name = "Mayfield Group Holdings", industry = "technology", units = 6778, avg_price = 2.950, weighting = 6.11 },
+    # # =========================================================================
+    # # Technology & Growth
+    # # =========================================================================
+    # { ticker = "ACDC", name = "Global X Battery Tech & Lithium ETF", industry = "battery-tech-etf", units = 141, avg_price = 141.001, weighting = 6.08 },
+    # { ticker = "DOW", name = "Downer EDI Limited", industry = "engineering-services", units = 2487, avg_price = 7.991, weighting = 6.08 },
+    # { ticker = "SEMI", name = "ETFS Semiconductor ETF", industry = "semiconductor-etf", units = 864, avg_price = 23.113, weighting = 6.10 },
+    # { ticker = "MYG", name = "Mayfield Group Holdings", industry = "technology", units = 6778, avg_price = 2.950, weighting = 6.11 },
 
     # =========================================================================
     # Infrastructure & Industrials
     # =========================================================================
     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure", units = 3159, avg_price = 6.303, weighting = 5.97 },
     { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure", units = 4925, avg_price = 4.025, weighting = 6.01 },
-    { ticker = "SRG", name = "SRG Global Limited", industry = "engineering-services", units = 6621, avg_price = 3.000, weighting = 6.05 },
-    { ticker = "SSM", name = "Service Stream Limited", industry = "infrastructure-services", units = 8619, avg_price = 2.269, weighting = 5.96 },
+    # { ticker = "SRG", name = "SRG Global Limited", industry = "engineering-services", units = 6621, avg_price = 3.000, weighting = 6.05 },
+    # { ticker = "SSM", name = "Service Stream Limited", industry = "infrastructure-services", units = 8619, avg_price = 2.269, weighting = 5.96 },
 ]
 
 # ===========================================================================
@@ -143,7 +143,7 @@ description = "Generate consolidated SMSF portfolio review using template"
 depends = "run_stock_analysis, fetch_benchmark_indices"
 on_error = "fail"
 template = "smsf-portfolio-summary"
-# Template handles: filter_tags, thinking_level, prompt, output_tags
+# Template declares singleton=true - runs once, parent variables inherited for data access
 
 # ===========================================================================
 # Step 4: Email Consolidated Portfolio Report

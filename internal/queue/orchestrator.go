@@ -32,16 +32,14 @@ func NewOrchestrator(jobManager *Manager, stepManager interfaces.StepManager, ev
 	}
 }
 
-// ExecuteJobDefinition executes a job definition by creating a manager job and step jobs.
-// It orchestrates the execution of steps defined in the job definition.
-// Returns the manager job ID.
-func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+// CreateManagerJob creates a manager job record synchronously and returns its ID.
+// This allows the HTTP handler to return the job ID immediately before starting async execution.
+func (o *Orchestrator) CreateManagerJob(ctx context.Context, jobDef *models.JobDefinition) (string, error) {
 	// Create manager job (root parent)
 	managerID := uuid.New().String()
 
 	// Prepare config and metadata
 	jobDefConfig := make(map[string]interface{})
-	// Copy relevant fields from job definition to config
 	jobDefConfig["job_def_id"] = jobDef.ID
 	jobDefConfig["job_def_name"] = jobDef.Name
 	jobDefConfig["job_def_type"] = string(jobDef.Type)
@@ -53,7 +51,6 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 	}
 
 	// Manually construct Job object for CreateJobRecord
-	// CreateJobRecord expects Payload string with config/metadata
 	payloadData := map[string]interface{}{
 		"config":   jobDefConfig,
 		"metadata": managerMetadata,
@@ -72,6 +69,175 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 
 	if err := o.jobManager.CreateJobRecord(ctx, job); err != nil {
 		return "", fmt.Errorf("create manager job record: %w", err)
+	}
+
+	return managerID, nil
+}
+
+// ExecuteJobDefinitionWithID executes a job definition using a pre-created manager job ID.
+// This is used when the manager job was already created via CreateManagerJob.
+func (o *Orchestrator) ExecuteJobDefinitionWithID(ctx context.Context, managerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) error {
+	// Persist metadata
+	managerMetadata := make(map[string]interface{})
+	if jobDef.AuthID != "" {
+		managerMetadata["auth_id"] = jobDef.AuthID
+	}
+	if jobDef.ID != "" {
+		managerMetadata["job_definition_id"] = jobDef.ID
+	}
+	managerMetadata["phase"] = "execution"
+
+	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
+		// Log warning but continue
+	}
+
+	// Add initial job log
+	initialLog := fmt.Sprintf("Starting job definition execution: %s (ID: %s, Steps: %d)",
+		jobDef.Name, jobDef.ID, len(jobDef.Steps))
+	o.jobManager.AddJobLog(ctx, managerID, "info", initialLog)
+
+	// Build job definition config for manager job
+	jobDefConfig := make(map[string]interface{})
+	for i, step := range jobDef.Steps {
+		stepKey := fmt.Sprintf("step_%d_%s", i+1, step.Type.String())
+		jobDefConfig[stepKey] = step.Config
+	}
+	jobDefConfig["job_definition_id"] = jobDef.ID
+	jobDefConfig["source_type"] = jobDef.SourceType
+	jobDefConfig["base_url"] = jobDef.BaseURL
+	jobDefConfig["schedule"] = jobDef.Schedule
+	jobDefConfig["timeout"] = jobDef.Timeout
+	jobDefConfig["enabled"] = jobDef.Enabled
+	if jobDef.AuthID != "" {
+		jobDefConfig["auth_id"] = jobDef.AuthID
+	}
+
+	if err := o.jobManager.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
+		// Log warning but continue
+	}
+
+	// Build step_definitions for UI display
+	stepDefs := make([]map[string]interface{}, len(jobDef.Steps))
+	for i, step := range jobDef.Steps {
+		stepDefs[i] = map[string]interface{}{
+			"name":        step.Name,
+			"type":        step.Type.String(),
+			"description": step.Description,
+		}
+	}
+	initialMetadata := map[string]interface{}{
+		"step_definitions": stepDefs,
+		"total_steps":      len(jobDef.Steps),
+		"current_step":     0,
+	}
+	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
+		// Log warning but continue
+	}
+
+	// Mark manager job as running
+	if err := o.jobManager.UpdateJobStatus(ctx, managerID, "running"); err != nil {
+		// Log warning but continue
+	}
+
+	// Publish job created event to notify UI immediately
+	if o.eventService != nil {
+		createdEvent := interfaces.Event{
+			Type: interfaces.EventJobCreated,
+			Payload: map[string]interface{}{
+				"job_id":      managerID,
+				"status":      "running",
+				"name":        jobDef.Name,
+				"type":        "manager",
+				"source_type": jobDef.SourceType,
+				"total_steps": len(jobDef.Steps),
+				"timestamp":   time.Now().Format(time.RFC3339),
+			},
+		}
+		if err := o.eventService.Publish(ctx, createdEvent); err != nil {
+			// Log but don't fail
+		}
+	}
+
+	// Publish job status change event to notify UI
+	if o.eventService != nil {
+		statusEvent := interfaces.Event{
+			Type: interfaces.EventJobStatusChange,
+			Payload: map[string]interface{}{
+				"job_id":      managerID,
+				"status":      "running",
+				"name":        jobDef.Name,
+				"type":        "manager",
+				"total_steps": len(jobDef.Steps),
+				"timestamp":   time.Now().Format(time.RFC3339),
+			},
+		}
+		go func() {
+			if err := o.eventService.Publish(ctx, statusEvent); err != nil {
+				// Log but don't fail
+			}
+		}()
+	}
+
+	// Continue with step execution using the internal implementation
+	// Skip manager job creation since we already created it via CreateManagerJob
+	_, err := o.executeJobDefinitionInternal(ctx, managerID, jobDef, jobMonitor, stepMonitor)
+	return err
+}
+
+// ExecuteJobDefinition executes a job definition by creating a manager job and step jobs.
+// It orchestrates the execution of steps defined in the job definition.
+// Returns the manager job ID.
+func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+	return o.executeJobDefinitionInternal(ctx, "", jobDef, jobMonitor, stepMonitor)
+}
+
+// executeJobDefinitionInternal is the internal implementation that optionally accepts a pre-created manager ID.
+func (o *Orchestrator) executeJobDefinitionInternal(ctx context.Context, preCreatedManagerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+	// Use provided manager ID or generate new one
+	var managerID string
+	managerAlreadyCreated := preCreatedManagerID != ""
+	if managerAlreadyCreated {
+		managerID = preCreatedManagerID
+	} else {
+		managerID = uuid.New().String()
+	}
+
+	// Prepare config and metadata
+	jobDefConfig := make(map[string]interface{})
+	// Copy relevant fields from job definition to config
+	jobDefConfig["job_def_id"] = jobDef.ID
+	jobDefConfig["job_def_name"] = jobDef.Name
+	jobDefConfig["job_def_type"] = string(jobDef.Type)
+
+	managerMetadata := map[string]interface{}{
+		"job_def_id":   jobDef.ID,
+		"job_def_name": jobDef.Name,
+		"phase":        "orchestration",
+	}
+
+	// Only create job record if not already created via CreateManagerJob
+	if !managerAlreadyCreated {
+		// Manually construct Job object for CreateJobRecord
+		// CreateJobRecord expects Payload string with config/metadata
+		payloadData := map[string]interface{}{
+			"config":   jobDefConfig,
+			"metadata": managerMetadata,
+		}
+		payloadBytes, _ := json.Marshal(payloadData)
+
+		job := &Job{
+			ID:        managerID,
+			Type:      string(models.JobTypeManager),
+			Name:      jobDef.Name,
+			CreatedAt: time.Now(),
+			Payload:   string(payloadBytes),
+			Phase:     "orchestration",
+			Status:    "pending",
+		}
+
+		if err := o.jobManager.CreateJobRecord(ctx, job); err != nil {
+			return "", fmt.Errorf("create manager job record: %w", err)
+		}
 	}
 
 	// Persist metadata immediately after job creation
