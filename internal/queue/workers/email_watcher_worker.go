@@ -22,7 +22,7 @@ import (
 type EmailWatcherWorker struct {
 	imapService   *imap.Service
 	jobDefStorage interfaces.JobDefinitionStorage
-	orchestrator  *queue.Orchestrator
+	jobDispatcher *queue.JobDispatcher
 	logger        arbor.ILogger
 	jobMgr        *queue.Manager
 }
@@ -34,14 +34,14 @@ var _ interfaces.DefinitionWorker = (*EmailWatcherWorker)(nil)
 func NewEmailWatcherWorker(
 	imapService *imap.Service,
 	jobDefStorage interfaces.JobDefinitionStorage,
-	orchestrator *queue.Orchestrator,
+	jobDispatcher *queue.JobDispatcher,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 ) *EmailWatcherWorker {
 	return &EmailWatcherWorker{
 		imapService:   imapService,
 		jobDefStorage: jobDefStorage,
-		orchestrator:  orchestrator,
+		jobDispatcher: jobDispatcher,
 		logger:        logger,
 		jobMgr:        jobMgr,
 	}
@@ -181,7 +181,7 @@ func (w *EmailWatcherWorker) CreateJobs(ctx context.Context, step models.JobStep
 		}
 
 		// Execute job definition
-		managerID, err := w.orchestrator.ExecuteJobDefinition(ctx, jobDefToExecute, nil, nil)
+		managerID, err := w.jobDispatcher.ExecuteJobDefinition(ctx, jobDefToExecute, nil, nil)
 		if err != nil {
 			w.logger.Error().
 				Err(err).

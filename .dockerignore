@@ -1,0 +1,44 @@
+# Build artifacts
+bin/
+*.exe
+
+# Test directories
+test/
+
+# Logs
+*.log
+logs/
+
+# Data directories
+data/
+*.db
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation (copied separately via staging)
+docs/
+
+# Claude/AI workspaces
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Note: deployments/docker/.docker-staging/ is NOT ignored - needed for COPY in Dockerfile
+
+# Environment files in root (copied via staging)
+.env
+.env.*
+
+# README (copied via staging)
+README.md

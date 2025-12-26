@@ -22,7 +22,7 @@ type DevOpsHandler struct {
 	documentStorage interfaces.DocumentStorage
 	searchService   interfaces.SearchService
 	jobDefStorage   interfaces.JobDefinitionStorage
-	orchestrator    *queue.Orchestrator
+	jobDispatcher   *queue.JobDispatcher
 	jobMonitor      interfaces.JobMonitor
 	stepMonitor     interfaces.StepMonitor
 	logger          arbor.ILogger
@@ -34,7 +34,7 @@ func NewDevOpsHandler(
 	documentStorage interfaces.DocumentStorage,
 	searchService interfaces.SearchService,
 	jobDefStorage interfaces.JobDefinitionStorage,
-	orchestrator *queue.Orchestrator,
+	jobDispatcher *queue.JobDispatcher,
 	jobMonitor interfaces.JobMonitor,
 	stepMonitor interfaces.StepMonitor,
 	logger arbor.ILogger,
@@ -44,7 +44,7 @@ func NewDevOpsHandler(
 		documentStorage: documentStorage,
 		searchService:   searchService,
 		jobDefStorage:   jobDefStorage,
-		orchestrator:    orchestrator,
+		jobDispatcher:   jobDispatcher,
 		jobMonitor:      jobMonitor,
 		stepMonitor:     stepMonitor,
 		logger:          logger,
@@ -188,10 +188,10 @@ func (h *DevOpsHandler) EnrichHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute the job definition through the orchestrator
+	// Execute the job definition through the job dispatcher
 	// Use a background context so the job continues after HTTP response
 	bgCtx := context.Background()
-	jobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+	jobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute DevOps enrichment job")
 		http.Error(w, "Failed to trigger enrichment pipeline: "+err.Error(), http.StatusInternalServerError)

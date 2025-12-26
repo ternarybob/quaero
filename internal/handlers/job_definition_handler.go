@@ -34,7 +34,7 @@ type JobDefinitionHandler struct {
 	jobDefStorage     interfaces.JobDefinitionStorage
 	jobStorage        interfaces.QueueStorage
 	jobMgr            *queue.Manager
-	orchestrator      *queue.Orchestrator
+	jobDispatcher     *queue.JobDispatcher
 	jobMonitor        interfaces.JobMonitor
 	stepMonitor       interfaces.StepMonitor
 	authStorage       interfaces.AuthStorage
@@ -53,7 +53,7 @@ func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.QueueStorage,
 	jobMgr *queue.Manager,
-	orchestrator *queue.Orchestrator,
+	jobDispatcher *queue.JobDispatcher,
 	jobMonitor interfaces.JobMonitor,
 	stepMonitor interfaces.StepMonitor,
 	authStorage interfaces.AuthStorage,
@@ -74,8 +74,8 @@ func NewJobDefinitionHandler(
 	if jobMgr == nil {
 		panic("jobMgr cannot be nil")
 	}
-	if orchestrator == nil {
-		panic("orchestrator cannot be nil")
+	if jobDispatcher == nil {
+		panic("jobDispatcher cannot be nil")
 	}
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
@@ -93,7 +93,7 @@ func NewJobDefinitionHandler(
 		jobDefStorage:     jobDefStorage,
 		jobStorage:        jobStorage,
 		jobMgr:            jobMgr,
-		orchestrator:      orchestrator,
+		jobDispatcher:     jobDispatcher,
 		jobMonitor:        jobMonitor,
 		stepMonitor:       stepMonitor,
 		authStorage:       authStorage,
@@ -574,7 +574,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 
 	// Create manager job synchronously to get the job ID immediately
 	// This allows returning the actual job ID in the response
-	managerJobID, err := h.orchestrator.CreateManagerJob(ctx, jobDef)
+	managerJobID, err := h.jobDispatcher.CreateManagerJob(ctx, jobDef)
 	if err != nil {
 		h.logger.Error().
 			Err(err).
@@ -605,7 +605,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		bgCtx := context.Background()
 
 		// Continue execution with the pre-created manager job ID
-		err := h.orchestrator.ExecuteJobDefinitionWithID(bgCtx, managerJobID, jobDef, h.jobMonitor, h.stepMonitor)
+		err := h.jobDispatcher.ExecuteJobDefinitionWithID(bgCtx, managerJobID, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -1476,7 +1476,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 				// Execute the prepared job definition
 				go func() {
 					bgCtx := context.Background()
-					parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
+					parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
 					if err != nil {
 						h.logger.Error().
 							Err(err).
@@ -1615,7 +1615,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			// Execute via orchestrator (headless chromedp with proper job hierarchy)
 			go func() {
 				bgCtx := context.Background()
-				parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
+				parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
 				if err != nil {
 					h.logger.Error().Err(err).Str("crawl_job_id", crawlJobID).Msg("Headless crawl execution failed")
 					return
@@ -1741,7 +1741,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		go func() {
 			bgCtx := context.Background()
 
-			parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
+			parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
 			if err != nil {
 				h.logger.Error().
 					Err(err).
@@ -1823,7 +1823,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+		parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -2210,7 +2210,7 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 			// Execute the prepared job definition
 			go func() {
 				bgCtx := context.Background()
-				parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
+				parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
 				if err != nil {
 					h.logger.Error().
 						Err(err).
@@ -2393,7 +2393,7 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
+		parentJobID, err := h.jobDispatcher.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).

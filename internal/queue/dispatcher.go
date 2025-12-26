@@ -13,6 +13,8 @@ import (
 )
 
 // JobDispatcher handles the execution of job definitions by coordinating steps and workers.
+// This is the mechanical dispatch component that routes jobs to workers and manages execution flow.
+// For AI-powered cognitive orchestration, see OrchestratorWorker.
 type JobDispatcher struct {
 	jobManager   *Manager
 	stepManager  interfaces.StepManager
@@ -34,7 +36,7 @@ func NewJobDispatcher(jobManager *Manager, stepManager interfaces.StepManager, e
 
 // CreateManagerJob creates a manager job record synchronously and returns its ID.
 // This allows the HTTP handler to return the job ID immediately before starting async execution.
-func (o *JobDispatcher) CreateManagerJob(ctx context.Context, jobDef *models.JobDefinition) (string, error) {
+func (d *JobDispatcher) CreateManagerJob(ctx context.Context, jobDef *models.JobDefinition) (string, error) {
 	// Create manager job (root parent)
 	managerID := uuid.New().String()
 
@@ -67,7 +69,7 @@ func (o *JobDispatcher) CreateManagerJob(ctx context.Context, jobDef *models.Job
 		Status:    "pending",
 	}
 
-	if err := o.jobManager.CreateJobRecord(ctx, job); err != nil {
+	if err := d.jobManager.CreateJobRecord(ctx, job); err != nil {
 		return "", fmt.Errorf("create manager job record: %w", err)
 	}
 
@@ -76,7 +78,7 @@ func (o *JobDispatcher) CreateManagerJob(ctx context.Context, jobDef *models.Job
 
 // ExecuteJobDefinitionWithID executes a job definition using a pre-created manager job ID.
 // This is used when the manager job was already created via CreateManagerJob.
-func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) error {
+func (d *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) error {
 	// Persist metadata
 	managerMetadata := make(map[string]interface{})
 	if jobDef.AuthID != "" {
@@ -87,14 +89,14 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 	}
 	managerMetadata["phase"] = "execution"
 
-	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
+	if err := d.jobManager.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
 		// Log warning but continue
 	}
 
 	// Add initial job log
 	initialLog := fmt.Sprintf("Starting job definition execution: %s (ID: %s, Steps: %d)",
 		jobDef.Name, jobDef.ID, len(jobDef.Steps))
-	o.jobManager.AddJobLog(ctx, managerID, "info", initialLog)
+	d.jobManager.AddJobLog(ctx, managerID, "info", initialLog)
 
 	// Build job definition config for manager job
 	jobDefConfig := make(map[string]interface{})
@@ -112,7 +114,7 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 		jobDefConfig["auth_id"] = jobDef.AuthID
 	}
 
-	if err := o.jobManager.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
+	if err := d.jobManager.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
 		// Log warning but continue
 	}
 
@@ -130,17 +132,17 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 		"total_steps":      len(jobDef.Steps),
 		"current_step":     0,
 	}
-	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
+	if err := d.jobManager.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
 		// Log warning but continue
 	}
 
 	// Mark manager job as running
-	if err := o.jobManager.UpdateJobStatus(ctx, managerID, "running"); err != nil {
+	if err := d.jobManager.UpdateJobStatus(ctx, managerID, "running"); err != nil {
 		// Log warning but continue
 	}
 
 	// Publish job created event to notify UI immediately
-	if o.eventService != nil {
+	if d.eventService != nil {
 		createdEvent := interfaces.Event{
 			Type: interfaces.EventJobCreated,
 			Payload: map[string]interface{}{
@@ -153,13 +155,13 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 				"timestamp":   time.Now().Format(time.RFC3339),
 			},
 		}
-		if err := o.eventService.Publish(ctx, createdEvent); err != nil {
+		if err := d.eventService.Publish(ctx, createdEvent); err != nil {
 			// Log but don't fail
 		}
 	}
 
 	// Publish job status change event to notify UI
-	if o.eventService != nil {
+	if d.eventService != nil {
 		statusEvent := interfaces.Event{
 			Type: interfaces.EventJobStatusChange,
 			Payload: map[string]interface{}{
@@ -172,7 +174,7 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 			},
 		}
 		go func() {
-			if err := o.eventService.Publish(ctx, statusEvent); err != nil {
+			if err := d.eventService.Publish(ctx, statusEvent); err != nil {
 				// Log but don't fail
 			}
 		}()
@@ -180,19 +182,19 @@ func (o *JobDispatcher) ExecuteJobDefinitionWithID(ctx context.Context, managerI
 
 	// Continue with step execution using the internal implementation
 	// Skip manager job creation since we already created it via CreateManagerJob
-	_, err := o.executeJobDefinitionInternal(ctx, managerID, jobDef, jobMonitor, stepMonitor)
+	_, err := d.executeJobDefinitionInternal(ctx, managerID, jobDef, jobMonitor, stepMonitor)
 	return err
 }
 
 // ExecuteJobDefinition executes a job definition by creating a manager job and step jobs.
 // It orchestrates the execution of steps defined in the job definition.
 // Returns the manager job ID.
-func (o *JobDispatcher) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
-	return o.executeJobDefinitionInternal(ctx, "", jobDef, jobMonitor, stepMonitor)
+func (d *JobDispatcher) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+	return d.executeJobDefinitionInternal(ctx, "", jobDef, jobMonitor, stepMonitor)
 }
 
 // executeJobDefinitionInternal is the internal implementation that optionally accepts a pre-created manager ID.
-func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCreatedManagerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCreatedManagerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
 	// Use provided manager ID or generate new one
 	var managerID string
 	managerAlreadyCreated := preCreatedManagerID != ""
@@ -235,7 +237,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			Status:    "pending",
 		}
 
-		if err := o.jobManager.CreateJobRecord(ctx, job); err != nil {
+		if err := d.jobManager.CreateJobRecord(ctx, job); err != nil {
 			return "", fmt.Errorf("create manager job record: %w", err)
 		}
 	}
@@ -250,14 +252,14 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 	}
 	managerMetadata["phase"] = "execution"
 
-	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
+	if err := d.jobManager.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
 		// Log warning but continue
 	}
 
 	// Add initial job log
 	initialLog := fmt.Sprintf("Starting job definition execution: %s (ID: %s, Steps: %d)",
 		jobDef.Name, jobDef.ID, len(jobDef.Steps))
-	o.jobManager.AddJobLog(ctx, managerID, "info", initialLog)
+	d.jobManager.AddJobLog(ctx, managerID, "info", initialLog)
 
 	// Build job definition config for manager job
 	jobDefConfig = make(map[string]interface{})
@@ -275,7 +277,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		jobDefConfig["auth_id"] = jobDef.AuthID
 	}
 
-	if err := o.jobManager.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
+	if err := d.jobManager.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
 		// Log warning but continue
 	}
 
@@ -293,17 +295,17 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		"total_steps":      len(jobDef.Steps),
 		"current_step":     0,
 	}
-	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
+	if err := d.jobManager.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
 		// Log warning but continue
 	}
 
 	// Mark manager job as running
-	if err := o.jobManager.UpdateJobStatus(ctx, managerID, "running"); err != nil {
+	if err := d.jobManager.UpdateJobStatus(ctx, managerID, "running"); err != nil {
 		// Log warning but continue
 	}
 
 	// Publish job created event to notify UI immediately
-	if o.eventService != nil {
+	if d.eventService != nil {
 		createdEvent := interfaces.Event{
 			Type: interfaces.EventJobCreated,
 			Payload: map[string]interface{}{
@@ -317,13 +319,13 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			},
 		}
 		// Publish synchronously to ensure UI sees job immediately
-		if err := o.eventService.Publish(ctx, createdEvent); err != nil {
+		if err := d.eventService.Publish(ctx, createdEvent); err != nil {
 			// Log but don't fail
 		}
 	}
 
 	// Publish job status change event to notify UI
-	if o.eventService != nil {
+	if d.eventService != nil {
 		statusEvent := interfaces.Event{
 			Type: interfaces.EventJobStatusChange,
 			Payload: map[string]interface{}{
@@ -336,7 +338,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			},
 		}
 		go func() {
-			if err := o.eventService.Publish(ctx, statusEvent); err != nil {
+			if err := d.eventService.Publish(ctx, statusEvent); err != nil {
 				// Log but don't fail
 			}
 		}()
@@ -380,8 +382,8 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			ProgressTotal:   0,
 		}
 
-		if err := o.jobManager.CreateJobRecord(ctx, stepJob); err != nil {
-			o.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Failed to create step job: %v", err))
+		if err := d.jobManager.CreateJobRecord(ctx, stepJob); err != nil {
+			d.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Failed to create step job: %v", err))
 			continue
 		}
 
@@ -398,17 +400,17 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		if jobDef.AuthID != "" {
 			stepJobMetadata["auth_id"] = jobDef.AuthID
 		}
-		if err := o.jobManager.UpdateJobMetadata(ctx, stepID, stepJobMetadata); err != nil {
+		if err := d.jobManager.UpdateJobMetadata(ctx, stepID, stepJobMetadata); err != nil {
 			// Log but continue
 		}
 
 		// Mark step as running
-		if err := o.jobManager.UpdateJobStatus(ctx, stepID, "running"); err != nil {
+		if err := d.jobManager.UpdateJobStatus(ctx, stepID, "running"); err != nil {
 			// Log but continue
 		}
 
 		// Get document count BEFORE step execution
-		docCountBefore, _ := o.jobManager.GetDocumentCount(ctx, managerID)
+		docCountBefore, _ := d.jobManager.GetDocumentCount(ctx, managerID)
 
 		// Update manager metadata with current step info
 		// Include step_job_ids so UI can find step job ID for fetching events during execution
@@ -421,12 +423,12 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			"total_steps":         len(jobDef.Steps),
 			"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 		}
-		if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerStepMetadata); err != nil {
+		if err := d.jobManager.UpdateJobMetadata(ctx, managerID, managerStepMetadata); err != nil {
 			// Log but continue
 		}
 
 		// Publish step starting event
-		if o.eventService != nil {
+		if d.eventService != nil {
 			payload := map[string]interface{}{
 				"job_id":       managerID,
 				"step_id":      stepID,
@@ -444,7 +446,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				Payload: payload,
 			}
 			go func() {
-				if err := o.eventService.Publish(ctx, event); err != nil {
+				if err := d.eventService.Publish(ctx, event); err != nil {
 					// Log but don't fail
 				}
 			}()
@@ -463,7 +465,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				Payload: jobUpdatePayload,
 			}
 			go func() {
-				if err := o.eventService.Publish(ctx, jobUpdateEvent); err != nil {
+				if err := d.eventService.Publish(ctx, jobUpdateEvent); err != nil {
 					// Log but don't fail
 				}
 			}()
@@ -471,25 +473,25 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 
 		// Resolve placeholders in step config
 		resolvedStep := step
-		if step.Config != nil && o.kvStorage != nil {
-			resolvedStep.Config = o.resolvePlaceholders(ctx, step.Config)
+		if step.Config != nil && d.kvStorage != nil {
+			resolvedStep.Config = d.resolvePlaceholders(ctx, step.Config)
 		}
 
 		// Log step starting to the step job (which has step_name in metadata for UI filtering)
 		stepStartLog := fmt.Sprintf("Starting Step %d/%d: %s", i+1, len(jobDef.Steps), step.Name)
-		o.jobManager.AddJobLog(ctx, stepID, "info", stepStartLog)
+		d.jobManager.AddJobLog(ctx, stepID, "info", stepStartLog)
 
 		// Phase 1: Initialize step worker to assess work
-		o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Initializing worker...", "", "init")
-		initResult, err := o.stepManager.Init(ctx, resolvedStep, *jobDef)
+		d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Initializing worker...", "", "init")
+		initResult, err := d.stepManager.Init(ctx, resolvedStep, *jobDef)
 		if err != nil {
-			o.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s init failed: %v", step.Name, err), "", "init")
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Init failed: %v", err), "", "init")
-			o.jobManager.SetJobError(ctx, managerID, err.Error())
-			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
+			d.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s init failed: %v", step.Name, err), "", "init")
+			d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Init failed: %v", err), "", "init")
+			d.jobManager.SetJobError(ctx, managerID, err.Error())
+			d.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
 			// Publish step_progress event so UI gets refresh trigger with finished=true
-			if o.eventService != nil {
+			if d.eventService != nil {
 				stepProgressPayload := map[string]interface{}{
 					"step_id":    stepID,
 					"manager_id": managerID,
@@ -502,7 +504,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					Payload: stepProgressPayload,
 				}
 				go func() {
-					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+					if err := d.eventService.Publish(ctx, stepProgressEvent); err != nil {
 						// Log but don't fail
 					}
 				}()
@@ -528,7 +530,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				"step_stats":          stepStats[:i+1],
 				"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 			}
-			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
+			d.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
 			if step.OnError == models.ErrorStrategyFail {
 				return managerID, fmt.Errorf("step %s init failed: %w", step.Name, err)
@@ -540,49 +542,49 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		// Log init result for visibility
 		initLogMsg := fmt.Sprintf("Worker initialized: %d work items, strategy=%s",
 			initResult.TotalCount, initResult.Strategy)
-		o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", initLogMsg, "", "init")
+		d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", initLogMsg, "", "init")
 
 		// Phase 2: Create jobs based on init result
 		// Execute step via StepManager, passing the init result
-		o.logger.Debug().
+		d.logger.Debug().
 			Str("step_name", step.Name).
 			Str("step_id", stepID).
-			Msg("[dispatcher] Calling StepManager.Execute")
+			Msg("[orchestrator] Calling StepManager.Execute")
 
 		// Check if worker returns child jobs BEFORE calling Execute
 		// This ensures "Spawning child jobs" log appears before child job completion logs
-		preExecWorker := o.stepManager.GetWorker(models.WorkerType(step.Type))
+		preExecWorker := d.stepManager.GetWorker(models.WorkerType(step.Type))
 		if preExecWorker != nil && preExecWorker.ReturnsChildJobs() {
-			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawning child jobs...", step.Name), "", "run")
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Spawning child jobs...", "", "run")
+			d.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawning child jobs...", step.Name), "", "run")
+			d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Spawning child jobs...", "", "run")
 		}
 
-		childJobID, err := o.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID, initResult)
+		childJobID, err := d.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID, initResult)
 
 		// CRITICAL: This log MUST appear immediately after StepManager.Execute returns
 		// If this log doesn't appear, the goroutine is blocked or crashed
-		o.logger.Info().
+		d.logger.Info().
 			Str("step_name", step.Name).
 			Str("step_id", stepID).
 			Str("child_job_id", childJobID).
 			Bool("has_error", err != nil).
-			Msg("[dispatcher] StepManager.Execute returned - CHECKPOINT 1")
+			Msg("[orchestrator] StepManager.Execute returned - CHECKPOINT 1")
 
-		o.logger.Debug().
+		d.logger.Debug().
 			Str("step_name", step.Name).
 			Str("step_id", stepID).
 			Str("child_job_id", childJobID).
 			Err(err).
-			Msg("[dispatcher] StepManager.Execute returned")
+			Msg("[orchestrator] StepManager.Execute returned")
 
 		if err != nil {
-			o.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err), "", "run")
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
-			o.jobManager.SetJobError(ctx, managerID, err.Error())
-			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
+			d.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err), "", "run")
+			d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
+			d.jobManager.SetJobError(ctx, managerID, err.Error())
+			d.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
 			// Publish step_progress event so UI gets refresh trigger with finished=true
-			if o.eventService != nil {
+			if d.eventService != nil {
 				stepProgressPayload := map[string]interface{}{
 					"step_id":    stepID,
 					"manager_id": managerID,
@@ -595,7 +597,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					Payload: stepProgressPayload,
 				}
 				go func() {
-					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+					if err := d.eventService.Publish(ctx, stepProgressEvent); err != nil {
 						// Log but don't fail
 					}
 				}()
@@ -621,7 +623,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				"step_stats":          stepStats[:i+1],
 				"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 			}
-			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
+			d.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
 			if step.OnError == models.ErrorStrategyFail {
 				return managerID, fmt.Errorf("step %s failed: %w", step.Name, err)
@@ -629,9 +631,9 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 
 			// Check error tolerance
 			if jobDef.ErrorTolerance != nil {
-				shouldStop, _ := o.checkErrorTolerance(ctx, managerID, jobDef.ErrorTolerance)
+				shouldStop, _ := d.checkErrorTolerance(ctx, managerID, jobDef.ErrorTolerance)
 				if shouldStop {
-					o.jobManager.UpdateJobStatus(ctx, managerID, "failed")
+					d.jobManager.UpdateJobStatus(ctx, managerID, "failed")
 					return managerID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
 				}
 			}
@@ -655,33 +657,33 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		// Worker.CreateJobs returns jobID.
 		// If ReturnsChildJobs is true, we expect child jobs.
 		// We can use StepManager.GetWorker to check.
-		o.logger.Debug().
+		d.logger.Debug().
 			Str("step_name", step.Name).
 			Str("step_type", step.Type.String()).
 			Str("child_job_id", childJobID).
-			Msg("[dispatcher] StepManager.Execute returned, checking worker type")
+			Msg("[orchestrator] StepManager.Execute returned, checking worker type")
 
-		worker := o.stepManager.GetWorker(models.WorkerType(step.Type))
+		worker := d.stepManager.GetWorker(models.WorkerType(step.Type))
 		returnsChildJobs := false
 		if worker != nil {
 			returnsChildJobs = worker.ReturnsChildJobs()
-			o.logger.Debug().
+			d.logger.Debug().
 				Str("step_name", step.Name).
 				Bool("returns_child_jobs", returnsChildJobs).
-				Msg("[dispatcher] Worker found, checking ReturnsChildJobs")
+				Msg("[orchestrator] Worker found, checking ReturnsChildJobs")
 		} else {
-			o.logger.Warn().
+			d.logger.Warn().
 				Str("step_name", step.Name).
 				Str("step_type", step.Type.String()).
-				Msg("[dispatcher] Worker not found for step type")
+				Msg("[orchestrator] Worker not found for step type")
 		}
 
 		// CHECKPOINT 2: Log after worker check
-		o.logger.Info().
+		d.logger.Info().
 			Str("step_name", step.Name).
 			Bool("returns_child_jobs", returnsChildJobs).
 			Bool("worker_found", worker != nil).
-			Msg("[dispatcher] Worker check complete - CHECKPOINT 2")
+			Msg("[orchestrator] Worker check complete - CHECKPOINT 2")
 
 		// Track whether we waited for children synchronously (vs async StepMonitor)
 		childrenWaitedSynchronously := false
@@ -690,21 +692,21 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			hasChildJobs = true
 
 			// Check if children are already complete (worker waited internally, e.g., AgentWorker with pollJobCompletion)
-			initialStats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
+			initialStats, err := d.jobManager.GetJobChildStats(ctx, []string{stepID})
 			if err != nil {
-				o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get initial child stats")
+				d.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get initial child stats")
 			}
 			initialChildStats := initialStats[stepID]
 
 			// If children are already all complete, skip the wait loop entirely
 			if initialChildStats != nil && initialChildStats.PendingChildren == 0 && initialChildStats.RunningChildren == 0 && initialChildStats.CompletedChildren > 0 {
-				o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+				d.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
 					fmt.Sprintf("All child jobs completed (%d completed, %d failed) - worker waited internally",
 						initialChildStats.CompletedChildren, initialChildStats.FailedChildren), "", "run")
 				childrenWaitedSynchronously = true
 			} else {
 				// Log that we're waiting for child jobs
-				o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Waiting for child jobs to complete...", "", "run")
+				d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Waiting for child jobs to complete...", "", "run")
 
 				waitTimeout := 30 * time.Minute // Default timeout for waiting
 				if jobDef.Timeout != "" {
@@ -723,21 +725,21 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					// Check context cancellation
 					select {
 					case <-ctx.Done():
-						o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", "Context cancelled while waiting for child jobs", "", "run")
+						d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", "Context cancelled while waiting for child jobs", "", "run")
 						return managerID, ctx.Err()
 					default:
 					}
 
 					// Check timeout
 					if time.Since(waitStart) > waitTimeout {
-						o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Timeout waiting for child jobs after %v", waitTimeout), "", "run")
+						d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Timeout waiting for child jobs after %v", waitTimeout), "", "run")
 						return managerID, fmt.Errorf("timeout waiting for child jobs of step %s", step.Name)
 					}
 
 					// Get current child stats
-					stats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
+					stats, err := d.jobManager.GetJobChildStats(ctx, []string{stepID})
 					if err != nil {
-						o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get child stats while waiting")
+						d.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get child stats while waiting")
 						time.Sleep(pollInterval)
 						continue
 					}
@@ -753,14 +755,14 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 						childStats.PendingChildren, childStats.RunningChildren,
 						childStats.CompletedChildren, childStats.FailedChildren)
 					if currentStats != lastLoggedStats {
-						o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+						d.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
 							fmt.Sprintf("Child jobs: %s", currentStats), "", "run")
 						lastLoggedStats = currentStats
 					}
 
 					// Publish step_progress event periodically so UI receives refresh triggers
 					// This enables real-time step event display during synchronous wait
-					if time.Since(lastProgressPublish) >= progressPublishInterval && o.eventService != nil {
+					if time.Since(lastProgressPublish) >= progressPublishInterval && d.eventService != nil {
 						stepProgressPayload := map[string]interface{}{
 							"step_id":        stepID,
 							"manager_id":     managerID,
@@ -778,7 +780,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 							Payload: stepProgressPayload,
 						}
 						go func() {
-							if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+							if err := d.eventService.Publish(ctx, stepProgressEvent); err != nil {
 								// Log but don't fail
 							}
 						}()
@@ -787,7 +789,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 
 					// Check if all children are in terminal state
 					if childStats.PendingChildren == 0 && childStats.RunningChildren == 0 {
-						o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+						d.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
 							fmt.Sprintf("All child jobs completed (%d completed, %d failed) in %v",
 								childStats.CompletedChildren, childStats.FailedChildren, time.Since(waitStart)), "", "run")
 						childrenWaitedSynchronously = true
@@ -799,31 +801,31 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			}
 
 			// CHECKPOINT 3: After wait loop or immediate completion check
-			o.logger.Info().
+			d.logger.Info().
 				Str("step_name", step.Name).
 				Str("step_id", stepID).
 				Bool("children_waited_synchronously", childrenWaitedSynchronously).
-				Msg("[dispatcher] Wait loop completed - CHECKPOINT 3")
+				Msg("[orchestrator] Wait loop completed - CHECKPOINT 3")
 		} else {
-			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name), "", "run")
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID), "", "run")
+			d.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name), "", "run")
+			d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID), "", "run")
 		}
 
 		// Update manager progress
-		if err := o.jobManager.UpdateJobProgress(ctx, managerID, i+1, len(jobDef.Steps)); err != nil {
+		if err := d.jobManager.UpdateJobProgress(ctx, managerID, i+1, len(jobDef.Steps)); err != nil {
 			// Log warning but continue
 		}
 
 		// Get child stats for this step
 		var stepChildCount int
-		if stats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID}); err == nil {
+		if stats, err := d.jobManager.GetJobChildStats(ctx, []string{stepID}); err == nil {
 			if s := stats[stepID]; s != nil {
 				stepChildCount = s.ChildCount
 			}
 		}
 
 		// Get document count AFTER step execution
-		docCountAfter, _ := o.jobManager.GetDocumentCount(ctx, managerID)
+		docCountAfter, _ := d.jobManager.GetDocumentCount(ctx, managerID)
 
 		// Calculate documents created by this step
 		stepDocCount := docCountAfter - docCountBefore
@@ -832,8 +834,8 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		// If we waited synchronously for children, the step is completed.
 		// Only use "spawned" status if we're using async StepMonitor (not waiting inline).
 		stepStatus := "completed"
-		o.logger.Debug().
-			Str("phase", "dispatcher").
+		d.logger.Debug().
+			Str("phase", "orchestrator").
 			Str("step_id", stepID).
 			Bool("returns_child_jobs", returnsChildJobs).
 			Int("step_child_count", stepChildCount).
@@ -841,8 +843,8 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			Bool("children_waited_synchronously", childrenWaitedSynchronously).
 			Msg("Determining step status for step monitor")
 
-		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, children_waited=%v",
-			returnsChildJobs, stepChildCount, childrenWaitedSynchronously), "", "dispatcher")
+		d.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, children_waited=%v",
+			returnsChildJobs, stepChildCount, childrenWaitedSynchronously), "", "orchestrator")
 
 		// Only set status to "spawned" if we're NOT waiting synchronously
 		// When childrenWaitedSynchronously is true, children already completed so status should be "completed"
@@ -863,19 +865,19 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 
 		// Update step job status
 		if stepStatus == "completed" {
-			o.jobManager.UpdateJobStatus(ctx, stepID, "completed")
-			o.jobManager.SetJobFinished(ctx, stepID)
+			d.jobManager.UpdateJobStatus(ctx, stepID, "completed")
+			d.jobManager.SetJobFinished(ctx, stepID)
 
 			// CHECKPOINT 4: After step status update
-			o.logger.Info().
+			d.logger.Info().
 				Str("step_name", step.Name).
 				Str("step_id", stepID).
 				Str("step_status", stepStatus).
-				Msg("[dispatcher] Step status updated - CHECKPOINT 4")
+				Msg("[orchestrator] Step status updated - CHECKPOINT 4")
 
 			// Publish step_progress event so UI gets refresh trigger with finished=true
 			// This is critical for steps that complete synchronously (no StepMonitor)
-			if o.eventService != nil {
+			if d.eventService != nil {
 				stepProgressPayload := map[string]interface{}{
 					"step_id":    stepID,
 					"manager_id": managerID,
@@ -888,7 +890,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					Payload: stepProgressPayload,
 				}
 				go func() {
-					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+					if err := d.eventService.Publish(ctx, stepProgressEvent); err != nil {
 						// Log but don't fail
 					}
 				}()
@@ -908,7 +910,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					Payload: jobUpdatePayload,
 				}
 				go func() {
-					if err := o.eventService.Publish(ctx, jobUpdateEvent); err != nil {
+					if err := d.eventService.Publish(ctx, jobUpdateEvent); err != nil {
 						// Log but don't fail
 					}
 				}()
@@ -926,7 +928,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				Depth:     1,
 			}
 			stepMonitor.StartMonitoring(ctx, stepQueueJob)
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Step monitor started for spawned children", "", "dispatcher")
+			d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Step monitor started for spawned children", "", "orchestrator")
 		}
 
 		// Update manager metadata with step progress
@@ -941,12 +943,12 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			"step_stats":          stepStats[:i+1],
 			"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 		}
-		if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerCompletedMetadata); err != nil {
+		if err := d.jobManager.UpdateJobMetadata(ctx, managerID, managerCompletedMetadata); err != nil {
 			// Log but continue
 		}
 
 		// Publish step progress event
-		if o.eventService != nil {
+		if d.eventService != nil {
 			payload := map[string]interface{}{
 				"job_id":           managerID,
 				"step_id":          stepID,
@@ -965,7 +967,7 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 				Payload: payload,
 			}
 			go func() {
-				if err := o.eventService.Publish(ctx, event); err != nil {
+				if err := d.eventService.Publish(ctx, event); err != nil {
 					// Log but don't fail
 				}
 			}()
@@ -977,13 +979,13 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 	stepIDsMetadata := map[string]interface{}{
 		"step_job_ids": stepJobIDs,
 	}
-	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, stepIDsMetadata); err != nil {
+	if err := d.jobManager.UpdateJobMetadata(ctx, managerID, stepIDsMetadata); err != nil {
 		// Log but continue
 	}
 
 	// Handle completion
 	if hasChildJobs && jobMonitor != nil {
-		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", "Steps have child jobs - starting manager job monitoring", "", "dispatcher")
+		d.jobManager.AddJobLogWithPhase(ctx, managerID, "info", "Steps have child jobs - starting manager job monitoring", "", "orchestrator")
 
 		managerQueueJob := &models.QueueJob{
 			ID:        managerID,
@@ -1000,14 +1002,14 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		jobMonitor.StartMonitoring(ctx, managerQueueJob)
 	} else {
 		if lastValidationError != "" {
-			o.jobManager.AddJobLog(ctx, managerID, "error", "Job failed: "+lastValidationError)
-			o.jobManager.SetJobError(ctx, managerID, lastValidationError)
-			o.jobManager.UpdateJobStatus(ctx, managerID, "failed")
-			o.jobManager.SetJobFinished(ctx, managerID)
+			d.jobManager.AddJobLog(ctx, managerID, "error", "Job failed: "+lastValidationError)
+			d.jobManager.SetJobError(ctx, managerID, lastValidationError)
+			d.jobManager.UpdateJobStatus(ctx, managerID, "failed")
+			d.jobManager.SetJobFinished(ctx, managerID)
 		} else {
-			o.jobManager.AddJobLog(ctx, managerID, "info", "Job completed (no child jobs)")
-			o.jobManager.UpdateJobStatus(ctx, managerID, "completed")
-			o.jobManager.SetJobFinished(ctx, managerID)
+			d.jobManager.AddJobLog(ctx, managerID, "info", "Job completed (no child jobs)")
+			d.jobManager.UpdateJobStatus(ctx, managerID, "completed")
+			d.jobManager.SetJobFinished(ctx, managerID)
 		}
 	}
 
@@ -1015,36 +1017,36 @@ func (o *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 }
 
 // resolvePlaceholders recursively resolves {key-name} placeholders in step config values
-func (o *JobDispatcher) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
-	if config == nil || o.kvStorage == nil {
+func (d *JobDispatcher) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
+	if config == nil || d.kvStorage == nil {
 		return config
 	}
 
 	resolved := make(map[string]interface{})
 	for key, value := range config {
-		resolved[key] = o.resolveValue(ctx, value)
+		resolved[key] = d.resolveValue(ctx, value)
 	}
 	return resolved
 }
 
 // resolveValue recursively resolves placeholders in a single value
-func (o *JobDispatcher) resolveValue(ctx context.Context, value interface{}) interface{} {
+func (d *JobDispatcher) resolveValue(ctx context.Context, value interface{}) interface{} {
 	switch v := value.(type) {
 	case string:
 		if len(v) > 2 && v[0] == '{' && v[len(v)-1] == '}' {
 			keyName := v[1 : len(v)-1]
-			kvValue, err := o.kvStorage.Get(ctx, keyName)
+			kvValue, err := d.kvStorage.Get(ctx, keyName)
 			if err == nil && kvValue != "" {
 				return kvValue
 			}
 		}
 		return v
 	case map[string]interface{}:
-		return o.resolvePlaceholders(ctx, v)
+		return d.resolvePlaceholders(ctx, v)
 	case []interface{}:
 		resolved := make([]interface{}, len(v))
 		for i, item := range v {
-			resolved[i] = o.resolveValue(ctx, item)
+			resolved[i] = d.resolveValue(ctx, item)
 		}
 		return resolved
 	default:
@@ -1053,12 +1055,12 @@ func (o *JobDispatcher) resolveValue(ctx context.Context, value interface{}) int
 }
 
 // checkErrorTolerance checks if the error tolerance threshold has been exceeded
-func (o *JobDispatcher) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
+func (d *JobDispatcher) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
 	if tolerance == nil || tolerance.MaxChildFailures == 0 {
 		return false, nil
 	}
 
-	failedCount, err := o.jobManager.GetFailedChildCount(ctx, parentJobID)
+	failedCount, err := d.jobManager.GetFailedChildCount(ctx, parentJobID)
 	if err != nil {
 		return false, fmt.Errorf("failed to query failed job count: %w", err)
 	}

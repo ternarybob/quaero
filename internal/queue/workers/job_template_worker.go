@@ -26,9 +26,9 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// JobTemplateOrchestrator defines the interface for executing job definitions.
-// This is implemented by queue.Orchestrator.
-type JobTemplateOrchestrator interface {
+// JobTemplateDispatcher defines the interface for executing job definitions.
+// This is implemented by queue.JobDispatcher.
+type JobTemplateDispatcher interface {
 	ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error)
 }
 
@@ -38,7 +38,7 @@ type JobTemplateOrchestrator interface {
 type JobTemplateWorker struct {
 	jobDefStorage interfaces.JobDefinitionStorage
 	jobService    *jobs.Service
-	orchestrator  JobTemplateOrchestrator
+	jobDispatcher JobTemplateDispatcher
 	jobMgr        *queue.Manager
 	eventService  interfaces.EventService
 	logger        arbor.ILogger
@@ -52,7 +52,7 @@ var _ interfaces.DefinitionWorker = (*JobTemplateWorker)(nil)
 func NewJobTemplateWorker(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobService *jobs.Service,
-	orchestrator JobTemplateOrchestrator,
+	jobDispatcher JobTemplateDispatcher,
 	jobMgr *queue.Manager,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
@@ -61,7 +61,7 @@ func NewJobTemplateWorker(
 	return &JobTemplateWorker{
 		jobDefStorage: jobDefStorage,
 		jobService:    jobService,
-		orchestrator:  orchestrator,
+		jobDispatcher: jobDispatcher,
 		jobMgr:        jobMgr,
 		eventService:  eventService,
 		logger:        logger,
@@ -427,13 +427,13 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		return "", fmt.Errorf("failed to prepare any template instances")
 	}
 
-	// Check orchestrator availability
-	if w.orchestrator == nil {
-		w.logger.Error().Msg("Orchestrator not available")
+	// Check job dispatcher availability
+	if w.jobDispatcher == nil {
+		w.logger.Error().Msg("JobDispatcher not available")
 		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "error", "Orchestrator not configured")
+			w.jobMgr.AddJobLog(ctx, stepID, "error", "JobDispatcher not configured")
 		}
-		return "", fmt.Errorf("orchestrator not configured")
+		return "", fmt.Errorf("job dispatcher not configured")
 	}
 
 	var results []templateJobResult
@@ -487,7 +487,7 @@ func (w *JobTemplateWorker) executeSequential(ctx context.Context, stepID string
 		}
 
 		// Run the job definition
-		executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, pj.jobDef, nil, nil)
+		executedJobID, err := w.jobDispatcher.ExecuteJobDefinition(ctx, pj.jobDef, nil, nil)
 		if err != nil {
 			w.logger.Error().Err(err).
 				Str("identifier", pj.identifier).
@@ -586,7 +586,7 @@ func (w *JobTemplateWorker) executeParallel(ctx context.Context, stepID string, 
 			}
 
 			// Execute the job definition - this creates the manager job and executes it
-			executedJobID, err := w.orchestrator.ExecuteJobDefinition(ctx, job.jobDef, nil, nil)
+			executedJobID, err := w.jobDispatcher.ExecuteJobDefinition(ctx, job.jobDef, nil, nil)
 
 			// Publish job spawn event immediately after job creation (before acquiring lock)
 			// This ensures the UI sees spawned jobs as soon as they're created
@@ -702,7 +702,7 @@ func (w *JobTemplateWorker) substituteTemplateVariables(content string, variable
 }
 
 // ReturnsChildJobs returns false since ExecuteJobDefinition runs jobs synchronously.
-// The child jobs complete within CreateJobs before it returns, so the orchestrator
+// The child jobs complete within CreateJobs before it returns, so the job dispatcher
 // doesn't need to wait for them separately.
 func (w *JobTemplateWorker) ReturnsChildJobs() bool {
 	return false

@@ -31,17 +31,24 @@ case "${1:-}" in
         echo -e "\033[0;32mStopped\033[0m"
         exit 0
         ;;
+    --rebuild|-r|"")
+        # Default action - continue to build and deploy below
+        ;;
     --help|-h)
-        echo "Usage: $0 [--status|--logs|--stop|--help]"
+        echo "Usage: $0 [--status|--logs|--stop|--rebuild|--help]"
         echo ""
         echo "Options:"
+        echo "  --rebuild, -r  Stop, rebuild and redeploy (default)"
         echo "  --status, -s   Show Docker container status"
         echo "  --logs, -l     Follow Docker container logs"
         echo "  --stop         Stop Docker containers"
         echo "  --help, -h     Show this help"
-        echo ""
-        echo "No arguments: Build and deploy to Docker"
         exit 0
+        ;;
+    *)
+        echo -e "\033[0;31mUnknown option: $1\033[0m"
+        echo "Use --help for usage information"
+        exit 1
         ;;
 esac
 

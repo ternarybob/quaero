@@ -46,6 +46,9 @@ const (
 
 	// Template orchestration workers
 	WorkerTypeJobTemplate WorkerType = "job_template" // Executes job templates with variable substitution
+
+	// AI-powered cognitive orchestration workers
+	WorkerTypeOrchestrator WorkerType = "orchestrator" // AI agent that dynamically plans and executes steps using LLM reasoning
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -57,7 +60,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
 		WorkerTypeASXStockData, WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
-		WorkerTypeEmailWatcher, WorkerTypeJobTemplate:
+		WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
 	}
 	return false
@@ -94,5 +97,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,
+		WorkerTypeOrchestrator,
 	}
 }

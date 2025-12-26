@@ -69,16 +69,16 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution (using concrete types for refactored queue system)
-	QueueManager interfaces.QueueManager
-	LogService   interfaces.LogService
-	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
-	JobManager   *queue.Manager
-	StepManager  *queue.StepManager
-	Orchestrator *queue.Orchestrator
-	JobProcessor *workers.JobProcessor
-	JobMonitor   interfaces.JobMonitor
-	StepMonitor  interfaces.StepMonitor
-	JobService   *jobsvc.Service
+	QueueManager  interfaces.QueueManager
+	LogService    interfaces.LogService
+	LogConsumer   *logs.Consumer // Log consumer for arbor context channel
+	JobManager    *queue.Manager
+	StepManager   *queue.StepManager
+	JobDispatcher *queue.JobDispatcher
+	JobProcessor  *workers.JobProcessor
+	JobMonitor    interfaces.JobMonitor
+	StepMonitor   interfaces.StepMonitor
+	JobService    *jobsvc.Service
 
 	// Source-agnostic services
 	StatusService     *status.Service
@@ -828,6 +828,20 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
+	// Register Orchestrator worker (AI-powered cognitive orchestration with LLM reasoning)
+	orchestratorWorker := workers.NewOrchestratorWorker(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.StorageManager.KeyValueStorage(),
+		a.EventService,
+		a.Logger,
+		jobMgr,
+		a.ProviderFactory,
+	)
+	a.StepManager.RegisterWorker(orchestratorWorker)
+	orchestratorWorker.SetStepManager(a.StepManager) // Set after registration to avoid circular dependency
+	a.Logger.Debug().Str("step_type", orchestratorWorker.GetType().String()).Msg("Orchestrator worker registered")
+
 	// Register enrichment pipeline workers (each handles a specific enrichment step)
 	analyzeBuildWorker := workers.NewAnalyzeBuildWorker(
 		a.SearchService,
@@ -885,7 +899,7 @@ func (a *App) initServices() error {
 	emailWatcherWorker := workers.NewEmailWatcherWorker(
 		a.IMAPService,
 		a.StorageManager.JobDefinitionStorage(),
-		a.Orchestrator,
+		a.JobDispatcher,
 		a.Logger,
 		jobMgr,
 	)
@@ -905,8 +919,8 @@ func (a *App) initServices() error {
 
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
-	// Initialize Orchestrator
-	a.Orchestrator = queue.NewOrchestrator(
+	// Initialize JobDispatcher (mechanical job execution coordinator)
+	a.JobDispatcher = queue.NewJobDispatcher(
 		jobMgr,
 		a.StepManager,
 		a.EventService,
@@ -914,11 +928,11 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// Register Job Template worker (must be after Orchestrator is created since it needs it)
+	// Register Job Template worker (must be after JobDispatcher is created since it needs it)
 	jobTemplateWorker := workers.NewJobTemplateWorker(
 		a.StorageManager.JobDefinitionStorage(),
 		jobs.NewService(a.StorageManager.KeyValueStorage(), a.AgentService, a.Logger),
-		a.Orchestrator,
+		a.JobDispatcher,
 		jobMgr,
 		a.EventService,
 		a.Logger,
@@ -1056,7 +1070,7 @@ func (a *App) initHandlers() error {
 	a.GitHubJobsHandler = handlers.NewGitHubJobsHandler(
 		a.ConnectorService,
 		a.JobManager,
-		a.Orchestrator,
+		a.JobDispatcher,
 		a.QueueManager,
 		a.JobMonitor,
 		a.StepMonitor,
@@ -1072,7 +1086,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.QueueStorage(),
 		a.JobManager,
-		a.Orchestrator,
+		a.JobDispatcher,
 		a.JobMonitor,
 		a.StepMonitor,
 		a.StorageManager.AuthStorage(),
@@ -1095,7 +1109,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.StorageManager.JobDefinitionStorage(),
-		a.Orchestrator,
+		a.JobDispatcher,
 		a.JobMonitor,
 		a.StepMonitor,
 		a.Logger,

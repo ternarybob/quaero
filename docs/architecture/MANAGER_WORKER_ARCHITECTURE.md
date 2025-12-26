@@ -21,14 +21,16 @@ The Quaero queue system uses a decoupled architecture to separate job lifecycle 
 - Validates step configuration against the registered worker.
 - **Does NOT** manage job status or persistence.
 
-### 3. Orchestrator (`internal/queue/orchestrator.go`)
+### 3. JobDispatcher (`internal/queue/dispatcher.go`)
 **Responsibility:** Execution Coordination.
-- Coordinates the execution of a `JobDefinition`.
+- Coordinates the mechanical execution of a `JobDefinition`.
 - Creates the parent "Manager Job".
 - Iterates through steps, creating "Step Jobs".
 - Uses `StepManager` to execute each step.
 - Handles error tolerance, retries (future), and flow control.
 - Manages the parent-child relationship and monitoring setup.
+
+**Note:** The term "Orchestrator" is reserved for the AI-powered `OrchestratorWorker` which performs cognitive orchestration using LLM reasoning. `JobDispatcher` handles mechanical dispatch.
 
 ### 4. Workers (`internal/queue/workers/`)
 **Responsibility:** Execution of specific tasks.
@@ -41,10 +43,10 @@ The Quaero queue system uses a decoupled architecture to separate job lifecycle 
 ## Data Flow
 
 1.  **Job Submission:** API receives a request to execute a Job Definition.
-2.  **Orchestration:** `JobDefinitionHandler` calls `Orchestrator.ExecuteJobDefinition`.
-3.  **Manager Job Creation:** `Orchestrator` creates a parent job via `JobManager`.
+2.  **Dispatch:** `JobDefinitionHandler` calls `JobDispatcher.ExecuteJobDefinition`.
+3.  **Manager Job Creation:** `JobDispatcher` creates a parent job via `JobManager`.
 4.  **Step Execution:**
-    - `Orchestrator` iterates through steps.
+    - `JobDispatcher` iterates through steps.
     - Creates a step job via `JobManager`.
     - Calls `StepManager.Execute` with the step configuration.
 5.  **Worker Routing:** `StepManager` looks up the worker for the step type and calls `worker.CreateJobs`.
@@ -71,22 +73,24 @@ See `docs/fix/queue_manager/03_logging_architecture_review.md` for proposed:
 
 ```mermaid
 graph TD
-    API[API / JobDefinitionHandler] --> Orch[Orchestrator]
-    Orch --> JM[JobManager]
-    Orch --> SM[StepManager]
-    
+    API[API / JobDefinitionHandler] --> Disp[JobDispatcher]
+    Disp --> JM[JobManager]
+    Disp --> SM[StepManager]
+
     JM --> DB[(BadgerDB)]
-    
+
     SM --> W_Crawl[CrawlerWorker]
     SM --> W_GH[GitHubWorker]
     SM --> W_Agent[AgentWorker]
-    
+    SM --> W_Orch[OrchestratorWorker]
+
     W_Crawl --> JM
     W_GH --> JM
-    
+    W_Orch -.-> |"LLM Planning"| LLM[Gemini/Claude]
+
     subgraph "Execution Flow"
-        Orch -- "1. Create Parent Job" --> JM
-        Orch -- "2. Route Step" --> SM
+        Disp -- "1. Create Parent Job" --> JM
+        Disp -- "2. Route Step" --> SM
         SM -- "3. Execute Step" --> W_Crawl
         W_Crawl -- "4. Create Child Jobs" --> JM
     end

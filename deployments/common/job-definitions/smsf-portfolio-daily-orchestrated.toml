@@ -1,0 +1,148 @@
+# SMSF Portfolio Review - Orchestrated Version
+# =========================================================================
+# Uses the OrchestratorWorker with Planner-Executor-Reviewer loop for
+# strategic portfolio analysis with dynamic reasoning.
+#
+# KEY DIFFERENCES from static smsf-portfolio-daily.toml:
+# - Single orchestrator step for intelligent portfolio review
+# - LLM plans the analysis based on current portfolio state
+# - Recovery logic for missing data
+#
+# VARIABLES:
+# Global variables are declared once at job level in [config] section.
+# The orchestrator reads these variables to know which holdings to analyze.
+# =========================================================================
+
+id = "smsf-portfolio-daily-orchestrated"
+name = "SMSF Portfolio Strategy Review (Thinking)"
+type = "orchestrator"
+description = "AI-powered SMSF portfolio analysis with strategic reasoning"
+tags = ["smsf", "portfolio", "daily", "orchestrator", "thinking"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Orchestrator Configuration
+# =========================================================================
+
+# Global variables - holdings for portfolio analysis
+# Available variable keys: ticker, name, industry, units, avg_price, weighting
+[config]
+variables = [
+    # =========================================================================
+    # Infrastructure & Industrials
+    # =========================================================================
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure", units = 3159, avg_price = 6.303, weighting = 5.97 },
+    { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure", units = 4925, avg_price = 4.025, weighting = 6.01 },
+
+    # =========================================================================
+    # Uncomment to add more holdings:
+    # =========================================================================
+    # # ETFs & Index Funds (Defensive/Core)
+    # { ticker = "AAA", name = "Betashares Australian High Interest Cash ETF", industry = "cash-etf", units = 198, avg_price = 50.235, weighting = 3.04 },
+    # { ticker = "VACF", name = "Vanguard Australian Corporate Fixed Interest Index ETF", industry = "bond-etf", units = 193, avg_price = 51.666, weighting = 3.05 },
+    # { ticker = "VGS", name = "Vanguard MSCI Index International Shares ETF", industry = "global-etf", units = 64, avg_price = 154.031, weighting = 3.01 },
+    # { ticker = "PMGOLD", name = "Perth Mint Gold", industry = "gold-etf", units = 597, avg_price = 66.747, weighting = 12.21 },
+
+    # # Large Cap Blue Chips (Stable Income)
+    # { ticker = "WES", name = "Wesfarmers Limited", industry = "retail", units = 122, avg_price = 81.209, weighting = 3.03 },
+    # { ticker = "WOW", name = "Woolworths Group Limited", industry = "retail", units = 339, avg_price = 29.329, weighting = 3.04 },
+]
+
+# Benchmark indices for comparison
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+    { code = "XSO", name = "S&P/ASX Small Ordinaries" },
+]
+
+# =========================================================================
+# Orchestrator Step - Strategic Portfolio Review
+# =========================================================================
+
+[step.strategic_review]
+type = "orchestrator"
+description = "AI-powered strategic portfolio review"
+on_error = "continue"
+
+# Natural language goal - holistic portfolio analysis
+goal = """
+Perform a comprehensive SMSF portfolio review for all holdings in the variables list.
+
+PORTFOLIO CONTEXT:
+Read the portfolio holdings from the variables. Each holding includes:
+- Ticker, company name, industry
+- Units held, average purchase price, portfolio weighting
+
+ANALYSIS TASKS:
+1. For each holding, calculate current valuation and P/L:
+   - Fetch current market price
+   - Calculate: Current Value = Units × Current Price
+   - Calculate: Total Return = Current Value - (Units × Avg Price)
+   - Calculate: Return % = Total Return / Cost Basis
+
+2. Collect benchmark data:
+   - Fetch ASX 200 (XJO) performance for comparison
+   - Fetch Small Ords (XSO) for small cap comparison
+
+3. For each holding, perform stock analysis:
+   - Technical trend analysis (SMA 50, SMA 200, RSI)
+   - Announcement quality assessment (signal vs noise)
+   - Industry outlook
+   - Competitor comparison
+
+4. Generate portfolio-level insights:
+   - Identify top performers and laggards
+   - Check for COOKED stocks (overextended, high risk)
+   - Identify BUY/SELL/HOLD actions with conviction scores
+   - SMSF compliance considerations
+
+5. Create consolidated portfolio summary:
+   - Gain/Loss table with all holdings
+   - Consolidated recommendations table
+   - Priority actions by timeframe (Trader 1-8 weeks, Super 6m-3y)
+   - Opportunity analysis for next 6 months
+
+If data is missing for any stock:
+- Calculate what you can with available data
+- Note missing data explicitly
+- Suggest alternative data sources
+
+OUTPUT REQUIREMENTS:
+- Portfolio valuation summary with total gains/losses
+- Individual stock BUY/SELL/HOLD recommendations
+- Risk alerts for overextended positions
+- Actionable next steps
+"""
+
+thinking_level = "HIGH"
+model_preference = "auto"
+
+# Available tools for portfolio analysis
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices and technicals", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch ASX company announcements", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks", worker = "asx_index_data" },
+    { name = "search_web", description = "Search for financial news and analysis", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate LLM-based analysis", worker = "summary" },
+    { name = "run_stock_review", description = "Execute stock review template", worker = "job_template", template = "asx-stock-review" },
+    { name = "run_data_collection", description = "Execute data collection template", worker = "job_template", template = "asx-stock-data" },
+    { name = "run_portfolio_summary", description = "Execute portfolio summary template", worker = "job_template", template = "smsf-portfolio-summary" }
+]
+
+# Output tags - allows email step to find this document via body_from_tag
+output_tags = ["smsf-portfolio-review"]
+
+# =========================================================================
+# Email Step - Send Portfolio Report
+# =========================================================================
+
+[step.email_portfolio]
+type = "email"
+description = "Email consolidated SMSF portfolio review"
+depends = "strategic_review"
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "SMSF Portfolio Review - AI-Powered Strategic Analysis"
+body_from_tag = "smsf-portfolio-review"

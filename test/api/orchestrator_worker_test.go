@@ -2,83 +2,129 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/ternarybob/quaero/test/common"
 )
 
+// TestOrchestratorWorkerSubmission tests that orchestrator job definitions can be created
+// and triggered via the API. This validates:
+// 1. Job definition with type "orchestrator" is accepted
+// 2. Step config with "goal" field passes validation
+// 3. Job can be triggered and returns a valid job ID
 func TestOrchestratorWorkerSubmission(t *testing.T) {
-	// Initialize test environment
-	env := common.NewTestEnvironment(t)
+	env, err := common.SetupTestEnvironment(t.Name())
+	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
 	helper := env.NewHTTPTestHelper(t)
 
-	// 1. Submit the definition (simulated by ensuring it's loaded or posting it)
-	// For this test, we assume the file 'orchestrator-fact-check.toml' is already in the definitions dir
-	// and loaded by the system. If not, we can post it.
-
-	// Create/Update the job definition via API to match the file
-	// (mirroring the file content locally for the test POST)
-	defID := "orchestrator-fact-check-api-test"
+	// Create job definition with orchestrator type
+	defID := "orchestrator-test-" + time.Now().Format("20060102150405")
 	body := map[string]interface{}{
 		"id":          defID,
-		"name":        "Fact Check API Test",
-		"type":        "orchestrator", // This will likely fail validation currently
-		"description": "API Test for Orchestrator",
-		"config": map[string]interface{}{
-			"output_schema": "test/config/job-templates/output-schema-fact-check.toml",
-		},
+		"name":        "Orchestrator API Test",
+		"type":        "orchestrator",
+		"description": "API test for OrchestratorWorker",
+		"enabled":     true,
 		"steps": []map[string]interface{}{
 			{
-				"name": "verify_claim",
-				"type": "orchestrator",
-				"goal": "Verify the claim: 'The earth is flat'.",
+				"name":        "verify_claim",
+				"type":        "orchestrator",
+				"description": "Verify a test claim using LLM reasoning",
+				"on_error":    "fail",
+				"config": map[string]interface{}{
+					"goal":           "Verify the claim: 'Water boils at 100 degrees Celsius at sea level'.",
+					"thinking_level": "MEDIUM",
+				},
 			},
 		},
 	}
 
-	// Trigger the job
-	// NOTE: This POST is expected to fail or the trigger to fail because 'orchestrator' type is unknown
+	t.Log("Creating orchestrator job definition")
 	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err)
-
-	// If the type is validated strictly, this might be 400.
-	// If it allows dynamic types but fails at runtime, it might be 201.
-	// We Assert 201 because we WANT it to succeed in the future.
-	require.Equal(t, 201, resp.StatusCode, "Should likely fail 400 until implemented")
+	require.NoError(t, err, "Failed to POST job definition")
 	defer resp.Body.Close()
 
-	// Trigger execution
+	if resp.StatusCode != http.StatusCreated {
+		var errResult map[string]interface{}
+		helper.ParseJSONResponse(resp, &errResult)
+		t.Logf("Error response: %v", errResult)
+	}
+	helper.AssertStatusCode(resp, http.StatusCreated)
+
+	// Cleanup job definition after test
+	defer helper.DELETE(fmt.Sprintf("/api/job-definitions/%s", defID))
+
+	// Verify job definition was created
+	t.Log("Verifying job definition exists")
+	getResp, err := helper.GET("/api/job-definitions/" + defID)
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	helper.AssertStatusCode(getResp, http.StatusOK)
+
+	var jobDef map[string]interface{}
+	err = helper.ParseJSONResponse(getResp, &jobDef)
+	require.NoError(t, err)
+	assert.Equal(t, defID, jobDef["id"])
+	assert.Equal(t, "orchestrator", jobDef["type"])
+
+	// Verify steps contain orchestrator config with goal
+	steps, ok := jobDef["steps"].([]interface{})
+	require.True(t, ok, "Steps should be array")
+	require.Len(t, steps, 1, "Should have 1 step")
+
+	firstStep := steps[0].(map[string]interface{})
+	assert.Equal(t, "verify_claim", firstStep["name"])
+	assert.Equal(t, "orchestrator", firstStep["type"])
+
+	stepConfig, ok := firstStep["config"].(map[string]interface{})
+	require.True(t, ok, "Step config should exist")
+	assert.NotEmpty(t, stepConfig["goal"], "Goal should be set")
+
+	// Trigger job execution
+	t.Log("Triggering orchestrator job")
 	triggerResp, err := helper.POST(fmt.Sprintf("/api/jobs/trigger/%s", defID), nil)
 	require.NoError(t, err)
 	defer triggerResp.Body.Close()
+	helper.AssertStatusCode(triggerResp, http.StatusOK)
 
-	// We expect this to be 200 IF valid, but currently will fail or 404
-	require.Equal(t, 200, triggerResp.StatusCode)
+	// Parse job ID from trigger response
+	var triggerResult map[string]interface{}
+	err = helper.ParseJSONResponse(triggerResp, &triggerResult)
+	require.NoError(t, err)
 
-	// Get Job ID
-	var result map[string]interface{}
-	// ... (parsing logic) ...
-	jobID := "placeholder-until-implemented" // helper.ParseJSON(triggerResp).ID
+	jobID, ok := triggerResult["id"].(string)
+	require.True(t, ok, "Trigger response should contain job ID")
+	require.NotEmpty(t, jobID, "Job ID should not be empty")
+	t.Logf("Triggered job ID: %s", jobID)
 
-	// Poll for completion
-	maxRetries := 10
+	// Poll for job completion (with timeout)
+	t.Log("Polling for job completion")
+	var finalStatus string
+	maxRetries := 30
 	for i := 0; i < maxRetries; i++ {
-		statusResp, _ := helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
-		require.Equal(t, 200, statusResp.StatusCode)
+		statusResp, err := helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
+		require.NoError(t, err)
 
-		// Logic to check status...
-		// ...
+		var jobStatus map[string]interface{}
+		err = helper.ParseJSONResponse(statusResp, &jobStatus)
+		statusResp.Body.Close()
+		require.NoError(t, err)
 
-		time.Sleep(1 * time.Second)
+		status, _ := jobStatus["status"].(string)
+		if status == "completed" || status == "failed" {
+			finalStatus = status
+			break
+		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Assert on Outputs (The "Business Logic" check)
-	// We expect the Output to contain 'verdict' and 'sources'
-	// This ensures the worker actually DID something.
-	// assert.NotEmpty(t, finalOutput["verdict"])
-	// assert.NotEmpty(t, finalOutput["sources"])
+	// OrchestratorWorker is placeholder, so expect completion (not failure)
+	assert.Equal(t, "completed", finalStatus, "Job should complete (placeholder implementation)")
 }

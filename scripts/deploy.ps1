@@ -7,7 +7,9 @@
 param (
     [switch]$Stop,
     [switch]$Logs,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$Rebuild,
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,20 @@ $projectRoot = Split-Path -Parent $scriptDir
 
 Write-Host "Quaero Docker Deployment" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
+
+# Show help
+if ($Help) {
+    Write-Host ""
+    Write-Host "Usage: .\deploy.ps1 [-Status] [-Logs] [-Stop] [-Rebuild] [-Help]"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -Rebuild   Stop, rebuild and redeploy (default)"
+    Write-Host "  -Status    Show Docker container status"
+    Write-Host "  -Logs      Follow Docker container logs"
+    Write-Host "  -Stop      Stop Docker containers"
+    Write-Host "  -Help      Show this help"
+    exit 0
+}
 
 # Show status
 if ($Status) {
@@ -40,7 +56,7 @@ if ($Stop) {
     exit 0
 }
 
-# Build and deploy
+# Default action: Rebuild (stop, build, deploy)
 Write-Host "Preparing Docker build..." -ForegroundColor Yellow
 
 # Paths
@@ -67,27 +83,33 @@ if (Test-Path "$dockerConfig\.env") { Copy-Item "$dockerConfig\.env" "$staging\c
 
 # Stage job-definitions
 Write-Host "  Staging job-definitions..." -ForegroundColor Gray
-if (Test-Path "$commonConfig\job-definitions") {
-    Get-ChildItem "$commonConfig\job-definitions\*.toml" | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" }
-}
-if (Test-Path "$dockerConfig\job-definitions") {
-    Get-ChildItem "$dockerConfig\job-definitions\*.toml" | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" -Force }
-}
+$jobDefs = Get-ChildItem "$commonConfig\job-definitions\*.toml" -ErrorAction SilentlyContinue
+if ($jobDefs) { $jobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" } }
+$dockerJobDefs = Get-ChildItem "$dockerConfig\job-definitions\*.toml" -ErrorAction SilentlyContinue
+if ($dockerJobDefs) { $dockerJobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" -Force } }
 
 # Stage job-templates
 Write-Host "  Staging job-templates..." -ForegroundColor Gray
-if (Test-Path "$commonConfig\job-templates") {
-    Get-ChildItem "$commonConfig\job-templates\*.toml" | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" }
-}
-if (Test-Path "$dockerConfig\job-templates") {
-    Get-ChildItem "$dockerConfig\job-templates\*.toml" | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" -Force }
-}
+$jobTemplates = Get-ChildItem "$commonConfig\job-templates\*.toml" -ErrorAction SilentlyContinue
+if ($jobTemplates) { $jobTemplates | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" } }
+$dockerJobTemplates = Get-ChildItem "$dockerConfig\job-templates\*.toml" -ErrorAction SilentlyContinue
+if ($dockerJobTemplates) { $dockerJobTemplates | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" -Force } }
 
 # Stage docs
 Write-Host "  Staging documentation..." -ForegroundColor Gray
 if (Test-Path "$projectRoot\README.md") { Copy-Item "$projectRoot\README.md" "$staging\docs\" }
-if (Test-Path "$projectRoot\docs\architecture") {
-    Get-ChildItem "$projectRoot\docs\architecture\*.md" | ForEach-Object { Copy-Item $_.FullName "$staging\docs\" }
+$archDocs = Get-ChildItem "$projectRoot\docs\architecture\*.md" -ErrorAction SilentlyContinue
+if ($archDocs) { $archDocs | ForEach-Object { Copy-Item $_.FullName "$staging\docs\" } }
+
+# Ensure directories are not empty (Docker COPY fails on empty dirs)
+if (-not (Get-ChildItem "$staging\config" -ErrorAction SilentlyContinue)) {
+    New-Item "$staging\config\.gitkeep" -ItemType File -Force | Out-Null
+}
+if (-not (Get-ChildItem "$staging\job-definitions" -ErrorAction SilentlyContinue)) {
+    New-Item "$staging\job-definitions\.gitkeep" -ItemType File -Force | Out-Null
+}
+if (-not (Get-ChildItem "$staging\job-templates" -ErrorAction SilentlyContinue)) {
+    New-Item "$staging\job-templates\.gitkeep" -ItemType File -Force | Out-Null
 }
 
 # Get version info
