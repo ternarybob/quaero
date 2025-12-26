@@ -341,195 +341,157 @@ description = "Generate BUY/SELL/HOLD recommendation with conviction score for {
 depends = "generate_stock_summary"
 on_error = "fail"
 filter_tags = ["stock-summary", "{stock:ticker_lower}"]
+model = "gemini-3-pro-preview"
 thinking_level = "HIGH"
-prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities.
-Generate a formal investment recommendation for ASX:{stock:ticker} ({stock:name}).
+prompt = """You are a Senior Investment Analyst specializing in ASX-listed equities and technical trend-following. Your goal is to synthesize 2 years of price data, MA 50/200 relationships, and 6 months of corporate announcements to provide high-conviction BUY|HOLD|SELL ratings.
 
-**OUTPUT FORMAT**: Start your response DIRECTLY with "# STOCK ANALYSIS:" - do NOT include any preamble, introduction, persona description, or phrases like "Here is..." or "I will analyze...". Output ONLY the structured recommendation below.
+### DATA CONTEXT PROVIDED
+1. **Price History (2 Years):** Daily OHLC data from the stock data documents.
+2. **Technical Indicators:** SMA 200 (Long-term trend) and SMA 50 (Medium-term momentum).
+3. **Announcements (6 Months):** Categorized as "Signal" (material impact) or "Noise" (PR/Fluff) from the announcement analysis.
+
+### CORE ANALYSIS LOGIC
+- **Trader Perspective (1-8 Weeks):** Focus on the relationship between Price and the SMA 50. Look for "Signal" announcements acting as catalysts for breakouts or mean-reversion to the SMA 50.
+- **Super Perspective (6m-3y):** Focus on the SMA 200 slope and "Golden/Death Crosses." Evaluate if the 6-month announcement "Signal" trend supports long-term structural growth.
+
+**OUTPUT FORMAT**: Start your response DIRECTLY with "# STOCK ANALYSIS:" - do NOT include any preamble.
 
 # STOCK ANALYSIS: ASX:{stock:ticker}
-## {stock:name}
-## Sector: {stock:industry}
+## {stock:name} | Sector: {stock:industry}
 
 ---
 
-## EXECUTIVE SUMMARY
+## EXECUTIVE SUMMARY: THE DUAL-TIMEFRAME VIEW
 
-| Assessment | Rating | Confidence |
-|------------|--------|------------|
-| Technical Outlook | BULLISH / BEARISH / NEUTRAL | HIGH / MEDIUM / LOW |
-| Announcement Credibility | HIGH / MEDIUM / LOW | |
-| Signal-to-Noise Ratio | X% | |
-| {stock:industry} Sector Outlook | POSITIVE / NEUTRAL / NEGATIVE | |
-| Competitive Position | LEADER / STRONG / MODERATE / WEAK | |
+| Metric | Trader (1-8 Weeks) | Super (6m-3y) |
+|:---|:---|:---|
+| **Outlook** | BULLISH / BEARISH / NEUTRAL | BULLISH / BEARISH / NEUTRAL |
+| **Rating** | **[BUY / HOLD / SELL]** | **[BUY / HOLD / SELL]** |
+| **Conviction** | X/10 | X/10 |
 
 ---
 
-## RECOMMENDATION
+## PERIOD PERFORMANCE SUMMARY
+*Extract from the Stock Data document's "Period Performance" section.*
 
-| Ticker | Status | Conviction (1-10) | Primary Reason |
-|--------|--------|-------------------|----------------|
-| {stock:ticker} | **[BUY / SELL / HOLD]** | **[1-10]** | [One-line reason] |
+| Period | Change % | Interpretation |
+|:---|:---|:---|
+| **1 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Short-term momentum] |
+| **3 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Medium-term trend] |
+| **6 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Trend strength] |
+| **1 Year** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Annual performance] |
+| **2 Year** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Long-term trajectory] |
 
-### Conviction Scale
-- 1-3: Low conviction - high uncertainty
-- 4-6: Moderate conviction - balanced factors
-- 7-8: High conviction - strong directional view
-- 9-10: Very high conviction - exceptional opportunity/risk
+**Formatting Rules**:
+- Use <span style="color:green">▲</span>+X.X% for positive changes (green arrow up)
+- Use <span style="color:red">▼</span>-X.X% for negative changes (red arrow down)
+- Use plain X.X% for neutral (within ±2%)
+- Write "N/A" if period data not available in source documents
 
----
-
-## DETAILED JUSTIFICATION
-
-### For BUY Recommendation:
-- **Growth Catalyst 1**: [Specific evidence]
-- **Growth Catalyst 2**: [Specific evidence]
-- **Valuation Support**: [Why current price is attractive]
-- **Technical Entry**: [Chart-based entry rationale]
-
-### For HOLD Recommendation:
-- **Reason for Not Selling**: [Specific evidence]
-- **Reason for Not Buying More**: [Why wait]
-- **Watch Points**: [What would change recommendation]
-- **Expected Holding Period**: [Timeframe]
-
-### For SELL Recommendation:
-- **Exit Reason 1**: [Specific concern with evidence]
-- **Exit Reason 2**: [Supporting concern]
-- **Opportunity Cost**: [Better alternatives exist]
-- **Exit Strategy**: [Immediate / Staged]
-
----
-
-## 200MA DIP-BUY STRATEGY ASSESSMENT
-
-The 200-day Moving Average (SMA200) is a key long-term trend indicator. A "dip-buy" opportunity occurs when:
-1. Stock has been in an UPTREND (price consistently above SMA200)
-2. Price temporarily DIPS below SMA200 (the buying opportunity)
-3. Volume is NORMAL or LOW (not panic selling)
-4. Fundamentals remain INTACT (no material negative announcements)
-
-### Current 200MA Status
+### Volume Analysis
+*From Stock Data document's "Volume Analysis" section.*
 
 | Metric | Value | Signal |
-|--------|-------|--------|
-| Current Price | $X.XX | |
-| SMA 200 | $X.XX | |
-| Price vs SMA200 | Above/Below by X% | ABOVE TREND / DIP / BREAKDOWN |
-| Days Above SMA200 (last 60) | X days | Strong/Moderate/Weak trend |
-| Recent Volume | X vs avg | Normal/Elevated/Panic |
+|:---|:---|:---|
+| **Today's Volume** | [X,XXX] | |
+| **Average Volume** | [X,XXX] | |
+| **Volume vs Avg** | [X.X%] | [Normal / High Activity / Low Activity] |
 
-### Dip-Buy Opportunity Checklist
+---
 
-**IS THIS A DIP-BUY OPPORTUNITY?** [YES / NO / WATCH]
+## COMPETITOR ANALYSIS TABLE
+*Compare {stock:ticker} against {stock:industry} sector peers. Use data from competitor search documents if available.*
+
+| Metric | {stock:ticker} | Competitor 1 | Competitor 2 | Sector Avg |
+|:---|:---|:---|:---|:---|
+| **1Y Performance** | X.X% | X.X% | X.X% | X.X% |
+| **SMA 200 Status** | Above/Below | Above/Below | Above/Below | - |
+| **Market Cap** | $XM/B | $XM/B | $XM/B | - |
+| **P/E Ratio** | X.X | X.X | X.X | X.X |
+
+**Competitive Position**: [LEADER / STRONG / AVERAGE / WEAK / UNKNOWN]
+- Evidence: [Key differentiators or concerns vs peers]
+- Relative Strength: [Outperforming / At par / Underperforming sector]
+
+---
+
+## SIGNAL-TO-NOISE AUDIT (Last 6 Months)
+*Use data from the announcement analysis document.*
+
+- **Total Announcements:** [Count]
+- **Signal-to-Noise Ratio:** [X]%
+- **Key Signal Event:** [Identify the most material announcement]
+- **Analyst Commentary:** [Critique whether the company is "pumping" PR or delivering material growth/operational updates.]
+
+---
+
+## TECHNICAL TREND ANALYSIS
+
+| Indicator | Value | Interpretation |
+|:---|:---|:---|
+| **Price vs SMA 50** | $X.XX / ±X% | [Short-term Momentum Assessment] |
+| **Price vs SMA 200** | $X.XX / ±X% | [Long-term Trend Health] |
+| **MA Relationship** | [Golden Cross / Death Cross / Parallel] | [Bullish/Bearish/Neutral alignment] |
+
+---
+
+## STRATEGIC JUSTIFICATION
+
+### 1. THE TRADER CASE (1-8 Weeks)
+*Focus: Price action relative to SMA 50 + News Catalysts.*
+- **Tactical Setup:** [e.g., Pullback to SMA 50, Breakout above Resistance]
+- **Catalyst Alignment:** [How recent "Signal" news supports a short-term move]
+- **Risk to Trade:** [Specific technical level or news event that voids the trade]
+
+### 2. THE SUPER CASE (6m - 3 Years)
+*Focus: SMA 200 Slope + Structural Signal.*
+- **Structural Health:** [Is the SMA 200 sloping up? Is the price holding above it?]
+- **Fundamental Backing:** [Do the last 6 months of "Signal" announcements suggest a multi-year growth story?]
+- **Accumulation Zone:** [Where should long-term investors add to their position?]
+
+---
+
+## THE 200MA "DIP-BUY" CRITICAL CHECKLIST
+*Is the current price action a 'Buyable Dip' or a 'Trend Breakdown'?*
 
 | Criterion | Status | Evidence |
-|-----------|--------|----------|
-| Was ABOVE SMA200 recently (30 days) | [YES/NO] | Price was $X.XX vs SMA200 $X.XX |
-| Currently AT or BELOW SMA200 | [YES/NO] | Current $X.XX vs SMA200 $X.XX |
-| Volume NOT elevated (< 1.5x avg) | [YES/NO] | Volume X vs avg X |
-| No material negative news (30 days) | [YES/NO] | [Latest announcement summary] |
-| Announcement credibility >= 5/10 | [YES/NO] | Score: X/10 |
-| Industry outlook not NEGATIVE | [YES/NO] | Sector: [Assessment] |
+|:---|:---|:---|
+| **Trend History** | [YES/NO] | Was price above SMA 200 for >70% of the last 6 months? |
+| **Volume Quality** | [YES/NO] | Is recent selling on <1.2x average volume? |
+| **News Integrity** | [YES/NO] | Have there been ZERO "Negative Signal" news items in 60 days? |
+| **Support Test** | [YES/NO] | Is price within 3% of SMA 200 or bouncing off it? |
 
-**Dip-Buy Verdict**:
-- **If 5+ criteria YES**: **BUY THE DIP** - Entry zone $X.XX to $X.XX (SMA200 ± 5%)
-- **If 3-4 criteria YES**: **WATCH** - Wait for [specific trigger]
-- **If < 3 criteria YES**: **NO DIP-BUY** - This is a trend breakdown, not a dip
-
-### 200MA Breakdown Warning
-
-If price is BELOW SMA200 AND fails 3+ criteria above:
-- **TREND BREAKDOWN ALERT**: This may not be a buying opportunity
-- Price below SMA200 with high volume = institutional selling
-- Price below SMA200 after negative news = fundamental deterioration
-- Recommendation: Wait for price to reclaim SMA200 before considering entry
+**DIP-BUY VERDICT:** [BUY THE DIP / WATCH / AVOID - BREAKDOWN IN PROGRESS]
 
 ---
 
-## ENTRY/EXIT STRATEGY (200MA + Announcement Based)
+## EXECUTION PARAMETERS
 
-### BUY ENTRY RULES
-
-| Scenario | Entry Price | Trigger | Stop Loss | Target |
-|----------|-------------|---------|-----------|--------|
-| **200MA Dip-Buy** | $X.XX (at SMA200) | Price touches SMA200 from above | $X.XX (-7% below SMA200) | $X.XX (+15-20%) |
-| **Breakout Buy** | $X.XX (resistance) | Close above resistance + 1.5x volume | $X.XX (below breakout level) | $X.XX (next resistance) |
-| **Earnings Buy** | Market price | Positive earnings + guidance raise | $X.XX (-5% from entry) | Hold for re-rate |
-
-### EXIT RULES
-
-| Scenario | Trigger | Action |
-|----------|---------|--------|
-| **Stop Loss Hit** | Price closes below stop level | Full exit - no exceptions |
-| **Trend Breakdown** | Price closes > 7% below SMA200 | Exit 100% - trend invalidated |
-| **Profit Target** | Price reaches target | Exit 50%, trail stop on rest |
-| **Negative Earnings** | Earnings miss > 10% | Exit immediately |
-| **Death Cross** | SMA50 crosses below SMA200 | Reduce to 25% position |
-
-### POSITION SIZING
-
-Based on conviction score and current setup:
-
-| Conviction | Position Size | Rationale |
-|------------|--------------|-----------|
-| 8-10 (Very High) | 100% of intended allocation | Strong conviction, low risk |
-| 5-7 (Moderate) | 50% of intended allocation | Balanced risk/reward |
-| 1-4 (Low) | 25% or AVOID | High uncertainty, wait for clarity |
-
-**Recommended Position for {stock:ticker}**: [X]% based on conviction [X/10]
+| Action | Price Trigger | Rationale |
+|:---|:---|:---|
+| **ENTRY (Trader)** | $X.XX | [e.g., Break of SMA 50 on Signal News] |
+| **ENTRY (Super)** | $X.XX | [e.g., SMA 200 touch or Golden Cross] |
+| **STOP LOSS** | $X.XX | [Hard exit if SMA 200 is lost on high volume] |
+| **PROFIT TARGET** | $X.XX | [Next major resistance or +20% extension] |
 
 ---
 
-## ACTIONABLE RECOMMENDATIONS
-
-### For Traders (1-4 weeks)
-**SIGNAL: BUY / HOLD / SELL / NO TRADE**
-- Entry: $X.XX (or "Wait for confirmation")
-- Stop Loss: $X.XX (X% below entry)
-- Target: $X.XX (X% upside)
-- Risk/Reward: X:1
-- **CONFIDENCE**: HIGH / MEDIUM / LOW
-
-### For Investors (6-12 months)
-**SIGNAL: BUY / HOLD / SELL**
-- Accumulate below: $X.XX
-- Sell above: $X.XX
-- Key catalyst to watch: [Upcoming events/results]
-
-### Dividend Investors (if applicable)
-- Current yield: X% (or "N/A")
-- Expected yield: X%
-- Ex-dividend dates to watch
+## RISK ASSESSMENT & ALTERNATIVES
+- **Primary Risk:** [e.g., High Noise ratio suggests management over-compensation]
+- **Sector Peer Comparison:** [How does {stock:ticker} compare to sector peers based on current MA alignment?]
 
 ---
 
-## ALTERNATIVE STOCKS
-
-If SELL or seeking better risk-adjusted growth, consider these 2-3 ASX stocks:
-
-| Alternative | Ticker | Industry | Why Better | Risk Level |
-|-------------|--------|----------|------------|------------|
-| [Company 1] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
-| [Company 2] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
-| [Company 3] | [XXX] | [Sector] | [Advantage over {stock:ticker}] | High/Medium/Low |
+## REVIEW TRIGGER
+**When to Re-Evaluate This Stock:**
+- [Specific price level with reasoning, e.g., "Price < $5.75 (SMA200 support level)"]
+- [Specific event with reasoning, e.g., "Next Earnings Q2 (guidance update expected)"]
+- [Technical trigger with reasoning, e.g., "Break above $12.50 (resistance level - confirms breakout)"]
 
 ---
 
-## RISK ASSESSMENT
-
-### Key Risks
-- **Market Risk**: [General market exposure]
-- **Sector Risk**: [Industry-specific risks]
-- **Company Risk**: [Stock-specific concerns]
-- **Liquidity**: {stock:ticker} has [adequate/limited] trading liquidity
-
----
-
-**DISCLAIMER**: This is general information only, not personal financial advice.
-Consult licensed advisers before making investment decisions. Only ASX-listed stocks considered.
-
-**Analysis Date**: [Use the current date provided in the system context above]
+**DISCLAIMER**: General Information Only.
+**Analysis Date**: [Use current date from system context]
 **Industry Sector**: {stock:industry}
 """
 output_tags = [

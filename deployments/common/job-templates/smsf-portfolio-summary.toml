@@ -47,113 +47,200 @@ type = "summary"
 description = "Generate consolidated SMSF portfolio review with practical investment recommendations"
 on_error = "fail"
 filter_tags = ["stock-portfolio"]
+model = "gemini-3-pro-preview"
 thinking_level = "HIGH"
 max_iterations = 2
 critique_prompt = """
 Critique the Draft Portfolio Review against these rules:
 
 1. **DATA ACCURACY (CRITICAL)**:
-   - Check the "Gain/Loss Table".
+   - Check the "Gain/Loss Table (AUDITED)".
    - Did the draft use the EXACT `Avg Price` and `Units` from the "Portfolio Holdings Data" section?
    - Do the math: (Current Price - Avg Price) * Units = Total Return. Is it correct?
    - If ANY value is a placeholder (e.g., $[X.XX]), REJECT IT.
 
 2. **SECTION CHECK**:
-   - "Gain/Loss Table" MUST be present with color coding (green +, red -).
-   - "Stock-by-Stock Recommendation" MUST be a single table with Industry column, ordered by ticker.
-   - Each row MUST include detailed assessment (Long Term View, Technical Opinion, Signal/Noise, Review Trigger).
+   - "Gain/Loss Table (AUDITED)" MUST be present with HTML color formatting (<span style="color:green">▲</span> for gains, <span style="color:red">▼</span> for losses).
+   - "Consolidated Stock Recommendations" table MUST have EXACTLY these columns: Ticker, Industry, Action, Conviction, 1M %, 3M %, 6M %, 1Y %, 2Y %, Volume, SMA 200 Status, Signal/Noise, Review Trigger.
+   - Period percentages (1M, 3M, 6M, 1Y, 2Y) MUST use HTML color formatting or N/A if unavailable.
+   - Volume MUST be formatted as "X.Xx" (e.g., "1.5x", "0.8x") relative to average.
+   - SMA 200 Status MUST be one of: "Above Trend", "Dip-Buy", or "Breakdown".
+   - Signal/Noise MUST be formatted as "[X]% (High/Med/Low)".
+   - Review Trigger MUST include reasoning (e.g., "Price < $5.50 (SMA200 support)").
+   - "Column Definitions" section MUST be present after the table.
+   - "Priority Actions (BY TIMEFRAME)" MUST have BOTH Trader (1-8 Weeks) AND Super (6m-3y) sections.
    - "Global Macro" section MUST NOT be present (it is irrelevant).
-   - "Report Date" must be the current analysis date.
 
 3. **TONE & CONTENT**:
    - No generic "market speak".
-   - BUY/HOLD/SELL must use color indicators.
-   - No "Detailed Stock Assessment" section (content is in the table).
-   - No "Alternative Replacements" section.
+   - BUY/HOLD/SELL must use text formatting (**BUY**, HOLD, *SELL*) - NO emoji circles.
+   - Focus on KEY details and reasoning for position movements.
 
 If the draft is perfect, output: "NO_CHANGES_NEEDED".
 Otherwise, list the specific errors to fix.
 """
-prompt = """You are a Senior Investment Strategist and Compliance Officer preparing a practical SMSF portfolio review.
+prompt = """You are a Senior Investment Strategist and Compliance Officer. Your task is to consolidate multiple "Stock Analysis" documents into a single SMSF Portfolio Review. Apply a critical lens to technical trends and announcement credibility.
 
-## RULES
-1. **DATA SOURCE**: Use ONLY the provided "Portfolio Holdings Data" for Units and Avg Price. Use stock documents for Current Price.
-2. **NO HALLUCINATIONS**: Do not invent historical data. If data is missing, say "N/A".
-3. **NO GLOBAL MACRO**: Focus only on the specific stocks in the portfolio.
-4. **SIGNAL/NOISE**: For each stock, you must assess the "Signal/Noise Ratio" based on the analysis provided.
+### DATA SOURCE RULES
+1. **PORTFOLIO DATA**: Use ONLY the "Portfolio Holdings Data" for Units and Avg Price.
+2. **MARKET DATA**: Use the latest stock-specific analysis for Current Price, SMA 50, and SMA 200.
+3. **CALCULATION ACCURACY**:
+   - Cost Basis = Units * Avg Price
+   - Current Value = Units * Current Price
+   - Total Return = Current Value - Cost Basis
+   - **MANDATORY**: If math is incorrect or placeholders like [X.XX] are used, the report is invalid.
 
-## COLOR CODING
-- **Positive values**: Use 🟢 or (+) prefix for gains
-- **Negative values**: Use 🔴 or (-) prefix for losses
-- **BUY**: 🟢 BUY
-- **HOLD**: 🟠 HOLD
-- **SELL**: 🔴 SELL
+### ANALYTICAL RIGOR (SMA & SIGNAL)
+- **Signal/Noise**: Must be derived from the 6-month announcement audit in each stock report.
+- **SMA 200 Status**: Specifically note if the stock is "Above Trend," "Dip-Buy," or "Breakdown."
+
+### FORMATTING (HTML & TEXT)
+- **Positive**: <span style="color:green">▲</span>+X.X%
+- **Negative**: <span style="color:red">▼</span>-X.X%
+- **Action**: **BUY**, HOLD, or *SELL* (No Emojis)
+
+---
 
 # SMSF PORTFOLIO REVIEW: PRACTICAL INVESTMENT ASSESSMENT
-## Strategy: Diversified Australian Equities with ETF Exposure
+## Strategy: Technical Trend Following & Signal-Verified Value
 ## Analysis Date: [Use Current Date]
 
 ---
 
 ## EXECUTIVE SUMMARY
-
-[High-level summary of portfolio health, total value, and key actions]
+[High-level summary: Identify which stocks are driving gains, which are breaking their SMA 200 trend, and the overall portfolio Signal-to-Noise health. Note if this is a partial portfolio view.]
 
 ---
 
-## GAIN/LOSS TABLE
+## GAIN/LOSS TABLE (AUDITED)
 
 | Ticker | Units | Avg Price | Current Price | Cost Basis | Current Value | Total Return | Total Return % |
-|--------|-------|-----------|---------------|------------|---------------|--------------|----------------|
-| [Ticker] | [Units] | [Avg] | [Current] | [Cost] | [Value] | 🟢/🔴 $X | 🟢/🔴 X% |
+|:---|:---|:---|:---|:---|:---|:---|:---|
+| [Ticker] | [Units] | [Avg] | [Current] | [Cost] | [Value] | <span style="color:green">▲</span>+$X / <span style="color:red">▼</span>-$X | <span style="color:green">▲</span>+X% / <span style="color:red">▼</span>-X% |
 | **TOTAL** | | | | **$X** | **$X** | **$X** | **X%** |
 
-*(Calculate EXACTLY. Do not use placeholders. Use 🟢 for positive, 🔴 for negative.)*
+*(Calculate EXACTLY. Do not use placeholders.)*
 
 ---
 
-## STOCK-BY-STOCK RECOMMENDATION
+## CONSOLIDATED STOCK RECOMMENDATIONS
 
-*Single table ordered alphabetically by ticker. Include Industry column.*
+*Single table ordered alphabetically by ticker.*
 
-| Ticker | Industry | Action | Conviction | 7D | 1M | 3M | 6M | 1Y | 2Y | Volume | Tech Opinion | Signal/Noise | Review Trigger |
-|--------|----------|--------|------------|-----|-----|-----|-----|-----|-----|--------|--------------|--------------|----------------|
-| [AAA] | [Industry] | 🟢 BUY / 🟠 HOLD / 🔴 SELL | 1-10 | [7D %] | [1M %] | [3M %] | [6M %] | [1Y %] | [2Y %] | [Vol Trend] | [200MA, levels] | [High/Med/Low %] | [Event to watch] |
+| Ticker | Industry | Action | Conviction | 1M % | 3M % | 6M % | 1Y % | 2Y % | Volume | SMA 200 Status | Signal/Noise | Review Trigger |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| [AAA] | [Sector] | **BUY** / HOLD / *SELL* | 1-10 | [%] | [%] | [%] | [%] | [%] | [vs Avg] | [Above/Dip/Breakdown] | [X]% (H/M/L) | [Price or Event + WHY] |
 
-**Column Definitions:**
-- **Performance Columns (7D, 1M, 3M, 6M, 1Y, 2Y)**: Price change over period with color coding
-  - Format: 🟢/🟠/🔴 +X.X% ($Y.YY)
-  - 🟢 Green: Positive performance (>2%)
-  - 🟠 Orange: Neutral performance (-2% to +2%)
-  - 🔴 Red: Negative performance (<-2%)
-- **Volume**: Long-term average daily volume and recent trend
-  - Format: "1.2M avg, ↑ 25% (1M)" or "850K avg, ↓ 15% (1W)"
-  - Shows if last week/month volume is above (↑) or below (↓) long-term average
-- **Tech Opinion**: Review of 200MA and key technical levels
-- **Signal/Noise**: Company narrative credibility - HIGHER IS BETTER
-  - Definition: % of announcements that actually moved share price (Signal) vs PR fluff that didn't (Noise)
-  - 🟢 High (>50%): Credible management, announcements have substance
-  - 🟠 Medium (25-50%): Mixed credibility, some announcements are noise
-  - 🔴 Low (<25%): Mostly PR noise, be skeptical of company narrative
-- **Review Trigger**: Specific event to watch (e.g. "Next Earnings", "Price < $X")
+**Column Definitions** *(ALWAYS include this section)*:
+- **1M % / 3M % / 6M % / 1Y % / 2Y %**: Price change over respective periods
+  - Format: <span style="color:green">▲</span>+X.X% for gains >2%, <span style="color:red">▼</span>-X.X% for losses <-2%, X.X% (plain) for neutral
+  - N/A if data not available in source documents
+- **Volume**: Today's volume vs average (e.g., "1.5x" or "0.8x")
+  - High (>1.5x avg) indicates unusual activity
+  - Low (<0.5x avg) indicates quiet trading
+- **SMA 200 Status**:
+  - *Above Trend*: Price > SMA 200 (Healthy long-term trend)
+  - *Dip-Buy*: Price at/near SMA 200 with low volume + high Signal news
+  - *Breakdown*: Price < SMA 200 with high volume or negative Signal news
+- **Signal/Noise**: Company announcement credibility - format as "[X]% (High/Med/Low)"
+  - **High (>50%)**: Management delivers material updates; trust the narrative
+  - **Medium (25-50%)**: Mixed credibility; some announcements are noise
+  - **Low (<25%)**: Management relies on PR fluff; treat breakouts with skepticism
+- **Review Trigger**: The specific "Line in the Sand" with reasoning
+  - Example: "Close below $5.50 (SMA200 support)" or "Next Qtr Guidance (margin outlook)"
 
----
-
-## PRIORITY ACTIONS
-
-1. [High Priority Action]
-2. [Medium Priority Action]
+**IMPORTANT**: The "Column Definitions" section above MUST be included in every output - do not omit it.
 
 ---
 
-**DISCLAIMER**: General information only. Not financial advice.
+## PRIORITY ACTIONS (BY TIMEFRAME)
+
+### 1. IMMEDIATE TRADER ACTIONS (1-8 Weeks)
+*Focus on SMA 50 crossovers and short-term momentum.*
+- **Action**: [e.g., Exit ASX:XXX - broken SMA 50 on high volume]
+- **Action**: [e.g., Set trailing stop on ASX:XXX at $Y.YY (below SMA 50)]
+
+### 2. STRATEGIC SUPER ACTIONS (6m - 3 Years)
+*Focus on SMA 200 health and long-term Signal credibility.*
+- **Action**: [e.g., Accumulate ASX:XXX - long term SMA 200 slope positive + High Signal]
+- **Action**: [e.g., Prepare exit for ASX:YYY - multi-month Noise trend + Death Cross imminent]
+
+---
+
+**DISCLAIMER**: General information only. Not personal financial advice.
 """
 output_tags = ["smsf-portfolio-review", "smsf-portfolio", "portfolio-summary"]
 
 # Validation patterns - ensure required sections are present with actual content
 # The summary worker will verify these patterns exist in the output
 output_validation = [
-    "## GAIN/LOSS TABLE",
-    "## STOCK-BY-STOCK RECOMMENDATION",
+    "## GAIN/LOSS TABLE (AUDITED)",
+    "## CONSOLIDATED STOCK RECOMMENDATIONS",
     "## EXECUTIVE SUMMARY",
+    "**Column Definitions**",
+    "## PRIORITY ACTIONS (BY TIMEFRAME)",
 ]
+
+# =========================================================================
+# Step 2: Generate Job Statistics Report
+# =========================================================================
+# Creates a statistics report showing documents created and data coverage.
+# Output is tagged for email attachment.
+
+[step.generate_statistics]
+type = "summary"
+description = "Generate job execution statistics report for email attachment"
+depends = "generate_summary"
+on_error = "continue"
+filter_tags = ["stock-portfolio"]
+prompt = """Generate a brief Job Statistics Report from the provided documents.
+
+**OUTPUT FORMAT**: Start your response DIRECTLY with "# JOB STATISTICS REPORT" - no preamble.
+
+# JOB STATISTICS REPORT
+## Analysis Run: [Current Date]
+
+---
+
+## Document Summary
+
+Count the documents by examining the document titles/content:
+
+| Category | Count | Details |
+|----------|-------|---------|
+| Stock Data Documents | [count] | Documents with price data, technicals |
+| Investment Recommendations | [count] | Documents with BUY/SELL/HOLD |
+| Analysis Documents | [count] | Stock summaries, announcement analysis |
+| Total Documents | [total] | |
+
+---
+
+## Stocks Analyzed
+
+List each stock ticker found in the documents:
+
+| Ticker | Stock Data | Announcements | Analysis | Recommendation | Status |
+|--------|------------|---------------|----------|----------------|--------|
+| [XXX] | ✓/✗ | ✓/✗ | ✓/✗ | ✓/✗ | Complete/Partial |
+
+---
+
+## Data Coverage Summary
+
+- **Complete Coverage**: [count] stocks with all data components
+- **Partial Coverage**: [count] stocks missing some data
+- **Missing Data**: List any stocks with significant data gaps
+
+---
+
+## Period Performance Data Check
+
+For each stock, verify Period Performance data availability:
+- ✓ = Has period performance data (7D, 1M, 3M, 6M, 1Y, 2Y)
+- ✗ = Missing period performance data
+
+---
+
+*Report generated automatically for quality assurance.*
+"""
+output_tags = ["job-statistics", "smsf-portfolio", "email-attachment"]
