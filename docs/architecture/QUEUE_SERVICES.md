@@ -130,6 +130,45 @@ type QueueManager interface {
 }
 ```
 
+## Job Definition Change Detection & Document Cleanup
+
+The system automatically detects when job definition TOML files change and cleans up stale documents.
+
+### How It Works
+
+1. **Content Hash Computation:** When loading job definitions, an MD5 hash (8-char hex) is computed from the TOML content
+2. **Change Detection:** The new hash is compared with the stored `ContentHash` on the existing job definition
+3. **Document Cleanup:** If hashes differ, all documents with `jobdef:{id}` cache tag are deleted
+4. **Updated Flag:** The job definition is marked with `Updated=true` for UI display
+
+### Flow
+
+```
+LoadJobDefinitionsFromFiles()
+    ↓
+Compute MD5 hash of TOML content
+    ↓
+Compare with existingJobDef.ContentHash
+    ↓
+If different:
+    - jobDef.Updated = true
+    - cacheService.CleanupByJobDefID(jobDef.ID)
+    - Log "Job definition content changed"
+    ↓
+Save updated job definition with new ContentHash
+```
+
+### Key Fields
+
+| Field | Type | Persisted | Description |
+|-------|------|-----------|-------------|
+| `ContentHash` | string | Yes | MD5 hash (8-char hex) of TOML content |
+| `Updated` | bool | No | True if content changed since last load |
+
+### Cache Service Integration
+
+The `CacheService.CleanupByJobDefID()` method queries all documents with the `jobdef:{id}` tag and deletes them, forcing regeneration on next job execution.
+
 ## Service Initialization Order
 
 **CRITICAL:** Services must be initialized in this order:
@@ -139,8 +178,16 @@ type QueueManager interface {
 badgerDB := badger.Open(config.Database.Path)
 logStorage := badger.NewLogStorage(badgerDB)
 jobStorage := badger.NewQueueStorage(badgerDB)
+documentStorage := badger.NewDocumentStorage(badgerDB)
 
-// 2. Event Service
+// 2. Cache Service (for document cleanup during job definition loading)
+cacheService := cache.NewService(documentStorage, logger)
+storageManager.SetCacheService(cacheService)
+
+// 3. Load Job Definitions (cleanup happens here if content changed)
+storageManager.LoadJobDefinitionsFromFiles(ctx, definitionsDir)
+
+// 4. Event Service
 eventService := events.NewService(logger)
 
 // 3. Queue Services

@@ -2,6 +2,8 @@ package badger
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,9 +13,19 @@ import (
 	"github.com/ternarybob/quaero/internal/jobs"
 )
 
-// LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory
-// Similar to LoadVariablesFromFiles, this scans the directory and loads all .toml files as job definitions
-func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.JobDefinitionStorage, kvStorage interfaces.KeyValueStorage, definitionsDir string, logger arbor.ILogger) error {
+// computeContentHash computes an 8-character MD5 hex hash of content.
+// This format matches the existing pattern used in WorkerInitResult.ContentHash.
+func computeContentHash(content []byte) string {
+	hash := md5.Sum(content)
+	return hex.EncodeToString(hash[:])[:8]
+}
+
+// LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory.
+// Similar to LoadVariablesFromFiles, this scans the directory and loads all .toml files as job definitions.
+//
+// If cacheService is provided (non-nil), documents associated with changed job definitions will be
+// automatically cleaned up to force regeneration on next execution.
+func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.JobDefinitionStorage, kvStorage interfaces.KeyValueStorage, definitionsDir string, logger arbor.ILogger, cacheService interfaces.CacheService) error {
 	// Check if directory exists
 	if _, err := os.Stat(definitionsDir); os.IsNotExist(err) {
 		logger.Debug().Str("dir", definitionsDir).Msg("Job definitions directory does not exist, skipping")
@@ -58,8 +70,9 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 			continue
 		}
 
-		// Store raw TOML content
+		// Store raw TOML content and compute content hash
 		jobDef.TOML = string(tomlBytes)
+		jobDef.ContentHash = computeContentHash(tomlBytes)
 
 		// Validate job definition (for logging only - don't skip saving if validation fails)
 		// This allows jobs with missing variables to be loaded and displayed in the UI
@@ -75,6 +88,32 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 			if existingJobDef.IsSystemJob() {
 				logger.Warn().Str("job_def_id", jobDef.ID).Str("file", entry.Name()).Msg("Cannot update system job via file loading")
 				continue
+			}
+
+			// Detect content change by comparing hashes
+			if existingJobDef.ContentHash != "" && existingJobDef.ContentHash != jobDef.ContentHash {
+				jobDef.Updated = true
+				logger.Info().
+					Str("job_id", jobDef.ID).
+					Str("old_hash", existingJobDef.ContentHash).
+					Str("new_hash", jobDef.ContentHash).
+					Msg("Job definition content changed - marking as updated for document cleanup")
+
+				// Cleanup documents if cache service is available
+				if cacheService != nil {
+					deletedCount, err := cacheService.CleanupByJobDefID(ctx, jobDef.ID)
+					if err != nil {
+						logger.Warn().
+							Err(err).
+							Str("job_id", jobDef.ID).
+							Msg("Failed to cleanup documents for updated job definition")
+					} else if deletedCount > 0 {
+						logger.Info().
+							Str("job_id", jobDef.ID).
+							Int("deleted", deletedCount).
+							Msg("Cleaned up stale documents for updated job definition")
+					}
+				}
 			}
 
 			// Update existing job definition

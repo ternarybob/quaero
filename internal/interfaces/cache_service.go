@@ -26,4 +26,9 @@ type CacheService interface {
 	// GetCurrentRevision returns the current revision number for a job/step.
 	// Returns 0 if no documents exist for this job/step.
 	GetCurrentRevision(ctx context.Context, jobDefID, stepName string) (int, error)
+
+	// CleanupByJobDefID removes all documents associated with a job definition.
+	// Used when job definition content changes to force document regeneration.
+	// Returns the number of documents deleted.
+	CleanupByJobDefID(ctx context.Context, jobDefID string) (int, error)
 }

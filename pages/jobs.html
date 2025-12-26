@@ -13,9 +13,16 @@
     <main class="container">
 
         <!-- Page Title -->
-        <div class="page-title">
-            <h1>Job Management</h1>
-            <p>Manage job definitions for data collection</p>
+        <div class="page-title" x-data="{ reloading: false }" style="display: flex; align-items: flex-start; justify-content: space-between;">
+            <div>
+                <h1>Job Management</h1>
+                <p>Manage job definitions for data collection</p>
+            </div>
+            <button class="btn btn-sm" @click="reloading = true; window.dispatchEvent(new CustomEvent('jobs-reload-all')); setTimeout(() => reloading = false, 2000)"
+                :disabled="reloading"
+                title="Reload All Jobs and Templates from TOML files">
+                <i :class="reloading ? 'fas fa-spinner fa-spin' : 'fa-solid fa-rotate-right'"></i>
+            </button>
         </div>
 
         <!-- ============================= JOB DEFINITIONS PANEL ============================= -->
@@ -29,15 +36,6 @@
                         <section class="navbar-section">
                             <h3>Job Definitions</h3>
                         </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary" @click="window.location.href='/jobs/add'">
-                                <i class="fas fa-plus"></i>
-                                <span>Add Job</span>
-                            </button>
-                            <button class="btn btn-sm" @click="confirmReloadAll()" title="Reload All Jobs and Templates from TOML files">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                        </section>
                     </header>
                 </div>
                 <div class="card-body">
@@ -48,7 +46,7 @@
                                 <i class="fas fa-briefcase fa-3x"></i>
                             </div>
                             <p class="empty-title h5">No job definitions configured</p>
-                            <p class="empty-subtitle">Click "Add Job" to create one</p>
+                            <p class="empty-subtitle">Job definitions are loaded from TOML files</p>
                         </div>
                     </template>
 
@@ -75,6 +73,10 @@
                                             <!-- Runtime Status Badge -->
                                             <span x-show="jobDef.runtime_status === 'disabled'" class="label label-error" :title="jobDef.runtime_error || 'Job cannot execute due to missing dependencies'">
                                                 <i class="fas fa-ban"></i> Disabled
+                                            </span>
+                                            <!-- Updated Badge (content changed since last run) -->
+                                            <span x-show="jobDef.updated" class="label label-warning" title="Job definition content has changed - documents have been cleaned up and will be regenerated on next run">
+                                                <i class="fas fa-sync-alt"></i> Updated
                                             </span>
                                         </div>
                                         <div class="card-subtitle text-gray" x-text="jobDef.description || 'No description provided'"></div>
@@ -129,11 +131,6 @@
                                             :title="isJobExecuting(jobDef.id) ? 'Job execution in progress...' : (jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : 'Run Job')" aria-label="Run Job">
                                             <i :class="isJobExecuting(jobDef.id) ? 'fas fa-spinner fa-spin' : 'fas fa-play'"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-refresh'" class="btn btn-sm" @click="confirmReloadJob(jobDef.id, jobDef.name)"
-                                            :disabled="isJobReloading(jobDef.id)"
-                                            :title="isJobReloading(jobDef.id) ? 'Reloading...' : 'Reload this job from TOML file'" aria-label="Reload Job">
-                                            <i :class="isJobReloading(jobDef.id) ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'"></i>
-                                        </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'" class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)" :disabled="jobDef.type !== 'crawler'"
                                             title="Download as TOML" aria-label="Download Job" x-show="jobDef.type === 'crawler'">
                                             <i class="fas fa-download"></i>
@@ -156,11 +153,6 @@
                     <header class="navbar">
                         <section class="navbar-section">
                             <h3>Job Templates</h3>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm" @click="loadJobTemplates()" title="Refresh Job Templates">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
                         </section>
                     </header>
                 </div>

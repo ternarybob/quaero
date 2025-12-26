@@ -439,6 +439,12 @@ document.addEventListener('alpine:init', () => {
             window.debugLog('JobDefinitionsManagement', 'Initializing component');
             this.loadJobDefinitions();
             this.resetCurrentJobDefinition();
+
+            // Listen for global reload event from page-level button
+            window.addEventListener('jobs-reload-all', () => {
+                window.debugLog('JobDefinitionsManagement', 'Received jobs-reload-all event');
+                this.confirmReloadAll();
+            });
         },
 
         isJobExecuting(jobDefId) {
@@ -461,6 +467,12 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
+            await this.reloadAllWithoutConfirm();
+            // Dispatch event to trigger job templates reload after confirmation
+            window.dispatchEvent(new CustomEvent('jobs-reload-confirmed'));
+        },
+
+        async reloadAllWithoutConfirm() {
             this.reloadingAll = true;
             window.debugLog('JobDefinitionsManagement', 'Reloading all job definitions from disk');
 
@@ -949,6 +961,12 @@ document.addEventListener('alpine:init', () => {
         init() {
             window.debugLog('JobTemplatesManagement', 'Initializing component');
             this.loadJobTemplates();
+
+            // Listen for reload confirmation event (after user confirms in dialog)
+            window.addEventListener('jobs-reload-confirmed', () => {
+                window.debugLog('JobTemplatesManagement', 'Received jobs-reload-confirmed event');
+                this.loadJobTemplates();
+            });
         },
 
         async loadJobTemplates() {

@@ -226,6 +226,10 @@ type StorageManager interface {
 	// This is used to load job definitions at startup
 	LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error
 
+	// SetCacheService sets the cache service for document cleanup during job definition loading.
+	// When set, LoadJobDefinitionsFromFiles will cleanup documents for changed job definitions.
+	SetCacheService(cacheService CacheService)
+
 	// LoadConnectorsFromFiles loads connectors from TOML files in the specified directory
 	// This is used to load connector configurations at startup
 	LoadConnectorsFromFiles(ctx context.Context, dirPath string) error

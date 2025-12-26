@@ -18,6 +18,7 @@ type Manager struct {
 	jobDefinition interfaces.JobDefinitionStorage
 	kv            interfaces.KeyValueStorage
 	connector     interfaces.ConnectorStorage
+	cacheService  interfaces.CacheService // Optional: for document cleanup on job definition changes
 	logger        arbor.ILogger
 }
 
@@ -130,9 +131,16 @@ func (m *Manager) ClearAllConfigData(ctx context.Context) error {
 	return nil
 }
 
-// LoadJobDefinitionsFromFiles loads job definitions from TOML files
+// LoadJobDefinitionsFromFiles loads job definitions from TOML files.
+// If SetCacheService has been called, documents will be cleaned up for changed job definitions.
 func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error {
-	return LoadJobDefinitionsFromFiles(ctx, m.jobDefinition, m.kv, dirPath, m.logger)
+	return LoadJobDefinitionsFromFiles(ctx, m.jobDefinition, m.kv, dirPath, m.logger, m.cacheService)
+}
+
+// SetCacheService sets the cache service for document cleanup.
+// When set, LoadJobDefinitionsFromFiles will cleanup documents for changed job definitions.
+func (m *Manager) SetCacheService(cacheService interfaces.CacheService) {
+	m.cacheService = cacheService
 }
 
 // LoadConnectorsFromFiles loads connectors from TOML files

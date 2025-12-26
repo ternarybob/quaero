@@ -323,6 +323,9 @@ func (a *App) initDatabase() error {
 
 	// Load job definitions from files
 	// This happens after variables are loaded so that job definitions can reference variables
+	// Set cache service first to enable document cleanup for changed job definitions
+	jobDefCacheService := cache.NewService(a.StorageManager.DocumentStorage(), a.Logger)
+	a.StorageManager.SetCacheService(jobDefCacheService)
 	if err := a.StorageManager.LoadJobDefinitionsFromFiles(context.Background(), a.Config.Jobs.DefinitionsDir); err != nil {
 		// Log warning but don't fail startup (consistent with other loaders)
 		a.Logger.Warn().Err(err).Msg("Failed to load job definitions from files")

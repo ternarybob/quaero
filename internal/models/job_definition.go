@@ -175,6 +175,8 @@ type JobDefinition struct {
 	ValidationStatus string                 `json:"validation_status"` // TOML validation status: "valid", "invalid", "unknown"
 	ValidationError  string                 `json:"validation_error"`  // TOML validation error message (if invalid)
 	ValidatedAt      *time.Time             `json:"validated_at"`      // Timestamp of last validation (nil if never validated)
+	ContentHash      string                 `json:"content_hash,omitempty"` // MD5 hash (8-char hex) of TOML content for change detection
+	Updated          bool                   `json:"updated"`           // True if TOML content changed since last load (computed, not persisted)
 	RuntimeStatus    string                 `json:"runtime_status"`    // Runtime validation status: "ready", "disabled", "unknown" (not persisted to DB)
 	RuntimeError     string                 `json:"runtime_error"`     // Runtime validation error message (e.g., missing API key) (not persisted to DB)
 	CreatedAt        time.Time              `json:"created_at"`        // Creation timestamp

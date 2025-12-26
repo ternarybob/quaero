@@ -25,6 +25,27 @@ mkdir -p $WORKDIR
 3. **VALIDATOR** - Adversarial reviewer: validates against requirements, architecture, AND skills. Default: REJECT
 4. **DOCUMENTARIAN** - Updates `docs/architecture` after all steps complete to reflect new patterns, decisions, and configuration
 
+**MODEL CONFIGURATION:**
+```yaml
+ARCHITECT:
+  model: opus          # Use Claude Opus 4.5 for deep analysis and planning
+  thinking: extended   # Leverage extended thinking for architecture decisions
+  rationale: |
+    ARCHITECT requires deep reasoning for:
+    - Analyzing complex requirements
+    - Reviewing architecture docs and identifying patterns
+    - Breaking down tasks into well-defined steps
+    - Making architectural decisions with full context
+
+WORKER:
+  model: opus          # Use Opus for implementation quality
+  thinking: standard   # Standard thinking sufficient for implementation
+
+VALIDATOR:
+  model: opus          # Use Opus for thorough adversarial review
+  thinking: extended   # Extended thinking for finding edge cases and issues
+```
+
 **ADVERSARIAL RELATIONSHIPS:**
 ```
 WORKER ←→ VALIDATOR    : Hostile opposition - VALIDATOR assumes bugs exist

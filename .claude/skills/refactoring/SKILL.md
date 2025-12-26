@@ -3,6 +3,18 @@
 ## Purpose
 Core patterns for ALL code modifications in Quaero. Referenced by commands and other skills.
 
+## MODEL RECOMMENDATION
+```yaml
+model: opus              # Use Claude Opus 4.5 for refactoring analysis
+thinking: extended       # Extended thinking enables deeper code analysis
+rationale: |
+  Opus 4.5 with extended thinking is recommended for refactoring because:
+  - Analyzing existing code patterns requires deep context understanding
+  - EXTEND > MODIFY > CREATE decisions need thorough codebase exploration
+  - Identifying extension points requires reasoning across multiple files
+  - Preventing parallel structures needs comprehensive pattern recognition
+```
+
 ## ANTI-CREATION BIAS
 ```
 ┌─────────────────────────────────────────────────────────────────┐

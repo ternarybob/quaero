@@ -54,7 +54,7 @@ description = "Fetch 24-month daily stock data and technicals for {stock:name}"
 on_error = "continue"
 asx_code = "{stock:ticker}"
 period = "Y2"
-output_tags = ["stock-data", "{stock:ticker_lower}", "{stock:industry}"]
+output_tags = ["stock-data", "{stock:ticker_lower}", "{stock:industry}", "stock-portfolio"]
 
 # =========================================================================
 # Step 2: Fetch Company Announcements (24 Months)

@@ -230,6 +230,51 @@ func (s *Service) GetCurrentRevision(ctx context.Context, jobDefID, stepName str
 	return maxRevision, nil
 }
 
+// CleanupByJobDefID removes all documents associated with a job definition.
+// Used when job definition content changes to force document regeneration.
+// Returns the number of documents deleted.
+func (s *Service) CleanupByJobDefID(ctx context.Context, jobDefID string) (int, error) {
+	// Query all documents with the jobdef tag
+	jobdefTag := "jobdef:" + sanitizeTagValue(jobDefID)
+
+	opts := &interfaces.ListOptions{
+		Tags:  []string{jobdefTag},
+		Limit: 10000, // High limit to get all documents for this job
+	}
+
+	docs, err := s.documentStorage.ListDocuments(opts)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query documents for job definition cleanup: %w", err)
+	}
+
+	if len(docs) == 0 {
+		return 0, nil
+	}
+
+	deletedCount := 0
+	for _, doc := range docs {
+		if err := s.documentStorage.DeleteDocument(doc.ID); err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("doc_id", doc.ID).
+				Str("jobdef_id", jobDefID).
+				Msg("Failed to delete document during job definition cleanup")
+		} else {
+			deletedCount++
+		}
+	}
+
+	if deletedCount > 0 {
+		s.logger.Info().
+			Str("jobdef_id", jobDefID).
+			Int("deleted_count", deletedCount).
+			Int("total_found", len(docs)).
+			Msg("Cleaned up documents for updated job definition")
+	}
+
+	return deletedCount, nil
+}
+
 // getDocumentsByCacheTags retrieves documents matching jobdef and step cache tags.
 func (s *Service) getDocumentsByCacheTags(jobDefID, stepName string) ([]*models.Document, error) {
 	// Use ListDocuments with tag filtering
