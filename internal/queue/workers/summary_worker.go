@@ -749,13 +749,17 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 		return "", fmt.Errorf("empty response from %s API", resp.Provider)
 	}
 
+	// Strip any echoed personality/role text from LLM output
+	// LLMs sometimes echo back the system prompt (e.g., "You are a Senior Investment Strategist...")
+	cleanedText := w.stripLeadingPersonalityText(resp.Text)
+
 	w.logger.Debug().
 		Str("provider", string(resp.Provider)).
 		Str("model", resp.Model).
-		Int("response_length", len(resp.Text)).
+		Int("response_length", len(cleanedText)).
 		Msg("Summary generation completed")
 
-	return resp.Text, nil
+	return cleanedText, nil
 }
 
 // createDocument creates a Document from the summary results
@@ -856,6 +860,100 @@ func (w *SummaryWorker) logJobEvent(ctx context.Context, parentJobID, _, level, 
 		return
 	}
 	w.jobMgr.AddJobLog(ctx, parentJobID, level, message)
+}
+
+// stripLeadingPersonalityText removes echoed system prompt personality text from LLM output.
+// LLMs sometimes echo back role instructions like "You are a Senior Investment Strategist..."
+// at the beginning of their response. This function strips such text to produce clean output.
+func (w *SummaryWorker) stripLeadingPersonalityText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return content
+	}
+
+	// Common personality/role prefixes that LLMs echo back
+	personalityPrefixes := []string{
+		"You are a ",
+		"You are an ",
+		"As a ",
+		"As an ",
+		"I am a ",
+		"I am an ",
+	}
+
+	// Check if content starts with a personality prefix
+	startsWithPersonality := false
+	for _, prefix := range personalityPrefixes {
+		if strings.HasPrefix(content, prefix) {
+			startsWithPersonality = true
+			break
+		}
+	}
+
+	if !startsWithPersonality {
+		return content
+	}
+
+	// Find where the personality text ends - look for:
+	// 1. Double newline (paragraph break)
+	// 2. Horizontal rule (---)
+	// 3. First markdown header (# or ##)
+	// The actual content typically starts after one of these
+
+	// Look for common delimiters that separate personality text from actual content
+	delimiters := []string{
+		"\n\n---", // Horizontal rule
+		"\n\n# ",  // H1 header
+		"\n\n## ", // H2 header
+		"\n---",   // Horizontal rule without double newline
+		"\n# ",    // H1 header without double newline
+		"\n## ",   // H2 header without double newline
+	}
+
+	for _, delimiter := range delimiters {
+		idx := strings.Index(content, delimiter)
+		if idx != -1 {
+			// Found delimiter - strip everything before it
+			// Keep the delimiter if it's a header (starts with #)
+			remainder := content[idx:]
+			remainder = strings.TrimPrefix(remainder, "\n\n")
+			remainder = strings.TrimPrefix(remainder, "\n")
+
+			w.logger.Debug().
+				Int("original_len", len(content)).
+				Int("stripped_len", len(remainder)).
+				Str("delimiter", delimiter).
+				Msg("Stripped leading personality text from LLM output")
+
+			return remainder
+		}
+	}
+
+	// If we didn't find a clear delimiter, try finding the first double newline
+	// and check if what follows looks like actual content (starts with #, *, -, |, etc.)
+	doubleNewline := strings.Index(content, "\n\n")
+	if doubleNewline != -1 && doubleNewline < 500 { // Personality text is usually short
+		remainder := strings.TrimSpace(content[doubleNewline+2:])
+		// Check if remainder starts with markdown content indicators
+		contentStarters := []string{"#", "*", "-", "|", "**", "##", "###", "1.", "2.", "3."}
+		for _, starter := range contentStarters {
+			if strings.HasPrefix(remainder, starter) {
+				w.logger.Debug().
+					Int("original_len", len(content)).
+					Int("stripped_len", len(remainder)).
+					Msg("Stripped leading personality paragraph from LLM output")
+				return remainder
+			}
+		}
+	}
+
+	// No clear delimiter found - return original content
+	// Better to show personality text than accidentally strip real content
+	w.logger.Warn().
+		Str("prefix", content[:min(100, len(content))]).
+		Msg("Content starts with personality prefix but no clear delimiter found - keeping original")
+
+	return content
 }
 
 // generateCritique generates a critique of the draft summary

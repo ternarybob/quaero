@@ -61,7 +61,12 @@ Critique the Draft Portfolio Review against these rules:
 
 2. **SECTION CHECK**:
    - "Gain/Loss Table (AUDITED)" MUST be present with HTML color formatting (<span style="color:green">▲</span> for gains, <span style="color:red">▼</span> for losses).
-   - "Consolidated Stock Recommendations" table MUST have EXACTLY these columns: Ticker, Industry, Action, Conviction, 1M %, 3M %, 6M %, 1Y %, 2Y %, Volume, SMA 200 Status, Signal/Noise, Review Trigger.
+   - "Consolidated Stock Recommendations" table MUST have EXACTLY these columns: Ticker, Industry, Action, Conviction, Quality, Ext %, Outlook, 1M %, 3M %, 6M %, 1Y %, 2Y %, Volume, SMA 200 Status, Signal/Noise, Review Trigger.
+   - Action MUST be one of: **BUY**, HOLD, **REDUCE**, *SELL* (using correct formatting).
+   - Quality MUST be one of: **QUALITY**, **SPECULATIVE**, **EMPTY** (using correct formatting).
+   - Ext % MUST show extension above SMA 200 (e.g., "+45%", "+120%").
+   - Outlook MUST be one of: *Fresh*, *Mature*, **COOKED** (using correct formatting).
+   - "Opportunity Analysis (6-Month Forecast)" section MUST be present after Column Definitions.
    - Period percentages (1M, 3M, 6M, 1Y, 2Y) MUST use HTML color formatting or N/A if unavailable.
    - Volume MUST be formatted as "X.Xx" (e.g., "1.5x", "0.8x") relative to average.
    - SMA 200 Status MUST be one of: "Above Trend", "Dip-Buy", or "Breakdown".
@@ -127,11 +132,27 @@ prompt = """You are a Senior Investment Strategist and Compliance Officer. Your 
 
 *Single table ordered alphabetically by ticker.*
 
-| Ticker | Industry | Action | Conviction | 1M % | 3M % | 6M % | 1Y % | 2Y % | Volume | SMA 200 Status | Signal/Noise | Review Trigger |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-| [AAA] | [Sector] | **BUY** / HOLD / *SELL* | 1-10 | [%] | [%] | [%] | [%] | [%] | [vs Avg] | [Above/Dip/Breakdown] | [X]% (H/M/L) | [Price or Event + WHY] |
+| Ticker | Industry | Action | Conviction | Quality | Ext % | Outlook | 1M % | 3M % | 6M % | 1Y % | 2Y % | Volume | SMA 200 Status | Signal/Noise | Review Trigger |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| [AAA] | [Sector] | **BUY** / HOLD / **REDUCE** / *SELL* | 1-10 | **QUALITY** / **SPECULATIVE** / **EMPTY** | +X% | *Fresh* / *Mature* / **COOKED** | [%] | [%] | [%] | [%] | [%] | [vs Avg] | [Above/Dip/Breakdown] | [X]% (H/M/L) | [Price or Event + WHY] |
 
 **Column Definitions** *(ALWAYS include this section)*:
+- **Action**: **BUY** (bold), HOLD (plain), **REDUCE** (bold), *SELL* (italic)
+  - **REDUCE**: Trim 50% of position - stock in high-risk zone (30-50% extension)
+  - *SELL*: Exit position - stock is "COOKED" (overextended, risk > reward)
+- **Quality**: Fundamental quality grade (from stock review)
+  - **QUALITY**: Stable revenue, profitable, high Signal/Noise (compounders)
+  - **SPECULATIVE**: Momentum play, pre-revenue, high Noise (trade, don't hold)
+  - **EMPTY**: Value trap, failing model, cap-raise risk (avoid or exit)
+- **Ext %**: Extension percentage - how far price is above SMA 200 (from stock review)
+  - <30%: Normal extension
+  - 30-50%: High risk zone
+  - >50%: Extreme (likely COOKED)
+  - >100%: Critical overextension
+- **Outlook**: Technical state classification (from stock review)
+  - *Fresh*: Just broke out, low extension (<15%)
+  - *Mature*: Healthy trend, SMA 50 holding (15-30%)
+  - **COOKED**: Extreme extension (>50%), RSI exhaustion, or volume climax
 - **1M % / 3M % / 6M % / 1Y % / 2Y %**: Price change over respective periods
   - Format: <span style="color:green">▲</span>+X.X% for gains >2%, <span style="color:red">▼</span>-X.X% for losses <-2%, X.X% (plain) for neutral
   - N/A if data not available in source documents
@@ -150,6 +171,21 @@ prompt = """You are a Senior Investment Strategist and Compliance Officer. Your 
   - Example: "Close below $5.50 (SMA200 support)" or "Next Qtr Guidance (margin outlook)"
 
 **IMPORTANT**: The "Column Definitions" section above MUST be included in every output - do not omit it.
+
+---
+
+## OPPORTUNITY ANALYSIS (6-Month Forecast)
+
+*6-month opportunity outlook for each holding based on volume trends and global tailwinds (from stock reviews).*
+
+| Ticker | Quality | Opportunity Term | Expected 6M | Rationale |
+|:---|:---|:---|:---|:---|
+| [AAA] | **QUALITY** / **SPECULATIVE** / **EMPTY** | Growth Consolidation / Mean Reversion / Cap-Raise Risk | Bullish (+X%) / Bearish (-X%) / Flat | [Volume trend + tailwind summary] |
+
+**Opportunity Term Definitions** *(ALWAYS include this section)*:
+- **Growth Consolidation**: Healthy pause in uptrend. Volume stabilizing. Fundamentals support continuation.
+- **Mean Reversion**: Overextended from fundamentals. Volume exhaustion at highs. Price likely to retrace.
+- **Cap-Raise Risk**: Broken technicals or operational setback likely to trigger dilutive capital raise.
 
 ---
 
@@ -178,6 +214,7 @@ output_validation = [
     "## CONSOLIDATED STOCK RECOMMENDATIONS",
     "## EXECUTIVE SUMMARY",
     "**Column Definitions**",
+    "## OPPORTUNITY ANALYSIS (6-Month Forecast)",
     "## PRIORITY ACTIONS (BY TIMEFRAME)",
 ]
 

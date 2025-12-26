@@ -259,6 +259,15 @@
                             breaks: true,
                             gfm: true
                         });
+                        // Enable HTML passthrough for color span tags (used for ▲/▼ indicators)
+                        marked.use({
+                            renderer: {
+                                html(html) {
+                                    // Pass through HTML - content is from trusted job templates
+                                    return html;
+                                }
+                            }
+                        });
                     }
                     console.log('[Search] Alpine.js component initialized');
 
@@ -401,8 +410,13 @@
                         // Convert markdown to HTML
                         const html = typeof marked !== 'undefined' ? marked.parse(text) : text;
 
-                        // Sanitize HTML
-                        return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+                        // Sanitize HTML while allowing span tags with style (for colored indicators)
+                        return typeof DOMPurify !== 'undefined'
+                            ? DOMPurify.sanitize(html, {
+                                ADD_TAGS: ['span'],
+                                ADD_ATTR: ['style']
+                              })
+                            : html;
                     } catch (error) {
                         console.error('Error rendering markdown:', error);
                         // Fallback to escaped text

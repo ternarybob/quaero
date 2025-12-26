@@ -138,10 +138,45 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
 	// Get body - can be from step config, or from previous step's output document
-	body, htmlBody := w.resolveBody(ctx, stepConfig)
+	// Also track source document for adding source links
+	bodyResult := w.resolveBodyWithSource(ctx, stepConfig)
+	body := bodyResult.textBody
+	htmlBody := bodyResult.htmlBody
 
 	if body == "" && htmlBody == "" {
 		body = "Job completed. No content was specified for this email."
+	}
+
+	// Find and append source document links if we have a source document
+	if bodyResult.sourceDoc != nil {
+		// Get base URL from config or use default
+		baseURL := "http://localhost:8080"
+		if configBaseURL, ok := stepConfig["base_url"].(string); ok && configBaseURL != "" {
+			baseURL = configBaseURL
+		}
+
+		// Find related source documents
+		sources := w.findSourceDocuments(ctx, bodyResult.sourceDoc, stepConfig, baseURL)
+		if len(sources) > 0 {
+			sourceLinksHTML := w.formatSourceLinksHTML(sources, baseURL)
+
+			// Inject source links before the closing </div> of .content
+			// The wrapInEmailTemplate structure is: <div class="content">CONTENT</div><div class="footer">...
+			// We want to add source links at the end of CONTENT but before closing </div>
+			if htmlBody != "" && sourceLinksHTML != "" {
+				// Find the position to inject (before </div> of .content)
+				insertPos := strings.LastIndex(htmlBody, `</div>
+  <div class="footer">`)
+				if insertPos > 0 {
+					htmlBody = htmlBody[:insertPos] + sourceLinksHTML + htmlBody[insertPos:]
+				}
+			}
+
+			w.logger.Info().
+				Int("source_count", len(sources)).
+				Str("step_id", stepID).
+				Msg("Added source document links to email")
+		}
 	}
 
 	// Log job start
@@ -235,6 +270,14 @@ func (w *EmailWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
+// emailBodyResult contains the resolved email body and source document info
+type emailBodyResult struct {
+	textBody   string
+	htmlBody   string
+	sourceDoc  *models.Document // The document used as email body (if any)
+	sourceTags []string         // Tags used to find the source document
+}
+
 // resolveBody determines the email body from step configuration
 // Supports:
 //   - body (direct text/markdown)
@@ -245,25 +288,34 @@ func (w *EmailWorker) ValidateConfig(step models.JobStep) error {
 //
 // All text content is converted to HTML for proper email presentation
 func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]interface{}) (textBody, htmlBody string) {
+	result := w.resolveBodyWithSource(ctx, stepConfig)
+	return result.textBody, result.htmlBody
+}
+
+// resolveBodyWithSource determines the email body and returns source document info
+func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[string]interface{}) emailBodyResult {
+	var result emailBodyResult
+
 	// Direct body text (markdown is converted to HTML)
 	if body, ok := stepConfig["body"].(string); ok && body != "" {
-		textBody = body
+		result.textBody = body
 		// Convert markdown to HTML for rich email formatting
-		htmlBody = w.convertMarkdownToHTML(body)
+		result.htmlBody = w.convertMarkdownToHTML(body)
 	}
 
 	// Direct HTML body (overrides conversion from body)
 	if html, ok := stepConfig["body_html"].(string); ok && html != "" {
-		htmlBody = html
+		result.htmlBody = html
 	}
 
 	// Body from document ID
 	if docID, ok := stepConfig["body_from_document"].(string); ok && docID != "" {
 		if doc, err := w.documentStorage.GetDocument(docID); err == nil && doc != nil {
 			if doc.ContentMarkdown != "" {
-				textBody = doc.ContentMarkdown
+				result.textBody = doc.ContentMarkdown
 				// Convert markdown to HTML for rich email formatting
-				htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+				result.htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+				result.sourceDoc = doc
 			}
 		} else {
 			w.logger.Warn().Str("document_id", docID).Err(err).Msg("Failed to load document for email body")
@@ -286,10 +338,12 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 			if doc, err := w.documentStorage.GetDocument(results[0].ID); err == nil && doc != nil {
 				if doc.ContentMarkdown != "" {
 					w.logger.Debug().Int("markdown_len", len(doc.ContentMarkdown)).Msg("Document has markdown content, converting to HTML")
-					textBody = doc.ContentMarkdown
+					result.textBody = doc.ContentMarkdown
 					// Convert markdown to HTML for rich email formatting
-					htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
-					w.logger.Debug().Int("html_len", len(htmlBody)).Msg("HTML body after conversion")
+					result.htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+					result.sourceDoc = doc
+					result.sourceTags = []string{tag}
+					w.logger.Debug().Int("html_len", len(result.htmlBody)).Msg("HTML body after conversion")
 				} else {
 					w.logger.Warn().Str("doc_id", results[0].ID).Msg("Document has no markdown content")
 				}
@@ -336,9 +390,11 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 				if doc, err := w.documentStorage.GetDocument(results[0].ID); err == nil && doc != nil {
 					if doc.ContentMarkdown != "" {
 						w.logger.Debug().Int("markdown_len", len(doc.ContentMarkdown)).Msg("Document has markdown content, converting to HTML")
-						textBody = doc.ContentMarkdown
-						htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
-						w.logger.Debug().Int("html_len", len(htmlBody)).Msg("HTML body after conversion")
+						result.textBody = doc.ContentMarkdown
+						result.htmlBody = w.convertMarkdownToHTML(doc.ContentMarkdown)
+						result.sourceDoc = doc
+						result.sourceTags = inputTags
+						w.logger.Debug().Int("html_len", len(result.htmlBody)).Msg("HTML body after conversion")
 					} else {
 						w.logger.Warn().Str("doc_id", results[0].ID).Msg("Document has no markdown content")
 					}
@@ -351,7 +407,7 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 		}
 	}
 
-	return textBody, htmlBody
+	return result
 }
 
 // saveHTMLDocument saves the HTML email body as a document for verification
@@ -409,6 +465,8 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 	w.logger.Debug().Int("markdown_len", len(markdown)).Msg("Converting markdown to HTML using goldmark")
 
 	// Create goldmark instance with GitHub Flavored Markdown extensions
+	// WithUnsafe() allows raw HTML (like <span style="color:green">) to pass through
+	// This is needed for colored indicators (▲/▼) in job outputs
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM, // GitHub Flavored Markdown (tables, strikethrough, etc.)
@@ -416,6 +474,7 @@ func (w *EmailWorker) convertMarkdownToHTML(markdown string) string {
 		goldmark.WithRendererOptions(
 			html.WithHardWraps(),
 			html.WithXHTML(),
+			html.WithUnsafe(), // Allow raw HTML for colored indicators
 		),
 	)
 
@@ -956,4 +1015,137 @@ func (w *EmailWorker) wrapInEmailTemplate(content string) string {
   </div>
 </body>
 </html>`
+}
+
+// sourceDocInfo holds information about a source document for linking
+type sourceDocInfo struct {
+	ID         string
+	Title      string
+	SourceType string
+}
+
+// findSourceDocuments discovers related source documents based on the email body document's tags
+// It looks for documents with tags like "asx-stock-data", "stock-recommendation", "stock-review"
+// that share common stock ticker tags with the source document
+func (w *EmailWorker) findSourceDocuments(ctx context.Context, sourceDoc *models.Document, stepConfig map[string]interface{}, baseURL string) []sourceDocInfo {
+	var sources []sourceDocInfo
+
+	if sourceDoc == nil {
+		return sources
+	}
+
+	// Extract stock ticker tags from source document (typically 3-4 letter lowercase codes)
+	var tickerTags []string
+	for _, tag := range sourceDoc.Tags {
+		// Skip non-ticker tags
+		if tag == "smsf-portfolio-review" || tag == "smsf-portfolio" || tag == "portfolio-summary" ||
+			tag == "stock-recommendation" || tag == "stock-portfolio" || tag == "asx-stock-data" ||
+			tag == "stock-review" || tag == "summary" || strings.HasPrefix(tag, "date:") ||
+			strings.HasPrefix(tag, "email") || strings.HasPrefix(tag, "job-") {
+			continue
+		}
+		// Ticker tags are typically 2-5 lowercase letters
+		if len(tag) >= 2 && len(tag) <= 6 && tag == strings.ToLower(tag) {
+			tickerTags = append(tickerTags, tag)
+		}
+	}
+
+	w.logger.Debug().
+		Strs("source_tags", sourceDoc.Tags).
+		Strs("ticker_tags", tickerTags).
+		Msg("Finding source documents for email")
+
+	// Source document types to find for each ticker
+	sourceTypes := []string{"asx-stock-data", "stock-recommendation"}
+
+	// For each ticker, find related source documents
+	for _, ticker := range tickerTags {
+		for _, sourceType := range sourceTypes {
+			opts := interfaces.SearchOptions{
+				Tags:     []string{sourceType, ticker},
+				Limit:    1,
+				OrderBy:  "created_at",
+				OrderDir: "desc",
+			}
+			results, err := w.searchService.Search(ctx, "", opts)
+			if err != nil {
+				w.logger.Debug().Err(err).Str("ticker", ticker).Str("source_type", sourceType).Msg("Error searching for source document")
+				continue
+			}
+			if len(results) > 0 {
+				doc := results[0]
+				sources = append(sources, sourceDocInfo{
+					ID:         doc.ID,
+					Title:      fmt.Sprintf("ASX:%s %s", strings.ToUpper(ticker), sourceType),
+					SourceType: sourceType,
+				})
+				w.logger.Debug().Str("doc_id", doc.ID).Str("ticker", ticker).Str("source_type", sourceType).Msg("Found source document")
+			}
+		}
+	}
+
+	// Also add the main body document itself
+	if sourceDoc.ID != "" {
+		sources = append(sources, sourceDocInfo{
+			ID:         sourceDoc.ID,
+			Title:      sourceDoc.Title,
+			SourceType: "portfolio-summary",
+		})
+	}
+
+	return sources
+}
+
+// formatSourceLinksHTML creates an HTML section with clickable links to source documents
+func (w *EmailWorker) formatSourceLinksHTML(sources []sourceDocInfo, baseURL string) string {
+	if len(sources) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`<div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">`)
+	sb.WriteString(`<h3 style="color: #666; font-size: 14px; margin-bottom: 12px;">📎 Source Documents</h3>`)
+	sb.WriteString(`<p style="font-size: 12px; color: #888; margin-bottom: 10px;">Click to view original data in Quaero:</p>`)
+	sb.WriteString(`<ul style="list-style: none; padding: 0; margin: 0;">`)
+
+	// Group sources by type
+	typeGroups := make(map[string][]sourceDocInfo)
+	typeOrder := []string{"asx-stock-data", "stock-recommendation", "portfolio-summary"}
+	for _, src := range sources {
+		typeGroups[src.SourceType] = append(typeGroups[src.SourceType], src)
+	}
+
+	for _, srcType := range typeOrder {
+		docs := typeGroups[srcType]
+		if len(docs) == 0 {
+			continue
+		}
+
+		typeLabel := srcType
+		switch srcType {
+		case "asx-stock-data":
+			typeLabel = "Stock Data"
+		case "stock-recommendation":
+			typeLabel = "Analysis & Recommendations"
+		case "portfolio-summary":
+			typeLabel = "Portfolio Summary"
+		}
+
+		sb.WriteString(fmt.Sprintf(`<li style="margin: 8px 0;"><strong style="color: #555;">%s:</strong> `, typeLabel))
+
+		for i, doc := range docs {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			// URL encode the document ID for safety
+			link := fmt.Sprintf("%s/documents?document_id=%s", baseURL, doc.ID)
+			sb.WriteString(fmt.Sprintf(`<a href="%s" style="color: #0066cc;">%s</a>`, link, doc.Title))
+		}
+		sb.WriteString(`</li>`)
+	}
+
+	sb.WriteString(`</ul>`)
+	sb.WriteString(`</div>`)
+
+	return sb.String()
 }

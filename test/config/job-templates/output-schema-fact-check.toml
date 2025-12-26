@@ -1,0 +1,10 @@
+[fact_check]
+statement = "Description of the claim being checked"
+verdict = "TRUE|FALSE|PARTIAL"
+confidence = 0.95
+reasoning = "Detailed explanation of why this verdict was reached"
+
+[fact_check.sources]
+# Map of source domains to their credibility score (0-10)
+"wikipedia.org" = 9
+"random-blog.com" = 2

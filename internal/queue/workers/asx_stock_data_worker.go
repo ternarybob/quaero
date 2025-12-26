@@ -277,17 +277,50 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 		forceRefresh = fr
 	}
 
-	// Check for cached data before fetching
-	if !forceRefresh && cacheHours > 0 {
-		sourceType := "asx_stock_data"
-		if isIndexCode(asxCode) {
-			sourceType = "asx_index"
-		}
-		sourceID := fmt.Sprintf("asx:%s:stock_data", asxCode)
-		if isIndexCode(asxCode) {
-			sourceID = fmt.Sprintf("asx:%s:index_data", asxCode)
-		}
+	// Check for delete_history flag (propagated from parent when job/template changes)
+	// This triggers cache invalidation to ensure fresh data is collected
+	deleteHistory := false
+	if dh, ok := stepConfig["delete_history"].(bool); ok {
+		deleteHistory = dh
+	} else if dh, ok := jobDef.Config["delete_history"].(bool); ok {
+		deleteHistory = dh
+	}
 
+	// Build source identifiers
+	sourceType := "asx_stock_data"
+	if isIndexCode(asxCode) {
+		sourceType = "asx_index"
+	}
+	sourceID := fmt.Sprintf("asx:%s:stock_data", asxCode)
+	if isIndexCode(asxCode) {
+		sourceID = fmt.Sprintf("asx:%s:index_data", asxCode)
+	}
+
+	// Delete existing cached document if delete_history is set
+	// This ensures stale data is removed when job/template content changes
+	if deleteHistory {
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && existingDoc != nil {
+			if err := w.documentStorage.DeleteDocument(existingDoc.ID); err != nil {
+				w.logger.Warn().Err(err).
+					Str("asx_code", asxCode).
+					Str("doc_id", existingDoc.ID).
+					Msg("Failed to delete cached document for history cleanup")
+			} else {
+				w.logger.Info().
+					Str("asx_code", asxCode).
+					Str("doc_id", existingDoc.ID).
+					Msg("Deleted cached document - job/template changed (delete_history)")
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "info",
+						fmt.Sprintf("ASX:%s - Deleted cached document (job/template changed)", asxCode))
+				}
+			}
+		}
+	}
+
+	// Check for cached data before fetching (skip if force_refresh or delete_history)
+	if !forceRefresh && !deleteHistory && cacheHours > 0 {
 		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
 		if err == nil && w.isCacheFresh(existingDoc, cacheHours) {
 			w.logger.Info().
@@ -310,6 +343,7 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 		Str("asx_code", asxCode).
 		Str("period", period).
 		Bool("force_refresh", forceRefresh).
+		Bool("delete_history", deleteHistory).
 		Msg("Fetching ASX stock data")
 
 	if w.jobMgr != nil {
@@ -797,6 +831,24 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 			p.Shares1k, formatDecimal(p.Value1k)))
 	}
 	content.WriteString("\n")
+
+	// Add explicit period changes summary for easy LLM extraction
+	// This single line makes it easy for downstream summaries to extract period performance
+	periodLabels := map[int]string{7: "7D", 30: "1M", 91: "3M", 183: "6M", 365: "1Y", 730: "2Y"}
+	var summaryParts []string
+	for _, p := range periodPerf {
+		if label, ok := periodLabels[p.Days]; ok {
+			sign := ""
+			if p.ChangePercent > 0 {
+				sign = "+"
+			}
+			summaryParts = append(summaryParts, fmt.Sprintf("%s: %s%.1f%%", label, sign, p.ChangePercent))
+		}
+	}
+	if len(summaryParts) > 0 {
+		content.WriteString(fmt.Sprintf("**Period Changes Summary**: %s\n\n", strings.Join(summaryParts, ", ")))
+	}
+
 	content.WriteString("*1k Shares = shares purchasable with $1,000 at period start price. 1k Value = current value of those shares.*\n\n")
 
 	// Volume Analysis Section

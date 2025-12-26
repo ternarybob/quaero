@@ -391,6 +391,19 @@ func (w *JobTemplateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 			}
 		}
 
+		// PROPAGATE DELETE_HISTORY: When parent job definition changed (Updated=true),
+		// child jobs should delete their cached documents before processing.
+		// This ensures fresh data is collected when job/template content changes.
+		if jobDef.Updated {
+			if templatedJobDef.Config == nil {
+				templatedJobDef.Config = make(map[string]interface{})
+			}
+			templatedJobDef.Config["delete_history"] = true
+			w.logger.Info().
+				Str("identifier", identifier).
+				Msg("Parent job updated - propagating delete_history=true to child job")
+		}
+
 		// Generate unique ID if not set or if it conflicts
 		if templatedJobDef.ID == "" {
 			templatedJobDef.ID = fmt.Sprintf("template-%s-%s", template, uuid.New().String()[:8])

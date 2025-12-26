@@ -371,31 +371,26 @@ prompt = """You are a Senior Investment Analyst specializing in ASX-listed equit
 
 ---
 
-## PERIOD PERFORMANCE SUMMARY
-*Extract from the Stock Data document's "Period Performance" section.*
+## PERIOD PERFORMANCE & VOLUME
+*DATA EXTRACTION: Find the **Period Changes Summary** line in the Stock Data document. Format: "7D: +X.X%, 1M: +X.X%, 3M: +X.X%, 6M: +X.X%, 1Y: +X.X%, 2Y: +X.X%". Extract each period's value directly. For volume, use "## Volume Analysis" section's "Volume vs Avg" percentage ÷ 100.*
 
-| Period | Change % | Interpretation |
-|:---|:---|:---|
-| **1 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Short-term momentum] |
-| **3 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Medium-term trend] |
-| **6 Month** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Trend strength] |
-| **1 Year** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Annual performance] |
-| **2 Year** | <span style="color:green">▲</span>+X.X% / <span style="color:red">▼</span>-X.X% | [Long-term trajectory] |
+| Period | Change % | Vol vs Avg |
+|:-------|:---------|:-----------|
+| **7D** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | - |
+| **1M** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | X.Xx |
+| **3M** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | - |
+| **6M** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | - |
+| **1Y** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | - |
+| **2Y** | <span style="color:green">▲</span>+X.X% or <span style="color:red">▼</span>-X.X% | - |
 
-**Formatting Rules**:
-- Use <span style="color:green">▲</span>+X.X% for positive changes (green arrow up)
-- Use <span style="color:red">▼</span>-X.X% for negative changes (red arrow down)
-- Use plain X.X% for neutral (within ±2%)
-- Write "N/A" if period data not available in source documents
+**DATA RULES (CRITICAL)**:
+1. **Source**: Find the **Period Changes Summary** line in the Stock Data document. It looks like: "**Period Changes Summary**: 7D: +5.0%, 1M: +16.7%, 3M: +25.0%, 6M: +40.0%, 1Y: +80.0%, 2Y: +120.0%"
+2. **Direct Extraction**: The summary line already uses short labels (7D, 1M, 3M, 6M, 1Y, 2Y) - extract values directly, no mapping needed
+3. **Volume**: Only the 1M row shows Vol vs Avg (current trading activity). Use "Volume vs Avg" percentage ÷ 100 (e.g., 120% → 1.2x, 85% → 0.85x)
+4. **Color Formatting**: Output literal HTML - `<span style="color:green">▲</span>+X.X%` for gains, `<span style="color:red">▼</span>-X.X%` for losses
+5. **N/A Rule**: ONLY use "N/A" if the period is NOT present in the **Period Changes Summary** line (stock may lack historical data for that period)
 
-### Volume Analysis
-*From Stock Data document's "Volume Analysis" section.*
-
-| Metric | Value | Signal |
-|:---|:---|:---|
-| **Today's Volume** | [X,XXX] | |
-| **Average Volume** | [X,XXX] | |
-| **Volume vs Avg** | [X.X%] | [Normal / High Activity / Low Activity] |
+**Volume Signal**: If Vol vs Avg > 1.5x, this indicates unusual activity (potential breakout or breakdown).
 
 ---
 
@@ -432,6 +427,141 @@ prompt = """You are a Senior Investment Analyst specializing in ASX-listed equit
 | **Price vs SMA 50** | $X.XX / ±X% | [Short-term Momentum Assessment] |
 | **Price vs SMA 200** | $X.XX / ±X% | [Long-term Trend Health] |
 | **MA Relationship** | [Golden Cross / Death Cross / Parallel] | [Bullish/Bearish/Neutral alignment] |
+
+---
+
+## COOKED STOCK ANALYSIS
+*Identify if the stock is overextended with exhausted technicals where downside risk > upside potential.*
+
+### Extension & Outlook Summary
+
+| Metric | Value | Status |
+|:-------|:------|:-------|
+| **Extension %** | +X.X% | [Low (<30%) / High (30-50%) / Extreme (>50%)] |
+| **RSI (14)** | X.X | [Neutral / Elevated / Overbought (>70)] |
+| **Outlook** | *Fresh* / *Mature* / **COOKED** | [Classification] |
+
+**Extension % Calculation**: ((Current Price - SMA 200) / SMA 200) × 100
+- **<30%**: Normal trend extension
+- **30-50%**: High risk zone - consider **REDUCE**
+- **>50%**: Extreme extension - likely **COOKED**
+- **>100%**: Critical overextension - *SELL* candidate
+
+### COOKED Criteria Checklist
+
+| Criterion | Status | Evidence |
+|:----------|:-------|:---------|
+| **200MA Deviation** | [YES/NO] | Is price >50% above SMA 200? (Extreme extension) |
+| **RSI Exhaustion** | [YES/NO] | Is RSI >70 OR showing Bearish Divergence (price ↑, RSI ↓)? |
+| **Volume Climax** | [YES/NO] | Was there a massive volume spike followed by stagnant price (churn)? |
+| **Signal Decay** | [YES/NO] | Is management releasing "Letter of Interest" or "Non-binding" news into vertical move? |
+
+**COOKED COUNT**: X/4 criteria met
+
+### Outlook Classification
+
+**Outlook Definitions**:
+- **Fresh** (*Fresh*): Just broke out, Extension <15%, low RSI, no volume climax
+- **Mature** (*Mature*): Healthy trend, Extension 15-30%, SMA 50 holding price
+- **COOKED** (**COOKED**): Extension >50%, OR RSI >70, OR 2+ cooked criteria met
+
+### Action Implications
+
+**If COOKED (2+ criteria met)**:
+- Recommend *SELL* (italic) - Risk significantly outweighs reward
+- Stop loss MUST be tight - any breakdown = immediate exit
+
+**If HIGH RISK (1 criterion met, Extension 30-50%)**:
+- Recommend **REDUCE** (bold) - Trim 50% of position
+- Trend may still be intact but risk is elevated
+
+**If FRESH/MATURE (0 criteria, Extension <30%)**:
+- Standard **BUY**/HOLD analysis applies
+- Normal position sizing appropriate
+
+---
+
+## QUALITY GRADE ANALYSIS
+*Classify the stock's fundamental quality based on operational metrics, revenue stability, and management credibility.*
+
+### Quality Classification Summary
+
+| Metric | Assessment | Evidence |
+|:-------|:-----------|:---------|
+| **Quality Grade** | **QUALITY** / **SPECULATIVE** / **EMPTY** | [Key classification reason] |
+| **Revenue Trend** | Growing / Stable / Declining | [YoY evidence from financials] |
+| **NPAT/Margins** | Profitable / Breakeven / Loss-making | [Margin trajectory] |
+| **Staffing Pattern** | Operational Growth / Stable / Zombie | [Hiring vs firing evidence] |
+| **Dilution Risk** | Low / Medium / High / Critical | [Cap raise history] |
+
+### Quality Grade Definitions
+
+**QUALITY** (*Strong fundamentals - compound over time*):
+- Stably builds revenue with clear YoY growth trajectory
+- Clear operational model with expanding margins or stable profitability
+- Rising dividends or NPAT demonstrates shareholder returns
+- High Signal/Noise (>50%) - management delivers on promises
+- Example indicators: Record revenue, increased staffing, order book growth
+
+**SPECULATIVE** (*Momentum play - trade, don't hold*):
+- High momentum or story-driven price action disconnected from operations
+- Pre-revenue or volatile earnings with no clear path to profitability
+- High "Noise" ratio (<30%) - management relies on PR over delivery
+- High dilution risk from frequent placements or non-binding agreements
+- Example indicators: Vertical price moves, minimal operational staff, EXIM-style loans
+
+**EMPTY / DEAD** (*Value trap - avoid or exit*):
+- Failing business model with declining revenue trajectory
+- Constant capital raises with no operational progress
+- "Zombie" staff levels - minimal hiring, salvage/reset focus
+- Critical gap between management PR (Noise) and operational reality (Signal)
+- Example indicators: Project setbacks, feasibility study failures, multi-year losses
+
+### Quality Criteria Evaluation
+
+| Criterion | Status | Evidence |
+|:----------|:-------|:---------|
+| **Revenue Growth** | [Positive/Flat/Negative] | [YoY % from financials or "N/A - Pre-revenue"] |
+| **Profitability** | [NPAT positive/negative] | [Margin % or loss amount] |
+| **Operational Staff** | [Growing/Stable/Shrinking] | [Hiring patterns from announcements] |
+| **Cap Raise History** | [None/Occasional/Frequent] | [Last 12 months placement activity] |
+| **Signal-to-Noise** | [High/Med/Low] | [From announcement analysis] |
+| **Promise Delivery** | [Strong/Mixed/Poor] | [Vanishing promise score from analysis] |
+
+### Quality Verdict
+**Grade**: [QUALITY / SPECULATIVE / EMPTY]
+**Conviction**: X/10
+**Key Evidence**: [1-2 sentence summary of primary classification reason]
+
+---
+
+## OPPORTUNITY ANALYSIS (6-Month Forecast)
+*Evaluate the 6-month opportunity based on volume trends, global tailwinds, and sector positioning.*
+
+### Opportunity Classification
+
+| Factor | Assessment |
+|:-------|:-----------|
+| **Opportunity Term** | **Growth Consolidation** / **Mean Reversion** / **Cap-Raise Risk** |
+| **Expected 6M Movement** | **Bullish (+X-Y%)** / **Bearish (-X-Y%)** / **Flat/Sideways** |
+| **Volume Trend** | Accumulating / Distributing / Exhaustion / Stable |
+
+### Opportunity Term Definitions
+
+- **Growth Consolidation**: Healthy pause in uptrend. Volume stabilizing. Fundamentals support continuation. Bullish outlook.
+- **Mean Reversion**: Overextended from fundamentals. Volume exhaustion at highs. Price likely to retrace to MA support. Bearish/cautious outlook.
+- **Cap-Raise Risk**: Broken technicals or operational setback likely to trigger dilutive capital raise. Flat or downward outlook.
+
+### Tailwind/Headwind Assessment
+
+| Factor | Impact | Evidence |
+|:-------|:-------|:---------|
+| **Global Tailwinds** | Positive / Neutral / Negative | [e.g., Energy Transition, AI/Data Centers, Uranium deficit] |
+| **Sector Positioning** | Leader / Strong / Average / Weak | [Competitive position from analysis] |
+| **Macro Environment** | Supportive / Neutral / Adverse | [RBA, inflation, regulatory] |
+
+### Opportunity Rationale
+[2-3 sentence explanation combining volume analysis, global tailwinds, and sector position to justify the 6-month outlook]
 
 ---
 

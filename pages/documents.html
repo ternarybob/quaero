@@ -332,23 +332,23 @@
                                     </div>
                                     <div>
                                         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); saveDocumentMarkdown('${doc.id}', '${(doc.title || 'document').replace(/'/g, "\\'")}')">
-                                            <i class="fas fa-download"></i> Save Document
+                                            <i class="fas fa-download"></i> Download
                                         </button>
                                     </div>
                                 </div>
                                 <!-- Spectre CSS Tabs -->
                                 <ul class="tab" style="margin-bottom: 0.5rem;">
                                     <li class="tab-item active" id="tab-markdown-${doc.id}">
-                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'markdown')">Markdown</a>
+                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'markdown')">Content</a>
                                     </li>
                                     <li class="tab-item" id="tab-json-${doc.id}">
                                         <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'json')">JSON</a>
                                     </li>
                                 </ul>
-                                <!-- Markdown Tab Content (default) -->
+                                <!-- Content Tab (default) - displays raw document content -->
                                 <div id="content-markdown-${doc.id}" class="tab-content">
                                     <div id="tags-${doc.id}" class="markdown-tags"></div>
-                                    <div id="markdown-${doc.id}" class="markdown-content">Loading markdown...</div>
+                                    <pre><code id="markdown-${doc.id}" class="language-markdown">Loading content...</code></pre>
                                 </div>
                                 <!-- JSON Tab Content -->
                                 <div id="content-json-${doc.id}" class="tab-content" style="display: none;">
@@ -370,11 +370,20 @@
 
             if (isExpanded) {
                 detailRow.style.display = 'none';
+                // Remove document_id from URL when collapsed
+                const url = new URL(window.location);
+                url.searchParams.delete('document_id');
+                window.history.replaceState({}, '', url);
                 return;
             }
 
             // Expand row
             detailRow.style.display = 'table-row';
+
+            // Update URL with document_id
+            const url = new URL(window.location);
+            url.searchParams.set('document_id', docId);
+            window.history.replaceState({}, '', url);
 
             const codeBlock = document.getElementById(`code-${docId}`);
             const markdownBlock = document.getElementById(`markdown-${docId}`);
@@ -440,29 +449,18 @@
                     tagsBlock.innerHTML = html;
                 }
 
-                // Render Markdown tab
+                // Render Content tab - display raw content as code (not rendered HTML)
                 if (markdownBlock) {
                     if (doc.content_markdown && doc.content_markdown.trim()) {
-                        // Configure marked for safe rendering
-                        if (typeof marked !== 'undefined') {
-                            marked.setOptions({
-                                breaks: true,
-                                gfm: true
-                            });
-                            markdownBlock.innerHTML = marked.parse(doc.content_markdown);
+                        // Display raw content as code - never render as HTML
+                        markdownBlock.textContent = doc.content_markdown;
 
-                            // Apply syntax highlighting to code blocks in markdown
-                            if (typeof hljs !== 'undefined') {
-                                markdownBlock.querySelectorAll('pre code').forEach((block) => {
-                                    hljs.highlightElement(block);
-                                });
-                            }
-                        } else {
-                            // Fallback: show raw markdown if marked.js not loaded
-                            markdownBlock.textContent = doc.content_markdown;
+                        // Apply syntax highlighting
+                        if (typeof hljs !== 'undefined') {
+                            hljs.highlightElement(markdownBlock);
                         }
                     } else {
-                        markdownBlock.innerHTML = '<div class="markdown-empty">No markdown content available</div>';
+                        markdownBlock.textContent = 'No content available';
                     }
                 }
             } catch (error) {
@@ -837,9 +835,19 @@
         });
 
         // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function () {
-            loadStats();
-            loadDocuments();
+        document.addEventListener('DOMContentLoaded', async function () {
+            await loadStats();
+            await loadDocuments();
+
+            // Check for document_id in URL and open that document
+            const urlParams = new URLSearchParams(window.location.search);
+            const documentId = urlParams.get('document_id');
+            if (documentId) {
+                // Small delay to ensure DOM is ready after render
+                setTimeout(() => {
+                    toggleDetail(documentId);
+                }, 100);
+            }
         });
 
         // Ensure Alpine.js is fully initialized
