@@ -763,6 +763,18 @@ func (a *App) initServices() error {
 		a.Logger.Debug().Str("step_type", agentWorker.GetType().String()).Str("job_type", agentWorker.GetWorkerType()).Msg("Agent worker registered")
 	}
 
+	// Register Tool Execution worker (processes tool_execution jobs from orchestrator)
+	// This worker executes individual tool calls as queue citizens with independent status tracking
+	toolExecutionWorker := workers.NewToolExecutionWorker(
+		a.StepManager,
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		jobMgr,
+		a.Logger,
+	)
+	jobProcessor.RegisterExecutor(toolExecutionWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("job_type", toolExecutionWorker.GetWorkerType()).Msg("Tool execution worker registered")
+
 	// Register Places search worker (synchronous execution, no child jobs)
 	placesWorker := workers.NewPlacesWorker(
 		a.PlacesService,

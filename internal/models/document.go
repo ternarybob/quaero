@@ -65,6 +65,12 @@ type Document struct {
 	URL      string                 `json:"url"`  // Link to original
 	Tags     []string               `json:"tags"` // User-defined tags from job definitions for categorization and filtering
 
+	// Structured extracts - populated at ingestion time by extractors
+	// Enables deterministic retrieval of structured data rather than LLM needle-finding
+	Extracts    []Extract  `json:"extracts,omitempty"`
+	ExtractedAt *time.Time `json:"extracted_at,omitempty"` // When extraction was last performed
+	ContentHash string     `json:"content_hash,omitempty"` // Hash for change detection and re-extraction triggers
+
 	// Sync tracking
 	LastSynced       *time.Time `json:"last_synced,omitempty"`        // When document was last synced from source
 	SourceVersion    string     `json:"source_version,omitempty"`     // Version/etag from source to detect changes
@@ -222,6 +228,126 @@ type CrossSourceMetadata struct {
 	ReferencedIssues []string `json:"referenced_issues"` // Jira keys found in content (e.g., ["BUG-123", "STORY-456"])
 	ReferencedPRs    []string `json:"referenced_prs"`    // GitHub PR numbers (e.g., ["#123", "#456"])
 	ReferencedPages  []string `json:"referenced_pages"`  // Confluence page IDs mentioned
+}
+
+// Extract represents structured data extracted from document content at ingestion time.
+// This enables deterministic retrieval of structured information rather than relying
+// on LLM "needle-finding" at query time.
+//
+// Extracts are populated during document crawling/ingestion by rule-based or LLM extractors.
+// Tools return these structured extracts, not raw markdown, for reliable AI synthesis.
+type Extract struct {
+	Type       string          `json:"type"`                  // Extract type: "financial", "meeting", "technical", "api", etc.
+	Schema     string          `json:"schema"`                // Schema version used for extraction (e.g., "v1", "v2")
+	Data       json.RawMessage `json:"data"`                  // Structured data matching the schema
+	Confidence float64         `json:"confidence,omitempty"`  // Extraction confidence (1.0 for rule-based, 0.0-1.0 for LLM)
+	Span       *TextSpan       `json:"span,omitempty"`        // Location in raw content (for reference back to source)
+	ExtractedAt string         `json:"extracted_at,omitempty"` // When extraction was performed (RFC3339)
+}
+
+// TextSpan represents a location range in the source document
+type TextSpan struct {
+	Start int `json:"start"` // Start character offset
+	End   int `json:"end"`   // End character offset
+}
+
+// FinancialExtract represents financial data extracted from documents
+type FinancialExtract struct {
+	Ticker        string   `json:"ticker"`
+	ReportDate    string   `json:"report_date,omitempty"`
+	ReportType    string   `json:"report_type,omitempty"`    // quarterly, annual
+	Revenue       *float64 `json:"revenue,omitempty"`
+	NetIncome     *float64 `json:"net_income,omitempty"`
+	EPS           *float64 `json:"eps,omitempty"`
+	DividendYield *float64 `json:"dividend_yield,omitempty"`
+	PERatio       *float64 `json:"pe_ratio,omitempty"`
+	MarketCap     *float64 `json:"market_cap,omitempty"`
+	Notes         []string `json:"notes,omitempty"`          // Qualitative observations
+}
+
+// MeetingExtract represents meeting notes/decisions extracted from documents
+type MeetingExtract struct {
+	Date        string   `json:"date"`
+	Attendees   []string `json:"attendees,omitempty"`
+	Topics      []string `json:"topics"`
+	Decisions   []string `json:"decisions,omitempty"`
+	ActionItems []Action `json:"action_items,omitempty"`
+}
+
+// Action represents an action item from a meeting
+type Action struct {
+	Description string `json:"description"`
+	Owner       string `json:"owner,omitempty"`
+	DueDate     string `json:"due_date,omitempty"`
+}
+
+// APIExtract represents API/technical documentation extracted from documents
+type APIExtract struct {
+	ServiceName string     `json:"service_name"`
+	Endpoints   []Endpoint `json:"endpoints,omitempty"`
+	AuthMethod  string     `json:"auth_method,omitempty"`
+	BaseURL     string     `json:"base_url,omitempty"`
+}
+
+// Endpoint represents an API endpoint
+type Endpoint struct {
+	Method      string `json:"method"`       // GET, POST, PUT, DELETE
+	Path        string `json:"path"`
+	Description string `json:"description,omitempty"`
+	RequestBody string `json:"request_body,omitempty"`  // JSON schema or example
+	Response    string `json:"response,omitempty"`      // JSON schema or example
+}
+
+// ToMap converts Extract to map for storage
+func (e *Extract) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// ToMap converts FinancialExtract to map for storage
+func (f *FinancialExtract) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(f)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// ToMap converts MeetingExtract to map for storage
+func (m *MeetingExtract) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ToMap converts APIExtract to map for storage
+func (a *APIExtract) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(a)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // DocumentStats represents statistics about documents

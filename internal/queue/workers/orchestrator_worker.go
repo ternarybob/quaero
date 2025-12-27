@@ -25,6 +25,7 @@ import (
 type Plan struct {
 	Reasoning string     `json:"reasoning"`
 	Steps     []PlanStep `json:"steps"`
+	Error     bool       `json:"error,omitempty"` // True if planner could not create a valid plan
 }
 
 // PlanStep represents a single step in the execution plan
@@ -45,18 +46,26 @@ type PlanStepResult struct {
 }
 
 // plannerSystemPrompt is the system instruction for the Planner LLM
-const plannerSystemPrompt = `You are an intelligent orchestration planner. Your job is to analyze a goal and create an execution plan using the available tools.
+// CRITICAL: This prompt enforces FORCED TOOL USE - the AI must call tools and cannot fabricate data
+const plannerSystemPrompt = `You are an intelligent orchestration planner. Your ONLY job is to decide which tools to call.
 
-IMPORTANT RULES:
-1. Output ONLY valid JSON - no markdown code blocks, no explanations before or after the JSON
-2. Each step must use exactly one tool from the available_tools list
-3. Steps can depend on other steps using the depends_on field
-4. Use meaningful step IDs like "step_1_fetch_data", "step_2_analyze"
-5. Params must match what the tool expects
+CRITICAL RULES - FORCED TOOL USE:
+1. You have ZERO knowledge of stock prices, financial data, or any external information
+2. You MUST call at least one tool to retrieve ANY data - you cannot answer from memory
+3. Return ONLY tool calls - no explanatory text, no analysis, no fabricated data
+4. If no tools can answer the query, you MUST return an error - NEVER fabricate data
+5. Output ONLY valid JSON - no markdown code blocks, no explanations before or after
+
+EXECUTION RULES:
+1. Each step must use exactly one tool from the available_tools list
+2. Steps can depend on other steps using the depends_on field
+3. Use meaningful step IDs like "step_1_fetch_data", "step_2_analyze"
+4. Params must match what the tool expects
+5. Select the MINIMUM set of tools needed to answer the query
 
 OUTPUT FORMAT (JSON only):
 {
-  "reasoning": "Brief explanation of the plan",
+  "reasoning": "Brief explanation of which tools are needed and why",
   "steps": [
     {
       "id": "step_1",
@@ -67,11 +76,14 @@ OUTPUT FORMAT (JSON only):
   ]
 }
 
-If no tools are available or the goal cannot be achieved, return:
+If the goal CANNOT be achieved with available tools, return:
 {
-  "reasoning": "Explanation of why no plan can be created",
-  "steps": []
-}`
+  "reasoning": "ERROR: Cannot achieve goal because [specific reason]. Available tools cannot provide [what's missing].",
+  "steps": [],
+  "error": true
+}
+
+NEVER return an empty steps array unless it's truly impossible to proceed with available tools.`
 
 // reviewerSystemPrompt is the system instruction for the Reviewer LLM
 const reviewerSystemPrompt = `You are a quality reviewer for orchestration results. Analyze the execution results against the original goal.
@@ -411,13 +423,11 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 	}
 
 	// =========================================================================
-	// PHASE 2: EXECUTOR - Execute plan steps
+	// PHASE 2: EXECUTOR - Create tool execution jobs as queue citizens
 	// =========================================================================
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", "Phase 2: EXECUTOR - Executing plan steps...")
+		w.jobMgr.AddJobLog(ctx, stepID, "info", "Phase 2: EXECUTOR - Creating tool execution jobs...")
 	}
-
-	var results []PlanStepResult
 
 	// Build tool lookup map for quick access
 	toolLookup := make(map[string]map[string]interface{})
@@ -427,53 +437,109 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 		}
 	}
 
-	// Execute each plan step
+	// Create tool execution jobs for each plan step
+	// These are queue citizens - visible in UI with independent status tracking
+	var toolJobIDs []string
+	toolJobMap := make(map[string]PlanStep) // jobID -> planStep for result collection
+
 	for _, planStep := range plan.Steps {
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("Executing step: %s (tool: %s)", planStep.ID, planStep.Tool))
-		}
-
-		var result PlanStepResult
-
 		// Find the tool configuration
 		toolConfig, toolFound := toolLookup[planStep.Tool]
 		if !toolFound {
-			result = PlanStepResult{
-				StepID:  planStep.ID,
-				Tool:    planStep.Tool,
-				Success: false,
-				Error:   fmt.Sprintf("Tool '%s' not found in available_tools", planStep.Tool),
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "error",
+					fmt.Sprintf("Tool '%s' not found in available_tools", planStep.Tool))
 			}
-		} else if w.stepManager == nil {
-			// Fallback to simulation if StepManager not available
-			w.logger.Warn().
-				Str("step_id", planStep.ID).
-				Str("tool", planStep.Tool).
-				Msg("StepManager not available, simulating tool execution")
-			workerType, _ := toolConfig["worker"].(string)
-			result = PlanStepResult{
-				StepID:  planStep.ID,
-				Tool:    planStep.Tool,
-				Success: true,
-				Output:  fmt.Sprintf("SIMULATED: Would invoke worker '%s' for tool '%s' (StepManager not configured)", workerType, planStep.Tool),
-			}
-		} else {
-			// Execute tool via StepManager
-			result = w.executeTool(ctx, planStep, toolConfig, jobDef, stepID)
+			continue
 		}
 
-		results = append(results, result)
+		// Get worker type from tool config
+		workerType, _ := toolConfig["worker"].(string)
+		if workerType == "" {
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "error",
+					fmt.Sprintf("Tool '%s' has no worker type configured", planStep.Tool))
+			}
+			continue
+		}
+
+		// Build job payload with tool config and plan step params
+		jobPayload := map[string]interface{}{
+			"plan_step_id":   planStep.ID,
+			"tool_name":      planStep.Tool,
+			"worker_type":    workerType,
+			"params":         planStep.Params,
+			"tool_config":    toolConfig,
+			"job_def_id":     jobDef.ID,
+			"manager_id":     stepID, // Link to orchestrator step
+			"step_name":      step.Name,
+			"original_goal":  goal,
+		}
+
+		// Create tool execution job as queue citizen
+		toolJobID, err := w.jobMgr.CreateChildJob(ctx, stepID, string(models.JobTypeToolExecution), "execution", jobPayload)
+		if err != nil {
+			w.logger.Error().Err(err).
+				Str("tool", planStep.Tool).
+				Str("step_id", planStep.ID).
+				Msg("Failed to create tool execution job")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "error",
+					fmt.Sprintf("Failed to create job for tool %s: %v", planStep.Tool, err))
+			}
+			continue
+		}
+
+		toolJobIDs = append(toolJobIDs, toolJobID)
+		toolJobMap[toolJobID] = planStep
 
 		if w.jobMgr != nil {
-			if result.Success {
-				w.jobMgr.AddJobLog(ctx, stepID, "info",
-					fmt.Sprintf("Step %s completed: %s", planStep.ID, truncateString(result.Output, 100)))
-			} else {
-				w.jobMgr.AddJobLog(ctx, stepID, "warning",
-					fmt.Sprintf("Step %s failed: %s", planStep.ID, result.Error))
+			paramsJSON, _ := json.Marshal(planStep.Params)
+			w.jobMgr.AddJobLog(ctx, stepID, "info",
+				fmt.Sprintf("Created tool job: %s (tool: %s, worker: %s) params: %s",
+					toolJobID, planStep.Tool, workerType, string(paramsJSON)))
+		}
+
+		w.logger.Info().
+			Str("job_id", toolJobID).
+			Str("tool", planStep.Tool).
+			Str("worker_type", workerType).
+			Str("plan_step_id", planStep.ID).
+			Msg("Created tool execution job")
+	}
+
+	if len(toolJobIDs) == 0 {
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "error", "No tool jobs were created - execution cannot proceed")
+		}
+		return "", fmt.Errorf("no tool jobs created: all tools failed validation")
+	}
+
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Created %d tool execution jobs, waiting for completion...", len(toolJobIDs)))
+	}
+
+	// =========================================================================
+	// PHASE 2b: WAIT - Poll for tool job completion
+	// =========================================================================
+	results, err := w.waitForToolJobs(ctx, stepID, toolJobIDs, toolJobMap)
+	if err != nil {
+		w.logger.Error().Err(err).Msg("Error waiting for tool jobs")
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Tool job polling failed: %v", err))
+		}
+	}
+
+	if w.jobMgr != nil {
+		successCount := 0
+		for _, r := range results {
+			if r.Success {
+				successCount++
 			}
 		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Tool execution complete: %d/%d succeeded", successCount, len(results)))
 	}
 
 	// =========================================================================
@@ -550,10 +616,10 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 	return stepID, nil
 }
 
-// ReturnsChildJobs returns false since orchestrator currently executes inline.
-// Future implementation may spawn child jobs for parallel tool execution.
+// ReturnsChildJobs returns true since orchestrator creates tool execution jobs as queue citizens.
+// Each tool call becomes a separate job visible in the queue with independent status tracking.
 func (w *OrchestratorWorker) ReturnsChildJobs() bool {
-	return false
+	return true
 }
 
 // truncateString truncates a string to maxLen characters, adding "..." if truncated
@@ -696,6 +762,22 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 			Err(err).
 			Msg("Failed to parse LLM plan response")
 		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
+	}
+
+	// Check if planner returned an error (could not create valid plan)
+	if plan.Error {
+		w.logger.Warn().
+			Str("reasoning", plan.Reasoning).
+			Msg("Planner returned error - cannot achieve goal with available tools")
+		return nil, fmt.Errorf("planning failed: %s", plan.Reasoning)
+	}
+
+	// FORCED TOOL USE: Require at least one tool call
+	if len(plan.Steps) == 0 {
+		w.logger.Error().
+			Str("reasoning", plan.Reasoning).
+			Msg("Planning failed: no tool calls returned (forced tool use violation)")
+		return nil, fmt.Errorf("planning failed: no tool calls returned - AI must call at least one tool")
 	}
 
 	w.logger.Info().
@@ -869,6 +951,128 @@ func (w *OrchestratorWorker) executeTool(
 		Msg("Tool execution completed")
 
 	return result
+}
+
+// waitForToolJobs polls for completion of tool execution jobs and collects results.
+// This enables asynchronous tool execution while maintaining the orchestration flow.
+func (w *OrchestratorWorker) waitForToolJobs(ctx context.Context, parentStepID string, toolJobIDs []string, toolJobMap map[string]PlanStep) ([]PlanStepResult, error) {
+	const (
+		pollInterval = 2 * time.Second
+		maxWaitTime  = 10 * time.Minute
+	)
+
+	startTime := time.Now()
+	results := make([]PlanStepResult, 0, len(toolJobIDs))
+	completedJobs := make(map[string]bool)
+
+	w.logger.Info().
+		Int("job_count", len(toolJobIDs)).
+		Str("parent_step_id", parentStepID).
+		Msg("Starting tool job polling")
+
+	for {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return results, ctx.Err()
+		default:
+		}
+
+		// Check if max wait time exceeded
+		if time.Since(startTime) > maxWaitTime {
+			w.logger.Warn().
+				Dur("elapsed", time.Since(startTime)).
+				Int("completed", len(completedJobs)).
+				Int("total", len(toolJobIDs)).
+				Msg("Tool job polling timed out")
+			return results, fmt.Errorf("tool job polling timed out after %v", maxWaitTime)
+		}
+
+		// Check status of each job
+		allComplete := true
+		for _, jobID := range toolJobIDs {
+			if completedJobs[jobID] {
+				continue
+			}
+
+			// Get job status
+			jobInterface, err := w.jobMgr.GetJob(ctx, jobID)
+			if err != nil {
+				w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get tool job status")
+				continue
+			}
+
+			jobState, ok := jobInterface.(*models.QueueJobState)
+			if !ok {
+				continue
+			}
+
+			// Check if job is in terminal state
+			isTerminal := jobState.Status == models.JobStatusCompleted ||
+				jobState.Status == models.JobStatusFailed ||
+				jobState.Status == models.JobStatusCancelled
+
+			if isTerminal {
+				completedJobs[jobID] = true
+				planStep := toolJobMap[jobID]
+
+				result := PlanStepResult{
+					StepID: planStep.ID,
+					Tool:   planStep.Tool,
+				}
+
+				if jobState.Status == models.JobStatusCompleted {
+					result.Success = true
+					// Try to get output from job metadata or search for documents
+					if output, ok := jobState.Metadata["output"].(string); ok {
+						result.Output = output
+					} else {
+						result.Output = fmt.Sprintf("Tool %s completed successfully", planStep.Tool)
+					}
+				} else {
+					result.Success = false
+					result.Error = jobState.Error
+					if result.Error == "" {
+						result.Error = fmt.Sprintf("Tool %s failed with status: %s", planStep.Tool, jobState.Status)
+					}
+				}
+
+				results = append(results, result)
+
+				w.logger.Info().
+					Str("job_id", jobID).
+					Str("tool", planStep.Tool).
+					Str("status", string(jobState.Status)).
+					Bool("success", result.Success).
+					Msg("Tool job completed")
+
+				if w.jobMgr != nil {
+					if result.Success {
+						w.jobMgr.AddJobLog(ctx, parentStepID, "info",
+							fmt.Sprintf("Tool job %s completed: %s", planStep.Tool, truncateString(result.Output, 100)))
+					} else {
+						w.jobMgr.AddJobLog(ctx, parentStepID, "warning",
+							fmt.Sprintf("Tool job %s failed: %s", planStep.Tool, result.Error))
+					}
+				}
+			} else {
+				allComplete = false
+			}
+		}
+
+		if allComplete && len(completedJobs) == len(toolJobIDs) {
+			w.logger.Info().
+				Int("completed", len(completedJobs)).
+				Dur("elapsed", time.Since(startTime)).
+				Msg("All tool jobs completed")
+			break
+		}
+
+		// Wait before next poll
+		time.Sleep(pollInterval)
+	}
+
+	return results, nil
 }
 
 // buildOutputContent creates markdown content from orchestration results

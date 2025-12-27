@@ -28,6 +28,11 @@ const (
 	JobTypeManager JobType = "manager" // Top-level orchestrator (contains steps)
 	JobTypeStep    JobType = "step"    // Step container (monitors its spawned jobs)
 
+	// Orchestrator job types (AI-powered cognitive orchestration)
+	JobTypePlanningCall   JobType = "planning_call"   // LLM decides which tools to call
+	JobTypeToolExecution  JobType = "tool_execution"  // Individual tool execution job (queue citizen)
+	JobTypeSynthesis      JobType = "synthesis"       // LLM formats results with schema constraint
+
 	// Legacy types (kept for backward compatibility)
 	JobTypeParent        JobType = "parent"         // Parent job that spawns child jobs (deprecated, use JobTypeManager)
 	JobTypePreValidation JobType = "pre_validation" // Pre-flight validation job
