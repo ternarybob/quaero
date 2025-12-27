@@ -154,11 +154,13 @@ func (w *ToolExecutionWorker) Execute(ctx context.Context, job *models.QueueJob)
 		return err
 	}
 
+	// Log step_config as JSON string since arbor logger doesn't have Interface method
+	stepConfigJSON, _ := json.Marshal(stepConfig)
 	w.logger.Debug().
 		Str("job_id", job.ID).
 		Str("tool", toolName).
 		Str("worker_type", workerType).
-		Interface("step_config", stepConfig).
+		Str("step_config", string(stepConfigJSON)).
 		Msg("Executing tool via StepManager")
 
 	_, err := w.stepManager.Execute(ctx, syntheticStep, jobDef, job.ID, nil)

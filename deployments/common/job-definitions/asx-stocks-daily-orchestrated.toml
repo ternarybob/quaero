@@ -8,6 +8,14 @@
 # - LLM-based planning decides which tools to call and in what order
 # - Recovery logic if data collection fails
 #
+# TOOL ORCHESTRATION PATTERN:
+# 1. PLANNER: LLM decides which tools to call (forced tool use - no fabrication)
+# 2. EXECUTOR: Each tool call becomes a separate queue job (tool_execution type)
+#    - Visible in queue UI with independent status tracking
+#    - Parallel execution where possible
+#    - Independent failure handling
+# 3. REVIEWER: LLM validates goal achievement and synthesizes results
+#
 # VARIABLES:
 # Global variables are declared once at job level in [config] section.
 # The orchestrator reads these variables to know which stocks to analyze.
@@ -77,7 +85,12 @@ thinking_level = "HIGH"
 # Model preference (auto selects based on task complexity)
 model_preference = "auto"
 
-# Available tools - existing workers exposed to the orchestrator
+# Available tools - workers exposed to the orchestrator as callable tools
+# Each tool becomes a tool_execution queue job when invoked:
+# - name: Tool identifier used by the planner
+# - description: Human-readable description for LLM context
+# - worker: The worker type that executes this tool
+# - template: (optional) For job_template workers, the template to execute
 available_tools = [
     { name = "fetch_stock_data", description = "Fetch ASX stock prices and technical indicators", worker = "asx_stock_data" },
     { name = "fetch_announcements", description = "Fetch ASX company announcements", worker = "asx_announcements" },

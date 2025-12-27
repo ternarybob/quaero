@@ -202,6 +202,30 @@ After implementation, the queue UI displays:
   └─ Phase: REVIEWER [pending]
 ```
 
+## Job Definition Configuration
+
+Orchestrated jobs use the `type = "orchestrator"` job type with an `available_tools` configuration:
+
+```toml
+[step.analyze_stocks]
+type = "orchestrator"
+goal = "Perform comprehensive stock analysis..."
+thinking_level = "HIGH"
+model_preference = "auto"
+
+# Each tool becomes a tool_execution queue job when invoked
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices", worker = "asx_stock_data" },
+    { name = "run_stock_review", description = "Execute stock review", worker = "job_template", template = "asx-stock-review" }
+]
+```
+
+**Tool Configuration Fields:**
+- `name`: Tool identifier used by the planner
+- `description`: Human-readable description for LLM context
+- `worker`: The worker type that executes this tool
+- `template`: (optional) For `job_template` workers, the template to execute
+
 ## Key Files
 
 | Purpose | File Path |
@@ -211,6 +235,8 @@ After implementation, the queue UI displays:
 | Tool Execution Worker | `internal/queue/workers/tool_execution_worker.go` |
 | Document Model | `internal/models/document.go` |
 | Worker Registration | `internal/app/app.go:766-776` |
+| Orchestrated Job Definition | `deployments/common/job-definitions/asx-stocks-daily-orchestrated.toml` |
+| Portfolio Orchestrated Job | `deployments/common/job-definitions/smsf-portfolio-daily-orchestrated.toml` |
 
 ## Implementation Status
 
