@@ -325,6 +325,14 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 			Str("job_id", msg.JobID).
 			Msg("Invalid queue job")
 
+		// Mark job as failed in database (not just delete from queue)
+		// This ensures parent jobs don't wait indefinitely for failed children
+		if updateErr := jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, string(models.JobStatusFailed)); updateErr != nil {
+			jp.logger.Error().Err(updateErr).Str("job_id", msg.JobID).Msg("Failed to update invalid job status to failed")
+		}
+		jp.jobMgr.SetJobError(jp.ctx, msg.JobID, fmt.Sprintf("Job validation failed: %v", err))
+		jp.jobMgr.AddJobLog(jp.ctx, msg.JobID, "error", fmt.Sprintf("Job validation failed: %v", err))
+
 		// Delete invalid message from queue
 		if err := deleteFn(); err != nil {
 			jp.logger.Error().Err(err).Msg("Failed to delete invalid message")

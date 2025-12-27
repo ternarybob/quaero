@@ -648,7 +648,7 @@ func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearch
 	}
 
 	// Build tags
-	tags := []string{"web_search"}
+	tags := []string{"web-search"}
 	if jobDef != nil && len(jobDef.Tags) > 0 {
 		tags = append(tags, jobDef.Tags...)
 	}

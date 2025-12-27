@@ -237,12 +237,12 @@ type CrossSourceMetadata struct {
 // Extracts are populated during document crawling/ingestion by rule-based or LLM extractors.
 // Tools return these structured extracts, not raw markdown, for reliable AI synthesis.
 type Extract struct {
-	Type       string          `json:"type"`                  // Extract type: "financial", "meeting", "technical", "api", etc.
-	Schema     string          `json:"schema"`                // Schema version used for extraction (e.g., "v1", "v2")
-	Data       json.RawMessage `json:"data"`                  // Structured data matching the schema
-	Confidence float64         `json:"confidence,omitempty"`  // Extraction confidence (1.0 for rule-based, 0.0-1.0 for LLM)
-	Span       *TextSpan       `json:"span,omitempty"`        // Location in raw content (for reference back to source)
-	ExtractedAt string         `json:"extracted_at,omitempty"` // When extraction was performed (RFC3339)
+	Type        string          `json:"type"`                   // Extract type: "financial", "meeting", "technical", "api", etc.
+	Schema      string          `json:"schema"`                 // Schema version used for extraction (e.g., "v1", "v2")
+	Data        json.RawMessage `json:"data"`                   // Structured data matching the schema
+	Confidence  float64         `json:"confidence,omitempty"`   // Extraction confidence (1.0 for rule-based, 0.0-1.0 for LLM)
+	Span        *TextSpan       `json:"span,omitempty"`         // Location in raw content (for reference back to source)
+	ExtractedAt string          `json:"extracted_at,omitempty"` // When extraction was performed (RFC3339)
 }
 
 // TextSpan represents a location range in the source document
@@ -255,14 +255,14 @@ type TextSpan struct {
 type FinancialExtract struct {
 	Ticker        string   `json:"ticker"`
 	ReportDate    string   `json:"report_date,omitempty"`
-	ReportType    string   `json:"report_type,omitempty"`    // quarterly, annual
+	ReportType    string   `json:"report_type,omitempty"` // quarterly, annual
 	Revenue       *float64 `json:"revenue,omitempty"`
 	NetIncome     *float64 `json:"net_income,omitempty"`
 	EPS           *float64 `json:"eps,omitempty"`
 	DividendYield *float64 `json:"dividend_yield,omitempty"`
 	PERatio       *float64 `json:"pe_ratio,omitempty"`
 	MarketCap     *float64 `json:"market_cap,omitempty"`
-	Notes         []string `json:"notes,omitempty"`          // Qualitative observations
+	Notes         []string `json:"notes,omitempty"` // Qualitative observations
 }
 
 // MeetingExtract represents meeting notes/decisions extracted from documents
@@ -291,11 +291,11 @@ type APIExtract struct {
 
 // Endpoint represents an API endpoint
 type Endpoint struct {
-	Method      string `json:"method"`       // GET, POST, PUT, DELETE
+	Method      string `json:"method"` // GET, POST, PUT, DELETE
 	Path        string `json:"path"`
 	Description string `json:"description,omitempty"`
-	RequestBody string `json:"request_body,omitempty"`  // JSON schema or example
-	Response    string `json:"response,omitempty"`      // JSON schema or example
+	RequestBody string `json:"request_body,omitempty"` // JSON schema or example
+	Response    string `json:"response,omitempty"`     // JSON schema or example
 }
 
 // ToMap converts Extract to map for storage

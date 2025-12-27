@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -356,8 +357,83 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 	// Track step job IDs for monitoring (map step name -> step job ID)
 	stepJobIDs := make(map[string]string, len(jobDef.Steps))
 
+	// Track failed steps for dependency checking
+	failedSteps := make(map[string]bool)
+
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
+		// Check if this step depends on any failed steps
+		if step.Depends != "" {
+			depParts := strings.Split(step.Depends, ",")
+			hasDependencyFailed := false
+			failedDep := ""
+			for _, dep := range depParts {
+				dep = strings.TrimSpace(dep)
+				if dep != "" && failedSteps[dep] {
+					hasDependencyFailed = true
+					failedDep = dep
+					break
+				}
+			}
+
+			if hasDependencyFailed {
+				// Skip this step since a dependency failed
+				d.logger.Info().
+					Str("step_name", step.Name).
+					Str("failed_dependency", failedDep).
+					Msg("Skipping step due to failed dependency")
+
+				d.jobManager.AddJobLog(ctx, managerID, "warning",
+					fmt.Sprintf("Skipping step %s: dependency '%s' failed", step.Name, failedDep))
+
+				// Mark this step as failed too (cascading failure)
+				failedSteps[step.Name] = true
+
+				// Create step job record in skipped state
+				stepID := uuid.New().String()
+				stepJobIDs[step.Name] = stepID
+
+				stepJob := &Job{
+					ID:        stepID,
+					ParentID:  &managerID,
+					Type:      string(models.JobTypeStep),
+					Name:      step.Name,
+					Phase:     "execution",
+					Status:    "skipped",
+					CreatedAt: time.Now(),
+				}
+				if err := d.jobManager.CreateJobRecord(ctx, stepJob); err != nil {
+					// Log but continue
+				}
+
+				stepStats[i] = map[string]interface{}{
+					"step_index":     i,
+					"step_id":        stepID,
+					"step_name":      step.Name,
+					"step_type":      step.Type.String(),
+					"child_count":    0,
+					"document_count": 0,
+					"status":         "skipped",
+					"skip_reason":    fmt.Sprintf("dependency '%s' failed", failedDep),
+				}
+
+				// Return error if this step had on_error = "fail"
+				if step.OnError == models.ErrorStrategyFail {
+					skippedStepMetadata := map[string]interface{}{
+						"current_step":        i + 1,
+						"current_step_name":   step.Name,
+						"current_step_type":   step.Type.String(),
+						"current_step_status": "skipped",
+						"step_stats":          stepStats[:i+1],
+						"step_job_ids":        stepJobIDs,
+					}
+					d.jobManager.UpdateJobMetadata(ctx, managerID, skippedStepMetadata)
+					return managerID, fmt.Errorf("step %s skipped: dependency '%s' failed", step.Name, failedDep)
+				}
+
+				continue
+			}
+		}
 		// Create step job (child of manager, parent of spawned jobs)
 		stepID := uuid.New().String()
 		stepJobIDs[step.Name] = stepID
@@ -485,6 +561,9 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		d.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Initializing worker...", "", "init")
 		initResult, err := d.stepManager.Init(ctx, resolvedStep, *jobDef)
 		if err != nil {
+			// Track this step as failed for dependency checking
+			failedSteps[step.Name] = true
+
 			d.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s init failed: %v", step.Name, err), "", "init")
 			d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Init failed: %v", err), "", "init")
 			d.jobManager.SetJobError(ctx, managerID, err.Error())
@@ -578,6 +657,9 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			Msg("[orchestrator] StepManager.Execute returned")
 
 		if err != nil {
+			// Track this step as failed for dependency checking
+			failedSteps[step.Name] = true
+
 			d.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err), "", "run")
 			d.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
 			d.jobManager.SetJobError(ctx, managerID, err.Error())

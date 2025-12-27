@@ -161,7 +161,15 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 		"document_count": 0,
 	}
 
-	queueJob := models.NewQueueJob(jobType, "", config, metadata)
+	// Derive job name from config or use job type as fallback
+	jobName := jobType
+	if name, ok := config["name"].(string); ok && name != "" {
+		jobName = name
+	} else if toolName, ok := config["tool_name"].(string); ok && toolName != "" {
+		jobName = fmt.Sprintf("Tool: %s", toolName)
+	}
+
+	queueJob := models.NewQueueJob(jobType, jobName, config, metadata)
 	queueJob.ID = jobID
 
 	jobState := models.NewQueueJobState(queueJob)
@@ -171,11 +179,17 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
+	// Serialize full QueueJob as payload (JobProcessor expects complete job object)
+	queueJobJSON, err := queueJob.ToJSON()
+	if err != nil {
+		return "", fmt.Errorf("serialize queue job: %w", err)
+	}
+
 	// Enqueue the job
 	if err := m.queue.Enqueue(ctx, Message{
 		JobID:   jobID,
 		Type:    jobType,
-		Payload: payloadJSON,
+		Payload: queueJobJSON,
 	}); err != nil {
 		return "", fmt.Errorf("enqueue job: %w", err)
 	}
@@ -202,7 +216,15 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 		"phase": phase,
 	}
 
-	queueJob := models.NewQueueJob(jobType, "", config, metadata)
+	// Derive job name from config (try tool_name, step_name, or fall back to job type)
+	jobName := jobType
+	if toolName, ok := config["tool_name"].(string); ok && toolName != "" {
+		jobName = fmt.Sprintf("Tool: %s", toolName)
+	} else if stepName, ok := config["step_name"].(string); ok && stepName != "" {
+		jobName = stepName
+	}
+
+	queueJob := models.NewQueueJob(jobType, jobName, config, metadata)
 	queueJob.ID = jobID
 	queueJob.ParentID = &parentID
 
@@ -213,11 +235,17 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
+	// Serialize full QueueJob as payload (JobProcessor expects complete job object)
+	queueJobJSON, err := queueJob.ToJSON()
+	if err != nil {
+		return "", fmt.Errorf("serialize queue job: %w", err)
+	}
+
 	// Enqueue the job
 	if err := m.queue.Enqueue(ctx, Message{
 		JobID:   jobID,
 		Type:    jobType,
-		Payload: payloadJSON,
+		Payload: queueJobJSON,
 	}); err != nil {
 		return "", fmt.Errorf("enqueue job: %w", err)
 	}

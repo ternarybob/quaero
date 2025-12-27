@@ -130,6 +130,30 @@ type QueueManager interface {
 }
 ```
 
+### Queue Message Payload Format
+
+**CRITICAL:** The `Payload` field of `QueueMessage` must contain a complete serialized `QueueJob` object (using `QueueJob.ToJSON()`), not just the config map.
+
+```go
+// CORRECT: Serialize full QueueJob
+queueJobJSON, err := queueJob.ToJSON()
+msg := QueueMessage{
+    JobID:   queueJob.ID,
+    Type:    queueJob.Type,
+    Payload: queueJobJSON,  // Full QueueJob object
+}
+
+// WRONG: Only config map
+payloadJSON, _ := json.Marshal(config)
+msg := QueueMessage{
+    JobID:   jobID,
+    Type:    jobType,
+    Payload: payloadJSON,  // JobProcessor will fail validation!
+}
+```
+
+The `JobProcessor` deserializes the payload using `QueueJobFromJSON()` and calls `Validate()`, which requires all fields including `ID`, `Type`, `Name`, `Config`, and `Metadata`.
+
 ## Job Definition Change Detection & Document Cleanup
 
 The system automatically detects when job definition TOML files change and cleans up stale documents.

@@ -1,0 +1,83 @@
+# ASX Stocks Daily Analysis - 1 Stock Test Configuration
+# =========================================================================
+# Test configuration with single stock for minimal test execution.
+# =========================================================================
+
+id = "asx-stocks-1-stock-test"
+name = "ASX Daily Stock Analysis - 1 Stock Test"
+type = "orchestrator"
+description = "AI-powered stock analysis using dynamic planning and execution (1 stock)"
+tags = ["asx", "stocks", "daily", "orchestrator", "thinking", "test"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Orchestrator Configuration
+# =========================================================================
+
+# Test variables - single stock for minimal test execution
+[config]
+variables = [
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+]
+
+# =========================================================================
+# Orchestrator Step - Dynamic Planning and Execution
+# =========================================================================
+
+[step.analyze_stocks]
+type = "orchestrator"
+description = "AI-powered stock analysis with dynamic planning"
+on_error = "continue"
+
+goal = """
+Perform a comprehensive daily analysis of all ASX stocks in the variables list.
+
+For EACH stock in the list:
+1. Collect current market data (prices, volume, technical indicators)
+2. Fetch recent ASX announcements
+3. Search for financial news and analyst coverage
+4. Analyze announcements for signal vs noise
+5. Generate a stock summary with key metrics
+6. Create a BUY/SELL/HOLD recommendation with conviction score
+
+If data collection fails for any stock:
+- Note the failure explicitly
+- Attempt alternative data sources (web search)
+- Continue with remaining stocks
+
+Final output should include:
+- Individual stock reports
+- Summary table of all recommendations
+- Any alerts for significant price movements or announcements
+"""
+
+thinking_level = "HIGH"
+model_preference = "auto"
+
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>'] e.g. ['asx-stock-data', 'gnp']. REQUIRED params: asx_code (string) - the ASX ticker symbol e.g. 'GNP'", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch ASX company announcements. Creates document tagged with ['asx-announcement', '<ticker>'] e.g. ['asx-announcement', 'sks']. REQUIRED params: asx_code (string) - the ASX ticker symbol e.g. 'SKS'", worker = "asx_announcements" },
+    { name = "search_web", description = "Search web for financial news. Creates document tagged with ['web-search'] ONLY (no ticker tag). REQUIRED params: query (string) - the search query", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate LLM-based analysis from previously collected documents. REQUIRED params: prompt (string) - the analysis prompt, filter_tags (array) - tags to filter documents. For stock data use ['asx-stock-data', 'gnp'], for announcements use ['asx-announcement', 'gnp'], for web search use ['web-search'] alone (no ticker). To analyze multiple types, call analyze_summary once per document type.", worker = "summary" },
+    { name = "run_stock_review", description = "Execute stock review template for a stock. Params: asx_code (string) - ticker to analyze", worker = "job_template", template = "asx-stock-review" },
+    { name = "run_data_collection", description = "Execute data collection template. Params: asx_code (string) - ticker to collect data for", worker = "job_template", template = "asx-stock-data" }
+]
+
+# Output tags - allows email step to find this document via body_from_tag
+output_tags = ["stock-recommendation"]
+
+# =========================================================================
+# Email Step - Send consolidated report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email consolidated stock analysis report"
+depends = "analyze_stocks"
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "ASX Daily Stock Analysis - AI-Powered Report (1 Stock Test)"
+body_from_tag = "stock-recommendation"

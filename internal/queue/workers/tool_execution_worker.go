@@ -128,6 +128,14 @@ func (w *ToolExecutionWorker) Execute(ctx context.Context, job *models.QueueJob)
 		stepConfig[k] = v
 	}
 
+	// Pass through output_tags from job config (set by orchestrator for terminal steps)
+	if outputTags, ok := job.Config["output_tags"]; ok {
+		stepConfig["output_tags"] = outputTags
+		w.logger.Debug().
+			Str("job_id", job.ID).
+			Msg("Passing output_tags to step config")
+	}
+
 	// Create synthetic JobStep for the tool
 	syntheticStep := models.JobStep{
 		Name:        fmt.Sprintf("tool_%s_%s", toolName, planStepID),

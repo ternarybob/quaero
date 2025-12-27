@@ -61,24 +61,76 @@ EXECUTION RULES:
 2. Steps can depend on other steps using the depends_on field
 3. Use meaningful step IDs like "step_1_fetch_data", "step_2_analyze"
 4. Params must match what the tool expects
-5. Select the MINIMUM set of tools needed to answer the query
+
+DEPENDENCY ORDERING:
+1. Data collection tools create documents tagged with specific types
+2. Analysis tools (analyze_summary) require documents to exist FIRST
+3. Analysis steps MUST have depends_on pointing to their data collection steps
+
+TAG FILTERING - CRITICAL (READ CAREFULLY):
+filter_tags uses AND logic - documents must have ALL specified tags to match.
+
+Document tags by tool:
+- fetch_stock_data: ["asx-stock-data", "<ticker>"] e.g. ["asx-stock-data", "gnp"]
+- fetch_announcements: ["asx-announcement", "<ticker>"] e.g. ["asx-announcement", "gnp"]
+- search_web: ["web-search"] ONLY (no ticker tag)
+
+CORRECT filter_tags examples:
+- Analyze GNP stock data: ["asx-stock-data", "gnp"]
+- Analyze GNP announcements: ["asx-announcement", "gnp"]
+- Analyze web search results: ["web-search"]
+
+WRONG filter_tags (will find ZERO documents):
+- ["asx-stock-data", "asx-announcement"] - no doc has both type tags
+- ["asx-stock-data", "web-search", "gnp"] - no doc has all these
+- ["gnp", "sks"] - no doc is tagged with multiple tickers
+
+For comprehensive analysis across data types, create SEPARATE analyze_summary calls:
+1. One for stock data: filter_tags: ["asx-stock-data", "gnp"]
+2. One for announcements: filter_tags: ["asx-announcement", "gnp"]
+3. One for web search: filter_tags: ["web-search"]
+4. Final synthesis step that depends on all analysis steps
 
 OUTPUT FORMAT (JSON only):
 {
   "reasoning": "Brief explanation of which tools are needed and why",
   "steps": [
     {
-      "id": "step_1",
-      "tool": "tool_name",
-      "params": {"key": "value"},
+      "id": "step_1_fetch_gnp_data",
+      "tool": "fetch_stock_data",
+      "params": {"asx_code": "GNP"},
       "depends_on": []
+    },
+    {
+      "id": "step_2_fetch_gnp_ann",
+      "tool": "fetch_announcements",
+      "params": {"asx_code": "GNP"},
+      "depends_on": []
+    },
+    {
+      "id": "step_3_analyze_gnp_data",
+      "tool": "analyze_summary",
+      "params": {"prompt": "Analyze GNP stock metrics", "filter_tags": ["asx-stock-data", "gnp"]},
+      "depends_on": ["step_1_fetch_gnp_data"]
+    },
+    {
+      "id": "step_4_analyze_gnp_ann",
+      "tool": "analyze_summary",
+      "params": {"prompt": "Analyze GNP announcements", "filter_tags": ["asx-announcement", "gnp"]},
+      "depends_on": ["step_2_fetch_gnp_ann"]
+    },
+    {
+      "id": "step_5_final",
+      "tool": "analyze_summary",
+      "params": {"prompt": "Create final recommendation", "filter_tags": ["asx-stock-data", "gnp"]},
+      "depends_on": ["step_3_analyze_gnp_data", "step_4_analyze_gnp_ann"]
     }
   ]
 }
 
 If the goal CANNOT be achieved with available tools, return:
 {
-  "reasoning": "ERROR: Cannot achieve goal because [specific reason]. Available tools cannot provide [what's missing].",
+  "reasoning": "ERROR: Cannot achieve goal because [specific reason].",
   "steps": [],
   "error": true
 }
@@ -93,6 +145,13 @@ IMPORTANT RULES:
 2. Check if the goal was achieved based on the results
 3. Identify any missing data or failures
 4. If recovery is needed, suggest specific actions
+
+JUDGMENT GUIDELINES - Be pragmatic, not pedantic:
+1. Focus on SUBSTANCE over FORM: If the requested analysis/content was produced, the goal is achieved
+2. Single-item edge cases: A goal asking for "all items" is achieved if all items in the input were processed, even if there's only one
+3. "Summary table" with one item: A single-item analysis is still valid - format requirements are secondary to content
+4. Successful tool execution with valid output = goal achieved, even if formatting differs from ideal
+5. The goal is about WHAT was accomplished, not HOW it was formatted
 
 OUTPUT FORMAT (JSON only):
 {
@@ -437,78 +496,206 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 		}
 	}
 
-	// Create tool execution jobs for each plan step
-	// These are queue citizens - visible in UI with independent status tracking
-	var toolJobIDs []string
+	// Create tool execution jobs in dependency order (waves)
+	// Steps with no dependencies run first, then steps that depend on them, etc.
+	// This ensures data collection tools complete before analysis tools that need their output
+	var allResults []PlanStepResult
 	toolJobMap := make(map[string]PlanStep) // jobID -> planStep for result collection
+	completedSteps := make(map[string]bool) // track completed plan step IDs
+	stepToJobID := make(map[string]string)  // plan step ID -> job ID
 
-	for _, planStep := range plan.Steps {
-		// Find the tool configuration
-		toolConfig, toolFound := toolLookup[planStep.Tool]
-		if !toolFound {
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "error",
-					fmt.Sprintf("Tool '%s' not found in available_tools", planStep.Tool))
-			}
-			continue
-		}
-
-		// Get worker type from tool config
-		workerType, _ := toolConfig["worker"].(string)
-		if workerType == "" {
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "error",
-					fmt.Sprintf("Tool '%s' has no worker type configured", planStep.Tool))
-			}
-			continue
-		}
-
-		// Build job payload with tool config and plan step params
-		jobPayload := map[string]interface{}{
-			"plan_step_id":   planStep.ID,
-			"tool_name":      planStep.Tool,
-			"worker_type":    workerType,
-			"params":         planStep.Params,
-			"tool_config":    toolConfig,
-			"job_def_id":     jobDef.ID,
-			"manager_id":     stepID, // Link to orchestrator step
-			"step_name":      step.Name,
-			"original_goal":  goal,
-		}
-
-		// Create tool execution job as queue citizen
-		toolJobID, err := w.jobMgr.CreateChildJob(ctx, stepID, string(models.JobTypeToolExecution), "execution", jobPayload)
-		if err != nil {
-			w.logger.Error().Err(err).
-				Str("tool", planStep.Tool).
-				Str("step_id", planStep.ID).
-				Msg("Failed to create tool execution job")
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "error",
-					fmt.Sprintf("Failed to create job for tool %s: %v", planStep.Tool, err))
-			}
-			continue
-		}
-
-		toolJobIDs = append(toolJobIDs, toolJobID)
-		toolJobMap[toolJobID] = planStep
-
-		if w.jobMgr != nil {
-			paramsJSON, _ := json.Marshal(planStep.Params)
-			w.jobMgr.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("Created tool job: %s (tool: %s, worker: %s) params: %s",
-					toolJobID, planStep.Tool, workerType, string(paramsJSON)))
-		}
-
-		w.logger.Info().
-			Str("job_id", toolJobID).
-			Str("tool", planStep.Tool).
-			Str("worker_type", workerType).
-			Str("plan_step_id", planStep.ID).
-			Msg("Created tool execution job")
+	// Build step lookup for dependency resolution
+	stepLookup := make(map[string]PlanStep)
+	for _, ps := range plan.Steps {
+		stepLookup[ps.ID] = ps
 	}
 
-	if len(toolJobIDs) == 0 {
+	// Identify terminal steps (steps that no other step depends on)
+	// These will get the output_tags from the orchestrator config
+	terminalSteps := make(map[string]bool)
+	for _, ps := range plan.Steps {
+		terminalSteps[ps.ID] = true // Assume all are terminal initially
+	}
+	for _, ps := range plan.Steps {
+		for _, depID := range ps.DependsOn {
+			terminalSteps[depID] = false // Not terminal if another step depends on it
+		}
+	}
+
+	// Extract output_tags from step config for terminal steps
+	var outputTags []interface{}
+	if tags, ok := step.Config["output_tags"].([]interface{}); ok {
+		outputTags = tags
+	} else if tags, ok := step.Config["output_tags"].([]string); ok {
+		for _, t := range tags {
+			outputTags = append(outputTags, t)
+		}
+	}
+
+	// Execute in waves until all steps are done
+	maxWaves := 10 // Safety limit
+	for wave := 0; wave < maxWaves; wave++ {
+		// Find steps that can run in this wave (all dependencies satisfied)
+		var waveSteps []PlanStep
+		for _, planStep := range plan.Steps {
+			// Skip if already completed
+			if completedSteps[planStep.ID] {
+				continue
+			}
+
+			// Check if all dependencies are satisfied
+			depsSatisfied := true
+			for _, depID := range planStep.DependsOn {
+				if !completedSteps[depID] {
+					depsSatisfied = false
+					break
+				}
+			}
+
+			if depsSatisfied {
+				waveSteps = append(waveSteps, planStep)
+			}
+		}
+
+		// If no steps can run, we're either done or have a cycle
+		if len(waveSteps) == 0 {
+			break
+		}
+
+		if w.jobMgr != nil {
+			stepNames := make([]string, len(waveSteps))
+			for i, s := range waveSteps {
+				stepNames[i] = s.Tool
+			}
+			w.jobMgr.AddJobLog(ctx, stepID, "info",
+				fmt.Sprintf("Wave %d: executing %d tools (%s)", wave+1, len(waveSteps), strings.Join(stepNames, ", ")))
+		}
+
+		// Create jobs for this wave
+		var waveJobIDs []string
+		for _, planStep := range waveSteps {
+			// Find the tool configuration
+			toolConfig, toolFound := toolLookup[planStep.Tool]
+			if !toolFound {
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "error",
+						fmt.Sprintf("Tool '%s' not found in available_tools", planStep.Tool))
+				}
+				// Mark as completed (failed) so dependent steps don't wait forever
+				completedSteps[planStep.ID] = true
+				continue
+			}
+
+			// Get worker type from tool config
+			workerType, _ := toolConfig["worker"].(string)
+			if workerType == "" {
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "error",
+						fmt.Sprintf("Tool '%s' has no worker type configured", planStep.Tool))
+				}
+				completedSteps[planStep.ID] = true
+				continue
+			}
+
+			// Build job payload with tool config and plan step params
+			jobPayload := map[string]interface{}{
+				"plan_step_id":  planStep.ID,
+				"tool_name":     planStep.Tool,
+				"worker_type":   workerType,
+				"params":        planStep.Params,
+				"tool_config":   toolConfig,
+				"job_def_id":    jobDef.ID,
+				"manager_id":    stepID, // Link to orchestrator step
+				"step_name":     step.Name,
+				"original_goal": goal,
+			}
+
+			// Add output_tags to terminal steps (steps that no other step depends on)
+			// This allows the final analysis step to tag its output for downstream steps (like email)
+			if terminalSteps[planStep.ID] && len(outputTags) > 0 {
+				jobPayload["output_tags"] = outputTags
+				tagsJSON, _ := json.Marshal(outputTags)
+				w.logger.Debug().
+					Str("step_id", planStep.ID).
+					Str("output_tags", string(tagsJSON)).
+					Msg("Added output_tags to terminal step")
+			}
+
+			// Create tool execution job as queue citizen
+			toolJobID, err := w.jobMgr.CreateChildJob(ctx, stepID, string(models.JobTypeToolExecution), "execution", jobPayload)
+			if err != nil {
+				w.logger.Error().Err(err).
+					Str("tool", planStep.Tool).
+					Str("step_id", planStep.ID).
+					Msg("Failed to create tool execution job")
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "error",
+						fmt.Sprintf("Failed to create job for tool %s: %v", planStep.Tool, err))
+				}
+				completedSteps[planStep.ID] = true
+				continue
+			}
+
+			waveJobIDs = append(waveJobIDs, toolJobID)
+			toolJobMap[toolJobID] = planStep
+			stepToJobID[planStep.ID] = toolJobID
+
+			if w.jobMgr != nil {
+				paramsJSON, _ := json.Marshal(planStep.Params)
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("Created tool job: %s (tool: %s, worker: %s) params: %s",
+						toolJobID, planStep.Tool, workerType, string(paramsJSON)))
+			}
+
+			w.logger.Info().
+				Str("job_id", toolJobID).
+				Str("tool", planStep.Tool).
+				Str("worker_type", workerType).
+				Str("plan_step_id", planStep.ID).
+				Int("wave", wave+1).
+				Msg("Created tool execution job")
+		}
+
+		// Wait for this wave to complete before starting next wave
+		if len(waveJobIDs) > 0 {
+			waveResults, err := w.waitForToolJobs(ctx, stepID, waveJobIDs, toolJobMap)
+			if err != nil {
+				w.logger.Error().Err(err).Int("wave", wave+1).Msg("Error waiting for wave tool jobs")
+			}
+
+			// Mark steps as completed and collect results
+			for _, result := range waveResults {
+				completedSteps[result.StepID] = true
+				allResults = append(allResults, result)
+			}
+
+			if w.jobMgr != nil {
+				successCount := 0
+				for _, r := range waveResults {
+					if r.Success {
+						successCount++
+					}
+				}
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("Wave %d complete: %d/%d tools succeeded", wave+1, successCount, len(waveResults)))
+			}
+		}
+	}
+
+	// Check if all steps were executed
+	pendingSteps := 0
+	for _, ps := range plan.Steps {
+		if !completedSteps[ps.ID] {
+			pendingSteps++
+			w.logger.Warn().
+				Str("step_id", ps.ID).
+				Str("tool", ps.Tool).
+				Strs("depends_on", ps.DependsOn).
+				Msg("Step could not be executed (dependency cycle or missing dependency)")
+		}
+	}
+
+	if len(allResults) == 0 {
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", "No tool jobs were created - execution cannot proceed")
 		}
@@ -517,19 +704,11 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Created %d tool execution jobs, waiting for completion...", len(toolJobIDs)))
+			fmt.Sprintf("All waves complete: %d steps executed, %d pending", len(allResults), pendingSteps))
 	}
 
-	// =========================================================================
-	// PHASE 2b: WAIT - Poll for tool job completion
-	// =========================================================================
-	results, err := w.waitForToolJobs(ctx, stepID, toolJobIDs, toolJobMap)
-	if err != nil {
-		w.logger.Error().Err(err).Msg("Error waiting for tool jobs")
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Tool job polling failed: %v", err))
-		}
-	}
+	// Use allResults instead of results from here on
+	results := allResults
 
 	if w.jobMgr != nil {
 		successCount := 0
@@ -602,15 +781,26 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 	// =========================================================================
 	// COMPLETE
 	// =========================================================================
+	goalAchieved := review != nil && review.GoalAchieved
 	w.logger.Info().
 		Str("phase", "complete").
 		Str("step_name", step.Name).
 		Str("step_id", stepID).
-		Bool("goal_achieved", review != nil && review.GoalAchieved).
+		Bool("goal_achieved", goalAchieved).
 		Msg("Orchestration complete")
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info", "Orchestration complete")
+	}
+
+	// If goal was not achieved, return an error to mark step as failed
+	// This prevents dependent steps from running when on_error = "fail"
+	if !goalAchieved {
+		summary := "Goal not achieved"
+		if review != nil && review.Summary != "" {
+			summary = review.Summary
+		}
+		return stepID, fmt.Errorf("orchestration goal not achieved: %s", summary)
 	}
 
 	return stepID, nil
@@ -721,14 +911,35 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 	userPrompt.WriteString("\n\nCreate an execution plan to achieve the goal. Output ONLY valid JSON.")
 
 	// Determine model based on preference
+	// Supports both Gemini and Claude model selections
 	var model string
 	switch strings.ToLower(modelPreference) {
-	case "flash":
-		model = "gemini-2.0-flash"
-	case "pro":
-		model = "gemini-2.0-pro"
+	// Gemini models
+	case "flash", "gemini-flash":
+		model = "gemini-3-flash-preview"
+	case "pro", "gemini-pro":
+		model = "gemini-3-pro-preview"
+	// Claude models
+	case "claude", "claude-sonnet", "sonnet":
+		model = "claude-sonnet-4-5-20250929"
+	case "claude-opus", "opus":
+		model = "claude-opus-4-5-20251101"
+	case "claude-haiku", "haiku":
+		model = "claude-haiku-4-5-20251001"
 	default:
 		model = "" // Use provider default
+	}
+
+	// Log the model selection for visibility
+	if model != "" {
+		w.logger.Info().
+			Str("model_preference", modelPreference).
+			Str("model", model).
+			Msg("LLM model selected for orchestrator planning")
+	} else {
+		w.logger.Info().
+			Str("model_preference", modelPreference).
+			Msg("Using default LLM model from provider configuration")
 	}
 
 	// Call LLM

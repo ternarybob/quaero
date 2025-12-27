@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -318,13 +319,15 @@ func (s *DocumentStorage) RebuildFTS5Index() error {
 
 // hasAllDocTags checks if docTags contains all required tags (AND logic)
 func hasAllDocTags(docTags, requiredTags []string) bool {
+	// Build a case-insensitive tag set for matching
 	tagSet := make(map[string]bool, len(docTags))
 	for _, tag := range docTags {
-		tagSet[tag] = true
+		tagSet[strings.ToLower(tag)] = true
 	}
 
+	// Check that all required tags exist (case-insensitive)
 	for _, required := range requiredTags {
-		if !tagSet[required] {
+		if !tagSet[strings.ToLower(required)] {
 			return false
 		}
 	}

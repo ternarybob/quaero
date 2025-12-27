@@ -240,7 +240,20 @@ The OrchestratorWorker operates in three phases:
 | `goal` | string | Yes | Natural language description of desired outcome |
 | `available_tools` | []map | No | Workers exposed as callable tools (each must have `name` field) |
 | `thinking_level` | string | No | MINIMAL, LOW, MEDIUM, HIGH (default: MEDIUM) |
-| `model_preference` | string | No | Model selection: auto, flash, pro (default: auto) |
+| `model_preference` | string | No | Model selection (default: auto). See Model Selection table below. |
+
+**Model Selection** (`model_preference` values):
+
+The orchestrator supports both Gemini and Claude models. Use `model_preference` to select the LLM:
+
+| Value | Model Used | Provider | Use Case |
+|-------|------------|----------|----------|
+| `auto` (default) | Provider default | Config-dependent | Uses `llm.default_provider` from config |
+| `flash`, `gemini-flash` | `gemini-3-flash-preview` | Gemini | Fast, cost-effective planning |
+| `pro`, `gemini-pro` | `gemini-3-pro-preview` | Gemini | Advanced reasoning |
+| `claude`, `claude-sonnet`, `sonnet` | `claude-sonnet-4-5-20250929` | Claude | Balanced Claude model |
+| `claude-opus`, `opus` | `claude-opus-4-5-20251101` | Claude | Most capable Claude model |
+| `claude-haiku`, `haiku` | `claude-haiku-4-5-20251001` | Claude | Fast, efficient Claude model |
 
 **ThinkingLevel Values**:
 | Level | Use Case |
@@ -344,6 +357,7 @@ available_tools = [
     { name = "search_web", description = "Search the web", worker = "web_search" }
 ]
 thinking_level = "HIGH"
+model_preference = "auto"  # Or: "opus", "sonnet", "flash", "pro"
 ```
 
 **Complete orchestrated job definition with portfolio holdings**:
@@ -377,7 +391,7 @@ For each holding, calculate current valuation and P/L, collect benchmark data,
 perform stock analysis, and generate portfolio-level insights.
 """
 thinking_level = "HIGH"
-model_preference = "auto"
+model_preference = "opus"  # Use Claude Opus for deep reasoning
 available_tools = [
     { name = "fetch_stock_data", description = "Fetch ASX stock prices", worker = "asx_stock_data" },
     { name = "fetch_announcements", description = "Fetch ASX announcements", worker = "asx_announcements" },
@@ -467,9 +481,20 @@ filter_tags = ["devops-candidate"]
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
-| `period` | string | No | Time period for announcements (default: "M6" = 6 months). Options: D1, W1, M1, M3, M6, Y1, Y5 |
+| `period` | string | No | Time period for announcements (default: "Y1" = 1 year). Options: D1 (1 day), W1 (1 week), M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y5 (5 years) |
 | `limit` | int | No | Maximum number of announcements to fetch (default: 50) |
 | `output_tags` | []string | No | Additional tags to apply to output documents |
+
+**Period Options**:
+| Value | Description | Use Case |
+|-------|-------------|----------|
+| D1 | Last 1 day | Daily monitoring |
+| W1 | Last 1 week | Weekly review |
+| M1 | Last 1 month | Monthly review |
+| M3 | Last 3 months | Quarterly analysis |
+| M6 | Last 6 months | Half-yearly review |
+| Y1 | Last 1 year | Annual analysis (default) |
+| Y5 | Last 5 years | Long-term trend analysis, FY results history |
 
 #### Outputs
 
@@ -530,8 +555,21 @@ output_tags = ["asx-gnp-search", "gnp"]
 **Step Config**:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `asx_code` | string | Yes | ASX company code (e.g., "BHP", "CBA") |
+| `asx_code` | string | Yes | ASX company code (e.g., "BHP", "CBA") or index code (e.g., "XJO", "XSO") |
+| `period` | string | No | Historical data period (default: "Y1" = 1 year). Options: M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y2 (2 years), Y5 (5 years) |
 | `output_tags` | []string | No | Additional tags to apply to output documents |
+| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
+| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
+
+**Period Options**:
+| Value | Description | Use Case |
+|-------|-------------|----------|
+| M1 | Last 1 month | Short-term technical analysis |
+| M3 | Last 3 months | Quarterly performance |
+| M6 | Last 6 months | Half-year trends |
+| Y1 | Last 1 year | Annual analysis (default) |
+| Y2 | Last 2 years | Medium-term performance |
+| Y5 | Last 5 years | Long-term CAGR, growth trajectory |
 
 #### Outputs
 

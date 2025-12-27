@@ -96,15 +96,17 @@ func filterByTags(docs []*models.Document, tags []string) []*models.Document {
 	return filtered
 }
 
-// hasAllTags checks if docTags contains all required tags
+// hasAllTags checks if docTags contains all required tags (case-insensitive)
 func hasAllTags(docTags, requiredTags []string) bool {
+	// Build a case-insensitive tag set for matching
 	tagSet := make(map[string]bool, len(docTags))
 	for _, tag := range docTags {
-		tagSet[tag] = true
+		tagSet[strings.ToLower(tag)] = true
 	}
 
+	// Check that all required tags exist (case-insensitive)
 	for _, required := range requiredTags {
-		if !tagSet[required] {
+		if !tagSet[strings.ToLower(required)] {
 			return false
 		}
 	}
