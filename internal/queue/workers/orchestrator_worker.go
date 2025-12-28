@@ -10,10 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -195,6 +198,7 @@ type OrchestratorWorker struct {
 	jobMgr          *queue.Manager
 	providerFactory *llm.ProviderFactory
 	stepManager     interfaces.StepManager
+	templatesDir    string // Directory containing goal templates
 }
 
 // Compile-time assertion: OrchestratorWorker implements DefinitionWorker interface
@@ -209,6 +213,7 @@ func NewOrchestratorWorker(
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	providerFactory *llm.ProviderFactory,
+	templatesDir string,
 ) *OrchestratorWorker {
 	return &OrchestratorWorker{
 		documentStorage: documentStorage,
@@ -218,6 +223,7 @@ func NewOrchestratorWorker(
 		logger:          logger,
 		jobMgr:          jobMgr,
 		providerFactory: providerFactory,
+		templatesDir:    templatesDir,
 	}
 }
 
@@ -232,18 +238,97 @@ func (w *OrchestratorWorker) GetType() models.WorkerType {
 	return models.WorkerTypeOrchestrator
 }
 
+// GoalTemplateConfig holds configuration loaded from a goal template file
+type GoalTemplateConfig struct {
+	Goal            string
+	ThinkingLevel   string
+	ModelPreference string
+	OutputTags      []string
+	AvailableTools  []map[string]interface{}
+}
+
+// loadGoalTemplate loads a goal template from the templates directory.
+// Template files are expected to have a [template] section containing:
+// - goal: The natural language goal for the orchestrator
+// - thinking_level: LLM reasoning depth (MINIMAL, LOW, MEDIUM, HIGH)
+// - model_preference: Model selection preference (auto, flash, pro, etc.)
+// - output_tags: Tags to apply to output documents
+// - available_tools: Array of tool definitions for the orchestrator
+func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplateConfig, error) {
+	if w.templatesDir == "" {
+		return nil, fmt.Errorf("templates directory not configured")
+	}
+
+	// Build template file path
+	templateFile := filepath.Join(w.templatesDir, templateName+".toml")
+	if _, err := os.Stat(templateFile); os.IsNotExist(err) {
+		return nil, fmt.Errorf("goal template file not found: %s", templateFile)
+	}
+
+	// Read template content
+	templateContent, err := os.ReadFile(templateFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read goal template file: %w", err)
+	}
+
+	// Parse TOML with [template] section
+	type GoalTemplateFile struct {
+		Template struct {
+			Goal            string                   `toml:"goal"`
+			ThinkingLevel   string                   `toml:"thinking_level"`
+			ModelPreference string                   `toml:"model_preference"`
+			OutputTags      []string                 `toml:"output_tags"`
+			AvailableTools  []map[string]interface{} `toml:"available_tools"`
+		} `toml:"template"`
+	}
+
+	var templateFile2 GoalTemplateFile
+	if err := toml.Unmarshal(templateContent, &templateFile2); err != nil {
+		return nil, fmt.Errorf("failed to parse goal template: %w", err)
+	}
+
+	config := &GoalTemplateConfig{
+		Goal:            templateFile2.Template.Goal,
+		ThinkingLevel:   templateFile2.Template.ThinkingLevel,
+		ModelPreference: templateFile2.Template.ModelPreference,
+		OutputTags:      templateFile2.Template.OutputTags,
+		AvailableTools:  templateFile2.Template.AvailableTools,
+	}
+
+	if config.Goal == "" {
+		return nil, fmt.Errorf("goal template '%s' does not contain a goal in [template] section", templateName)
+	}
+
+	w.logger.Info().
+		Str("template", templateName).
+		Str("thinking_level", config.ThinkingLevel).
+		Str("model_preference", config.ModelPreference).
+		Int("output_tags", len(config.OutputTags)).
+		Int("available_tools", len(config.AvailableTools)).
+		Msg("Loaded goal template")
+
+	return config, nil
+}
+
 // ValidateConfig validates step configuration before execution.
 // Checks for required fields and valid values.
+// Accepts either 'goal' (inline) or 'goal_template' (reference to template file).
 func (w *OrchestratorWorker) ValidateConfig(step models.JobStep) error {
 	config := step.Config
 	if config == nil {
 		return fmt.Errorf("step config is required for orchestrator")
 	}
 
-	// Validate required goal parameter
-	goal, ok := config["goal"].(string)
-	if !ok || strings.TrimSpace(goal) == "" {
-		return fmt.Errorf("goal is required in orchestrator step config")
+	// Validate goal: either 'goal' or 'goal_template' is required
+	goal, hasGoal := config["goal"].(string)
+	goalTemplate, hasGoalTemplate := config["goal_template"].(string)
+
+	if hasGoal && strings.TrimSpace(goal) != "" {
+		// Inline goal - valid
+	} else if hasGoalTemplate && strings.TrimSpace(goalTemplate) != "" {
+		// Goal template reference - valid (will be loaded at Init time)
+	} else {
+		return fmt.Errorf("either 'goal' or 'goal_template' is required in orchestrator step config")
 	}
 
 	// Validate thinking_level if provided
@@ -284,26 +369,95 @@ func (w *OrchestratorWorker) ValidateConfig(step models.JobStep) error {
 // Init performs the initialization/setup phase for an orchestrator step.
 // This is where we:
 //   - Extract and validate configuration (goal, context, tools)
+//   - Load goal_template if specified (template provides goal, tools, thinking_level, etc.)
 //   - Prepare the context for LLM planning
 //   - Return metadata for CreateJobs
 //
 // The Init phase does NOT execute any planning - it only validates and prepares.
+//
+// Configuration priority:
+//   - goal_template: If specified, loads goal/tools/thinking_level/output_tags from template
+//   - Step config can override template values (e.g., step-level thinking_level wins)
+//   - Variables and benchmarks come from job definition [config] section (user data)
 func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	config := step.Config
 	if config == nil {
 		return nil, fmt.Errorf("step config is required for orchestrator")
 	}
 
-	// Extract goal (required)
-	goal, ok := config["goal"].(string)
-	if !ok || strings.TrimSpace(goal) == "" {
-		return nil, fmt.Errorf("goal is required in orchestrator step config")
+	var goal string
+	var availableTools []map[string]interface{}
+	var outputTags []string
+	thinkingLevel := ThinkingLevelMedium
+	modelPreference := "auto"
+
+	// Check for goal_template first
+	if goalTemplate, ok := config["goal_template"].(string); ok && strings.TrimSpace(goalTemplate) != "" {
+		// Load goal from template
+		templateConfig, err := w.loadGoalTemplate(goalTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load goal_template '%s': %w", goalTemplate, err)
+		}
+
+		// Apply template values as defaults
+		goal = templateConfig.Goal
+		availableTools = templateConfig.AvailableTools
+		outputTags = templateConfig.OutputTags
+
+		if templateConfig.ThinkingLevel != "" {
+			thinkingLevel = ThinkingLevel(strings.ToUpper(templateConfig.ThinkingLevel))
+		}
+		if templateConfig.ModelPreference != "" {
+			modelPreference = templateConfig.ModelPreference
+		}
+
+		w.logger.Info().
+			Str("goal_template", goalTemplate).
+			Int("tools_from_template", len(availableTools)).
+			Int("output_tags", len(outputTags)).
+			Msg("Loaded goal template")
 	}
 
-	// Extract thinking_level (optional, default: MEDIUM)
-	thinkingLevel := ThinkingLevelMedium
+	// Step config can override template values
+	if inlineGoal, ok := config["goal"].(string); ok && strings.TrimSpace(inlineGoal) != "" {
+		goal = inlineGoal // Step-level goal overrides template
+	}
+	if goal == "" {
+		return nil, fmt.Errorf("either 'goal' or 'goal_template' is required in orchestrator step config")
+	}
+
+	// Extract thinking_level from step config (overrides template)
 	if level, ok := config["thinking_level"].(string); ok {
 		thinkingLevel = ThinkingLevel(strings.ToUpper(level))
+	}
+
+	// Extract model_preference from step config (overrides template)
+	if pref, ok := config["model_preference"].(string); ok {
+		modelPreference = pref
+	}
+
+	// Extract output_tags from step config (overrides template)
+	if tags, ok := config["output_tags"].([]interface{}); ok {
+		outputTags = nil // Reset to step-level tags
+		for _, t := range tags {
+			if s, ok := t.(string); ok {
+				outputTags = append(outputTags, s)
+			}
+		}
+	} else if tags, ok := config["output_tags"].([]string); ok {
+		outputTags = tags
+	}
+
+	// Extract available_tools from step config (overrides template)
+	if tools, ok := config["available_tools"].([]interface{}); ok {
+		availableTools = nil // Reset to step-level tools
+		for _, t := range tools {
+			if toolMap, ok := t.(map[string]interface{}); ok {
+				availableTools = append(availableTools, toolMap)
+			}
+		}
+	} else if tools, ok := config["available_tools"].([]map[string]interface{}); ok {
+		availableTools = tools
 	}
 
 	// Extract variables from job definition config (the standard pattern for user data)
@@ -335,32 +489,15 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 		}
 	}
 
-	// Extract available_tools (optional)
-	var availableTools []map[string]interface{}
-	if tools, ok := config["available_tools"].([]interface{}); ok {
-		for _, t := range tools {
-			if toolMap, ok := t.(map[string]interface{}); ok {
-				availableTools = append(availableTools, toolMap)
-			}
-		}
-	} else if tools, ok := config["available_tools"].([]map[string]interface{}); ok {
-		availableTools = tools
-	}
-
-	// Extract model_preference (optional)
-	modelPreference := "auto"
-	if pref, ok := config["model_preference"].(string); ok {
-		modelPreference = pref
-	}
-
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Str("goal", goal).
+		Str("goal", truncateString(goal, 100)).
 		Str("thinking_level", string(thinkingLevel)).
 		Int("variables", len(variables)).
 		Int("benchmarks", len(benchmarks)).
 		Int("available_tools", len(availableTools)).
+		Int("output_tags", len(outputTags)).
 		Str("model_preference", modelPreference).
 		Msg("Orchestrator worker initialized")
 
@@ -387,6 +524,7 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 			"variables":        variables,
 			"benchmarks":       benchmarks,
 			"available_tools":  availableTools,
+			"output_tags":      outputTags,
 			"model_preference": modelPreference,
 		},
 	}, nil
@@ -523,14 +661,14 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 		}
 	}
 
-	// Extract output_tags from step config for terminal steps
+	// Extract output_tags from initResult metadata (merged from template and step config)
 	var outputTags []interface{}
-	if tags, ok := step.Config["output_tags"].([]interface{}); ok {
-		outputTags = tags
-	} else if tags, ok := step.Config["output_tags"].([]string); ok {
+	if tags, ok := initResult.Metadata["output_tags"].([]string); ok {
 		for _, t := range tags {
 			outputTags = append(outputTags, t)
 		}
+	} else if tags, ok := initResult.Metadata["output_tags"].([]interface{}); ok {
+		outputTags = tags
 	}
 
 	// Execute in waves until all steps are done
@@ -578,24 +716,21 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 			// Find the tool configuration
 			toolConfig, toolFound := toolLookup[planStep.Tool]
 			if !toolFound {
+				errMsg := fmt.Sprintf("tool '%s' not found in available_tools - check job definition", planStep.Tool)
 				if w.jobMgr != nil {
-					w.jobMgr.AddJobLog(ctx, stepID, "error",
-						fmt.Sprintf("Tool '%s' not found in available_tools", planStep.Tool))
+					w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 				}
-				// Mark as completed (failed) so dependent steps don't wait forever
-				completedSteps[planStep.ID] = true
-				continue
+				return "", fmt.Errorf(errMsg)
 			}
 
 			// Get worker type from tool config
 			workerType, _ := toolConfig["worker"].(string)
 			if workerType == "" {
+				errMsg := fmt.Sprintf("tool '%s' has no worker type configured", planStep.Tool)
 				if w.jobMgr != nil {
-					w.jobMgr.AddJobLog(ctx, stepID, "error",
-						fmt.Sprintf("Tool '%s' has no worker type configured", planStep.Tool))
+					w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 				}
-				completedSteps[planStep.ID] = true
-				continue
+				return "", fmt.Errorf(errMsg)
 			}
 
 			// Build job payload with tool config and plan step params

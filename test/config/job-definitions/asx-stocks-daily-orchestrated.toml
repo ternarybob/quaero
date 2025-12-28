@@ -1,6 +1,13 @@
-# ASX Stocks Daily Analysis - Orchestrated Version (Test Config)
+# ASX Stocks Daily Analysis - Orchestrated Version
 # =========================================================================
-# Test configuration with minimal stocks for faster test execution.
+# Uses goal_template to reference reusable analysis script.
+# User provides variables (stocks to analyze) and email config.
+#
+# TEMPLATE: job-templates/asx-stock-analysis-goal.toml
+# Contains: goal, tools, thinking_level, output_tags
+#
+# THIS FILE: User-specific configuration
+# Contains: variables (stocks), benchmarks, email settings
 # =========================================================================
 
 id = "asx-stocks-daily-orchestrated"
@@ -14,18 +21,30 @@ enabled = true
 auto_start = false
 
 # =========================================================================
-# Orchestrator Configuration
+# User Configuration - Stocks to Analyze
 # =========================================================================
 
-# Test variables - minimal set for faster test execution
 [config]
+# Stocks to analyze - add/remove as needed
+# Available variable keys: ticker, name, industry
 variables = [
     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
     { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure" },
+    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
+    { ticker = "WES", name = "Wesfarmers", industry = "retail" },
+    { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
+    { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
+    { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
+    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+]
+
+# Benchmark indices for comparison
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
 ]
 
 # =========================================================================
-# Orchestrator Step - Dynamic Planning and Execution
+# Orchestrator Step - References Goal Template
 # =========================================================================
 
 [step.analyze_stocks]
@@ -33,113 +52,8 @@ type = "orchestrator"
 description = "AI-powered stock analysis with dynamic planning"
 on_error = "continue"
 
-goal = """
-Perform a comprehensive daily analysis of all ASX stocks in the variables list.
-
-=== PHASE 1: DATA COLLECTION (for EACH stock) ===
-
-1. STOCK DATA: Fetch current market data with 5-year history
-   - Use fetch_stock_data with period: Y5 for 5-year historical data
-   - Captures: prices, volume, technical indicators, period performance
-
-2. ANNOUNCEMENTS: Fetch 1-year of ASX announcements
-   - Use fetch_announcements with period: Y1 (or M6 for recent focus)
-   - Captures: all official ASX announcements with price sensitivity flags
-
-3. NEWS: Search for financial news and analyst coverage
-   - Use search_web for recent news, analyst reports, broker notes
-
-=== PHASE 2: DEEP ANALYSIS ===
-
-4. ANNOUNCEMENT SIGNAL VS NOISE ANALYSIS
-   For each announcement, rate its information value:
-   - HIGH SIGNAL: Material financial data (FY/HY results, earnings guidance, major contracts, M&A)
-   - MEDIUM SIGNAL: Operational updates, board changes, strategy updates
-   - LOW SIGNAL (NOISE): Generic PR, routine notices, administrative filings
-   Cross-reference price-sensitive flags and stock price movement on announcement dates.
-   Calculate signal-to-noise ratio for the company's communication style.
-
-5. FY/HY RESULTS DEEP DIVE
-   Locate the most recent FY or HY results announcement and analyze:
-   - KEY POSITIVES (list 3-5): Revenue growth, margin improvement, cash flow, strategic wins
-   - KEY NEGATIVES (list 3-5): Cost pressures, debt levels, market headwinds, execution risks
-   - YEAR-OVER-YEAR COMPARISON: Revenue, NPAT, EPS, dividend changes
-   - MANAGEMENT OUTLOOK: Guidance, tone, and confidence level
-
-6. 5-YEAR COMPANY PERFORMANCE ANALYSIS
-   Using historical stock data, analyze long-term trajectory:
-   - STOCK PRICE PROGRESSION: 5-year CAGR, key inflection points
-   - PERFORMANCE PHASES: Growth periods, consolidation, declines
-   - PRICE VS MARKET: Performance relative to ASX 200 (if available)
-   - VOLUME TRENDS: Institutional interest changes over time
-   Note: Revenue/profit progression requires web search for historical financials.
-
-7. COMPANY QUALITY ASSESSMENT
-   Rate overall company quality (A/B/C/D/F) based on fundamental strength:
-   - REVENUE TRAJECTORY: Growing, stable, or declining over 3-5 years
-   - PROFIT TRAJECTORY: NPAT/margin trends, path to profitability
-   - SHARE PRICE TRAJECTORY: Long-term capital appreciation vs destruction
-   - QUALITY SCORE: A (excellent fundamentals), B (good), C (average), D (weak), F (poor/speculative)
-
-   Quality Rating Criteria:
-   - A: Consistent revenue AND profit growth, share price appreciation, strong balance sheet
-   - B: Mostly positive trends with minor concerns
-   - C: Mixed results, some growth but also challenges
-   - D: Declining trends in multiple areas, turnaround needed
-   - F: Speculative, pre-revenue, or deteriorating fundamentals
-
-8. STOCK SUMMARY with key metrics and technical levels
-
-9. DUAL INVESTMENT RECOMMENDATIONS
-
-   TRADER RECOMMENDATION (1-6 week horizon):
-   - Focus: Technical momentum, short-term catalysts, volatility
-   - Weighting: 70% technicals, 20% near-term catalysts, 10% fundamentals
-   - Action: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-   - Conviction: 1-10 score
-   - Key triggers: Breakout levels, earnings dates, news catalysts
-   - Suitable for: Active traders seeking short-term gains
-
-   SUPER RECOMMENDATION (6-12+ month horizon):
-   - Focus: Company quality, long-term value, sustainable growth
-   - Weighting: 60% fundamentals/quality, 25% industry position, 15% technicals
-   - Action: ACCUMULATE / HOLD / REDUCE / AVOID
-   - Conviction: 1-10 score
-   - Quality requirement: ONLY recommend ACCUMULATE for Quality A or B companies
-   - For Quality C: Maximum recommendation is HOLD
-   - For Quality D/F: Recommend REDUCE or AVOID regardless of technicals
-   - Suitable for: SMSF, long-term investors, retirement portfolios
-
-=== PHASE 3: SYNTHESIS ===
-
-If data collection fails for any stock:
-- Note the failure explicitly
-- Attempt alternative data sources (web search)
-- Continue with remaining stocks
-
-FINAL OUTPUT MUST INCLUDE:
-- Individual stock reports with all analysis sections above
-- Summary table: Ticker | Name | Quality | Trader Rec | Trader Conv | Super Rec | Super Conv | Signal:Noise | 5Y CAGR
-- Alerts for significant price movements or material announcements
-- Overall portfolio/watchlist assessment
-- TRADER WATCHLIST: Stocks with momentum for short-term opportunities
-- SUPER ACCUMULATE LIST: Quality A/B companies suitable for long-term investment
-"""
-
-thinking_level = "HIGH"
-model_preference = "auto"
-
-available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance (7D, 1M, 3M, 6M, 1Y, 2Y returns).", worker = "asx_stock_data" },
-    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1), limit (int) - max announcements. Use for FY/HY results, trading updates, contracts. Each announcement includes: date, headline, type, price_sensitive flag, PDF link.", worker = "asx_announcements" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, news, historical financial data (revenue/profit history), competitor analysis. Useful for data not available from ASX APIs.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
-    { name = "run_stock_review", description = "Execute stock review template for comprehensive single-stock analysis. Params: asx_code (string) - ticker to analyze", worker = "job_template", template = "asx-stock-review" },
-    { name = "run_data_collection", description = "Execute data collection template for a stock. Params: asx_code (string) - ticker to collect data for", worker = "job_template", template = "asx-stock-data" }
-]
-
-# Output tags - allows email step to find this document via body_from_tag
-output_tags = ["stock-recommendation"]
+# Reference the goal template (contains goal, tools, thinking_level, output_tags)
+goal_template = "asx-stock-analysis-goal"
 
 # =========================================================================
 # Email Step - Send consolidated report

@@ -849,6 +849,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		a.ProviderFactory,
+		"./job-templates", // Templates directory for goal_template support
 	)
 	a.StepManager.RegisterWorker(orchestratorWorker)
 	orchestratorWorker.SetStepManager(a.StepManager) // Set after registration to avoid circular dependency

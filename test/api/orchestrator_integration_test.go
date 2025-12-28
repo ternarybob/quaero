@@ -40,6 +40,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-1-stock-test",
 			expectedTickers: []string{"GNP"},
 			outputTag:       "stock-recommendation",
+			expectedIndices: []string{"XJO"},
 		},
 		{
 			name:            "TwoStocks",
@@ -47,6 +48,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-daily-orchestrated",
 			expectedTickers: []string{"GNP", "SKS"},
 			outputTag:       "stock-recommendation",
+			expectedIndices: []string{"XJO"},
 		},
 		{
 			name:            "ThreeStocks",
@@ -54,6 +56,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-3-stocks-test",
 			expectedTickers: []string{"GNP", "SKS", "WEB"},
 			outputTag:       "stock-recommendation",
+			expectedIndices: []string{"XJO"},
 		},
 		{
 			name:            "SMSFPortfolio",
