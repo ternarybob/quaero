@@ -72,6 +72,7 @@ filter_tags uses AND logic - documents must have ALL specified tags to match.
 
 Document tags by tool:
 - fetch_stock_data: ["asx-stock-data", "<ticker>"] e.g. ["asx-stock-data", "gnp"]
+- fetch_index_data: ["asx-index", "<code>", "benchmark"] e.g. ["asx-index", "xjo"]
 - fetch_announcements: ["asx-announcement", "<ticker>"] e.g. ["asx-announcement", "gnp"]
 - search_web: ["web-search"] ONLY (no ticker tag)
 
@@ -457,7 +458,7 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 	}
 
 	// Generate execution plan using LLM
-	plan, err := w.generatePlan(ctx, goal, contextContent, availableTools, thinkingLevel, modelPreference)
+	plan, err := w.generatePlan(ctx, goal, contextContent, availableTools, thinkingLevel, modelPreference, stepID)
 	if err != nil {
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Planning failed: %v", err))
@@ -894,7 +895,7 @@ func (w *OrchestratorWorker) formatToolsForPrompt(tools []map[string]interface{}
 }
 
 // generatePlan uses LLM to create an execution plan based on goal and context
-func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, contextContent string, tools []map[string]interface{}, thinkingLevel string, modelPreference string) (*Plan, error) {
+func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, contextContent string, tools []map[string]interface{}, thinkingLevel string, modelPreference string, stepID string) (*Plan, error) {
 	// Build the user prompt
 	var userPrompt strings.Builder
 	userPrompt.WriteString("GOAL:\n")
@@ -936,10 +937,20 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 			Str("model_preference", modelPreference).
 			Str("model", model).
 			Msg("LLM model selected for orchestrator planning")
+		// Also add to UI logs
+		if w.jobMgr != nil && stepID != "" {
+			w.jobMgr.AddJobLog(ctx, stepID, "info",
+				fmt.Sprintf("LLM Model: %s (preference: %s)", model, modelPreference))
+		}
 	} else {
 		w.logger.Info().
 			Str("model_preference", modelPreference).
 			Msg("Using default LLM model from provider configuration")
+		// Also add to UI logs
+		if w.jobMgr != nil && stepID != "" {
+			w.jobMgr.AddJobLog(ctx, stepID, "info",
+				fmt.Sprintf("LLM Model: provider default (preference: %s)", modelPreference))
+		}
 	}
 
 	// Call LLM

@@ -1,6 +1,7 @@
 # SMSF Portfolio Review - Orchestrated Version (Test Config)
 # =========================================================================
 # Test configuration with minimal holdings for faster test execution.
+# Tool definitions MUST match production for consistent LLM planning.
 # =========================================================================
 
 id = "smsf-portfolio-daily-orchestrated"
@@ -24,8 +25,10 @@ variables = [
     { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure", units = 500, avg_price = 4.00, weighting = 50.0 },
 ]
 
+# Benchmark indices for comparison (aligned with production)
 benchmarks = [
     { code = "XJO", name = "S&P/ASX 200" },
+    { code = "XSO", name = "S&P/ASX Small Ordinaries" },
 ]
 
 # =========================================================================
@@ -37,67 +40,136 @@ type = "orchestrator"
 description = "AI-powered strategic portfolio review"
 on_error = "continue"
 
+# Natural language goal - aligned with production for consistent analysis
 goal = """
 Perform a comprehensive SMSF portfolio review for all holdings in the variables list.
 
-PORTFOLIO CONTEXT:
-Read the portfolio holdings from the variables. Each holding includes:
-- Ticker, company name, industry
-- Units held, average purchase price, portfolio weighting
+IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropriately:
+- For single-stock portfolios: Focus on that stock's performance and risk concentration
+- For multi-stock portfolios: Include diversification and correlation analysis
 
-ANALYSIS TASKS:
-1. For each holding, calculate current valuation and P/L:
-   - Fetch current market price
-   - Calculate: Current Value = Units × Current Price
-   - Calculate: Total Return = Current Value - (Units × Avg Price)
-   - Calculate: Return % = Total Return / Cost Basis
+=== PHASE 1: DATA COLLECTION ===
 
-2. Collect benchmark data:
-   - Fetch ASX 200 (XJO) performance for comparison
+1. STOCK DATA: For EACH holding in variables:
+   - Use fetch_stock_data with period: Y5 for 5-year historical data
+   - Captures: current price, OHLCV history, technical indicators, period performance
+
+2. ANNOUNCEMENTS: For EACH holding:
+   - Use fetch_announcements with period: Y1 for annual announcements
+   - Captures: FY/HY results, trading updates, material contracts
+
+3. BENCHMARK DATA:
+   - Fetch ASX 200 (XJO) for large cap comparison
    - Fetch Small Ords (XSO) for small cap comparison
 
-3. For each holding, perform stock analysis:
-   - Technical trend analysis (SMA 50, SMA 200, RSI)
-   - Announcement quality assessment (signal vs noise)
-   - Industry outlook
-   - Competitor comparison
+4. NEWS: Search for financial news on each holding
+   - Use search_web for analyst coverage, broker notes
 
-4. Generate portfolio-level insights:
-   - Identify top performers and laggards
-   - Check for COOKED stocks (overextended, high risk)
-   - Identify BUY/SELL/HOLD actions with conviction scores
-   - SMSF compliance considerations
+=== PHASE 2: PROFIT & LOSS ANALYSIS ===
 
-5. Create consolidated portfolio summary:
-   - Gain/Loss table with all holdings
-   - Consolidated recommendations table
-   - Priority actions by timeframe (Trader 1-8 weeks, Super 6m-3y)
-   - Opportunity analysis for next 6 months
+5. PORTFOLIO VALUATION (for EACH holding):
+   - Current Price: from stock data
+   - Cost Basis: Units × Avg Purchase Price (from variables)
+   - Current Value: Units × Current Price
+   - Unrealized P/L: Current Value - Cost Basis
+   - Return %: (Current Value - Cost Basis) / Cost Basis × 100
+   - Contribution: Holding's % of total portfolio gain/loss
+
+6. TOTAL PORTFOLIO P/L:
+   - Sum of all Cost Bases = Total Investment
+   - Sum of all Current Values = Total Portfolio Value
+   - Total Unrealized P/L = Total Value - Total Investment
+   - Overall Return % = Total P/L / Total Investment × 100
+
+=== PHASE 3: PORTFOLIO MIX ANALYSIS ===
+
+7. DIVERSIFICATION ASSESSMENT:
+   - Industry concentration: % in each industry/sector
+   - Single-stock risk: Flag any holding >20% of portfolio
+   - Sector correlation: How holdings might move together
+   - For single-stock portfolio: Emphasize concentration risk
+
+8. COMPANY QUALITY ASSESSMENT (for EACH holding):
+   - Revenue trajectory (growing/stable/declining)
+   - Profit trajectory (NPAT/margin trends)
+   - Quality Grade: A (excellent) / B (good) / C (average) / D (weak) / F (speculative)
+
+9. PORTFOLIO MIX RATING:
+   - DEFENSIVE: % in ETFs, bonds, cash, blue chips
+   - GROWTH: % in small caps, technology, emerging
+   - INCOME: Dividend yield of portfolio
+   - Risk Profile: Conservative / Balanced / Aggressive
+
+=== PHASE 4: RECOMMENDATIONS ===
+
+10. DUAL RECOMMENDATIONS (for EACH holding):
+
+    TRADER VIEW (1-6 weeks):
+    - Focus: Technical momentum, near-term catalysts
+    - Action: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
+    - Conviction: 1-10
+
+    SUPER VIEW (6-12+ months):
+    - Focus: Company quality, long-term value, SMSF suitability
+    - Action: ACCUMULATE / HOLD / REDUCE / AVOID
+    - Conviction: 1-10
+    - Only recommend ACCUMULATE for Quality A or B companies
+
+11. PORTFOLIO ACTIONS:
+    - Rebalancing recommendations if any holding drifted from target weight
+    - Add/trim suggestions based on quality and valuation
+    - SMSF compliance notes (diversification rules, arm's length requirements)
+
+=== PHASE 5: SYNTHESIS ===
 
 If data is missing for any stock:
 - Calculate what you can with available data
 - Note missing data explicitly
-- Suggest alternative data sources
+- Continue with remaining analysis
 
-OUTPUT REQUIREMENTS:
-- Portfolio valuation summary with total gains/losses
-- Individual stock BUY/SELL/HOLD recommendations
-- Risk alerts for overextended positions
-- Actionable next steps
+FINAL OUTPUT MUST INCLUDE:
+
+1. PORTFOLIO VALUATION TABLE:
+   Ticker | Units | Avg Cost | Current | Value | P/L | Return% | Weight
+
+2. TOTAL PORTFOLIO SUMMARY:
+   - Total Investment, Current Value, Total P/L, Overall Return %
+
+3. RECOMMENDATIONS TABLE:
+   Ticker | Quality | Trader Rec | Trader Conv | Super Rec | Super Conv
+
+4. PORTFOLIO MIX SUMMARY:
+   - Industry breakdown, Risk profile, Diversification score
+
+5. PRIORITY ACTIONS:
+   - Trader opportunities (1-6 weeks)
+   - Super accumulation targets (6-12+ months)
+   - Rebalancing needs
+
+6. RISK ALERTS:
+   - Overconcentration warnings
+   - Quality concerns (D/F rated holdings)
+   - Stocks at technical extremes
 """
 
 thinking_level = "HIGH"
 model_preference = "auto"
 
+# Available tools - MUST match production for consistent LLM planning
+# Each tool becomes a tool_execution queue job when invoked:
+# - name: Tool identifier used by the planner
+# - description: Human-readable description for LLM context (includes tag info!)
+# - worker: The worker type that executes this tool
+# - template: (optional) For job_template workers, the template to execute
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices and technicals", worker = "asx_stock_data" },
-    { name = "fetch_announcements", description = "Fetch ASX company announcements", worker = "asx_announcements" },
-    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks", worker = "asx_index_data" },
-    { name = "search_web", description = "Search for financial news and analysis", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate LLM-based analysis", worker = "summary" },
-    { name = "run_stock_review", description = "Execute stock review template", worker = "job_template", template = "asx-stock-review" },
-    { name = "run_data_collection", description = "Execute data collection template", worker = "job_template", template = "asx-stock-data" },
-    { name = "run_portfolio_summary", description = "Execute portfolio summary template", worker = "job_template", template = "smsf-portfolio-summary" }
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
+    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, competitor analysis.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for portfolio P/L calculations and recommendations.", worker = "summary" },
+    { name = "run_stock_review", description = "Execute stock review template for comprehensive single-stock analysis. Params: asx_code (string) - ticker to analyze", worker = "job_template", template = "asx-stock-review" },
+    { name = "run_data_collection", description = "Execute data collection template for a stock. Params: asx_code (string) - ticker to collect data for", worker = "job_template", template = "asx-stock-data" },
+    { name = "run_portfolio_summary", description = "Execute portfolio summary template for consolidated SMSF review. Creates document tagged ['smsf-portfolio-review'].", worker = "job_template", template = "smsf-portfolio-summary" }
 ]
 
 # Output tags - allows email step to find this document via body_from_tag

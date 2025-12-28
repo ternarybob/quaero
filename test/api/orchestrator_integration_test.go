@@ -18,6 +18,8 @@ type orchestratorTestCase struct {
 	jobDefFile      string   // Job definition TOML file name
 	jobDefID        string   // Job definition ID (matches id field in TOML)
 	expectedTickers []string // Expected stock tickers in the output
+	outputTag       string   // Tag to find output document (default: "stock-recommendation")
+	expectedIndices []string // Expected index codes (e.g., XJO, XSO) - validates fetch_index_data was called
 }
 
 // TestOrchestratorIntegration_FullWorkflow tests the complete orchestrator workflow
@@ -37,18 +39,29 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefFile:      "asx-stocks-1-stock-test.toml",
 			jobDefID:        "asx-stocks-1-stock-test",
 			expectedTickers: []string{"GNP"},
+			outputTag:       "stock-recommendation",
 		},
 		{
 			name:            "TwoStocks",
 			jobDefFile:      "asx-stocks-daily-orchestrated.toml",
 			jobDefID:        "asx-stocks-daily-orchestrated",
 			expectedTickers: []string{"GNP", "SKS"},
+			outputTag:       "stock-recommendation",
 		},
 		{
 			name:            "ThreeStocks",
 			jobDefFile:      "asx-stocks-3-stocks-test.toml",
 			jobDefID:        "asx-stocks-3-stocks-test",
 			expectedTickers: []string{"GNP", "SKS", "WEB"},
+			outputTag:       "stock-recommendation",
+		},
+		{
+			name:            "SMSFPortfolio",
+			jobDefFile:      "smsf-portfolio-daily-orchestrated.toml",
+			jobDefID:        "smsf-portfolio-daily-orchestrated",
+			expectedTickers: []string{"GNP", "SKS"},
+			outputTag:       "smsf-portfolio-review",
+			expectedIndices: []string{"XJO", "XSO"},
 		},
 	}
 
@@ -111,10 +124,16 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	// Step 5: Assert job completed successfully
 	require.Equal(t, "completed", finalStatus, "Job should complete successfully")
 
+	// Step 5b: Validate index data was fetched (if expected)
+	if len(tc.expectedIndices) > 0 {
+		t.Logf("Step 5b: Validating index data for %v", tc.expectedIndices)
+		validateIndexDataFetched(t, helper, tc.expectedIndices)
+	}
+
 	// Step 6: Get the email/output document
-	t.Log("Step 5: Retrieving output document with tag 'stock-recommendation'")
-	docs := getDocumentsByTag(t, helper, "stock-recommendation")
-	require.Greater(t, len(docs), 0, "Should have at least one document with 'stock-recommendation' tag")
+	t.Logf("Step 6: Retrieving output document with tag '%s'", tc.outputTag)
+	docs := getDocumentsByTag(t, helper, tc.outputTag)
+	require.Greater(t, len(docs), 0, "Should have at least one document with '%s' tag", tc.outputTag)
 
 	// Get the most recent document (first in list, sorted by created desc)
 	outputDoc := docs[0]
@@ -191,6 +210,58 @@ func validateEmailContent(t *testing.T, content string, expectedTickers []string
 	assert.True(t, foundAnalysis, "Email should contain analysis-related content")
 
 	t.Log("PASS: Email contains actual stock analysis content")
+}
+
+// validateIndexDataFetched validates that index data documents were created for expected indices.
+// This ensures fetch_index_data tool was called and returned data.
+func validateIndexDataFetched(t *testing.T, helper *common.HTTPTestHelper, expectedIndices []string) {
+	if len(expectedIndices) == 0 {
+		return // No index validation needed
+	}
+
+	t.Log("Validating index data was fetched...")
+
+	for _, indexCode := range expectedIndices {
+		// Index documents are tagged with ["asx-index", "<lowercase-code>", "benchmark"]
+		// We search for "asx-index" tag and verify the index code is present
+		docs := getDocumentsByTag(t, helper, "asx-index")
+
+		// Find document matching this index code
+		found := false
+		var matchedDoc map[string]interface{}
+		for _, doc := range docs {
+			// Check if document tags contain the index code (lowercase)
+			if tags, ok := doc["tags"].([]interface{}); ok {
+				for _, tag := range tags {
+					if tagStr, ok := tag.(string); ok && strings.EqualFold(tagStr, indexCode) {
+						found = true
+						matchedDoc = doc
+						break
+					}
+				}
+			}
+			if found {
+				break
+			}
+		}
+
+		require.True(t, found, "Index document for %s should exist (tag: asx-index)", indexCode)
+
+		// Verify document has content
+		if matchedDoc != nil {
+			docID, _ := matchedDoc["id"].(string)
+			content := getDocumentContent(t, helper, docID)
+			require.NotEmpty(t, content, "Index document for %s should have content", indexCode)
+
+			// Verify content contains expected index-related data
+			assert.True(t, strings.Contains(content, indexCode) || strings.Contains(strings.ToUpper(content), indexCode),
+				"Index document should contain index code %s", indexCode)
+
+			t.Logf("PASS: Found index data for %s (doc: %s, content: %d chars)", indexCode, docID[:8], len(content))
+		}
+	}
+
+	t.Logf("PASS: All %d expected indices have data documents", len(expectedIndices))
 }
 
 // getJobErrorLogs retrieves ERROR-level logs for a job (including children)
