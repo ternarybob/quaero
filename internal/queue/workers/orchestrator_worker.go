@@ -931,26 +931,16 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 		model = "" // Use provider default
 	}
 
-	// Log the model selection for visibility
+	// Log the model selection for visibility (server logs only - UI log after call)
 	if model != "" {
 		w.logger.Info().
 			Str("model_preference", modelPreference).
 			Str("model", model).
 			Msg("LLM model selected for orchestrator planning")
-		// Also add to UI logs
-		if w.jobMgr != nil && stepID != "" {
-			w.jobMgr.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("LLM Model: %s (preference: %s)", model, modelPreference))
-		}
 	} else {
 		w.logger.Info().
 			Str("model_preference", modelPreference).
 			Msg("Using default LLM model from provider configuration")
-		// Also add to UI logs
-		if w.jobMgr != nil && stepID != "" {
-			w.jobMgr.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("LLM Model: provider default (preference: %s)", modelPreference))
-		}
 	}
 
 	// Call LLM
@@ -966,6 +956,16 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 	response, err := w.providerFactory.GenerateContent(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("LLM planning failed: %w", err)
+	}
+
+	// Log actual model used to UI (now we know from response)
+	if w.jobMgr != nil && stepID != "" {
+		actualModel := response.Model
+		if actualModel == "" {
+			actualModel = "unknown"
+		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("LLM Model: %s (preference: %s)", actualModel, modelPreference))
 	}
 
 	// Parse JSON response
@@ -1261,7 +1261,7 @@ func (w *OrchestratorWorker) waitForToolJobs(ctx context.Context, parentStepID s
 
 				results = append(results, result)
 
-				w.logger.Info().
+				w.logger.Debug().
 					Str("job_id", jobID).
 					Str("tool", planStep.Tool).
 					Str("status", string(jobState.Status)).
@@ -1270,7 +1270,7 @@ func (w *OrchestratorWorker) waitForToolJobs(ctx context.Context, parentStepID s
 
 				if w.jobMgr != nil {
 					if result.Success {
-						w.jobMgr.AddJobLog(ctx, parentStepID, "info",
+						w.jobMgr.AddJobLog(ctx, parentStepID, "debug",
 							fmt.Sprintf("Tool job %s completed: %s", planStep.Tool, truncateString(result.Output, 100)))
 					} else {
 						w.jobMgr.AddJobLog(ctx, parentStepID, "warning",

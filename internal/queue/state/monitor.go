@@ -504,7 +504,7 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		progressText := m.formatProgressText(stats)
 
 		// Add job log for parent job with empty originator (system/monitor log)
-		m.jobMgr.AddJobLogWithOriginator(ctx, parentID, "info",
+		m.jobMgr.AddJobLogWithOriginator(ctx, parentID, "debug",
 			fmt.Sprintf("Child job %s → %s. %s",
 				jobID[:8], // Short job ID for readability
 				status,
