@@ -48,6 +48,69 @@ type PlanStepResult struct {
 	Error   string
 }
 
+// mutuallyExclusiveTags defines tag pairs that should NEVER appear together in filter_tags
+// because they represent different document types (AND logic would find zero documents)
+var mutuallyExclusiveTags = [][2]string{
+	{"asx-stock-data", "asx-index"},
+	{"asx-stock-data", "asx-announcement"},
+	{"asx-stock-data", "web-search"},
+	{"asx-index", "asx-announcement"},
+	{"asx-index", "web-search"},
+	{"asx-announcement", "web-search"},
+}
+
+// validateFilterTags checks if filter_tags contain mutually exclusive tag pairs
+// Returns an error describing the invalid combination if found
+func validateFilterTags(filterTags []string) error {
+	if len(filterTags) < 2 {
+		return nil
+	}
+
+	tagSet := make(map[string]bool)
+	for _, tag := range filterTags {
+		tagSet[tag] = true
+	}
+
+	for _, pair := range mutuallyExclusiveTags {
+		if tagSet[pair[0]] && tagSet[pair[1]] {
+			return fmt.Errorf("invalid filter_tags: '%s' and '%s' are mutually exclusive (different document types, AND logic will find zero documents)", pair[0], pair[1])
+		}
+	}
+	return nil
+}
+
+// validatePlanSteps validates all steps in a plan for common mistakes
+func validatePlanSteps(plan *Plan) error {
+	for _, step := range plan.Steps {
+		// Only validate analyze_summary steps which use filter_tags
+		if step.Tool != "analyze_summary" {
+			continue
+		}
+
+		filterTagsRaw, ok := step.Params["filter_tags"]
+		if !ok {
+			continue
+		}
+
+		var filterTags []string
+		switch v := filterTagsRaw.(type) {
+		case []interface{}:
+			for _, tag := range v {
+				if tagStr, ok := tag.(string); ok {
+					filterTags = append(filterTags, tagStr)
+				}
+			}
+		case []string:
+			filterTags = v
+		}
+
+		if err := validateFilterTags(filterTags); err != nil {
+			return fmt.Errorf("step '%s': %w", step.ID, err)
+		}
+	}
+	return nil
+}
+
 // plannerSystemPrompt is the system instruction for the Planner LLM
 // CRITICAL: This prompt enforces FORCED TOOL USE - the AI must call tools and cannot fabricate data
 const plannerSystemPrompt = `You are an intelligent orchestration planner. Your ONLY job is to decide which tools to call.
@@ -85,15 +148,41 @@ CORRECT filter_tags examples:
 - Analyze web search results: ["web-search"]
 
 WRONG filter_tags (will find ZERO documents):
+- ["asx-stock-data", "asx-index"] - NEVER combine stock data and index tags!
 - ["asx-stock-data", "asx-announcement"] - no doc has both type tags
 - ["asx-stock-data", "web-search", "gnp"] - no doc has all these
 - ["gnp", "sks"] - no doc is tagged with multiple tickers
+
+MUTUALLY EXCLUSIVE TAGS (never combine these):
+- "asx-stock-data" and "asx-index" - different document types
+- "asx-stock-data" and "asx-announcement" - different document types
+- "asx-stock-data" and "web-search" - different document types
+- "asx-index" and "asx-announcement" - different document types
 
 For comprehensive analysis across data types, create SEPARATE analyze_summary calls:
 1. One for stock data: filter_tags: ["asx-stock-data", "gnp"]
 2. One for announcements: filter_tags: ["asx-announcement", "gnp"]
 3. One for web search: filter_tags: ["web-search"]
 4. Final synthesis step that depends on all analysis steps
+
+STOCKS vs BENCHMARKS - CRITICAL DISTINCTION:
+The CONTEXT section may contain two types of data:
+
+1. "STOCKS TO ANALYZE" (from variables):
+   - These are the PRIMARY TARGETS - you MUST create tool calls for EACH stock
+   - For each stock ticker, call: fetch_stock_data, fetch_announcements, search_web
+   - Example: If stocks = [GNP, SKS, WES], you need 9 data collection steps (3 tools × 3 stocks)
+   - Then create analysis steps for each stock's data
+
+2. "BENCHMARK INDICES" (from benchmarks):
+   - These are SECONDARY reference data for comparison only
+   - Call fetch_index_data for each benchmark code (e.g., XJO)
+   - Do NOT call fetch_stock_data or fetch_announcements for benchmarks
+
+COMMON MISTAKE TO AVOID:
+- WRONG: Only analyze the benchmark index (XJO) and ignore the stocks in variables
+- CORRECT: Analyze ALL stocks from the variables list, use benchmark for comparison only
+- If you see 7 stocks in STOCKS TO ANALYZE, your plan must include steps for all 7 stocks
 
 OUTPUT FORMAT (JSON only):
 {
@@ -720,7 +809,7 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 				if w.jobMgr != nil {
 					w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 				}
-				return "", fmt.Errorf(errMsg)
+				return "", fmt.Errorf("tool '%s' not found in available_tools - check job definition", planStep.Tool)
 			}
 
 			// Get worker type from tool config
@@ -730,7 +819,7 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 				if w.jobMgr != nil {
 					w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 				}
-				return "", fmt.Errorf(errMsg)
+				return "", fmt.Errorf("tool '%s' has no worker type configured", planStep.Tool)
 			}
 
 			// Build job payload with tool config and plan step params
@@ -962,6 +1051,10 @@ func truncateString(s string, maxLen int) string {
 // formatVariablesAsContext formats variables and benchmarks from the job definition config
 // as a context string for the LLM planner. This follows the standard job-definition pattern
 // where user data is declared in [config] variables.
+//
+// IMPORTANT: Uses explicit labels to help the LLM distinguish between:
+// - Variables = PRIMARY analysis targets (stocks to fetch and analyze with all tools)
+// - Benchmarks = SECONDARY reference data (indices for comparison only)
 func (w *OrchestratorWorker) formatVariablesAsContext(variables []map[string]interface{}, benchmarks []map[string]interface{}) string {
 	if len(variables) == 0 && len(benchmarks) == 0 {
 		return ""
@@ -969,10 +1062,11 @@ func (w *OrchestratorWorker) formatVariablesAsContext(variables []map[string]int
 
 	var sb strings.Builder
 
-	// Format variables (stocks, holdings, etc.)
+	// Format variables (stocks, holdings, etc.) with explicit PRIMARY TARGET labeling
 	if len(variables) > 0 {
-		sb.WriteString("--- Variables (from job definition) ---\n")
-		jsonBytes, err := json.MarshalIndent(map[string]interface{}{"items": variables}, "", "  ")
+		sb.WriteString("=== STOCKS TO ANALYZE (PRIMARY TARGETS) ===\n")
+		sb.WriteString("These are the ASX stocks you MUST analyze. Call fetch_stock_data, fetch_announcements, and search_web for EACH ticker.\n\n")
+		jsonBytes, err := json.MarshalIndent(map[string]interface{}{"stocks": variables}, "", "  ")
 		if err == nil {
 			sb.WriteString(string(jsonBytes))
 		} else {
@@ -983,13 +1077,14 @@ func (w *OrchestratorWorker) formatVariablesAsContext(variables []map[string]int
 		}
 	}
 
-	// Format benchmarks if present
+	// Format benchmarks with explicit SECONDARY/COMPARISON labeling
 	if len(benchmarks) > 0 {
 		if sb.Len() > 0 {
 			sb.WriteString("\n\n")
 		}
-		sb.WriteString("--- Benchmarks ---\n")
-		jsonBytes, err := json.MarshalIndent(map[string]interface{}{"benchmarks": benchmarks}, "", "  ")
+		sb.WriteString("=== BENCHMARK INDICES (for comparison only) ===\n")
+		sb.WriteString("These are market indices for comparison. Call fetch_index_data for these codes.\n\n")
+		jsonBytes, err := json.MarshalIndent(map[string]interface{}{"indices": benchmarks}, "", "  ")
 		if err == nil {
 			sb.WriteString(string(jsonBytes))
 		} else {
@@ -1135,6 +1230,15 @@ func (w *OrchestratorWorker) generatePlan(ctx context.Context, goal string, cont
 			Str("reasoning", plan.Reasoning).
 			Msg("Planning failed: no tool calls returned (forced tool use violation)")
 		return nil, fmt.Errorf("planning failed: no tool calls returned - AI must call at least one tool")
+	}
+
+	// Validate plan steps for common mistakes (e.g., mutually exclusive filter_tags)
+	if err := validatePlanSteps(&plan); err != nil {
+		w.logger.Error().
+			Err(err).
+			Str("reasoning", plan.Reasoning).
+			Msg("Plan validation failed: invalid filter_tags combination detected")
+		return nil, fmt.Errorf("plan validation failed: %w", err)
 	}
 
 	w.logger.Info().

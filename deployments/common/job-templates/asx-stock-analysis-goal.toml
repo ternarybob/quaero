@@ -65,6 +65,23 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
    - KEY NEGATIVES (list 3-5): Cost pressures, debt levels, market headwinds, execution risks
    - YEAR-OVER-YEAR COMPARISON: Revenue, NPAT, EPS, dividend changes
    - MANAGEMENT OUTLOOK: Guidance, tone, and confidence level
+   - MARKET REACTION: Share price movement following announcement
+     * Day 1: +/-X% (immediate reaction)
+     * Week 1: +/-X% (did reaction sustain or fade?)
+     * Assessment: Was reaction proportionate to news quality?
+
+6b. PRICE EVENT ANALYSIS
+   Identify the 3-5 most significant share price movements in the past year:
+   - For each major move (+/-10% or more in a week):
+     * DATE: When did it occur?
+     * MOVE: +/-X% over how many days?
+     * CATALYST: What news/announcement triggered it? (if identifiable)
+     * MARKET REACTION ASSESSMENT:
+       - JUSTIFIED: Reaction proportionate to news significance
+       - OVERREACTION: Price moved more than fundamentals warrant
+       - UNDERREACTION: Price moved less than news significance suggests
+       - KNEE-JERK: Initial spike/drop that reversed within days
+     * CURRENT STATUS: Has the move held, reversed, or continued?
 
 7. 5-YEAR COMPANY PERFORMANCE ANALYSIS
    Using historical stock data, analyze long-term trajectory:
@@ -81,12 +98,11 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
    - SHARE PRICE TRAJECTORY: Long-term capital appreciation vs destruction
    - QUALITY SCORE: A (excellent fundamentals), B (good), C (average), D (weak), F (poor/speculative)
 
-   Quality Rating Criteria:
-   - A: Consistent revenue AND profit growth, share price appreciation, strong balance sheet
-   - B: Mostly positive trends with minor concerns
-   - C: Mixed results, some growth but also challenges
-   - D: Declining trends in multiple areas, turnaround needed
-   - F: Speculative, pre-revenue, or deteriorating fundamentals
+   QUALITY REASONING (REQUIRED):
+   Provide 2-3 sentences explaining WHY this company received its quality rating.
+   Reference specific metrics: revenue growth %, profit margins, debt levels, share price CAGR.
+   Example: "Quality B: Revenue grew 12% YoY with improving margins (8% to 11%), but high
+   debt-to-equity (1.4x) and recent share price weakness (-15% vs XJO +8%) limit the rating."
 
 9. STOCK SUMMARY with key metrics and technical levels
 
@@ -121,9 +137,24 @@ FINAL OUTPUT MUST INCLUDE:
 - Individual stock reports with all analysis sections above
 - Summary table: Ticker | Name | Quality | Trader Rec | Trader Conv | Super Rec | Super Conv | Signal:Noise | 5Y CAGR
 - Alerts for significant price movements or material announcements
-- Overall portfolio/watchlist assessment
+- Overall watchlist assessment
 - TRADER WATCHLIST: Stocks with momentum for short-term opportunities
 - SUPER ACCUMULATE LIST: Quality A/B companies suitable for long-term investment
+- DEFINITIONS (at end of report):
+  * Quality Rating (A/B/C/D/F): Company fundamental strength grade
+    - A (Excellent): Consistent revenue AND profit growth, share price appreciation, strong balance sheet
+    - B (Good): Mostly positive trends with minor concerns
+    - C (Average): Mixed results, some growth but also challenges
+    - D (Weak): Declining trends in multiple areas, turnaround needed
+    - F (Speculative): Pre-revenue, high-risk, or deteriorating fundamentals
+  * Signal:Noise Ratio: Quality of company communications to ASX
+    - HIGH (>70%): Most announcements contain material, actionable information
+    - MEDIUM (40-70%): Mix of material updates and routine notices
+    - LOW (<40%): Mostly routine/PR announcements with little investment substance
+  * CAGR (Compound Annual Growth Rate): Annualized return over a period
+    - Formula: (End Value / Start Value)^(1/Years) - 1
+    - Example: 5Y CAGR of 15% = 15% average annual return compounded over 5 years
+    - Interpretation: >15% excellent, 10-15% good, 5-10% average, <5% poor
 """
 
 # Available tools - workers exposed to the orchestrator as callable tools

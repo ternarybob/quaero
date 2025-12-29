@@ -54,9 +54,28 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
 4. NEWS: Search for financial news on each holding
    - Use search_web for analyst coverage, broker notes
 
-=== PHASE 2: PROFIT & LOSS ANALYSIS ===
+=== PHASE 2: ANNOUNCEMENT & PRICE EVENT ANALYSIS ===
 
-5. PORTFOLIO VALUATION (for EACH holding):
+5. FY/HY RESULTS ANALYSIS (for EACH holding):
+   Locate the most recent FY or HY results announcement and analyze:
+   - KEY FINANCIALS: Revenue, NPAT, EPS, dividend changes YoY
+   - MANAGEMENT OUTLOOK: Guidance and confidence level
+   - MARKET REACTION: Share price movement following announcement
+     * Day 1: +/-X% (immediate reaction)
+     * Week 1: +/-X% (did reaction sustain or fade?)
+     * Assessment: Was reaction proportionate to news quality?
+
+6. PRICE EVENT ANALYSIS (for EACH holding):
+   Identify significant share price movements in the past year:
+   - For each major move (+/-10% or more in a week):
+     * DATE and MOVE: When and how much?
+     * CATALYST: What triggered it? (announcement, market, sector)
+     * REACTION ASSESSMENT: JUSTIFIED / OVERREACTION / KNEE-JERK
+     * CURRENT STATUS: Has the move held or reversed?
+
+=== PHASE 3: PROFIT & LOSS ANALYSIS ===
+
+7. PORTFOLIO VALUATION (for EACH holding):
    - Current Price: from stock data
    - Cost Basis: Units × Avg Purchase Price (from variables)
    - Current Value: Units × Current Price
@@ -64,34 +83,38 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
    - Return %: (Current Value - Cost Basis) / Cost Basis × 100
    - Contribution: Holding's % of total portfolio gain/loss
 
-6. TOTAL PORTFOLIO P/L:
+8. TOTAL PORTFOLIO P/L:
    - Sum of all Cost Bases = Total Investment
    - Sum of all Current Values = Total Portfolio Value
    - Total Unrealized P/L = Total Value - Total Investment
    - Overall Return % = Total P/L / Total Investment × 100
 
-=== PHASE 3: PORTFOLIO MIX ANALYSIS ===
+=== PHASE 4: PORTFOLIO MIX ANALYSIS ===
 
-7. DIVERSIFICATION ASSESSMENT:
+9. DIVERSIFICATION ASSESSMENT:
    - Industry concentration: % in each industry/sector
    - Single-stock risk: Flag any holding >20% of portfolio
    - Sector correlation: How holdings might move together
    - For single-stock portfolio: Emphasize concentration risk
 
-8. COMPANY QUALITY ASSESSMENT (for EACH holding):
+10. COMPANY QUALITY ASSESSMENT (for EACH holding):
    - Revenue trajectory (growing/stable/declining)
    - Profit trajectory (NPAT/margin trends)
    - Quality Grade: A (excellent) / B (good) / C (average) / D (weak) / F (speculative)
 
-9. PORTFOLIO MIX RATING:
+   QUALITY REASONING (REQUIRED):
+   Provide 2-3 sentences explaining WHY this holding received its quality rating.
+   Reference specific metrics: revenue growth %, profit margins, debt levels, share price CAGR.
+
+11. PORTFOLIO MIX RATING:
    - DEFENSIVE: % in ETFs, bonds, cash, blue chips
    - GROWTH: % in small caps, technology, emerging
    - INCOME: Dividend yield of portfolio
    - Risk Profile: Conservative / Balanced / Aggressive
 
-=== PHASE 4: RECOMMENDATIONS ===
+=== PHASE 5: RECOMMENDATIONS ===
 
-10. DUAL RECOMMENDATIONS (for EACH holding):
+12. DUAL RECOMMENDATIONS (for EACH holding):
 
     TRADER VIEW (1-6 weeks):
     - Focus: Technical momentum, near-term catalysts
@@ -104,12 +127,12 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
     - Conviction: 1-10
     - Only recommend ACCUMULATE for Quality A or B companies
 
-11. PORTFOLIO ACTIONS:
+13. PORTFOLIO ACTIONS:
     - Rebalancing recommendations if any holding drifted from target weight
     - Add/trim suggestions based on quality and valuation
     - SMSF compliance notes (diversification rules, arm's length requirements)
 
-=== PHASE 5: SYNTHESIS ===
+=== PHASE 6: SYNTHESIS ===
 
 If data is missing for any stock:
 - Calculate what you can with available data
@@ -139,6 +162,21 @@ FINAL OUTPUT MUST INCLUDE:
    - Overconcentration warnings
    - Quality concerns (D/F rated holdings)
    - Stocks at technical extremes
+
+7. DEFINITIONS (at end of report):
+   * Quality Rating (A/B/C/D/F): Company fundamental strength grade
+     - A (Excellent): Consistent revenue AND profit growth, share price appreciation, strong balance sheet
+     - B (Good): Mostly positive trends with minor concerns
+     - C (Average): Mixed results, some growth but also challenges
+     - D (Weak): Declining trends in multiple areas, turnaround needed
+     - F (Speculative): Pre-revenue, high-risk, or deteriorating fundamentals
+   * Signal:Noise Ratio: Quality of company communications to ASX
+     - HIGH (>70%): Most announcements contain material, actionable information
+     - MEDIUM (40-70%): Mix of material updates and routine notices
+     - LOW (<40%): Mostly routine/PR announcements with little investment substance
+   * CAGR (Compound Annual Growth Rate): Annualized return over a period
+     - Formula: (End Value / Start Value)^(1/Years) - 1
+     - Interpretation: >15% excellent, 10-15% good, 5-10% average, <5% poor
 """
 
 # Available tools - workers exposed to the orchestrator as callable tools
