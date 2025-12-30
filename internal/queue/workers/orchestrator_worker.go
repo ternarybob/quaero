@@ -349,6 +349,44 @@ type GoalTemplateConfig struct {
 	OutputTags      []string
 	AvailableTools  []map[string]interface{}
 	OutputSchema    map[string]interface{} // JSON schema for structured LLM output
+	OutputSchemaRef string                  // Reference to external schema file (e.g., "stock-report.schema.json")
+}
+
+// loadSchemaFromFile loads a JSON schema from the schemas directory.
+// The schemas directory is expected to be a sibling of the templates directory (../schemas/).
+// schemaRef is the filename (e.g., "stock-report.schema.json")
+func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]interface{}, error) {
+	if schemaRef == "" {
+		return nil, nil
+	}
+
+	// Schemas are in ../schemas/ relative to templates directory
+	schemasDir := filepath.Join(filepath.Dir(w.templatesDir), "schemas")
+	schemaPath := filepath.Join(schemasDir, schemaRef)
+
+	// Check if file exists
+	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("schema file not found: %s", schemaPath)
+	}
+
+	// Read schema file
+	schemaContent, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read schema file: %w", err)
+	}
+
+	// Parse JSON schema
+	var schema map[string]interface{}
+	if err := json.Unmarshal(schemaContent, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse schema JSON: %w", err)
+	}
+
+	w.logger.Info().
+		Str("schema_ref", schemaRef).
+		Str("schema_path", schemaPath).
+		Msg("Loaded external JSON schema")
+
+	return schema, nil
 }
 
 // loadGoalTemplate loads a goal template from the templates directory.
@@ -358,15 +396,28 @@ type GoalTemplateConfig struct {
 // - model_preference: Model selection preference (auto, flash, pro, etc.)
 // - output_tags: Tags to apply to output documents
 // - available_tools: Array of tool definitions for the orchestrator
+// - output_schema_ref: Reference to external JSON schema file (e.g., "stock-report.schema.json")
 func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplateConfig, error) {
 	if w.templatesDir == "" {
 		return nil, fmt.Errorf("templates directory not configured")
 	}
 
-	// Build template file path
-	templateFile := filepath.Join(w.templatesDir, templateName+".toml")
-	if _, err := os.Stat(templateFile); os.IsNotExist(err) {
-		return nil, fmt.Errorf("goal template file not found: %s", templateFile)
+	// Build template file path - support both TOML and JSON templates
+	var templateFile string
+	var isJSON bool
+
+	// Try JSON first, then TOML
+	jsonFile := filepath.Join(w.templatesDir, templateName+".json")
+	tomlFile := filepath.Join(w.templatesDir, templateName+".toml")
+
+	if _, err := os.Stat(jsonFile); err == nil {
+		templateFile = jsonFile
+		isJSON = true
+	} else if _, err := os.Stat(tomlFile); err == nil {
+		templateFile = tomlFile
+		isJSON = false
+	} else {
+		return nil, fmt.Errorf("goal template file not found: %s (tried .json and .toml)", templateName)
 	}
 
 	// Read template content
@@ -375,7 +426,52 @@ func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplat
 		return nil, fmt.Errorf("failed to read goal template file: %w", err)
 	}
 
-	// Parse TOML with [template] section
+	var config *GoalTemplateConfig
+
+	if isJSON {
+		// Parse JSON template
+		config, err = w.parseJSONTemplate(templateContent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JSON template: %w", err)
+		}
+	} else {
+		// Parse TOML template (legacy format)
+		config, err = w.parseTOMLTemplate(templateContent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse TOML template: %w", err)
+		}
+	}
+
+	// If output_schema_ref is specified, load the external schema
+	if config.OutputSchemaRef != "" && len(config.OutputSchema) == 0 {
+		schema, err := w.loadSchemaFromFile(config.OutputSchemaRef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load output schema '%s': %w", config.OutputSchemaRef, err)
+		}
+		config.OutputSchema = schema
+	}
+
+	if config.Goal == "" {
+		return nil, fmt.Errorf("goal template '%s' does not contain a goal", templateName)
+	}
+
+	hasSchema := config.OutputSchema != nil && len(config.OutputSchema) > 0
+	w.logger.Info().
+		Str("template", templateName).
+		Str("format", map[bool]string{true: "json", false: "toml"}[isJSON]).
+		Str("thinking_level", config.ThinkingLevel).
+		Str("model_preference", config.ModelPreference).
+		Int("output_tags", len(config.OutputTags)).
+		Int("available_tools", len(config.AvailableTools)).
+		Bool("has_output_schema", hasSchema).
+		Str("output_schema_ref", config.OutputSchemaRef).
+		Msg("Loaded goal template")
+
+	return config, nil
+}
+
+// parseTOMLTemplate parses a TOML-format goal template
+func (w *OrchestratorWorker) parseTOMLTemplate(content []byte) (*GoalTemplateConfig, error) {
 	type GoalTemplateFile struct {
 		Template struct {
 			Goal            string                   `toml:"goal"`
@@ -383,37 +479,57 @@ func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplat
 			ModelPreference string                   `toml:"model_preference"`
 			OutputTags      []string                 `toml:"output_tags"`
 			AvailableTools  []map[string]interface{} `toml:"available_tools"`
-			OutputSchema    map[string]interface{}   `toml:"output_schema"` // JSON schema for structured output
+			OutputSchema    map[string]interface{}   `toml:"output_schema"`     // Inline JSON schema (legacy)
+			OutputSchemaRef string                   `toml:"output_schema_ref"` // Reference to external schema file
 		} `toml:"template"`
 	}
 
-	var templateFile2 GoalTemplateFile
-	if err := toml.Unmarshal(templateContent, &templateFile2); err != nil {
-		return nil, fmt.Errorf("failed to parse goal template: %w", err)
+	var templateFile GoalTemplateFile
+	if err := toml.Unmarshal(content, &templateFile); err != nil {
+		return nil, err
 	}
 
-	config := &GoalTemplateConfig{
-		Goal:            templateFile2.Template.Goal,
-		ThinkingLevel:   templateFile2.Template.ThinkingLevel,
-		ModelPreference: templateFile2.Template.ModelPreference,
-		OutputTags:      templateFile2.Template.OutputTags,
-		AvailableTools:  templateFile2.Template.AvailableTools,
-		OutputSchema:    templateFile2.Template.OutputSchema,
+	return &GoalTemplateConfig{
+		Goal:            templateFile.Template.Goal,
+		ThinkingLevel:   templateFile.Template.ThinkingLevel,
+		ModelPreference: templateFile.Template.ModelPreference,
+		OutputTags:      templateFile.Template.OutputTags,
+		AvailableTools:  templateFile.Template.AvailableTools,
+		OutputSchema:    templateFile.Template.OutputSchema,
+		OutputSchemaRef: templateFile.Template.OutputSchemaRef,
+	}, nil
+}
+
+// parseJSONTemplate parses a JSON-format goal template
+func (w *OrchestratorWorker) parseJSONTemplate(content []byte) (*GoalTemplateConfig, error) {
+	type JSONTemplateFile struct {
+		ID              string                   `json:"id"`
+		Name            string                   `json:"name"`
+		Type            string                   `json:"type"`
+		Description     string                   `json:"description"`
+		Template        struct {
+			Goal            string                   `json:"goal"`
+			ThinkingLevel   string                   `json:"thinking_level"`
+			ModelPreference string                   `json:"model_preference"`
+			OutputTags      []string                 `json:"output_tags"`
+			AvailableTools  []map[string]interface{} `json:"available_tools"`
+			OutputSchemaRef string                   `json:"output_schema_ref"` // Reference to external schema file
+		} `json:"template"`
 	}
 
-	if config.Goal == "" {
-		return nil, fmt.Errorf("goal template '%s' does not contain a goal in [template] section", templateName)
+	var templateFile JSONTemplateFile
+	if err := json.Unmarshal(content, &templateFile); err != nil {
+		return nil, err
 	}
 
-	w.logger.Info().
-		Str("template", templateName).
-		Str("thinking_level", config.ThinkingLevel).
-		Str("model_preference", config.ModelPreference).
-		Int("output_tags", len(config.OutputTags)).
-		Int("available_tools", len(config.AvailableTools)).
-		Msg("Loaded goal template")
-
-	return config, nil
+	return &GoalTemplateConfig{
+		Goal:            templateFile.Template.Goal,
+		ThinkingLevel:   templateFile.Template.ThinkingLevel,
+		ModelPreference: templateFile.Template.ModelPreference,
+		OutputTags:      templateFile.Template.OutputTags,
+		AvailableTools:  templateFile.Template.AvailableTools,
+		OutputSchemaRef: templateFile.Template.OutputSchemaRef,
+	}, nil
 }
 
 // ValidateConfig validates step configuration before execution.

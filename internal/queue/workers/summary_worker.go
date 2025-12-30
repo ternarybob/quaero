@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -62,6 +63,57 @@ func NewSummaryWorker(
 // GetType returns WorkerTypeSummary for the DefinitionWorker interface
 func (w *SummaryWorker) GetType() models.WorkerType {
 	return models.WorkerTypeSummary
+}
+
+// loadSchemaFromFile loads a JSON schema from the schemas directory.
+// The schemas directory is expected to be at deployments/common/schemas/ (relative to working dir).
+// schemaRef is the filename (e.g., "stock-analysis.schema.json")
+func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interface{}, error) {
+	if schemaRef == "" {
+		return nil, nil
+	}
+
+	// Try multiple schema directory locations
+	schemaDirs := []string{
+		"deployments/common/schemas",       // Standard deployment location
+		"../schemas",                        // Relative to job-templates
+		"./schemas",                         // Current directory
+		"job-templates/../schemas",          // Relative to job-templates directory
+	}
+
+	var schemaPath string
+	var found bool
+	for _, dir := range schemaDirs {
+		path := fmt.Sprintf("%s/%s", dir, schemaRef)
+		if _, err := os.Stat(path); err == nil {
+			schemaPath = path
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("schema file not found: %s (searched: %v)", schemaRef, schemaDirs)
+	}
+
+	// Read schema file
+	schemaContent, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read schema file: %w", err)
+	}
+
+	// Parse JSON schema
+	var schema map[string]interface{}
+	if err := json.Unmarshal(schemaContent, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse schema JSON: %w", err)
+	}
+
+	w.logger.Info().
+		Str("schema_ref", schemaRef).
+		Str("schema_path", schemaPath).
+		Msg("Loaded external JSON schema")
+
+	return schema, nil
 }
 
 // Init performs the initialization/setup phase for a summary step.
@@ -251,13 +303,30 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 
 	// Extract output_schema (optional - JSON schema for structured output)
 	// When provided, the LLM MUST return JSON matching this schema
+	// Can be specified inline or via schema_ref (reference to external file)
 	var outputSchema map[string]interface{}
 	if schema, ok := stepConfig["output_schema"].(map[string]interface{}); ok && len(schema) > 0 {
 		outputSchema = schema
 		w.logger.Info().
 			Str("phase", "init").
 			Str("step_name", step.Name).
-			Msg("Output schema configured for structured JSON generation")
+			Msg("Output schema configured for structured JSON generation (inline)")
+	} else if schemaRef, ok := stepConfig["schema_ref"].(string); ok && schemaRef != "" {
+		// Load external schema from file
+		schema, err := w.loadSchemaFromFile(schemaRef)
+		if err != nil {
+			w.logger.Warn().
+				Err(err).
+				Str("schema_ref", schemaRef).
+				Msg("Failed to load external schema, continuing without schema")
+		} else {
+			outputSchema = schema
+			w.logger.Info().
+				Str("phase", "init").
+				Str("step_name", step.Name).
+				Str("schema_ref", schemaRef).
+				Msg("Output schema configured for structured JSON generation (external)")
+		}
 	}
 
 	w.logger.Info().

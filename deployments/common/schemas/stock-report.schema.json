@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "stock-report.schema.json",
+  "title": "Stock Report Schema",
+  "description": "Combined schema for daily stock analysis report with multiple stocks",
+  "type": "object",
+  "required": ["stocks", "summary_table", "watchlists", "definitions"],
+  "properties": {
+    "stocks": {
+      "type": "array",
+      "description": "Individual stock analyses",
+      "items": {
+        "$ref": "stock-analysis.schema.json"
+      }
+    },
+    "summary_table": {
+      "type": "array",
+      "description": "Summary table of all stocks",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "name", "quality", "trader_rec", "trader_conv", "super_rec", "super_conv", "signal_noise", "cagr"],
+        "properties": {
+          "ticker": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quality": {
+            "type": "string",
+            "enum": ["A", "B", "C", "D", "F"]
+          },
+          "trader_rec": {
+            "type": "string",
+            "enum": ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+          },
+          "trader_conv": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "super_rec": {
+            "type": "string",
+            "enum": ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"]
+          },
+          "super_conv": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "signal_noise": {
+            "type": "string",
+            "enum": ["HIGH", "MEDIUM", "LOW"]
+          },
+          "cagr": {
+            "type": "string",
+            "description": "5Y CAGR as percentage string (e.g., '15%')"
+          }
+        }
+      }
+    },
+    "watchlists": {
+      "type": "object",
+      "description": "Categorized watchlists",
+      "properties": {
+        "trader_momentum": {
+          "type": "array",
+          "description": "Stocks with momentum for short-term trades",
+          "items": {
+            "type": "string",
+            "description": "Ticker code"
+          }
+        },
+        "super_accumulate": {
+          "type": "array",
+          "description": "Quality A/B stocks for long-term accumulation",
+          "items": {
+            "type": "string",
+            "description": "Ticker code"
+          }
+        }
+      }
+    },
+    "alerts": {
+      "type": "array",
+      "description": "Significant alerts and material announcements",
+      "items": {
+        "type": "string"
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "description": "Definition of rating scales and metrics",
+      "properties": {
+        "quality_rating": {
+          "type": "string"
+        },
+        "signal_noise_ratio": {
+          "type": "string"
+        },
+        "cagr": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
