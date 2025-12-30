@@ -28,7 +28,13 @@ Execute: $ARGUMENTS
 
 ## WORKFLOW
 
-### PHASE 0: UNDERSTAND
+### PHASE 0: RESET CONTEXT
+```
+/compact
+```
+Clear context before starting to ensure maximum headroom for iterations.
+
+### PHASE 1: UNDERSTAND
 1. Read test file - extract requirements
 2. Read skills for applicable patterns:
    - `.claude/skills/refactoring/SKILL.md` - Core patterns
@@ -37,7 +43,7 @@ Execute: $ARGUMENTS
    - `.claude/skills/monitoring/SKILL.md` - UI tests (screenshots, monitoring, results)
 3. **For UI job tests** - validate against template: `test/ui/job_definition_general_test.go`
 
-### PHASE 1: RUN TEST
+### PHASE 2: RUN TEST
 ```bash
 # Extract ALL test names from file, build regex pattern
 TEST_PATTERN=$(grep "^func Test" {test_file} | sed 's/func \(Test[^(]*\).*/\1/' | paste -sd'|')
@@ -48,7 +54,7 @@ go test -v -run "^($TEST_PATTERN)$" ./$TEST_PKG/...
 - **ALL PASS →** Complete
 - **ANY FAIL →** Fix & Iterate
 
-### PHASE 2: FIX & ITERATE (max 5)
+### PHASE 3: FIX & ITERATE (max 5)
 ```
 TEST FAILS
      │
@@ -87,7 +93,7 @@ TEST FAILS
      └──► Loop
 ```
 
-### PHASE 3: COMPLETE
+### PHASE 4: COMPLETE
 - All tests pass
 - No test files modified
 

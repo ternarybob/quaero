@@ -95,7 +95,7 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
-	helper := env.NewHTTPTestHelperWithTimeout(t, 5*time.Minute)
+	helper := env.NewHTTPTestHelperWithTimeout(t, 15*time.Minute)
 
 	// Step 1: Load the orchestrated job definition
 	t.Logf("Step 1: Loading job definition %s", tc.jobDefFile)
@@ -111,9 +111,9 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	// Cleanup job after test
 	defer deleteJob(t, helper, jobID)
 
-	// Step 3: Wait for job completion (10 minute timeout for LLM operations)
-	t.Log("Step 3: Waiting for job completion (timeout: 10 minutes)")
-	finalStatus := waitForJobCompletion(t, helper, jobID, 10*time.Minute)
+	// Step 3: Wait for job completion (15 minute timeout for LLM operations)
+	t.Log("Step 3: Waiting for job completion (timeout: 15 minutes)")
+	finalStatus := waitForJobCompletion(t, helper, jobID, 15*time.Minute)
 	t.Logf("Job completed with status: %s", finalStatus)
 
 	// Step 4: Assert NO error logs in job execution
@@ -174,9 +174,9 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	require.NotEmpty(t, content, "Document content should not be empty")
 	t.Logf("Document content length: %d characters", len(content))
 
-	// Step 7: Save test output to results directory for verification
-	t.Log("Step 7: Saving test output to results directory")
-	saveTestOutput(t, tc.name, jobID, content)
+	// Step 7: Save test output and logs to results directory for verification
+	t.Log("Step 7: Saving test output and logs to results directory")
+	saveTestOutput(t, tc.name, jobID, content, env.GetResultsDir())
 
 	// Validate email content
 	validateEmailContent(t, content, tc.expectedTickers)
@@ -493,28 +493,68 @@ func validateMacroDataFetched(t *testing.T, helper *common.HTTPTestHelper) {
 	t.Logf("PASS: Found %d macro data documents", len(docs))
 }
 
-// saveTestOutput saves the generated output to the results directory for verification.
+// saveTestOutput saves the generated output and logs to BOTH locations:
+// 1. Structured: test/results/api/orchestrator-YYYYMMDD-HHMMSS/TestName/output.md + service.log + test.log
+// 2. Flat: test/api/results/output-TIMESTAMP-TestName-jobID.md
 // This allows manual inspection of test outputs and historical tracking of analysis quality.
-func saveTestOutput(t *testing.T, testName string, jobID string, content string) {
-	// Create results directory if it doesn't exist
-	resultsDir := filepath.Join("results")
-	if err := os.MkdirAll(resultsDir, 0755); err != nil {
-		t.Logf("Warning: Failed to create results directory: %v", err)
-		return
+func saveTestOutput(t *testing.T, testName string, jobID string, content string, envResultsDir string) {
+	timestamp := time.Now().Format("20060102-150405")
+	fullTestName := t.Name() // Gets full path like "TestOrchestratorIntegration_FullWorkflow/SingleStock"
+
+	// 1. Save to structured directory: test/results/api/orchestrator-TIMESTAMP/TestName/output.md
+	structuredDir := filepath.Join("..", "results", "api", fmt.Sprintf("orchestrator-%s", timestamp), fullTestName)
+	if err := os.MkdirAll(structuredDir, 0755); err != nil {
+		t.Logf("Warning: Failed to create structured results directory: %v", err)
+	} else {
+		// Save output.md
+		structuredPath := filepath.Join(structuredDir, "output.md")
+		if err := os.WriteFile(structuredPath, []byte(content), 0644); err != nil {
+			t.Logf("Warning: Failed to write structured output file: %v", err)
+		} else {
+			t.Logf("Saved structured output to: %s (%d bytes)", structuredPath, len(content))
+		}
+
+		// Copy service.log from environment results directory
+		serviceLogSrc := filepath.Join(envResultsDir, "service.log")
+		if serviceLogContent, err := os.ReadFile(serviceLogSrc); err == nil {
+			serviceLogDst := filepath.Join(structuredDir, "service.log")
+			if err := os.WriteFile(serviceLogDst, serviceLogContent, 0644); err != nil {
+				t.Logf("Warning: Failed to copy service.log: %v", err)
+			} else {
+				t.Logf("Copied service.log to: %s (%d bytes)", serviceLogDst, len(serviceLogContent))
+			}
+		} else {
+			t.Logf("Warning: Could not read service.log from %s: %v", serviceLogSrc, err)
+		}
+
+		// Copy test.log from environment results directory
+		testLogSrc := filepath.Join(envResultsDir, "test.log")
+		if testLogContent, err := os.ReadFile(testLogSrc); err == nil {
+			testLogDst := filepath.Join(structuredDir, "test.log")
+			if err := os.WriteFile(testLogDst, testLogContent, 0644); err != nil {
+				t.Logf("Warning: Failed to copy test.log: %v", err)
+			} else {
+				t.Logf("Copied test.log to: %s (%d bytes)", testLogDst, len(testLogContent))
+			}
+		} else {
+			t.Logf("Warning: Could not read test.log from %s: %v", testLogSrc, err)
+		}
 	}
 
-	// Create filename with timestamp, test name, and job ID
-	timestamp := time.Now().Format("2006-01-02T15-04-05")
+	// 2. Save to flat directory: test/api/results/output-TIMESTAMP-TestName-jobID.md
+	flatDir := filepath.Join("results")
+	if err := os.MkdirAll(flatDir, 0755); err != nil {
+		t.Logf("Warning: Failed to create flat results directory: %v", err)
+		return
+	}
 	safeTestName := strings.ReplaceAll(testName, "/", "-")
 	safeTestName = strings.ReplaceAll(safeTestName, " ", "-")
-	filename := fmt.Sprintf("output-%s-%s-%s.md", timestamp, safeTestName, jobID[:8])
-	outputPath := filepath.Join(resultsDir, filename)
-
-	// Write content to file
-	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
-		t.Logf("Warning: Failed to write output file: %v", err)
+	flatTimestamp := time.Now().Format("2006-01-02T15-04-05")
+	flatFilename := fmt.Sprintf("output-%s-%s-%s.md", flatTimestamp, safeTestName, jobID[:8])
+	flatPath := filepath.Join(flatDir, flatFilename)
+	if err := os.WriteFile(flatPath, []byte(content), 0644); err != nil {
+		t.Logf("Warning: Failed to write flat output file: %v", err)
 		return
 	}
-
-	t.Logf("Saved test output to: %s (%d bytes)", outputPath, len(content))
+	t.Logf("Saved flat output to: %s (%d bytes)", flatPath, len(content))
 }

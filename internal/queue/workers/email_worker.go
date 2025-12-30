@@ -249,21 +249,6 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Str("to", to).
 		Msg("Email sent successfully")
 
-	// Save email content to directory if save_to_dir is configured
-	// This creates a permanent archive of all sent emails for audit and debugging
-	if saveDir, ok := stepConfig["save_to_dir"].(string); ok && saveDir != "" {
-		if err := w.saveEmailToDir(saveDir, stepID, subject, body, htmlBody, to, &jobDef); err != nil {
-			w.logger.Warn().Err(err).Str("save_dir", saveDir).Msg("Failed to save email to directory")
-			if logErr := w.jobMgr.AddJobLog(ctx, stepID, "warning", fmt.Sprintf("Failed to save email archive: %v", err)); logErr != nil {
-				w.logger.Warn().Err(logErr).Msg("Failed to add job log")
-			}
-		} else {
-			if logErr := w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Email archived to %s", saveDir)); logErr != nil {
-				w.logger.Warn().Err(logErr).Msg("Failed to add job log")
-			}
-		}
-	}
-
 	return stepID, nil
 }
 
