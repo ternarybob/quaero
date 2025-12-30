@@ -824,6 +824,28 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job templates copied from %s to: %s\n", jobTemplatesSourcePath, jobTemplatesDestPath)
 
+	// Copy schemas directory to bin/schemas (for external JSON schemas)
+	schemasSourcePath, err := filepath.Abs("../config/schemas")
+	if err != nil {
+		return fmt.Errorf("failed to resolve schemas source path: %w", err)
+	}
+
+	schemasDestPath := filepath.Join(binDir, "schemas")
+
+	// Remove existing schemas directory if it exists
+	if _, err := os.Stat(schemasDestPath); err == nil {
+		if err := os.RemoveAll(schemasDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing schemas directory: %w", err)
+		}
+	}
+
+	// Copy schemas directory
+	if err := env.copyDir(schemasSourcePath, schemasDestPath); err != nil {
+		return fmt.Errorf("failed to copy schemas directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Schemas copied from %s to: %s\n", schemasSourcePath, schemasDestPath)
+
 	// Copy variables directory to bin/variables (for variables and key/value storage)
 	variablesSourcePath, err := filepath.Abs("../config/variables")
 	if err != nil {
