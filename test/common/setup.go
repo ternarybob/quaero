@@ -858,31 +858,24 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Schemas copied from %s to: %s\n", schemasSourcePath, schemasDestPath)
 
-	// Copy variables directory to bin/variables (for variables and key/value storage)
-	variablesSourcePath, err := filepath.Abs("../config/variables")
+	// Copy variables.toml file to bin/variables.toml (for variables and key/value storage)
+	variablesSourcePath, err := filepath.Abs("../config/variables.toml")
 	if err != nil {
 		return fmt.Errorf("failed to resolve variables source path: %w", err)
 	}
 
-	variablesDestPath := filepath.Join(binDir, "variables")
+	variablesDestPath := filepath.Join(binDir, "variables.toml")
 
-	// Remove existing variables directory if it exists
-	if _, err := os.Stat(variablesDestPath); err == nil {
-		if err := os.RemoveAll(variablesDestPath); err != nil {
-			return fmt.Errorf("failed to remove existing variables directory: %w", err)
-		}
+	// Copy variables.toml file
+	if err := env.copyFile(variablesSourcePath, variablesDestPath); err != nil {
+		return fmt.Errorf("failed to copy variables.toml: %w", err)
 	}
 
-	// Copy variables directory
-	if err := env.copyDir(variablesSourcePath, variablesDestPath); err != nil {
-		return fmt.Errorf("failed to copy variables directory: %w", err)
-	}
-
-	fmt.Fprintf(env.LogFile, "Variables directory copied from %s to: %s\n", variablesSourcePath, variablesDestPath)
+	fmt.Fprintf(env.LogFile, "Variables copied from %s to: %s\n", variablesSourcePath, variablesDestPath)
 
 	// Inject real API keys from environment into variables.toml
 	// This ensures tests run with actual keys without committing them to git
-	variablesFile := filepath.Join(variablesDestPath, "variables.toml")
+	variablesFile := variablesDestPath
 
 	type VariableConfig struct {
 		Value       string `toml:"value"`
@@ -990,28 +983,33 @@ func (env *TestEnvironment) buildService() error {
 		return fmt.Errorf("failed to marshal variables config: %w", err)
 	}
 
-	// Copy connectors directory to bin/connectors
-	// Source is test/config/connectors
-	connectorsSourcePath, err := filepath.Abs("../config/connectors")
+	// Copy connectors.toml file to bin/connectors.toml
+	connectorsSourcePath, err := filepath.Abs("../config/connectors.toml")
 	if err != nil {
 		return fmt.Errorf("failed to resolve connectors source path: %w", err)
 	}
 
-	// Destination is bin/connectors inside the build output directory
-	connectorsDestPath := filepath.Join(binDir, "connectors")
+	connectorsDestPath := filepath.Join(binDir, "connectors.toml")
 
-	// Remove existing connectors directory if it exists
-	if _, err := os.Stat(connectorsDestPath); err == nil {
-		if err := os.RemoveAll(connectorsDestPath); err != nil {
-			return fmt.Errorf("failed to remove existing connectors directory: %w", err)
-		}
+	// Copy connectors.toml file
+	if err := env.copyFile(connectorsSourcePath, connectorsDestPath); err != nil {
+		return fmt.Errorf("failed to copy connectors.toml: %w", err)
+	}
+	fmt.Fprintf(env.LogFile, "Connectors copied from %s to: %s\n", connectorsSourcePath, connectorsDestPath)
+
+	// Copy email.toml file to bin/email.toml
+	emailSourcePath, err := filepath.Abs("../config/email.toml")
+	if err != nil {
+		return fmt.Errorf("failed to resolve email source path: %w", err)
 	}
 
-	// Copy connectors directory
-	if err := env.copyDir(connectorsSourcePath, connectorsDestPath); err != nil {
-		return fmt.Errorf("failed to copy connectors directory: %w", err)
+	emailDestPath := filepath.Join(binDir, "email.toml")
+
+	// Copy email.toml file
+	if err := env.copyFile(emailSourcePath, emailDestPath); err != nil {
+		return fmt.Errorf("failed to copy email.toml: %w", err)
 	}
-	fmt.Fprintf(env.LogFile, "Connectors directory copied from %s to: %s\n", connectorsSourcePath, connectorsDestPath)
+	fmt.Fprintf(env.LogFile, "Email config copied from %s to: %s\n", emailSourcePath, emailDestPath)
 
 	return nil
 }
@@ -1273,25 +1271,15 @@ func (env *TestEnvironment) Cleanup() {
 		env.LogFile.Close()
 	}
 
-	// Copy test.log content to output.md before closing
-	if env.TestLog != nil && env.OutputFile != nil {
-		// Flush and close TestLog first
+	// Close test.log and output.md files
+	// NOTE: output.md should be written by tests explicitly via saveWorkerOutput()
+	// test.log contains execution logs and should NOT be copied to output.md
+	if env.TestLog != nil {
 		env.TestLog.Sync()
 		env.TestLog.Close()
-
-		// Read test.log and write to output.md
-		testLogPath := filepath.Join(env.ResultsDir, "test.log")
-		if content, err := os.ReadFile(testLogPath); err == nil {
-			env.OutputFile.Write(content)
-		}
+	}
+	if env.OutputFile != nil {
 		env.OutputFile.Close()
-	} else {
-		if env.TestLog != nil {
-			env.TestLog.Close()
-		}
-		if env.OutputFile != nil {
-			env.OutputFile.Close()
-		}
 	}
 }
 

@@ -8,12 +8,31 @@ This directory contains configuration files for automated tests.
 test/config/
 ├── setup.toml                    # Test harness config (build, service, output)
 ├── test-quaero.toml              # Base service config for all tests
+├── connectors.toml               # Connector configs (copied to bin/connectors.toml)
+├── email.toml                    # Email/SMTP config (copied to bin/email.toml)
+├── variables.toml                # Variables/API keys (copied to bin/variables.toml)
 ├── job-definitions/              # Job definitions (copied to bin/job-definitions/)
 │   ├── news-crawler.toml         # Example news crawler job
 │   ├── my-custom-crawler.toml    # Example custom crawler job
 │   └── test-agent-job.toml       # Test agent job (keyword extraction)
+├── job-templates/                # Job templates (copied to bin/job-templates/)
+├── schemas/                      # JSON schemas (copied to bin/schemas/)
 └── README.md                     # This file
 ```
+
+## Files Copied to bin/
+
+During `SetupTestEnvironment()`, the following files are copied to the bin directory:
+
+| Source | Destination | Description |
+|--------|-------------|-------------|
+| `test-quaero.toml` | `bin/quaero.toml` | Service configuration (merged with overrides) |
+| `connectors.toml` | `bin/connectors.toml` | Connector configurations |
+| `email.toml` | `bin/email.toml` | Email/SMTP settings |
+| `variables.toml` | `bin/variables.toml` | Variables and API keys (with .env injection) |
+| `job-definitions/` | `bin/job-definitions/` | Job definition files |
+| `job-templates/` | `bin/job-templates/` | Job template files |
+| `schemas/` | `bin/schemas/` | JSON schema files |
 
 ## Configuration Approach
 

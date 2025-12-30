@@ -92,10 +92,21 @@ func TestWorkerASXStockData(t *testing.T) {
 	// Wait for completion
 	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
 
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
 	// Verify completion (may fail if market is closed or API unavailable)
 	if finalStatus == "completed" {
 		// Verify document was created with expected structure
 		validateASXStockDataOutput(t, helper, "BHP")
+
+		// Save worker output (content and JSON metadata)
+		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 1); err != nil {
+			t.Logf("Warning: failed to save worker output: %v", err)
+		}
+
 		t.Log("PASS: asx_stock_data worker produced consistent output")
 	} else {
 		t.Logf("INFO: Job ended with status %s (may be expected outside market hours)", finalStatus)
@@ -164,8 +175,19 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 
 	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
 
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
 	if finalStatus == "completed" {
 		validateASXAnnouncementsOutput(t, helper, "BHP")
+
+		// Save worker output (content and JSON metadata)
+		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement", "bhp"}, 1); err != nil {
+			t.Logf("Warning: failed to save worker output: %v", err)
+		}
+
 		t.Log("PASS: asx_announcements worker produced consistent output")
 	} else {
 		t.Logf("INFO: Job ended with status %s", finalStatus)
@@ -296,10 +318,10 @@ func TestWorkerSummaryWithSchema(t *testing.T) {
 			},
 		}
 
-		// Save job config on first run
+		// Save job definition on first run
 		if runNumber == 1 {
-			if err := saveJobConfig(t, env, summaryBody); err != nil {
-				t.Logf("Warning: failed to save job config: %v", err)
+			if err := saveJobDefinition(t, env, summaryBody); err != nil {
+				t.Logf("Warning: failed to save job definition: %v", err)
 			}
 		}
 
@@ -432,8 +454,19 @@ func TestWorkerWebSearch(t *testing.T) {
 
 	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
 
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
 	if finalStatus == "completed" {
 		validateWebSearchOutput(t, helper)
+
+		// Save worker output (content and JSON metadata)
+		if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 1); err != nil {
+			t.Logf("Warning: failed to save worker output: %v", err)
+		}
+
 		t.Log("PASS: web_search worker produced output")
 	} else {
 		t.Logf("INFO: Job ended with status %s", finalStatus)
@@ -665,29 +698,33 @@ func validateWebSearchOutput(t *testing.T, helper *common.HTTPTestHelper) {
 // These helpers save job configuration and worker outputs to the results directory
 // for analysis of schema enforcement and output consistency.
 
-// saveJobConfig saves the job configuration to the results directory as job_config.json
-func saveJobConfig(t *testing.T, env *common.TestEnvironment, config map[string]interface{}) error {
+// saveJobDefinition saves the job definition to the results directory as job_definition.json
+func saveJobDefinition(t *testing.T, env *common.TestEnvironment, definition map[string]interface{}) error {
 	resultsDir := env.GetResultsDir()
 	if resultsDir == "" {
 		return fmt.Errorf("results directory not available")
 	}
 
-	configPath := filepath.Join(resultsDir, "job_config.json")
-	data, err := json.MarshalIndent(config, "", "  ")
+	defPath := filepath.Join(resultsDir, "job_definition.json")
+	data, err := json.MarshalIndent(definition, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal job config: %w", err)
+		return fmt.Errorf("failed to marshal job definition: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write job config to %s: %w", configPath, err)
+	if err := os.WriteFile(defPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write job definition to %s: %w", defPath, err)
 	}
 
-	t.Logf("Saved job config to: %s", configPath)
+	t.Logf("Saved job definition to: %s", defPath)
 	return nil
 }
 
-// saveWorkerOutput saves the worker output (document content) to numbered files
-// Returns paths to the saved files (jsonPath may be empty if content is not JSON)
+// saveWorkerOutput saves the worker output (document content) to the results directory.
+// It saves:
+// - output.md: Primary output file with document content_markdown
+// - output.json: Document metadata/JSON schema data
+// - output_N.md, output_N.json: Numbered files for multi-run comparison
+// Returns paths to the saved files (jsonPath may be empty if no metadata)
 func saveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper,
 	tags []string, runNumber int) (jsonPath, mdPath string, err error) {
 
@@ -730,23 +767,54 @@ func saveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 	doc := result.Documents[0]
 	content := doc.ContentMarkdown
 
-	// Save markdown content
+	// Save to output.md as the primary output file (always overwrite with latest)
+	// This contains the actual worker-generated content, not logs
+	primaryOutputPath := filepath.Join(resultsDir, "output.md")
+	if err := os.WriteFile(primaryOutputPath, []byte(content), 0644); err != nil {
+		t.Logf("Warning: failed to write primary output.md: %v", err)
+	} else {
+		t.Logf("Saved worker output to: %s", primaryOutputPath)
+	}
+
+	// Save numbered markdown content (for multi-run comparison)
 	mdPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber))
 	if err := os.WriteFile(mdPath, []byte(content), 0644); err != nil {
 		return "", "", fmt.Errorf("failed to write markdown to %s: %w", mdPath, err)
 	}
-	t.Logf("Saved markdown output to: %s", mdPath)
+	t.Logf("Saved numbered output to: %s", mdPath)
 
-	// Try to extract/save JSON content if present
-	// The content might be markdown that contains JSON or raw JSON
-	jsonContent := extractJSONFromContent(content)
-	if jsonContent != "" {
-		jsonPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
-		if err := os.WriteFile(jsonPath, []byte(jsonContent), 0644); err != nil {
-			t.Logf("Warning: failed to write JSON to %s: %v", jsonPath, err)
-			jsonPath = "" // Clear path if write failed
-		} else {
-			t.Logf("Saved JSON output to: %s", jsonPath)
+	// Save document metadata to output.json (schema data / structured data)
+	if doc.Metadata != nil && len(doc.Metadata) > 0 {
+		metadataJSON, err := json.MarshalIndent(doc.Metadata, "", "  ")
+		if err == nil {
+			// Save to primary output.json
+			primaryJSONPath := filepath.Join(resultsDir, "output.json")
+			if err := os.WriteFile(primaryJSONPath, metadataJSON, 0644); err != nil {
+				t.Logf("Warning: failed to write output.json: %v", err)
+			} else {
+				t.Logf("Saved document metadata to: %s", primaryJSONPath)
+			}
+
+			// Save numbered JSON for multi-run comparison
+			jsonPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+			if err := os.WriteFile(jsonPath, metadataJSON, 0644); err != nil {
+				t.Logf("Warning: failed to write numbered JSON: %v", err)
+				jsonPath = ""
+			} else {
+				t.Logf("Saved numbered metadata to: %s", jsonPath)
+			}
+		}
+	} else {
+		// Try to extract JSON content from the markdown itself
+		jsonContent := extractJSONFromContent(content)
+		if jsonContent != "" {
+			jsonPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+			if err := os.WriteFile(jsonPath, []byte(jsonContent), 0644); err != nil {
+				t.Logf("Warning: failed to write JSON to %s: %v", jsonPath, err)
+				jsonPath = ""
+			} else {
+				t.Logf("Saved extracted JSON to: %s", jsonPath)
+			}
 		}
 	}
 

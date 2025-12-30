@@ -231,12 +231,31 @@ Test results are saved to `test/results/{timestamp}/`:
 ```
 test/results/
 └── 2024-12-30-1045/
-    ├── test.log           # All test logs
+    ├── test.log              # All test logs
+    ├── service.log           # Service output logs
+    ├── output.md             # Worker-generated content (document content_markdown)
+    ├── job_definition.json   # Job definition used (for reproducibility)
+    ├── output_1.md           # Numbered outputs (for multi-run comparison)
+    ├── output_1.json         # Extracted JSON from output (if applicable)
     ├── 01_initial_state.png
     ├── 02_after_navigation.png
     ├── 03_final_state.png
     └── captured_data.json
 ```
+
+### Worker Test Output Files
+
+For tests that execute workers (like `TestWorkerASXStockData`, `TestWorkerSummaryWithSchema`):
+
+| File | Description |
+|------|-------------|
+| `output.md` | Primary output - actual worker-generated content (document content_markdown) |
+| `output.json` | Document metadata - structured data/schema fields from the document |
+| `job_definition.json` | The job definition used to run the test |
+| `output_N.md` | Numbered outputs for multi-run comparison |
+| `output_N.json` | Numbered metadata for multi-run comparison |
+
+**Important**: `output.md` contains the actual worker output (document content), NOT test logs. Test logs go to `test.log`.
 
 ## Anti-Patterns (Will Be Rejected)
 
