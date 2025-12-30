@@ -386,7 +386,99 @@ func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]in
 		Str("schema_path", schemaPath).
 		Msg("Loaded external JSON schema")
 
-	return schema, nil
+	// Resolve any $ref references in the schema
+	resolvedSchema := w.resolveSchemaRefs(schema, schemasDir)
+
+	return resolvedSchema, nil
+}
+
+// resolveSchemaRefs recursively resolves $ref references in a JSON schema.
+// This allows schema files to reference other schema files (e.g., stock-report.schema.json
+// referencing stock-analysis.schema.json) and have them inlined at load time.
+func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, schemasDir string) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+
+	for key, value := range schema {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Check if this is a $ref that needs resolution
+			if refPath, hasRef := v["$ref"].(string); hasRef && strings.HasSuffix(refPath, ".json") {
+				// Load the referenced schema file
+				refSchema := w.loadRefSchema(refPath, schemasDir)
+				if refSchema != nil {
+					// Copy all properties from the referenced schema, resolving nested refs
+					resolvedRef := w.resolveSchemaRefs(refSchema, schemasDir)
+					// Remove metadata fields for cleaner output
+					delete(resolvedRef, "$id")
+					delete(resolvedRef, "$schema")
+					result[key] = resolvedRef
+				} else {
+					// Could not resolve, keep the original
+					result[key] = v
+				}
+			} else {
+				// Recursively resolve nested objects
+				result[key] = w.resolveSchemaRefs(v, schemasDir)
+			}
+		case []interface{}:
+			// Recursively resolve array items
+			resolvedArray := make([]interface{}, len(v))
+			for i, item := range v {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					resolvedArray[i] = w.resolveSchemaRefs(itemMap, schemasDir)
+				} else {
+					resolvedArray[i] = item
+				}
+			}
+			result[key] = resolvedArray
+		default:
+			// Copy primitive values as-is
+			result[key] = value
+		}
+	}
+
+	return result
+}
+
+// loadRefSchema loads a referenced schema file from the schemas directory.
+func (w *OrchestratorWorker) loadRefSchema(refPath, schemasDir string) map[string]interface{} {
+	schemaPath := filepath.Join(schemasDir, refPath)
+
+	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
+		w.logger.Warn().
+			Str("ref_path", refPath).
+			Msg("Could not find referenced schema file")
+		return nil
+	}
+
+	content, err := os.ReadFile(schemaPath)
+	if err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("ref_path", refPath).
+			Msg("Failed to read referenced schema file")
+		return nil
+	}
+
+	var refSchema map[string]interface{}
+	if err := json.Unmarshal(content, &refSchema); err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("ref_path", refPath).
+			Msg("Failed to parse referenced schema JSON")
+		return nil
+	}
+
+	w.logger.Debug().
+		Str("ref_path", refPath).
+		Str("schema_path", schemaPath).
+		Msg("Resolved schema $ref")
+
+	return refSchema
 }
 
 // loadGoalTemplate loads a goal template from the templates directory.

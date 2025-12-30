@@ -113,7 +113,122 @@ func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interfa
 		Str("schema_path", schemaPath).
 		Msg("Loaded external JSON schema")
 
-	return schema, nil
+	// Resolve any $ref references in the schema
+	// This ensures the LLM receives a complete schema with all field definitions
+	resolvedSchema := w.resolveSchemaRefs(schema, schemaDirs)
+
+	return resolvedSchema, nil
+}
+
+// resolveSchemaRefs recursively resolves $ref references in a JSON schema.
+// This allows schema files to reference other schema files (e.g., stock-report.schema.json
+// referencing stock-analysis.schema.json) and have them inlined at load time.
+// This ensures the LLM receives a complete schema with all field definitions.
+func (w *SummaryWorker) resolveSchemaRefs(schema map[string]interface{}, schemaDirs []string) map[string]interface{} {
+	if schema == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+
+	for key, value := range schema {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Check if this is a $ref that needs resolution
+			if refPath, hasRef := v["$ref"].(string); hasRef && strings.HasSuffix(refPath, ".json") {
+				// Load the referenced schema file
+				refSchema := w.loadRefSchema(refPath, schemaDirs)
+				if refSchema != nil {
+					// Merge the referenced schema, excluding metadata fields
+					for refKey, refValue := range refSchema {
+						if refKey != "$id" && refKey != "$schema" && refKey != "title" && refKey != "description" {
+							result[key] = w.resolveSchemaRefs(map[string]interface{}{refKey: refValue}, schemaDirs)
+						}
+					}
+					// If we got a fully resolved schema, use it directly
+					if len(refSchema) > 0 {
+						// Copy all properties from the referenced schema
+						resolvedRef := w.resolveSchemaRefs(refSchema, schemaDirs)
+						// Remove metadata fields from the resolved schema for cleaner output
+						delete(resolvedRef, "$id")
+						delete(resolvedRef, "$schema")
+						result[key] = resolvedRef
+					}
+				} else {
+					// Could not resolve, keep the original
+					result[key] = v
+				}
+			} else {
+				// Recursively resolve nested objects
+				result[key] = w.resolveSchemaRefs(v, schemaDirs)
+			}
+		case []interface{}:
+			// Recursively resolve array items
+			resolvedArray := make([]interface{}, len(v))
+			for i, item := range v {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					resolvedArray[i] = w.resolveSchemaRefs(itemMap, schemaDirs)
+				} else {
+					resolvedArray[i] = item
+				}
+			}
+			result[key] = resolvedArray
+		default:
+			// Copy primitive values as-is
+			result[key] = value
+		}
+	}
+
+	return result
+}
+
+// loadRefSchema loads a referenced schema file from the schema directories.
+// Returns nil if the file cannot be found or parsed.
+func (w *SummaryWorker) loadRefSchema(refPath string, schemaDirs []string) map[string]interface{} {
+	// Try to find the referenced schema file
+	var schemaPath string
+	var found bool
+	for _, dir := range schemaDirs {
+		path := fmt.Sprintf("%s/%s", dir, refPath)
+		if _, err := os.Stat(path); err == nil {
+			schemaPath = path
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		w.logger.Warn().
+			Str("ref_path", refPath).
+			Msg("Could not find referenced schema file")
+		return nil
+	}
+
+	// Read and parse the referenced schema
+	content, err := os.ReadFile(schemaPath)
+	if err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("ref_path", refPath).
+			Msg("Failed to read referenced schema file")
+		return nil
+	}
+
+	var refSchema map[string]interface{}
+	if err := json.Unmarshal(content, &refSchema); err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("ref_path", refPath).
+			Msg("Failed to parse referenced schema JSON")
+		return nil
+	}
+
+	w.logger.Debug().
+		Str("ref_path", refPath).
+		Str("schema_path", schemaPath).
+		Msg("Resolved schema $ref")
+
+	return refSchema
 }
 
 // Init performs the initialization/setup phase for a summary step.
