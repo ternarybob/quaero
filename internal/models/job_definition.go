@@ -34,18 +34,18 @@ type JobDefinitionType string
 
 // JobDefinitionType constants
 const (
-	JobDefinitionTypeCrawler         JobDefinitionType = "crawler"
-	JobDefinitionTypeSummarizer      JobDefinitionType = "summarizer"
-	JobDefinitionTypeCustom          JobDefinitionType = "custom"
-	JobDefinitionTypePlaces          JobDefinitionType = "places"
-	JobDefinitionTypeAgent           JobDefinitionType = "agent"            // Agent-powered document processing jobs
-	JobDefinitionTypeFetch           JobDefinitionType = "fetch"            // API-based data collection with authentication (GitHub, etc.)
-	JobDefinitionTypeWebSearch       JobDefinitionType = "web_search"       // Gemini-powered web search with grounding
-	JobDefinitionTypeLocalDir        JobDefinitionType = "local_dir"        // Local filesystem directory indexing
-	JobDefinitionTypeCodeMap         JobDefinitionType = "code_map"         // Hierarchical code structure analysis
-	JobDefinitionTypeJobTemplate     JobDefinitionType = "job_template"     // Template orchestration - executes job templates with variable substitution
-	JobDefinitionTypeOrchestrator    JobDefinitionType = "orchestrator"     // AI-powered cognitive orchestration with dynamic planning
-	JobDefinitionTypeASXStockData    JobDefinitionType = "asx_stock_data"   // ASX stock data fetching
+	JobDefinitionTypeCrawler          JobDefinitionType = "crawler"
+	JobDefinitionTypeSummarizer       JobDefinitionType = "summarizer"
+	JobDefinitionTypeCustom           JobDefinitionType = "custom"
+	JobDefinitionTypePlaces           JobDefinitionType = "places"
+	JobDefinitionTypeAgent            JobDefinitionType = "agent"             // Agent-powered document processing jobs
+	JobDefinitionTypeFetch            JobDefinitionType = "fetch"             // API-based data collection with authentication (GitHub, etc.)
+	JobDefinitionTypeWebSearch        JobDefinitionType = "web_search"        // Gemini-powered web search with grounding
+	JobDefinitionTypeLocalDir         JobDefinitionType = "local_dir"         // Local filesystem directory indexing
+	JobDefinitionTypeCodeMap          JobDefinitionType = "code_map"          // Hierarchical code structure analysis
+	JobDefinitionTypeJobTemplate      JobDefinitionType = "job_template"      // Template orchestration - executes job templates with variable substitution
+	JobDefinitionTypeOrchestrator     JobDefinitionType = "orchestrator"      // AI-powered cognitive orchestration with dynamic planning
+	JobDefinitionTypeASXStockData     JobDefinitionType = "asx_stock_data"    // ASX stock data fetching
 	JobDefinitionTypeASXAnnouncements JobDefinitionType = "asx_announcements" // ASX company announcements fetching
 )
 

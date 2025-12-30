@@ -287,12 +287,12 @@ func validateSchemaCompliance(t *testing.T, content string) {
 	// 2. Check for quality rating (A/B/C/D/F) from stock-analysis.schema.json
 	// quality_rating enum: A, B, C, D, F
 	qualityPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)quality[:\s]+[ABCDF]\b`),                   // Quality: A, Quality B
-		regexp.MustCompile(`(?i)quality\s+rating[:\s]+[ABCDF]\b`),          // Quality Rating: A
-		regexp.MustCompile(`(?i)\bquality\s+[ABCDF]\b`),                    // Quality A
-		regexp.MustCompile(`(?i)\b[ABCDF]\s+(?:quality|rated|rating)\b`),   // A quality, A rated
-		regexp.MustCompile(`(?i)grade[:\s]+[ABCDF]\b`),                     // Grade: A
-		regexp.MustCompile(`\|\s*[ABCDF]\s*\|`),                            // | A | (table format)
+		regexp.MustCompile(`(?i)quality[:\s]+[ABCDF]\b`),                 // Quality: A, Quality B
+		regexp.MustCompile(`(?i)quality\s+rating[:\s]+[ABCDF]\b`),        // Quality Rating: A
+		regexp.MustCompile(`(?i)\bquality\s+[ABCDF]\b`),                  // Quality A
+		regexp.MustCompile(`(?i)\b[ABCDF]\s+(?:quality|rated|rating)\b`), // A quality, A rated
+		regexp.MustCompile(`(?i)grade[:\s]+[ABCDF]\b`),                   // Grade: A
+		regexp.MustCompile(`\|\s*[ABCDF]\s*\|`),                          // | A | (table format)
 	}
 
 	foundQuality := false

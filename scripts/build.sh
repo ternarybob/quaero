@@ -370,6 +370,12 @@ deploy_files() {
         done
     fi
 
+    # Deploy schemas from common - always override (same as job-templates)
+    if [ -d "$common_config/schemas" ]; then
+        rm -rf "$bin_dir/schemas"
+        cp -r "$common_config/schemas" "$bin_dir/schemas"
+    fi
+
     # Deploy connectors.toml from common, then local override (only if not exists in bin)
     if [ ! -f "$bin_dir/connectors.toml" ]; then
         if [ -f "$local_config/connectors.toml" ]; then

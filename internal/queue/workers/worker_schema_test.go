@@ -259,9 +259,9 @@ func TestASXStockDataWorker_OutputStructure(t *testing.T) {
 	// This is a structural test - the worker should always produce these sections
 
 	expectedSections := []string{
-		"Current Price",     // Always present
-		"Performance",       // Period returns
-		"Technical",         // SMA, RSI indicators
+		"Current Price", // Always present
+		"Performance",   // Period returns
+		"Technical",     // SMA, RSI indicators
 	}
 
 	// The worker formats StockData into markdown with these sections

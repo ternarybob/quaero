@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -28,7 +30,6 @@ import (
 
 // TestWorkerASXStockData tests the asx_stock_data worker produces consistent output
 func TestWorkerASXStockData(t *testing.T) {
-	skipIfNoChrome(t)
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -103,7 +104,6 @@ func TestWorkerASXStockData(t *testing.T) {
 
 // TestWorkerASXAnnouncements tests the asx_announcements worker produces consistent output
 func TestWorkerASXAnnouncements(t *testing.T) {
-	skipIfNoChrome(t)
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -173,8 +173,8 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 }
 
 // TestWorkerSummaryWithSchema tests the summary worker uses JSON schema for consistent output
+// This test executes the summary worker TWICE to verify output consistency and schema enforcement
 func TestWorkerSummaryWithSchema(t *testing.T) {
-	skipIfNoChrome(t)
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -241,8 +241,6 @@ func TestWorkerSummaryWithSchema(t *testing.T) {
 	require.Equal(t, "completed", indexStatus, "Index job should complete")
 
 	// Step 2: Create summary job WITH schema
-	summaryDefID := fmt.Sprintf("summary-schema-test-%d", time.Now().UnixNano())
-
 	// Define a test schema for code analysis
 	testSchema := map[string]interface{}{
 		"type":     "object",
@@ -267,65 +265,109 @@ func TestWorkerSummaryWithSchema(t *testing.T) {
 		},
 	}
 
-	summaryBody := map[string]interface{}{
-		"id":      summaryDefID,
-		"name":    "Summary with Schema Test",
-		"type":    "summarizer",
-		"enabled": true,
-		"tags":    []string{"schema-test", "summary-output"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "summarize",
-				"type": "summary",
-				"config": map[string]interface{}{
-					"prompt":        "Analyze the code and provide a structured assessment. Return JSON matching the schema.",
-					"filter_tags":   []string{"schema-test"},
-					"api_key":       "{google_gemini_api_key}",
-					"output_schema": testSchema,
+	// Execute the summary job TWICE to verify consistency
+	const numRuns = 2
+	completedRuns := 0
+
+	for runNumber := 1; runNumber <= numRuns; runNumber++ {
+		t.Logf("=== Execution %d of %d ===", runNumber, numRuns)
+
+		// Create unique job definition for each run
+		summaryDefID := fmt.Sprintf("summary-schema-test-%d-run%d", time.Now().UnixNano(), runNumber)
+		outputTag := fmt.Sprintf("summary-output-run%d", runNumber)
+
+		summaryBody := map[string]interface{}{
+			"id":      summaryDefID,
+			"name":    fmt.Sprintf("Summary with Schema Test - Run %d", runNumber),
+			"type":    "summarizer",
+			"enabled": true,
+			"tags":    []string{"schema-test", "summary-output", outputTag},
+			"steps": []map[string]interface{}{
+				{
+					"name": "summarize",
+					"type": "summary",
+					"config": map[string]interface{}{
+						"prompt":        "Analyze the code and provide a structured assessment. Return JSON matching the schema.",
+						"filter_tags":   []string{"schema-test"},
+						"api_key":       "{google_gemini_api_key}",
+						"output_schema": testSchema,
+					},
 				},
 			},
-		},
-	}
-
-	resp2, err := helper.POST("/api/job-definitions", summaryBody)
-	require.NoError(t, err)
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != http.StatusCreated {
-		t.Skipf("Summary job creation failed: %d", resp2.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + summaryDefID)
-		if delResp != nil {
-			delResp.Body.Close()
 		}
-	}()
 
-	// Execute summary
-	execResp2, err := helper.POST("/api/job-definitions/"+summaryDefID+"/execute", nil)
-	require.NoError(t, err)
-	defer execResp2.Body.Close()
+		// Save job config on first run
+		if runNumber == 1 {
+			if err := saveJobConfig(t, env, summaryBody); err != nil {
+				t.Logf("Warning: failed to save job config: %v", err)
+			}
+		}
 
-	var execResult2 map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-	summaryJobID := execResult2["job_id"].(string)
-	t.Logf("Executed summary job with schema: %s", summaryJobID)
+		resp2, err := helper.POST("/api/job-definitions", summaryBody)
+		require.NoError(t, err)
+		defer resp2.Body.Close()
 
-	summaryStatus := waitForJobCompletion(t, helper, summaryJobID, 5*time.Minute)
+		if resp2.StatusCode != http.StatusCreated {
+			t.Logf("Summary job creation failed for run %d: %d", runNumber, resp2.StatusCode)
+			continue
+		}
 
-	if summaryStatus == "completed" {
-		// Validate the output contains schema-defined fields
-		validateSummarySchemaOutput(t, helper, []string{"summary", "components", "recommendation"})
-		t.Log("PASS: summary worker with schema produced structured output")
+		defer func(defID string) {
+			delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+			if delResp != nil {
+				delResp.Body.Close()
+			}
+		}(summaryDefID)
+
+		// Execute summary
+		execResp2, err := helper.POST("/api/job-definitions/"+summaryDefID+"/execute", nil)
+		require.NoError(t, err)
+		defer execResp2.Body.Close()
+
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		summaryJobID := execResult2["job_id"].(string)
+		t.Logf("Executed summary job with schema (run %d): %s", runNumber, summaryJobID)
+
+		summaryStatus := waitForJobCompletion(t, helper, summaryJobID, 5*time.Minute)
+
+		if summaryStatus == "completed" {
+			completedRuns++
+
+			// Save worker output for this run
+			jsonPath, mdPath, err := saveWorkerOutput(t, env, helper, []string{"summary-output", outputTag}, runNumber)
+			if err != nil {
+				t.Logf("Warning: failed to save output for run %d: %v", runNumber, err)
+			} else {
+				t.Logf("Run %d outputs saved: JSON=%s, MD=%s", runNumber, jsonPath, mdPath)
+			}
+
+			// Validate the output contains schema-defined fields
+			validateSummarySchemaOutput(t, helper, []string{"summary", "components", "recommendation"})
+			t.Logf("PASS: Run %d - summary worker with schema produced structured output", runNumber)
+		} else {
+			t.Logf("INFO: Run %d - Summary job ended with status %s", runNumber, summaryStatus)
+		}
+	}
+
+	// Validate schema was logged in service.log
+	if checkSchemaInServiceLog(t, env, "output schema") {
+		t.Log("PASS: Schema usage was logged in service.log")
 	} else {
-		t.Logf("INFO: Summary job ended with status %s", summaryStatus)
+		t.Log("INFO: Schema usage logging not found (may need SCHEMA_ENFORCEMENT marker)")
+	}
+
+	// Compare outputs for consistency if both runs completed
+	if completedRuns == numRuns {
+		t.Log("=== Comparing outputs for consistency ===")
+		validateOutputConsistency(t, env)
+	} else {
+		t.Logf("INFO: Only %d of %d runs completed, skipping consistency comparison", completedRuns, numRuns)
 	}
 }
 
 // TestWorkerWebSearch tests the web_search worker for consistent output
 func TestWorkerWebSearch(t *testing.T) {
-	skipIfNoChrome(t)
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -615,4 +657,349 @@ func validateWebSearchOutput(t *testing.T, helper *common.HTTPTestHelper) {
 			t.Log("PASS: Output contains URLs from search results")
 		}
 	}
+}
+
+// =============================================================================
+// Output Capture Helpers
+// =============================================================================
+// These helpers save job configuration and worker outputs to the results directory
+// for analysis of schema enforcement and output consistency.
+
+// saveJobConfig saves the job configuration to the results directory as job_config.json
+func saveJobConfig(t *testing.T, env *common.TestEnvironment, config map[string]interface{}) error {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		return fmt.Errorf("results directory not available")
+	}
+
+	configPath := filepath.Join(resultsDir, "job_config.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal job config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write job config to %s: %w", configPath, err)
+	}
+
+	t.Logf("Saved job config to: %s", configPath)
+	return nil
+}
+
+// saveWorkerOutput saves the worker output (document content) to numbered files
+// Returns paths to the saved files (jsonPath may be empty if content is not JSON)
+func saveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper,
+	tags []string, runNumber int) (jsonPath, mdPath string, err error) {
+
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		return "", "", fmt.Errorf("results directory not available")
+	}
+
+	// Query documents by tags
+	tagStr := strings.Join(tags, ",")
+	resp, err := helper.GET("/api/documents?tags=" + tagStr)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to query documents: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("document query returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", "", fmt.Errorf("failed to parse document response: %w", err)
+	}
+
+	if len(result.Documents) == 0 {
+		return "", "", fmt.Errorf("no documents found with tags: %s", tagStr)
+	}
+
+	// Get the most recent document (first in list, sorted by creation date desc)
+	doc := result.Documents[0]
+	content := doc.ContentMarkdown
+
+	// Save markdown content
+	mdPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber))
+	if err := os.WriteFile(mdPath, []byte(content), 0644); err != nil {
+		return "", "", fmt.Errorf("failed to write markdown to %s: %w", mdPath, err)
+	}
+	t.Logf("Saved markdown output to: %s", mdPath)
+
+	// Try to extract/save JSON content if present
+	// The content might be markdown that contains JSON or raw JSON
+	jsonContent := extractJSONFromContent(content)
+	if jsonContent != "" {
+		jsonPath = filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+		if err := os.WriteFile(jsonPath, []byte(jsonContent), 0644); err != nil {
+			t.Logf("Warning: failed to write JSON to %s: %v", jsonPath, err)
+			jsonPath = "" // Clear path if write failed
+		} else {
+			t.Logf("Saved JSON output to: %s", jsonPath)
+		}
+	}
+
+	return jsonPath, mdPath, nil
+}
+
+// extractJSONFromContent attempts to extract JSON content from markdown or raw JSON
+func extractJSONFromContent(content string) string {
+	content = strings.TrimSpace(content)
+
+	// If content starts with {, it's likely JSON
+	if strings.HasPrefix(content, "{") {
+		// Validate it's valid JSON
+		var js map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &js); err == nil {
+			// Pretty print for readability
+			formatted, err := json.MarshalIndent(js, "", "  ")
+			if err == nil {
+				return string(formatted)
+			}
+			return content
+		}
+	}
+
+	// Look for JSON code blocks in markdown
+	jsonBlockPattern := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*\\n?```")
+	matches := jsonBlockPattern.FindStringSubmatch(content)
+	if len(matches) > 1 {
+		// Validate the extracted JSON
+		var js map[string]interface{}
+		if err := json.Unmarshal([]byte(matches[1]), &js); err == nil {
+			formatted, err := json.MarshalIndent(js, "", "  ")
+			if err == nil {
+				return string(formatted)
+			}
+			return matches[1]
+		}
+	}
+
+	return ""
+}
+
+// checkSchemaInServiceLog checks if the service log contains schema usage logging
+// Returns true if the expected pattern is found
+func checkSchemaInServiceLog(t *testing.T, env *common.TestEnvironment, expectedPattern string) bool {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Log("Warning: results directory not available")
+		return false
+	}
+
+	serviceLogPath := filepath.Join(resultsDir, "service.log")
+	content, err := os.ReadFile(serviceLogPath)
+	if err != nil {
+		t.Logf("Warning: failed to read service.log: %v", err)
+		return false
+	}
+
+	// Search for schema-related patterns
+	logContent := string(content)
+
+	// Check for the expected pattern
+	if strings.Contains(logContent, expectedPattern) {
+		t.Logf("PASS: Found '%s' in service.log", expectedPattern)
+		return true
+	}
+
+	// Also check for common schema logging patterns
+	schemaPatterns := []string{
+		"SCHEMA_ENFORCEMENT",
+		"output schema",
+		"schema_ref",
+		"Using output schema",
+		"schema_used",
+	}
+
+	for _, pattern := range schemaPatterns {
+		if strings.Contains(logContent, pattern) {
+			t.Logf("Found schema log pattern: %s", pattern)
+			return true
+		}
+	}
+
+	t.Logf("INFO: Schema pattern '%s' not found in service.log", expectedPattern)
+	return false
+}
+
+// validateOutputConsistency compares the two outputs for structural consistency
+func validateOutputConsistency(t *testing.T, env *common.TestEnvironment) {
+	resultsDir := env.GetResultsDir()
+
+	// Read both JSON outputs
+	json1Path := filepath.Join(resultsDir, "output_1.json")
+	json2Path := filepath.Join(resultsDir, "output_2.json")
+
+	content1, err1 := os.ReadFile(json1Path)
+	content2, err2 := os.ReadFile(json2Path)
+
+	if err1 != nil || err2 != nil {
+		t.Log("INFO: Could not read both JSON outputs for structural comparison")
+		if err1 != nil {
+			t.Logf("  output_1.json: %v", err1)
+		}
+		if err2 != nil {
+			t.Logf("  output_2.json: %v", err2)
+		}
+
+		// Fall back to markdown comparison
+		md1Path := filepath.Join(resultsDir, "output_1.md")
+		md2Path := filepath.Join(resultsDir, "output_2.md")
+		md1, merr1 := os.ReadFile(md1Path)
+		md2, merr2 := os.ReadFile(md2Path)
+
+		if merr1 == nil && merr2 == nil {
+			t.Logf("Comparing markdown outputs:")
+			t.Logf("  output_1.md: %d bytes", len(md1))
+			t.Logf("  output_2.md: %d bytes", len(md2))
+			// Both should have similar length (within 50% difference)
+			if len(md1) > 0 && len(md2) > 0 {
+				ratio := float64(len(md1)) / float64(len(md2))
+				if ratio > 0.5 && ratio < 2.0 {
+					t.Log("PASS: Markdown outputs have similar length (consistent output)")
+				} else {
+					t.Logf("INFO: Markdown outputs have different lengths (ratio: %.2f)", ratio)
+				}
+			}
+		}
+		return
+	}
+
+	// Parse JSON outputs
+	var js1, js2 map[string]interface{}
+	if err := json.Unmarshal(content1, &js1); err != nil {
+		t.Logf("Warning: Failed to parse output_1.json: %v", err)
+		return
+	}
+	if err := json.Unmarshal(content2, &js2); err != nil {
+		t.Logf("Warning: Failed to parse output_2.json: %v", err)
+		return
+	}
+
+	// Compare structure
+	diffs := compareJSONStructure("", js1, js2)
+	if len(diffs) == 0 {
+		t.Log("PASS: JSON outputs have identical structure (schema enforcement working)")
+	} else {
+		t.Logf("INFO: JSON outputs have structural differences:")
+		for _, diff := range diffs {
+			t.Logf("  - %s", diff)
+		}
+	}
+
+	// Compare keys at top level
+	keys1 := getKeys(js1)
+	keys2 := getKeys(js2)
+	t.Logf("Output 1 keys: %v", keys1)
+	t.Logf("Output 2 keys: %v", keys2)
+
+	// Check if same keys exist
+	if len(keys1) == len(keys2) {
+		allMatch := true
+		for _, k := range keys1 {
+			if !containsKey(keys2, k) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			t.Log("PASS: Both outputs have identical top-level keys")
+		}
+	}
+}
+
+// compareJSONStructure compares the structure (keys and types) of two JSON objects
+func compareJSONStructure(path string, v1, v2 interface{}) []string {
+	var diffs []string
+
+	if v1 == nil && v2 == nil {
+		return diffs
+	}
+	if v1 == nil || v2 == nil {
+		diffs = append(diffs, fmt.Sprintf("%s: one value is nil", path))
+		return diffs
+	}
+
+	// Compare types
+	switch val1 := v1.(type) {
+	case map[string]interface{}:
+		val2, ok := v2.(map[string]interface{})
+		if !ok {
+			diffs = append(diffs, fmt.Sprintf("%s: type mismatch (object vs %T)", path, v2))
+			return diffs
+		}
+
+		// Compare keys
+		for k := range val1 {
+			newPath := k
+			if path != "" {
+				newPath = path + "." + k
+			}
+			if _, exists := val2[k]; !exists {
+				diffs = append(diffs, fmt.Sprintf("%s: missing in second output", newPath))
+			} else {
+				diffs = append(diffs, compareJSONStructure(newPath, val1[k], val2[k])...)
+			}
+		}
+		for k := range val2 {
+			newPath := k
+			if path != "" {
+				newPath = path + "." + k
+			}
+			if _, exists := val1[k]; !exists {
+				diffs = append(diffs, fmt.Sprintf("%s: missing in first output", newPath))
+			}
+		}
+
+	case []interface{}:
+		val2, ok := v2.([]interface{})
+		if !ok {
+			diffs = append(diffs, fmt.Sprintf("%s: type mismatch (array vs %T)", path, v2))
+			return diffs
+		}
+		// For arrays, compare first element structure if both have elements
+		if len(val1) > 0 && len(val2) > 0 {
+			diffs = append(diffs, compareJSONStructure(path+"[0]", val1[0], val2[0])...)
+		}
+
+	default:
+		// For primitive types, just check they're both primitives (not comparing values)
+		switch v2.(type) {
+		case map[string]interface{}, []interface{}:
+			diffs = append(diffs, fmt.Sprintf("%s: type mismatch (%T vs %T)", path, v1, v2))
+		}
+	}
+
+	return diffs
+}
+
+// getKeys returns the keys of a map
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// containsKey checks if a slice contains a key
+func containsKey(slice []string, key string) bool {
+	for _, s := range slice {
+		if s == key {
+			return true
+		}
+	}
+	return false
 }

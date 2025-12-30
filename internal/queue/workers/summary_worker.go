@@ -75,10 +75,10 @@ func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interfa
 
 	// Try multiple schema directory locations
 	schemaDirs := []string{
-		"deployments/common/schemas",       // Standard deployment location
-		"../schemas",                        // Relative to job-templates
-		"./schemas",                         // Current directory
-		"job-templates/../schemas",          // Relative to job-templates directory
+		"deployments/common/schemas", // Standard deployment location
+		"../schemas",                 // Relative to job-templates
+		"./schemas",                  // Current directory
+		"job-templates/../schemas",   // Relative to job-templates directory
 	}
 
 	var schemaPath string
@@ -1143,11 +1143,23 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 		OutputSchema:  outputSchema,  // JSON schema for structured output (Gemini only)
 	}
 
-	// Log schema usage
+	// Log schema usage with SCHEMA_ENFORCEMENT marker for test assertions
 	if outputSchema != nil && len(outputSchema) > 0 {
+		schemaType, _ := outputSchema["type"].(string)
+		requiredFields := []string{}
+		if required, ok := outputSchema["required"].([]interface{}); ok {
+			for _, r := range required {
+				if s, ok := r.(string); ok {
+					requiredFields = append(requiredFields, s)
+				}
+			}
+		}
+
 		w.logger.Info().
 			Str("parent_job_id", parentJobID).
-			Msg("Using output schema for structured JSON generation")
+			Str("schema_type", schemaType).
+			Strs("required_fields", requiredFields).
+			Msg("SCHEMA_ENFORCEMENT: Using output schema for structured JSON generation")
 	}
 
 	// Generate content using provider factory (handles retries internally)

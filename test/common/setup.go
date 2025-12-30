@@ -990,16 +990,15 @@ func (env *TestEnvironment) buildService() error {
 		return fmt.Errorf("failed to marshal variables config: %w", err)
 	}
 
-	// Copy connectors directory to bin/bin/connectors (to match config.go default: ./bin/connectors)
+	// Copy connectors directory to bin/connectors
 	// Source is test/config/connectors
 	connectorsSourcePath, err := filepath.Abs("../config/connectors")
 	if err != nil {
 		return fmt.Errorf("failed to resolve connectors source path: %w", err)
 	}
 
-	// Destination is bin/bin/connectors inside the build output directory
-	// This ensures that when running from test/bin/, the app finds connectors at ./bin/connectors
-	connectorsDestPath := filepath.Join(binDir, "bin", "connectors")
+	// Destination is bin/connectors inside the build output directory
+	connectorsDestPath := filepath.Join(binDir, "connectors")
 
 	// Remove existing connectors directory if it exists
 	if _, err := os.Stat(connectorsDestPath); err == nil {

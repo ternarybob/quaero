@@ -349,7 +349,7 @@ type GoalTemplateConfig struct {
 	OutputTags      []string
 	AvailableTools  []map[string]interface{}
 	OutputSchema    map[string]interface{} // JSON schema for structured LLM output
-	OutputSchemaRef string                  // Reference to external schema file (e.g., "stock-report.schema.json")
+	OutputSchemaRef string                 // Reference to external schema file (e.g., "stock-report.schema.json")
 }
 
 // loadSchemaFromFile loads a JSON schema from the schemas directory.
@@ -503,11 +503,11 @@ func (w *OrchestratorWorker) parseTOMLTemplate(content []byte) (*GoalTemplateCon
 // parseJSONTemplate parses a JSON-format goal template
 func (w *OrchestratorWorker) parseJSONTemplate(content []byte) (*GoalTemplateConfig, error) {
 	type JSONTemplateFile struct {
-		ID              string                   `json:"id"`
-		Name            string                   `json:"name"`
-		Type            string                   `json:"type"`
-		Description     string                   `json:"description"`
-		Template        struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Description string `json:"description"`
+		Template    struct {
 			Goal            string                   `json:"goal"`
 			ThinkingLevel   string                   `json:"thinking_level"`
 			ModelPreference string                   `json:"model_preference"`
