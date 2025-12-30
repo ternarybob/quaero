@@ -21,10 +21,20 @@ auto_start = false
 # =========================================================================
 
 [config]
-# Stocks under consideration for purchase - reduced to 3 for faster test execution
+# Stocks under consideration for purchase - matches test case expectedTickers
 variables = [
     { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    { ticker = "SKS", name = "SKS Technologies Group Limited", industry = "technology" },
+    { ticker = "WES", name = "Wesfarmers Limited", industry = "retail" },
+    { ticker = "AMS", name = "Atomos Limited", industry = "technology" },
+    { ticker = "AV1", name = "Adveritas Limited", industry = "technology" },
     { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
+    { ticker = "KYP", name = "Kinatico Limited", industry = "technology" },
+    { ticker = "PNC", name = "Pioneer Credit Limited", industry = "financial" },
+    { ticker = "SDF", name = "Steadfast Group Limited", industry = "insurance" },
+    { ticker = "SGI", name = "Stealth Global Holdings Limited", industry = "industrial" },
+    { ticker = "VBTC", name = "Monochrome Bitcoin ETF", industry = "crypto" },
+    { ticker = "VGB", name = "Vanguard Australian Government Bond Index ETF", industry = "fixed income" },
     { ticker = "VNT", name = "Ventia Services Group Limited", industry = "infrastructure" },
 ]
 
@@ -55,3 +65,4 @@ on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "ASX Purchase Conviction Report - Test"
 body_from_tag = "purchase-recommendation"
+save_to_dir = "test/api/results"

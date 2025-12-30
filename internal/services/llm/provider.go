@@ -31,7 +31,8 @@ type ContentRequest struct {
 	Temperature       float32
 	MaxTokens         int
 	SystemInstruction string
-	ThinkingLevel     string // For providers that support extended thinking
+	ThinkingLevel     string                 // For providers that support extended thinking
+	OutputSchema      map[string]interface{} // JSON schema for structured output (Gemini only)
 }
 
 // ContentResponse represents a provider-agnostic content generation response
@@ -362,6 +363,22 @@ func (f *ProviderFactory) generateWithGemini(ctx context.Context, request *Conte
 		}
 	}
 
+	// Add schema for structured output if specified
+	// When schema is provided, Gemini enforces JSON output matching the schema
+	if request.OutputSchema != nil && len(request.OutputSchema) > 0 {
+		genaiSchema, err := convertToGenaiSchema(request.OutputSchema)
+		if err != nil {
+			f.logger.Error().Err(err).Msg("Failed to convert output schema")
+			// Continue without schema rather than failing
+		} else if genaiSchema != nil {
+			config.ResponseMIMEType = "application/json"
+			config.ResponseSchema = genaiSchema
+			f.logger.Debug().
+				Str("schema_type", string(genaiSchema.Type)).
+				Msg("Using structured JSON output with schema")
+		}
+	}
+
 	// Make API call with retry
 	var resp *genai.GenerateContentResponse
 	var apiErr error
@@ -442,4 +459,98 @@ func (f *ProviderFactory) Close() error {
 	f.claudeClient = anthropic.Client{} // Reset to zero value
 	f.claudeAPIKey = ""                 // Clear API key to mark as uninitialized
 	return nil
+}
+
+// convertToGenaiSchema converts a map[string]interface{} representation of a JSON schema
+// to a genai.Schema structure. This allows defining schemas in TOML templates.
+func convertToGenaiSchema(schemaMap map[string]interface{}) (*genai.Schema, error) {
+	if schemaMap == nil || len(schemaMap) == 0 {
+		return nil, nil
+	}
+
+	schema := &genai.Schema{}
+
+	// Type
+	if typeStr, ok := schemaMap["type"].(string); ok {
+		switch strings.ToLower(typeStr) {
+		case "object":
+			schema.Type = genai.TypeObject
+		case "array":
+			schema.Type = genai.TypeArray
+		case "string":
+			schema.Type = genai.TypeString
+		case "number":
+			schema.Type = genai.TypeNumber
+		case "integer":
+			schema.Type = genai.TypeInteger
+		case "boolean":
+			schema.Type = genai.TypeBoolean
+		}
+	}
+
+	// Description
+	if desc, ok := schemaMap["description"].(string); ok {
+		schema.Description = desc
+	}
+
+	// Enum
+	if enumVals, ok := schemaMap["enum"].([]interface{}); ok {
+		for _, v := range enumVals {
+			if s, ok := v.(string); ok {
+				schema.Enum = append(schema.Enum, s)
+			}
+		}
+	} else if enumVals, ok := schemaMap["enum"].([]string); ok {
+		schema.Enum = enumVals
+	}
+
+	// Required
+	if reqVals, ok := schemaMap["required"].([]interface{}); ok {
+		for _, v := range reqVals {
+			if s, ok := v.(string); ok {
+				schema.Required = append(schema.Required, s)
+			}
+		}
+	} else if reqVals, ok := schemaMap["required"].([]string); ok {
+		schema.Required = reqVals
+	}
+
+	// Minimum/Maximum for integers
+	if minVal, ok := schemaMap["minimum"].(int64); ok {
+		f := float64(minVal)
+		schema.Minimum = &f
+	} else if minVal, ok := schemaMap["minimum"].(float64); ok {
+		schema.Minimum = &minVal
+	}
+	if maxVal, ok := schemaMap["maximum"].(int64); ok {
+		f := float64(maxVal)
+		schema.Maximum = &f
+	} else if maxVal, ok := schemaMap["maximum"].(float64); ok {
+		schema.Maximum = &maxVal
+	}
+
+	// Items (for arrays)
+	if itemsMap, ok := schemaMap["items"].(map[string]interface{}); ok {
+		itemSchema, err := convertToGenaiSchema(itemsMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert items schema: %w", err)
+		}
+		schema.Items = itemSchema
+	}
+
+	// Properties (for objects)
+	if propsMap, ok := schemaMap["properties"].(map[string]interface{}); ok {
+		schema.Properties = make(map[string]*genai.Schema)
+		for propName, propVal := range propsMap {
+			if propMap, ok := propVal.(map[string]interface{}); ok {
+				propSchema, err := convertToGenaiSchema(propMap)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert property '%s': %w", propName, err)
+				}
+				schema.Properties[propName] = propSchema
+			}
+		}
+	}
+
+	return schema, nil
 }

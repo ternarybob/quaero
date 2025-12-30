@@ -28,6 +28,17 @@ model_preference = "auto"
 # Output tags - allows email step to find this document via body_from_tag
 output_tags = ["purchase-recommendation"]
 
+# Available tools - workers exposed to the orchestrator as callable tools
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
+    { name = "fetch_director_interest", description = "Fetch ASX director interest (Appendix 3Y) filings showing insider buying/selling. Creates document tagged with ['director-interest', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Provides: director name, shares acquired/disposed, filing date. High insider buying is a bullish signal.", worker = "asx_director_interest" },
+    { name = "fetch_macro_data", description = "Fetch macroeconomic data: RBA interest rates and commodity prices. Creates document tagged with ['macro-data', '<data_type>']. OPTIONAL params: data_type (string) - 'rba_cash_rate', 'iron_ore', 'gold', or 'all' (default 'all'). Provides: current rates, commodity prices. Use to assess if stock movement is company-specific or macro-driven.", worker = "macro_data" },
+    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use specific query recipes: '[TICKER] analyst price target 2025', '[TICKER] bear case risks', '[TICKER] insider buying'. Returns analyst coverage, broker notes, news articles.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for conviction scoring and Short Seller analysis. IMPORTANT: filter_tags uses AND logic - do NOT combine tags from different document types (e.g., 'asx-stock-data' and 'web-search' are mutually exclusive). Use a single document type tag or ticker-specific tags only.", worker = "summary" },
+]
+
 # Natural language goal - high-conviction purchase analysis
 goal = """
 Identify the BEST purchase opportunities from the provided list of stocks.
@@ -186,13 +197,143 @@ Tier Definitions:
 ---END TEMPLATE---
 """
 
-# Available tools - workers exposed to the orchestrator as callable tools
-available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
-    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
-    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
-    { name = "fetch_director_interest", description = "Fetch ASX director interest (Appendix 3Y) filings showing insider buying/selling. Creates document tagged with ['director-interest', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Provides: director name, shares acquired/disposed, filing date. High insider buying is a bullish signal.", worker = "asx_director_interest" },
-    { name = "fetch_macro_data", description = "Fetch macroeconomic data: RBA interest rates and commodity prices. Creates document tagged with ['macro-data', '<data_type>']. OPTIONAL params: data_type (string) - 'rba_cash_rate', 'iron_ore', 'gold', or 'all' (default 'all'). Provides: current rates, commodity prices. Use to assess if stock movement is company-specific or macro-driven.", worker = "macro_data" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use specific query recipes: '[TICKER] analyst price target 2025', '[TICKER] bear case risks', '[TICKER] insider buying'. Returns analyst coverage, broker notes, news articles.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for conviction scoring and Short Seller analysis. IMPORTANT: filter_tags uses AND logic - do NOT combine tags from different document types (e.g., 'asx-stock-data' and 'web-search' are mutually exclusive). Use a single document type tag or ticker-specific tags only.", worker = "summary" },
-]
+# Output schema for structured LLM output (Gemini ResponseSchema)
+# When set, the LLM MUST return JSON matching this schema.
+# The JSON is then converted to markdown for the final document.
+[template.output_schema]
+type = "object"
+description = "Structured stock analysis output with conviction scores"
+required = ["executive_summary", "stocks", "comparative_table", "warnings"]
+
+[template.output_schema.properties.executive_summary]
+type = "string"
+description = "2-3 sentences on top picks and market context"
+
+[template.output_schema.properties.stocks]
+type = "array"
+description = "Analysis for each stock in the watchlist"
+
+[template.output_schema.properties.stocks.items]
+type = "object"
+required = ["ticker", "name", "fundamental_analysis", "technical_analysis", "short_seller_bear_case", "analyst_resolution", "conviction_score"]
+
+[template.output_schema.properties.stocks.items.properties.ticker]
+type = "string"
+description = "ASX stock ticker code (e.g., GNP)"
+
+[template.output_schema.properties.stocks.items.properties.name]
+type = "string"
+description = "Company full name"
+
+[template.output_schema.properties.stocks.items.properties.fundamental_analysis]
+type = "string"
+description = "Fundamental analysis paragraph including market cap, P/E, EPS"
+
+[template.output_schema.properties.stocks.items.properties.technical_analysis]
+type = "string"
+description = "Technical analysis paragraph including SMA, RSI, trend assessment"
+
+[template.output_schema.properties.stocks.items.properties.short_seller_bear_case]
+type = "string"
+description = "Adversarial bear case arguments"
+
+[template.output_schema.properties.stocks.items.properties.analyst_resolution]
+type = "string"
+description = "Resolution of bull vs bear arguments"
+
+[template.output_schema.properties.stocks.items.properties.conviction_score]
+type = "integer"
+description = "Overall conviction score 0-100"
+minimum = 0
+maximum = 100
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown]
+type = "object"
+description = "Weighted score breakdown"
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown.properties.fundamental]
+type = "integer"
+description = "Fundamental score (weighted 35%)"
+minimum = 0
+maximum = 35
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown.properties.technical]
+type = "integer"
+description = "Technical score (weighted 25%)"
+minimum = 0
+maximum = 25
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown.properties.risk]
+type = "integer"
+description = "Risk score (weighted 25%)"
+minimum = 0
+maximum = 25
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown.properties.insider]
+type = "integer"
+description = "Insider activity score (weighted 10%)"
+minimum = 0
+maximum = 10
+
+[template.output_schema.properties.stocks.items.properties.conviction_breakdown.properties.macro]
+type = "integer"
+description = "Macro environment score (weighted 5%)"
+minimum = 0
+maximum = 5
+
+[template.output_schema.properties.stocks.items.properties.tier]
+type = "string"
+description = "Conviction tier classification"
+enum = ["Tier 1 (High)", "Tier 2 (Medium)", "Tier 3 (Speculative)", "Tier 4 (Avoid)"]
+
+[template.output_schema.properties.comparative_table]
+type = "array"
+description = "Summary comparison of all stocks"
+
+[template.output_schema.properties.comparative_table.items]
+type = "object"
+required = ["ticker", "total_score", "tier"]
+
+[template.output_schema.properties.comparative_table.items.properties.ticker]
+type = "string"
+
+[template.output_schema.properties.comparative_table.items.properties.fundamental]
+type = "integer"
+minimum = 0
+maximum = 35
+
+[template.output_schema.properties.comparative_table.items.properties.technical]
+type = "integer"
+minimum = 0
+maximum = 25
+
+[template.output_schema.properties.comparative_table.items.properties.risk]
+type = "integer"
+minimum = 0
+maximum = 25
+
+[template.output_schema.properties.comparative_table.items.properties.insider]
+type = "integer"
+minimum = 0
+maximum = 10
+
+[template.output_schema.properties.comparative_table.items.properties.macro]
+type = "integer"
+minimum = 0
+maximum = 5
+
+[template.output_schema.properties.comparative_table.items.properties.total_score]
+type = "integer"
+minimum = 0
+maximum = 100
+
+[template.output_schema.properties.comparative_table.items.properties.tier]
+type = "string"
+enum = ["Tier 1 (High)", "Tier 2 (Medium)", "Tier 3 (Speculative)", "Tier 4 (Avoid)"]
+
+[template.output_schema.properties.warnings]
+type = "array"
+description = "Risk warnings and market concerns"
+
+[template.output_schema.properties.warnings.items]
+type = "string"

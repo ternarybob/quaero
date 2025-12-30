@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -246,6 +248,21 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Str("step_id", stepID).
 		Str("to", to).
 		Msg("Email sent successfully")
+
+	// Save email content to directory if save_to_dir is configured
+	// This creates a permanent archive of all sent emails for audit and debugging
+	if saveDir, ok := stepConfig["save_to_dir"].(string); ok && saveDir != "" {
+		if err := w.saveEmailToDir(saveDir, stepID, subject, body, htmlBody, to, &jobDef); err != nil {
+			w.logger.Warn().Err(err).Str("save_dir", saveDir).Msg("Failed to save email to directory")
+			if logErr := w.jobMgr.AddJobLog(ctx, stepID, "warning", fmt.Sprintf("Failed to save email archive: %v", err)); logErr != nil {
+				w.logger.Warn().Err(logErr).Msg("Failed to add job log")
+			}
+		} else {
+			if logErr := w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Email archived to %s", saveDir)); logErr != nil {
+				w.logger.Warn().Err(logErr).Msg("Failed to add job log")
+			}
+		}
+	}
 
 	return stepID, nil
 }
@@ -1148,4 +1165,70 @@ func (w *EmailWorker) formatSourceLinksHTML(sources []sourceDocInfo, baseURL str
 	sb.WriteString(`</div>`)
 
 	return sb.String()
+}
+
+// saveEmailToDir saves email content to a directory for archiving and audit purposes.
+// Creates both markdown (.md) and HTML (.html) versions of the email content.
+// Directory structure: save_dir/YYYY-MM-DD/job-name_timestamp.md
+func (w *EmailWorker) saveEmailToDir(saveDir, stepID, subject, textBody, htmlBody, to string, jobDef *models.JobDefinition) error {
+	// Create date-based subdirectory
+	dateDir := time.Now().Format("2006-01-02")
+	fullDir := filepath.Join(saveDir, dateDir)
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(fullDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", fullDir, err)
+	}
+
+	// Build filename from job name and timestamp
+	timestamp := time.Now().Format("15-04-05")
+	safeName := "email"
+	if jobDef != nil && jobDef.Name != "" {
+		safeName = strings.ReplaceAll(jobDef.Name, " ", "-")
+		safeName = strings.ReplaceAll(safeName, "/", "-")
+		safeName = strings.ReplaceAll(safeName, ":", "-")
+		safeName = strings.ToLower(safeName)
+	}
+
+	// Save markdown version (primary content)
+	mdFilename := fmt.Sprintf("%s_%s.md", safeName, timestamp)
+	mdPath := filepath.Join(fullDir, mdFilename)
+
+	mdContent := fmt.Sprintf(`# %s
+
+**To:** %s
+**Date:** %s
+**Step ID:** %s
+
+---
+
+%s
+`, subject, to, time.Now().Format("January 2, 2006 at 15:04:05"), stepID, textBody)
+
+	if err := os.WriteFile(mdPath, []byte(mdContent), 0644); err != nil {
+		return fmt.Errorf("failed to write markdown file: %w", err)
+	}
+
+	w.logger.Info().
+		Str("path", mdPath).
+		Int("bytes", len(mdContent)).
+		Msg("Saved email markdown to file")
+
+	// Save HTML version if available
+	if htmlBody != "" {
+		htmlFilename := fmt.Sprintf("%s_%s.html", safeName, timestamp)
+		htmlPath := filepath.Join(fullDir, htmlFilename)
+
+		if err := os.WriteFile(htmlPath, []byte(htmlBody), 0644); err != nil {
+			w.logger.Warn().Err(err).Str("path", htmlPath).Msg("Failed to save HTML version")
+			// Don't fail the whole operation if HTML save fails
+		} else {
+			w.logger.Info().
+				Str("path", htmlPath).
+				Int("bytes", len(htmlBody)).
+				Msg("Saved email HTML to file")
+		}
+	}
+
+	return nil
 }

@@ -136,6 +136,24 @@ func (w *ToolExecutionWorker) Execute(ctx context.Context, job *models.QueueJob)
 			Msg("Passing output_tags to step config")
 	}
 
+	// Pass through output_schema from job config (set by orchestrator for terminal analyze_summary steps)
+	if outputSchema, ok := job.Config["output_schema"]; ok {
+		stepConfig["output_schema"] = outputSchema
+		w.logger.Debug().
+			Str("job_id", job.ID).
+			Msg("Passing output_schema to step config for structured JSON output")
+	}
+
+	// Pass through required_tickers from job config (for output validation)
+	if requiredTickers, ok := job.Config["required_tickers"]; ok {
+		stepConfig["required_tickers"] = requiredTickers
+	}
+
+	// Pass through benchmark_codes from job config (for output validation)
+	if benchmarkCodes, ok := job.Config["benchmark_codes"]; ok {
+		stepConfig["benchmark_codes"] = benchmarkCodes
+	}
+
 	// Create synthetic JobStep for the tool
 	syntheticStep := models.JobStep{
 		Name:        fmt.Sprintf("tool_%s_%s", toolName, planStepID),

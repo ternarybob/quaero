@@ -1137,7 +1137,7 @@ search_type = "text_search"
 
 **File**: `summary_worker.go`
 
-**Purpose**: Generates comprehensive summaries from tagged document collections using Gemini LLM.
+**Purpose**: Generates comprehensive summaries from tagged document collections using Gemini LLM. Supports schema-constrained JSON output with automatic markdown conversion.
 
 **Interfaces**: DefinitionWorker
 
@@ -1153,6 +1153,7 @@ search_type = "text_search"
 | `api_key` | string | No | Gemini API key |
 | `output_tags` | []string | No | Additional tags to apply to the output document (useful for downstream steps) |
 | `thinking_level` | string | No | Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Use HIGH for complex analysis. |
+| `output_schema` | map | No | JSON schema for structured output (Gemini only). When provided, enforces JSON output matching schema, then converts to markdown. |
 | `required_tickers` | []string | No | Stock tickers that MUST appear in output (for orchestrator terminal steps) |
 | `benchmark_codes` | []string | No | Benchmark codes that should NOT be treated as stocks (for validation) |
 | `output_validation` | []string | No | Required patterns that must appear in output |
@@ -1181,6 +1182,48 @@ Documents include an `output_validation` metadata section:
   }
 }
 ```
+
+#### Schema-Constrained Output (added 2025-12)
+
+The summary worker supports schema-constrained JSON output using Gemini's `ResponseSchema` feature. When `output_schema` is provided:
+
+1. **Generation**: The LLM is forced to return JSON matching the exact schema structure
+2. **Validation**: JSON structure is enforced at generation time (required fields, enums, numeric bounds)
+3. **Conversion**: The JSON response is automatically converted to formatted markdown
+
+**How it works**:
+- Schema is defined in job templates as `[template.output_schema]` (TOML format)
+- Orchestrator passes schema to terminal `analyze_summary` steps
+- Summary worker sets Gemini's `ResponseMIMEType = "application/json"` and `ResponseSchema`
+- Response is parsed and converted to markdown using `jsonToMarkdown()`
+
+**Supported schema features**:
+- `type`: object, array, string, number, integer, boolean
+- `required`: List of required property names
+- `enum`: Constrained values for strings
+- `minimum`/`maximum`: Numeric bounds
+- `properties`: Nested object schemas
+- `items`: Array item schema
+
+**Example template schema** (in TOML):
+```toml
+[template.output_schema]
+type = "object"
+required = ["stocks", "summary_table"]
+
+[template.output_schema.properties.stocks]
+type = "array"
+
+[template.output_schema.properties.stocks.items]
+type = "object"
+required = ["ticker", "quality_rating"]
+
+[template.output_schema.properties.stocks.items.properties.quality_rating]
+type = "string"
+enum = ["A", "B", "C", "D", "F"]
+```
+
+**Backward compatibility**: If no schema is provided, existing markdown-based generation is used unchanged.
 
 #### Outputs
 

@@ -29,6 +29,15 @@ model_preference = "auto"
 # Output tags - allows email step to find this document via body_from_tag
 output_tags = ["stock-recommendation"]
 
+# Available tools - workers exposed to the orchestrator as callable tools
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance (7D, 1M, 3M, 6M, 1Y, 2Y returns).", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1), limit (int) - max announcements. Use for FY/HY results, trading updates, contracts. Each announcement includes: date, headline, type, price_sensitive flag, PDF link.", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
+    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, news, historical financial data (revenue/profit history), competitor analysis. Useful for data not available from ASX APIs.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
+]
+
 # Natural language goal - the LLM will plan how to achieve this
 goal = """
 Perform a comprehensive daily analysis of all ASX stocks in the variables list.
@@ -157,11 +166,182 @@ FINAL OUTPUT MUST INCLUDE:
     - Interpretation: >15% excellent, 10-15% good, 5-10% average, <5% poor
 """
 
-# Available tools - workers exposed to the orchestrator as callable tools
-available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance (7D, 1M, 3M, 6M, 1Y, 2Y returns).", worker = "asx_stock_data" },
-    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1), limit (int) - max announcements. Use for FY/HY results, trading updates, contracts. Each announcement includes: date, headline, type, price_sensitive flag, PDF link.", worker = "asx_announcements" },
-    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, news, historical financial data (revenue/profit history), competitor analysis. Useful for data not available from ASX APIs.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
-]
+# Output schema for structured LLM output (Gemini ResponseSchema)
+# When set, the LLM MUST return JSON matching this schema.
+# The JSON is then converted to markdown for the final document.
+[template.output_schema]
+type = "object"
+description = "Structured stock analysis with dual recommendations"
+required = ["stocks", "summary_table", "watchlists", "definitions"]
+
+[template.output_schema.properties.stocks]
+type = "array"
+description = "Individual stock analyses"
+
+[template.output_schema.properties.stocks.items]
+type = "object"
+required = ["ticker", "name", "quality_rating", "signal_noise_ratio", "five_year_cagr", "trader_recommendation", "super_recommendation"]
+
+[template.output_schema.properties.stocks.items.properties.ticker]
+type = "string"
+description = "ASX stock ticker code"
+
+[template.output_schema.properties.stocks.items.properties.name]
+type = "string"
+description = "Company full name"
+
+[template.output_schema.properties.stocks.items.properties.industry]
+type = "string"
+description = "Industry/sector classification"
+
+[template.output_schema.properties.stocks.items.properties.stock_data_summary]
+type = "string"
+description = "Current price, market cap, P/E, EPS summary"
+
+[template.output_schema.properties.stocks.items.properties.announcement_analysis]
+type = "string"
+description = "FY/HY results analysis and key announcements"
+
+[template.output_schema.properties.stocks.items.properties.price_event_analysis]
+type = "string"
+description = "Significant price movements and catalysts"
+
+[template.output_schema.properties.stocks.items.properties.five_year_performance]
+type = "string"
+description = "5-year CAGR and performance analysis"
+
+[template.output_schema.properties.stocks.items.properties.quality_rating]
+type = "string"
+description = "Company quality grade"
+enum = ["A", "B", "C", "D", "F"]
+
+[template.output_schema.properties.stocks.items.properties.quality_reasoning]
+type = "string"
+description = "2-3 sentences explaining the quality rating"
+
+[template.output_schema.properties.stocks.items.properties.signal_noise_ratio]
+type = "string"
+description = "Quality of company communications"
+enum = ["HIGH", "MEDIUM", "LOW"]
+
+[template.output_schema.properties.stocks.items.properties.five_year_cagr]
+type = "number"
+description = "5-year compound annual growth rate as decimal (e.g., 0.15 for 15%)"
+
+[template.output_schema.properties.stocks.items.properties.trader_recommendation]
+type = "object"
+required = ["action", "conviction"]
+
+[template.output_schema.properties.stocks.items.properties.trader_recommendation.properties.action]
+type = "string"
+enum = ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+
+[template.output_schema.properties.stocks.items.properties.trader_recommendation.properties.conviction]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.stocks.items.properties.trader_recommendation.properties.triggers]
+type = "string"
+description = "Key triggers for the recommendation"
+
+[template.output_schema.properties.stocks.items.properties.super_recommendation]
+type = "object"
+required = ["action", "conviction"]
+
+[template.output_schema.properties.stocks.items.properties.super_recommendation.properties.action]
+type = "string"
+enum = ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"]
+
+[template.output_schema.properties.stocks.items.properties.super_recommendation.properties.conviction]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.stocks.items.properties.super_recommendation.properties.rationale]
+type = "string"
+description = "Rationale for long-term investors"
+
+[template.output_schema.properties.summary_table]
+type = "array"
+description = "Summary table of all stocks"
+
+[template.output_schema.properties.summary_table.items]
+type = "object"
+required = ["ticker", "name", "quality", "trader_rec", "trader_conv", "super_rec", "super_conv", "signal_noise", "cagr"]
+
+[template.output_schema.properties.summary_table.items.properties.ticker]
+type = "string"
+
+[template.output_schema.properties.summary_table.items.properties.name]
+type = "string"
+
+[template.output_schema.properties.summary_table.items.properties.quality]
+type = "string"
+enum = ["A", "B", "C", "D", "F"]
+
+[template.output_schema.properties.summary_table.items.properties.trader_rec]
+type = "string"
+enum = ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+
+[template.output_schema.properties.summary_table.items.properties.trader_conv]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.summary_table.items.properties.super_rec]
+type = "string"
+enum = ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"]
+
+[template.output_schema.properties.summary_table.items.properties.super_conv]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.summary_table.items.properties.signal_noise]
+type = "string"
+enum = ["HIGH", "MEDIUM", "LOW"]
+
+[template.output_schema.properties.summary_table.items.properties.cagr]
+type = "string"
+description = "5Y CAGR as percentage string (e.g., '15%')"
+
+[template.output_schema.properties.watchlists]
+type = "object"
+description = "Categorized watchlists"
+
+[template.output_schema.properties.watchlists.properties.trader_momentum]
+type = "array"
+description = "Stocks with momentum for short-term trades"
+
+[template.output_schema.properties.watchlists.properties.trader_momentum.items]
+type = "string"
+description = "Ticker code"
+
+[template.output_schema.properties.watchlists.properties.super_accumulate]
+type = "array"
+description = "Quality A/B stocks for long-term accumulation"
+
+[template.output_schema.properties.watchlists.properties.super_accumulate.items]
+type = "string"
+description = "Ticker code"
+
+[template.output_schema.properties.alerts]
+type = "array"
+description = "Significant alerts and material announcements"
+
+[template.output_schema.properties.alerts.items]
+type = "string"
+
+[template.output_schema.properties.definitions]
+type = "object"
+description = "Definition of rating scales and metrics"
+
+[template.output_schema.properties.definitions.properties.quality_rating]
+type = "string"
+
+[template.output_schema.properties.definitions.properties.signal_noise_ratio]
+type = "string"
+
+[template.output_schema.properties.definitions.properties.cagr]
+type = "string"

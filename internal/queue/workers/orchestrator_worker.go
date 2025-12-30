@@ -348,6 +348,7 @@ type GoalTemplateConfig struct {
 	ModelPreference string
 	OutputTags      []string
 	AvailableTools  []map[string]interface{}
+	OutputSchema    map[string]interface{} // JSON schema for structured LLM output
 }
 
 // loadGoalTemplate loads a goal template from the templates directory.
@@ -382,6 +383,7 @@ func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplat
 			ModelPreference string                   `toml:"model_preference"`
 			OutputTags      []string                 `toml:"output_tags"`
 			AvailableTools  []map[string]interface{} `toml:"available_tools"`
+			OutputSchema    map[string]interface{}   `toml:"output_schema"` // JSON schema for structured output
 		} `toml:"template"`
 	}
 
@@ -396,6 +398,7 @@ func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplat
 		ModelPreference: templateFile2.Template.ModelPreference,
 		OutputTags:      templateFile2.Template.OutputTags,
 		AvailableTools:  templateFile2.Template.AvailableTools,
+		OutputSchema:    templateFile2.Template.OutputSchema,
 	}
 
 	if config.Goal == "" {
@@ -491,6 +494,7 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 	var goal string
 	var availableTools []map[string]interface{}
 	var outputTags []string
+	var outputSchema map[string]interface{} // JSON schema for structured LLM output
 	thinkingLevel := ThinkingLevelMedium
 	modelPreference := "auto"
 
@@ -506,6 +510,7 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 		goal = templateConfig.Goal
 		availableTools = templateConfig.AvailableTools
 		outputTags = templateConfig.OutputTags
+		outputSchema = templateConfig.OutputSchema
 
 		if templateConfig.ThinkingLevel != "" {
 			thinkingLevel = ThinkingLevel(strings.ToUpper(templateConfig.ThinkingLevel))
@@ -514,10 +519,12 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 			modelPreference = templateConfig.ModelPreference
 		}
 
+		hasSchema := outputSchema != nil && len(outputSchema) > 0
 		w.logger.Info().
 			Str("goal_template", goalTemplate).
 			Int("tools_from_template", len(availableTools)).
 			Int("output_tags", len(outputTags)).
+			Bool("has_output_schema", hasSchema).
 			Msg("Loaded goal template")
 	}
 
@@ -629,6 +636,7 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 			"available_tools":  availableTools,
 			"output_tags":      outputTags,
 			"model_preference": modelPreference,
+			"output_schema":    outputSchema, // JSON schema for structured LLM output
 		},
 	}, nil
 }
@@ -774,6 +782,12 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 		outputTags = tags
 	}
 
+	// Extract output_schema from initResult metadata for structured JSON output
+	var outputSchema map[string]interface{}
+	if schema, ok := initResult.Metadata["output_schema"].(map[string]interface{}); ok && len(schema) > 0 {
+		outputSchema = schema
+	}
+
 	// Execute in waves until all steps are done
 	maxWaves := 10 // Safety limit
 	for wave := 0; wave < maxWaves; wave++ {
@@ -883,6 +897,15 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 						Str("step_id", planStep.ID).
 						Strs("benchmark_codes", benchmarkCodesList).
 						Msg("Added benchmark_codes to terminal analyze_summary step for validation")
+				}
+
+				// Pass output_schema for structured JSON output
+				// When provided, the LLM MUST return JSON matching this schema
+				if outputSchema != nil && len(outputSchema) > 0 {
+					jobPayload["output_schema"] = outputSchema
+					w.logger.Debug().
+						Str("step_id", planStep.ID).
+						Msg("Added output_schema to terminal analyze_summary step for structured output")
 				}
 			}
 

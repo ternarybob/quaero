@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -248,6 +249,17 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Msg("Model override configured")
 	}
 
+	// Extract output_schema (optional - JSON schema for structured output)
+	// When provided, the LLM MUST return JSON matching this schema
+	var outputSchema map[string]interface{}
+	if schema, ok := stepConfig["output_schema"].(map[string]interface{}); ok && len(schema) > 0 {
+		outputSchema = schema
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Msg("Output schema configured for structured JSON generation")
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -299,7 +311,8 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			"required_tickers":    requiredTickers, // For ticker validation in output
 			"benchmark_codes":     benchmarkCodes,  // For benchmark misuse validation
 			"thinking_level":      thinkingLevel,
-			"model":               model, // Can include provider prefix like "claude/claude-sonnet-4-20250514"
+			"model":               model,        // Can include provider prefix like "claude/claude-sonnet-4-20250514"
+			"output_schema":       outputSchema, // JSON schema for structured LLM output (Gemini only)
 			"max_iterations":      maxIterations,
 			"critique_prompt":     critiquePrompt,
 		},
@@ -340,9 +353,10 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 			"filter_tags": filterTags,
 		})
 
-	// Extract thinking level and model for LLM configuration
+	// Extract thinking level, model, and output schema for LLM configuration
 	thinkingLevel, _ := initResult.Metadata["thinking_level"].(string)
 	model, _ := initResult.Metadata["model"].(string)
+	outputSchema, _ := initResult.Metadata["output_schema"].(map[string]interface{})
 
 	// Detect provider from model name
 	provider := w.providerFactory.DetectProvider(model)
@@ -370,7 +384,7 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 
 	// If no critique configured, just run once
 	if maxIterations <= 0 || critiquePrompt == "" {
-		summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+		summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef, outputSchema)
 		if err != nil {
 			w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 			w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -390,7 +404,7 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 				fmt.Sprintf("Generating draft (%s)", iterationLabel), nil)
 
 			// 1. Generate Draft (or Refined Draft)
-			summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+			summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef, outputSchema)
 			if err != nil {
 				w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed in loop")
 				return "", fmt.Errorf("summary generation failed (iter %d): %w", i, err)
@@ -497,7 +511,7 @@ The following is a critique of your previous draft. You must address EVERY issue
 					validationIteration, maxValidationIterations, validationResult.String()), nil)
 
 			// Regenerate with feedback
-			summaryContent, err = w.generateSummary(ctx, feedbackPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+			summaryContent, err = w.generateSummary(ctx, feedbackPrompt, documents, stepID, thinkingLevel, model, &jobDef, outputSchema)
 			if err != nil {
 				w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary regeneration failed")
 				return "", fmt.Errorf("summary regeneration failed (validation iteration %d): %w", validationIteration, err)
@@ -977,7 +991,8 @@ func getNumericValue(m map[string]interface{}, key string) float64 {
 // thinkingLevel controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH (Gemini only).
 // model specifies the model to use, can include provider prefix (e.g., "claude/claude-sonnet-4-20250514").
 // jobDef provides access to job-level config variables (e.g., portfolio holdings with units, avg_price).
-func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string, jobDef *models.JobDefinition) (string, error) {
+// outputSchema, when provided, enforces structured JSON output which is then converted to markdown.
+func (w *SummaryWorker) generateSummary(ctx context.Context, prompt string, documents []*models.Document, parentJobID string, thinkingLevel string, modelOverride string, jobDef *models.JobDefinition, outputSchema map[string]interface{}) (string, error) {
 	// Build document content for the LLM
 	var docsContent strings.Builder
 	docsContent.WriteString("# Documents to Summarize\n\n")
@@ -1056,6 +1071,14 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 		Model:         model,
 		Temperature:   0.3,
 		ThinkingLevel: thinkingLevel, // Only used by Gemini
+		OutputSchema:  outputSchema,  // JSON schema for structured output (Gemini only)
+	}
+
+	// Log schema usage
+	if outputSchema != nil && len(outputSchema) > 0 {
+		w.logger.Info().
+			Str("parent_job_id", parentJobID).
+			Msg("Using output schema for structured JSON generation")
 	}
 
 	// Generate content using provider factory (handles retries internally)
@@ -1068,14 +1091,34 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 		return "", fmt.Errorf("empty response from %s API", resp.Provider)
 	}
 
-	// Strip any echoed personality/role text from LLM output
-	// LLMs sometimes echo back the system prompt (e.g., "You are a Senior Investment Strategist...")
-	cleanedText := w.stripLeadingPersonalityText(resp.Text)
+	// If schema was used, the response is JSON - convert to markdown
+	var cleanedText string
+	if outputSchema != nil && len(outputSchema) > 0 {
+		// Parse JSON response and convert to markdown
+		markdown, err := w.jsonToMarkdown(resp.Text)
+		if err != nil {
+			w.logger.Warn().
+				Err(err).
+				Msg("Failed to convert JSON to markdown, using raw response")
+			cleanedText = resp.Text
+		} else {
+			cleanedText = markdown
+			w.logger.Debug().
+				Int("json_length", len(resp.Text)).
+				Int("markdown_length", len(markdown)).
+				Msg("Converted structured JSON to markdown")
+		}
+	} else {
+		// Strip any echoed personality/role text from LLM output
+		// LLMs sometimes echo back the system prompt (e.g., "You are a Senior Investment Strategist...")
+		cleanedText = w.stripLeadingPersonalityText(resp.Text)
+	}
 
 	w.logger.Debug().
 		Str("provider", string(resp.Provider)).
 		Str("model", resp.Model).
 		Int("response_length", len(cleanedText)).
+		Bool("schema_used", outputSchema != nil && len(outputSchema) > 0).
 		Msg("Summary generation completed")
 
 	return cleanedText, nil
@@ -1357,4 +1400,498 @@ Your task is to critique the following Draft Document based on the Rules provide
 		return "", err
 	}
 	return resp.Text, nil
+}
+
+// jsonToMarkdown converts a structured JSON response to markdown format.
+// This function handles the output from schema-constrained LLM generation,
+// parsing the JSON and formatting it as a readable markdown document.
+func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
+	// Parse JSON
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return "", fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	var md strings.Builder
+
+	// Handle stock analysis output format
+	if stocks, ok := data["stocks"].([]interface{}); ok {
+		md.WriteString("# Stock Analysis Report\n\n")
+		md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
+
+		// Process each stock
+		for _, stockRaw := range stocks {
+			stock, ok := stockRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			ticker := getStringVal(stock, "ticker", "Unknown")
+			name := getStringVal(stock, "name", "Unknown")
+
+			md.WriteString(fmt.Sprintf("## ASX: %s (%s)\n\n", ticker, name))
+
+			// Industry
+			if industry := getStringVal(stock, "industry", ""); industry != "" {
+				md.WriteString(fmt.Sprintf("**Industry:** %s\n\n", industry))
+			}
+
+			// Stock data summary
+			if summary := getStringVal(stock, "stock_data_summary", ""); summary != "" {
+				md.WriteString(fmt.Sprintf("### Stock Data\n%s\n\n", summary))
+			}
+
+			// Announcement analysis
+			if announcements := getStringVal(stock, "announcement_analysis", ""); announcements != "" {
+				md.WriteString(fmt.Sprintf("### Announcement Analysis\n%s\n\n", announcements))
+			}
+
+			// Price event analysis
+			if priceEvents := getStringVal(stock, "price_event_analysis", ""); priceEvents != "" {
+				md.WriteString(fmt.Sprintf("### Price Event Analysis\n%s\n\n", priceEvents))
+			}
+
+			// 5-year performance
+			if fiveYear := getStringVal(stock, "five_year_performance", ""); fiveYear != "" {
+				md.WriteString(fmt.Sprintf("### 5-Year Performance\n%s\n\n", fiveYear))
+			}
+
+			// Quality rating
+			qualityRating := getStringVal(stock, "quality_rating", "")
+			qualityReasoning := getStringVal(stock, "quality_reasoning", "")
+			if qualityRating != "" {
+				md.WriteString(fmt.Sprintf("### Quality Assessment\n**Rating:** %s\n\n", qualityRating))
+				if qualityReasoning != "" {
+					md.WriteString(fmt.Sprintf("%s\n\n", qualityReasoning))
+				}
+			}
+
+			// Signal-noise ratio
+			if snr := getStringVal(stock, "signal_noise_ratio", ""); snr != "" {
+				md.WriteString(fmt.Sprintf("**Signal-to-Noise Ratio:** %s\n\n", snr))
+			}
+
+			// 5-year CAGR
+			if cagr, ok := stock["five_year_cagr"].(float64); ok {
+				md.WriteString(fmt.Sprintf("**5-Year CAGR:** %.1f%%\n\n", cagr*100))
+			}
+
+			// Trader recommendation
+			if traderRec, ok := stock["trader_recommendation"].(map[string]interface{}); ok {
+				md.WriteString("### Trader Recommendation (1-6 week horizon)\n")
+				action := getStringVal(traderRec, "action", "N/A")
+				conviction := getFloatVal(traderRec, "conviction", 0)
+				triggers := getStringVal(traderRec, "triggers", "")
+
+				md.WriteString(fmt.Sprintf("**Action:** %s | **Conviction:** %.0f/10\n\n", action, conviction))
+				if triggers != "" {
+					md.WriteString(fmt.Sprintf("**Key Triggers:** %s\n\n", triggers))
+				}
+			}
+
+			// Super recommendation
+			if superRec, ok := stock["super_recommendation"].(map[string]interface{}); ok {
+				md.WriteString("### Super Recommendation (6-12+ month horizon)\n")
+				action := getStringVal(superRec, "action", "N/A")
+				conviction := getFloatVal(superRec, "conviction", 0)
+				rationale := getStringVal(superRec, "rationale", "")
+
+				md.WriteString(fmt.Sprintf("**Action:** %s | **Conviction:** %.0f/10\n\n", action, conviction))
+				if rationale != "" {
+					md.WriteString(fmt.Sprintf("**Rationale:** %s\n\n", rationale))
+				}
+			}
+
+			md.WriteString("---\n\n")
+		}
+	}
+
+	// Handle purchase conviction output format
+	if execSummary := getStringVal(data, "executive_summary", ""); execSummary != "" {
+		if md.Len() == 0 {
+			md.WriteString("# Purchase Conviction Analysis\n\n")
+			md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
+		}
+		md.WriteString("## Executive Summary\n")
+		md.WriteString(execSummary)
+		md.WriteString("\n\n")
+	}
+
+	// Handle conviction-based stocks (different from stock analysis format)
+	if stocks, ok := data["stocks"].([]interface{}); ok && md.Len() > 0 {
+		// Check if these are conviction-style stocks
+		for _, stockRaw := range stocks {
+			stock, ok := stockRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Check for conviction_score which indicates purchase conviction format
+			if _, hasConviction := stock["conviction_score"]; hasConviction {
+				ticker := getStringVal(stock, "ticker", "Unknown")
+				name := getStringVal(stock, "name", "Unknown")
+				tier := getStringVal(stock, "tier", "Unknown")
+				convictionScore := getFloatVal(stock, "conviction_score", 0)
+
+				md.WriteString(fmt.Sprintf("## ASX: %s (%s)\n\n", ticker, name))
+				md.WriteString(fmt.Sprintf("**Tier:** %s | **Conviction Score:** %.0f/100\n\n", tier, convictionScore))
+
+				// Fundamental analysis
+				if fundamental := getStringVal(stock, "fundamental_analysis", ""); fundamental != "" {
+					md.WriteString(fmt.Sprintf("### Fundamental Analysis\n%s\n\n", fundamental))
+				}
+
+				// Technical analysis
+				if technical := getStringVal(stock, "technical_analysis", ""); technical != "" {
+					md.WriteString(fmt.Sprintf("### Technical Analysis\n%s\n\n", technical))
+				}
+
+				// Short seller bear case
+				if bearCase := getStringVal(stock, "short_seller_bear_case", ""); bearCase != "" {
+					md.WriteString(fmt.Sprintf("### Short Seller Bear Case\n%s\n\n", bearCase))
+				}
+
+				// Analyst resolution
+				if resolution := getStringVal(stock, "analyst_resolution", ""); resolution != "" {
+					md.WriteString(fmt.Sprintf("### Analyst Resolution\n%s\n\n", resolution))
+				}
+
+				// Conviction breakdown
+				if breakdown, ok := stock["conviction_breakdown"].(map[string]interface{}); ok {
+					md.WriteString("### Conviction Breakdown\n")
+					md.WriteString("| Component | Score |\n")
+					md.WriteString("|-----------|-------|\n")
+					md.WriteString(fmt.Sprintf("| Fundamental | %.0f/35 |\n", getFloatVal(breakdown, "fundamental", 0)))
+					md.WriteString(fmt.Sprintf("| Technical | %.0f/25 |\n", getFloatVal(breakdown, "technical", 0)))
+					md.WriteString(fmt.Sprintf("| Risk | %.0f/25 |\n", getFloatVal(breakdown, "risk", 0)))
+					md.WriteString(fmt.Sprintf("| Insider | %.0f/10 |\n", getFloatVal(breakdown, "insider", 0)))
+					md.WriteString(fmt.Sprintf("| Macro | %.0f/5 |\n", getFloatVal(breakdown, "macro", 0)))
+					md.WriteString("\n")
+				}
+
+				md.WriteString("---\n\n")
+			}
+		}
+	}
+
+	// Summary table
+	if summaryTable, ok := data["summary_table"].([]interface{}); ok && len(summaryTable) > 0 {
+		md.WriteString("## Summary Table\n\n")
+		md.WriteString("| Ticker | Name | Quality | Trader Rec | Conv | Super Rec | Conv | Signal:Noise | 5Y CAGR |\n")
+		md.WriteString("|--------|------|---------|------------|------|-----------|------|--------------|----------|\n")
+
+		for _, rowRaw := range summaryTable {
+			row, ok := rowRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			md.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %.0f | %s | %.0f | %s | %s |\n",
+				getStringVal(row, "ticker", ""),
+				getStringVal(row, "name", ""),
+				getStringVal(row, "quality", ""),
+				getStringVal(row, "trader_rec", ""),
+				getFloatVal(row, "trader_conv", 0),
+				getStringVal(row, "super_rec", ""),
+				getFloatVal(row, "super_conv", 0),
+				getStringVal(row, "signal_noise", ""),
+				getStringVal(row, "cagr", ""),
+			))
+		}
+		md.WriteString("\n")
+	}
+
+	// Comparative table (for purchase conviction)
+	if compTable, ok := data["comparative_table"].([]interface{}); ok && len(compTable) > 0 {
+		md.WriteString("## Comparative Analysis\n\n")
+		md.WriteString("| Ticker | Name | Tier | Conviction | Fundamental | Technical | Risk | Insider | Macro |\n")
+		md.WriteString("|--------|------|------|------------|-------------|-----------|------|---------|-------|\n")
+
+		for _, rowRaw := range compTable {
+			row, ok := rowRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			md.WriteString(fmt.Sprintf("| %s | %s | %s | %.0f | %.0f | %.0f | %.0f | %.0f | %.0f |\n",
+				getStringVal(row, "ticker", ""),
+				getStringVal(row, "name", ""),
+				getStringVal(row, "tier", ""),
+				getFloatVal(row, "conviction_score", 0),
+				getFloatVal(row, "fundamental", 0),
+				getFloatVal(row, "technical", 0),
+				getFloatVal(row, "risk", 0),
+				getFloatVal(row, "insider", 0),
+				getFloatVal(row, "macro", 0),
+			))
+		}
+		md.WriteString("\n")
+	}
+
+	// Watchlists
+	if watchlists, ok := data["watchlists"].(map[string]interface{}); ok {
+		md.WriteString("## Watchlists\n\n")
+
+		if traderMomentum, ok := watchlists["trader_momentum"].([]interface{}); ok && len(traderMomentum) > 0 {
+			md.WriteString("### Trader Momentum (Short-term Opportunities)\n")
+			for _, ticker := range traderMomentum {
+				if t, ok := ticker.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", t))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		if superAccumulate, ok := watchlists["super_accumulate"].([]interface{}); ok && len(superAccumulate) > 0 {
+			md.WriteString("### Super Accumulate (Quality A/B Long-term)\n")
+			for _, ticker := range superAccumulate {
+				if t, ok := ticker.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", t))
+				}
+			}
+			md.WriteString("\n")
+		}
+	}
+
+	// Alerts
+	if alerts, ok := data["alerts"].([]interface{}); ok && len(alerts) > 0 {
+		md.WriteString("## Alerts\n\n")
+		for _, alert := range alerts {
+			if a, ok := alert.(string); ok {
+				md.WriteString(fmt.Sprintf("- %s\n", a))
+			}
+		}
+		md.WriteString("\n")
+	}
+
+	// Warnings (for purchase conviction)
+	if warnings, ok := data["warnings"].([]interface{}); ok && len(warnings) > 0 {
+		md.WriteString("## Warnings\n\n")
+		for _, warning := range warnings {
+			if w, ok := warning.(string); ok {
+				md.WriteString(fmt.Sprintf("- %s\n", w))
+			}
+		}
+		md.WriteString("\n")
+	}
+
+	// Definitions
+	if definitions, ok := data["definitions"].(map[string]interface{}); ok {
+		md.WriteString("## Definitions\n\n")
+		for key, val := range definitions {
+			if v, ok := val.(string); ok {
+				md.WriteString(fmt.Sprintf("**%s:** %s\n\n", key, v))
+			}
+		}
+	}
+
+	// Handle SMSF portfolio output format
+	if portfolioVal, ok := data["portfolio_valuation"].([]interface{}); ok && len(portfolioVal) > 0 {
+		if md.Len() == 0 {
+			md.WriteString("# SMSF Portfolio Review\n\n")
+			md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
+		}
+
+		// Portfolio Valuation Table
+		md.WriteString("## Portfolio Valuation\n\n")
+		md.WriteString("| Ticker | Name | Units | Avg Cost | Current | Value | Cost Basis | P/L | Return % | Weight |\n")
+		md.WriteString("|--------|------|-------|----------|---------|-------|------------|-----|----------|--------|\n")
+
+		for _, rowRaw := range portfolioVal {
+			row, ok := rowRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			md.WriteString(fmt.Sprintf("| %s | %s | %.0f | $%.2f | $%.2f | $%.2f | $%.2f | $%.2f | %.1f%% | %.1f%% |\n",
+				getStringVal(row, "ticker", ""),
+				getStringVal(row, "name", ""),
+				getFloatVal(row, "units", 0),
+				getFloatVal(row, "avg_cost", 0),
+				getFloatVal(row, "current_price", 0),
+				getFloatVal(row, "current_value", 0),
+				getFloatVal(row, "cost_basis", 0),
+				getFloatVal(row, "unrealized_pl", 0),
+				getFloatVal(row, "return_pct", 0)*100,
+				getFloatVal(row, "weight_pct", 0)*100,
+			))
+		}
+		md.WriteString("\n")
+	}
+
+	// Total Summary (for SMSF portfolio)
+	if totalSummary, ok := data["total_summary"].(map[string]interface{}); ok {
+		md.WriteString("## Total Portfolio Summary\n\n")
+		md.WriteString(fmt.Sprintf("- **Total Investment:** $%.2f\n", getFloatVal(totalSummary, "total_investment", 0)))
+		md.WriteString(fmt.Sprintf("- **Total Value:** $%.2f\n", getFloatVal(totalSummary, "total_value", 0)))
+		md.WriteString(fmt.Sprintf("- **Total P/L:** $%.2f\n", getFloatVal(totalSummary, "total_pl", 0)))
+		md.WriteString(fmt.Sprintf("- **Overall Return:** %.1f%%\n\n", getFloatVal(totalSummary, "overall_return_pct", 0)*100))
+	}
+
+	// Recommendations table (for SMSF portfolio)
+	if recommendations, ok := data["recommendations"].([]interface{}); ok && len(recommendations) > 0 {
+		md.WriteString("## Recommendations\n\n")
+		md.WriteString("| Ticker | Quality | Trader Rec | Conv | Super Rec | Conv |\n")
+		md.WriteString("|--------|---------|------------|------|-----------|------|\n")
+
+		for _, recRaw := range recommendations {
+			rec, ok := recRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			traderAction := ""
+			traderConv := 0.0
+			if traderRec, ok := rec["trader_recommendation"].(map[string]interface{}); ok {
+				traderAction = getStringVal(traderRec, "action", "N/A")
+				traderConv = getFloatVal(traderRec, "conviction", 0)
+			}
+
+			superAction := ""
+			superConv := 0.0
+			if superRec, ok := rec["super_recommendation"].(map[string]interface{}); ok {
+				superAction = getStringVal(superRec, "action", "N/A")
+				superConv = getFloatVal(superRec, "conviction", 0)
+			}
+
+			md.WriteString(fmt.Sprintf("| %s | %s | %s | %.0f | %s | %.0f |\n",
+				getStringVal(rec, "ticker", ""),
+				getStringVal(rec, "quality_rating", ""),
+				traderAction,
+				traderConv,
+				superAction,
+				superConv,
+			))
+		}
+		md.WriteString("\n")
+
+		// Quality reasoning per stock
+		for _, recRaw := range recommendations {
+			rec, ok := recRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if reasoning := getStringVal(rec, "quality_reasoning", ""); reasoning != "" {
+				md.WriteString(fmt.Sprintf("**%s Quality Reasoning:** %s\n\n", getStringVal(rec, "ticker", ""), reasoning))
+			}
+		}
+	}
+
+	// Portfolio Mix (for SMSF portfolio)
+	if portfolioMix, ok := data["portfolio_mix"].(map[string]interface{}); ok {
+		md.WriteString("## Portfolio Mix\n\n")
+
+		if riskProfile := getStringVal(portfolioMix, "risk_profile", ""); riskProfile != "" {
+			md.WriteString(fmt.Sprintf("**Risk Profile:** %s\n\n", riskProfile))
+		}
+		if diversScore := getStringVal(portfolioMix, "diversification_score", ""); diversScore != "" {
+			md.WriteString(fmt.Sprintf("**Diversification:** %s\n\n", diversScore))
+		}
+
+		defensivePct := getFloatVal(portfolioMix, "defensive_pct", 0)
+		growthPct := getFloatVal(portfolioMix, "growth_pct", 0)
+		incomeYield := getFloatVal(portfolioMix, "income_yield", 0)
+
+		if defensivePct > 0 || growthPct > 0 {
+			md.WriteString(fmt.Sprintf("- **Defensive:** %.1f%%\n", defensivePct*100))
+			md.WriteString(fmt.Sprintf("- **Growth:** %.1f%%\n", growthPct*100))
+		}
+		if incomeYield > 0 {
+			md.WriteString(fmt.Sprintf("- **Portfolio Yield:** %.2f%%\n", incomeYield*100))
+		}
+		md.WriteString("\n")
+
+		// Industry breakdown
+		if industries, ok := portfolioMix["industry_breakdown"].([]interface{}); ok && len(industries) > 0 {
+			md.WriteString("### Industry Breakdown\n\n")
+			md.WriteString("| Industry | Weight |\n")
+			md.WriteString("|----------|--------|\n")
+			for _, indRaw := range industries {
+				ind, ok := indRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				md.WriteString(fmt.Sprintf("| %s | %.1f%% |\n",
+					getStringVal(ind, "industry", ""),
+					getFloatVal(ind, "weight_pct", 0)*100,
+				))
+			}
+			md.WriteString("\n")
+		}
+	}
+
+	// Priority Actions (for SMSF portfolio)
+	if priorityActions, ok := data["priority_actions"].(map[string]interface{}); ok {
+		md.WriteString("## Priority Actions\n\n")
+
+		if traderOpps, ok := priorityActions["trader_opportunities"].([]interface{}); ok && len(traderOpps) > 0 {
+			md.WriteString("### Trader Opportunities (1-6 weeks)\n")
+			for _, opp := range traderOpps {
+				if o, ok := opp.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", o))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		if superAcc, ok := priorityActions["super_accumulate"].([]interface{}); ok && len(superAcc) > 0 {
+			md.WriteString("### Super Accumulation Targets (6-12+ months)\n")
+			for _, acc := range superAcc {
+				if a, ok := acc.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", a))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		if rebalancing, ok := priorityActions["rebalancing"].([]interface{}); ok && len(rebalancing) > 0 {
+			md.WriteString("### Rebalancing Recommendations\n")
+			for _, reb := range rebalancing {
+				if r, ok := reb.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", r))
+				}
+			}
+			md.WriteString("\n")
+		}
+	}
+
+	// Risk Alerts (for SMSF portfolio)
+	if riskAlerts, ok := data["risk_alerts"].([]interface{}); ok && len(riskAlerts) > 0 {
+		md.WriteString("## Risk Alerts\n\n")
+		for _, alert := range riskAlerts {
+			if a, ok := alert.(string); ok {
+				md.WriteString(fmt.Sprintf("- ⚠️ %s\n", a))
+			}
+		}
+		md.WriteString("\n")
+	}
+
+	// If we didn't generate any meaningful content, return an error
+	if md.Len() == 0 {
+		return "", fmt.Errorf("no recognizable structure in JSON response")
+	}
+
+	return md.String(), nil
+}
+
+// getStringVal extracts a string value from a map with a default fallback
+func getStringVal(m map[string]interface{}, key, defaultVal string) string {
+	if val, ok := m[key]; ok {
+		if s, ok := val.(string); ok {
+			return s
+		}
+	}
+	return defaultVal
+}
+
+// getFloatVal extracts a numeric value from a map, handling various types
+func getFloatVal(m map[string]interface{}, key string, defaultVal float64) float64 {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
+	}
+	return defaultVal
 }

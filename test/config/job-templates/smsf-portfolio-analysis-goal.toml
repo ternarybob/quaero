@@ -149,3 +149,198 @@ available_tools = [
     { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, competitor analysis.", worker = "web_search" },
     { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for portfolio P/L calculations and recommendations.", worker = "summary" },
 ]
+
+# Output schema for structured LLM output (Gemini ResponseSchema)
+# When set, the LLM MUST return JSON matching this schema.
+# The JSON is then converted to markdown for the final document.
+[template.output_schema]
+type = "object"
+description = "Structured SMSF portfolio analysis with P/L calculations and recommendations"
+required = ["portfolio_valuation", "total_summary", "recommendations", "portfolio_mix", "priority_actions", "risk_alerts"]
+
+[template.output_schema.properties.portfolio_valuation]
+type = "array"
+description = "Valuation table for each holding"
+
+[template.output_schema.properties.portfolio_valuation.items]
+type = "object"
+required = ["ticker", "units", "avg_cost", "current_price", "current_value", "unrealized_pl", "return_pct", "weight_pct"]
+
+[template.output_schema.properties.portfolio_valuation.items.properties.ticker]
+type = "string"
+description = "ASX stock ticker code"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.name]
+type = "string"
+description = "Company full name"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.units]
+type = "number"
+description = "Number of shares held"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.avg_cost]
+type = "number"
+description = "Average purchase price per share"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.current_price]
+type = "number"
+description = "Current market price per share"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.current_value]
+type = "number"
+description = "Current market value (units × current_price)"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.cost_basis]
+type = "number"
+description = "Total cost basis (units × avg_cost)"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.unrealized_pl]
+type = "number"
+description = "Unrealized profit/loss (current_value - cost_basis)"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.return_pct]
+type = "number"
+description = "Return percentage as decimal (e.g., 0.15 for 15%)"
+
+[template.output_schema.properties.portfolio_valuation.items.properties.weight_pct]
+type = "number"
+description = "Portfolio weight percentage as decimal"
+
+[template.output_schema.properties.total_summary]
+type = "object"
+description = "Total portfolio summary"
+required = ["total_investment", "total_value", "total_pl", "overall_return_pct"]
+
+[template.output_schema.properties.total_summary.properties.total_investment]
+type = "number"
+description = "Sum of all cost bases"
+
+[template.output_schema.properties.total_summary.properties.total_value]
+type = "number"
+description = "Sum of all current values"
+
+[template.output_schema.properties.total_summary.properties.total_pl]
+type = "number"
+description = "Total unrealized P/L"
+
+[template.output_schema.properties.total_summary.properties.overall_return_pct]
+type = "number"
+description = "Overall return percentage as decimal"
+
+[template.output_schema.properties.recommendations]
+type = "array"
+description = "Recommendations for each holding"
+
+[template.output_schema.properties.recommendations.items]
+type = "object"
+required = ["ticker", "quality_rating", "trader_recommendation", "super_recommendation"]
+
+[template.output_schema.properties.recommendations.items.properties.ticker]
+type = "string"
+description = "ASX stock ticker code"
+
+[template.output_schema.properties.recommendations.items.properties.quality_rating]
+type = "string"
+description = "Company quality grade"
+enum = ["A", "B", "C", "D", "F"]
+
+[template.output_schema.properties.recommendations.items.properties.quality_reasoning]
+type = "string"
+description = "Brief explanation of quality rating"
+
+[template.output_schema.properties.recommendations.items.properties.trader_recommendation]
+type = "object"
+required = ["action", "conviction"]
+
+[template.output_schema.properties.recommendations.items.properties.trader_recommendation.properties.action]
+type = "string"
+enum = ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+
+[template.output_schema.properties.recommendations.items.properties.trader_recommendation.properties.conviction]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.recommendations.items.properties.super_recommendation]
+type = "object"
+required = ["action", "conviction"]
+
+[template.output_schema.properties.recommendations.items.properties.super_recommendation.properties.action]
+type = "string"
+enum = ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"]
+
+[template.output_schema.properties.recommendations.items.properties.super_recommendation.properties.conviction]
+type = "integer"
+minimum = 1
+maximum = 10
+
+[template.output_schema.properties.portfolio_mix]
+type = "object"
+description = "Portfolio mix analysis"
+
+[template.output_schema.properties.portfolio_mix.properties.industry_breakdown]
+type = "array"
+description = "Industry concentration breakdown"
+
+[template.output_schema.properties.portfolio_mix.properties.industry_breakdown.items]
+type = "object"
+
+[template.output_schema.properties.portfolio_mix.properties.industry_breakdown.items.properties.industry]
+type = "string"
+
+[template.output_schema.properties.portfolio_mix.properties.industry_breakdown.items.properties.weight_pct]
+type = "number"
+
+[template.output_schema.properties.portfolio_mix.properties.risk_profile]
+type = "string"
+description = "Overall risk profile"
+enum = ["Conservative", "Balanced", "Aggressive"]
+
+[template.output_schema.properties.portfolio_mix.properties.diversification_score]
+type = "string"
+description = "Diversification assessment"
+enum = ["Poor", "Moderate", "Good", "Excellent"]
+
+[template.output_schema.properties.portfolio_mix.properties.defensive_pct]
+type = "number"
+description = "Percentage in defensive assets"
+
+[template.output_schema.properties.portfolio_mix.properties.growth_pct]
+type = "number"
+description = "Percentage in growth assets"
+
+[template.output_schema.properties.portfolio_mix.properties.income_yield]
+type = "number"
+description = "Portfolio dividend yield as decimal"
+
+[template.output_schema.properties.priority_actions]
+type = "object"
+description = "Priority actions for the portfolio"
+
+[template.output_schema.properties.priority_actions.properties.trader_opportunities]
+type = "array"
+description = "Short-term trading opportunities"
+
+[template.output_schema.properties.priority_actions.properties.trader_opportunities.items]
+type = "string"
+
+[template.output_schema.properties.priority_actions.properties.super_accumulate]
+type = "array"
+description = "Long-term accumulation targets"
+
+[template.output_schema.properties.priority_actions.properties.super_accumulate.items]
+type = "string"
+
+[template.output_schema.properties.priority_actions.properties.rebalancing]
+type = "array"
+description = "Rebalancing recommendations"
+
+[template.output_schema.properties.priority_actions.properties.rebalancing.items]
+type = "string"
+
+[template.output_schema.properties.risk_alerts]
+type = "array"
+description = "Risk alerts and warnings"
+
+[template.output_schema.properties.risk_alerts.items]
+type = "string"
