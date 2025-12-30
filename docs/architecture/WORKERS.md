@@ -1153,7 +1153,8 @@ search_type = "text_search"
 | `api_key` | string | No | Gemini API key |
 | `output_tags` | []string | No | Additional tags to apply to the output document (useful for downstream steps) |
 | `thinking_level` | string | No | Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Use HIGH for complex analysis. |
-| `output_schema` | map | No | JSON schema for structured output (Gemini only). When provided, enforces JSON output matching schema, then converts to markdown. |
+| `output_schema` | map | No | Inline JSON schema for structured output (Gemini only). When provided, enforces JSON output matching schema, then converts to markdown. |
+| `schema_ref` | string | No | Reference to external JSON schema file in `schemas/` directory (e.g., `"stock-report.schema.json"`). Alternative to inline `output_schema`. |
 | `required_tickers` | []string | No | Stock tickers that MUST appear in output (for orchestrator terminal steps) |
 | `benchmark_codes` | []string | No | Benchmark codes that should NOT be treated as stocks (for validation) |
 | `output_validation` | []string | No | Required patterns that must appear in output |
@@ -1192,10 +1193,26 @@ The summary worker supports schema-constrained JSON output using Gemini's `Respo
 3. **Conversion**: The JSON response is automatically converted to formatted markdown
 
 **How it works**:
-- Schema is defined in job templates as `[template.output_schema]` (TOML format)
-- Orchestrator passes schema to terminal `analyze_summary` steps
+- Schema can be defined inline in job templates as `[template.output_schema]` (TOML) or externally via `output_schema_ref`
+- External schemas are stored in `deployments/common/schemas/` (JSON files, e.g., `stock-report.schema.json`)
+- Orchestrator loads external schemas via `loadSchemaFromFile()` and passes to terminal `analyze_summary` steps
 - Summary worker sets Gemini's `ResponseMIMEType = "application/json"` and `ResponseSchema`
 - Response is parsed and converted to markdown using `jsonToMarkdown()`
+
+**External Schema Files** (preferred for reusable schemas):
+```toml
+# In goal template (e.g., asx-stock-analysis-goal.toml)
+[template]
+output_schema_ref = "stock-report.schema.json"  # Loads from ../schemas/
+```
+
+Schema files location: `deployments/common/schemas/` and `test/config/schemas/` (must be mirrored)
+
+**Available schemas**:
+- `stock-report.schema.json` - Combined multi-stock analysis report
+- `stock-analysis.schema.json` - Individual stock analysis structure
+- `portfolio-review.schema.json` - Portfolio review report
+- `purchase-conviction.schema.json` - Purchase conviction analysis
 
 **Supported schema features**:
 - `type`: object, array, string, number, integer, boolean

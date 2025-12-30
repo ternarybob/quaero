@@ -569,7 +569,7 @@ The following is a critique of your previous draft. You must address EVERY issue
 					Str("final_errors", validationResult.String()).
 					Msg(errMsg)
 				w.logJobEvent(ctx, stepID, step.Name, "error", errMsg, nil)
-				return "", fmt.Errorf(errMsg)
+				return "", fmt.Errorf("%s", errMsg)
 			}
 
 			// Build validation feedback prompt for regeneration

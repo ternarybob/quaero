@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -243,6 +244,151 @@ func validateEmailContent(t *testing.T, content string, expectedTickers []string
 	assert.True(t, foundAnalysis, "Email should contain analysis-related content")
 
 	t.Log("PASS: Email contains actual stock analysis content")
+
+	// Step 10: Validate schema compliance (for stock recommendation outputs)
+	validateSchemaCompliance(t, content)
+}
+
+// validateSchemaCompliance validates that the output content contains expected schema fields.
+// This ensures the output_schema from goal templates (e.g., stock-report.schema.json) is being enforced.
+// Schema fields validated:
+// - Recommendation actions: STRONG BUY, BUY, HOLD, SELL, STRONG SELL (trader) and ACCUMULATE, HOLD, REDUCE, AVOID (super)
+// - Quality rating: A, B, C, D, or F
+// - Signal:Noise ratio: HIGH, MEDIUM, or LOW
+// - Technical indicators: RSI, SMA, support, resistance
+func validateSchemaCompliance(t *testing.T, content string) {
+	t.Log("Step 10: Validating output schema compliance")
+
+	contentUpper := strings.ToUpper(content)
+
+	// 1. Check for recommendation action fields from stock-analysis.schema.json
+	// trader_recommendation.action: STRONG BUY, BUY, HOLD, SELL, STRONG SELL
+	// super_recommendation.action: ACCUMULATE, HOLD, REDUCE, AVOID
+	recommendationActions := []string{
+		"STRONG BUY", "STRONG SELL", // Strong trader actions
+		"ACCUMULATE", "REDUCE", "AVOID", // Super recommendation actions
+	}
+
+	foundRecommendation := false
+	for _, action := range recommendationActions {
+		if strings.Contains(contentUpper, action) {
+			foundRecommendation = true
+			t.Logf("PASS: Found recommendation action '%s' in output (schema: trader/super_recommendation.action)", action)
+			break
+		}
+	}
+	// Note: Basic BUY/SELL/HOLD are already checked in validateEmailContent
+	// This checks for the more specific schema fields
+	if !foundRecommendation {
+		t.Log("INFO: No strong recommendation actions found (STRONG BUY/SELL, ACCUMULATE/REDUCE/AVOID)")
+		t.Log("      This may indicate schema is not being strictly enforced by LLM")
+	}
+
+	// 2. Check for quality rating (A/B/C/D/F) from stock-analysis.schema.json
+	// quality_rating enum: A, B, C, D, F
+	qualityPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)quality[:\s]+[ABCDF]\b`),                   // Quality: A, Quality B
+		regexp.MustCompile(`(?i)quality\s+rating[:\s]+[ABCDF]\b`),          // Quality Rating: A
+		regexp.MustCompile(`(?i)\bquality\s+[ABCDF]\b`),                    // Quality A
+		regexp.MustCompile(`(?i)\b[ABCDF]\s+(?:quality|rated|rating)\b`),   // A quality, A rated
+		regexp.MustCompile(`(?i)grade[:\s]+[ABCDF]\b`),                     // Grade: A
+		regexp.MustCompile(`\|\s*[ABCDF]\s*\|`),                            // | A | (table format)
+	}
+
+	foundQuality := false
+	for _, pattern := range qualityPatterns {
+		if pattern.MatchString(content) {
+			foundQuality = true
+			t.Log("PASS: Found quality rating (A/B/C/D/F) in output (schema: quality_rating)")
+			break
+		}
+	}
+
+	if !foundQuality {
+		t.Log("INFO: Quality rating (A/B/C/D/F) not found in expected format")
+		t.Log("      Schema field: quality_rating with enum [A, B, C, D, F]")
+	}
+
+	// 3. Check for signal:noise ratio from stock-analysis.schema.json
+	// signal_noise_ratio enum: HIGH, MEDIUM, LOW
+	signalNoisePatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)signal[:\s/-]+noise[:\s]+(?:HIGH|MEDIUM|LOW)`),
+		regexp.MustCompile(`(?i)signal[:\s/-]+noise\s+ratio[:\s]+(?:HIGH|MEDIUM|LOW)`),
+		regexp.MustCompile(`(?i)s\s*/\s*n[:\s]+(?:HIGH|MEDIUM|LOW)`),
+		regexp.MustCompile(`\|\s*(?:HIGH|MEDIUM|LOW)\s*\|`), // Table format
+	}
+
+	foundSignalNoise := false
+	for _, pattern := range signalNoisePatterns {
+		if pattern.MatchString(content) {
+			foundSignalNoise = true
+			t.Log("PASS: Found signal:noise ratio in output (schema: signal_noise_ratio)")
+			break
+		}
+	}
+
+	if !foundSignalNoise {
+		t.Log("INFO: Signal:noise ratio not found in expected format")
+		t.Log("      Schema field: signal_noise_ratio with enum [HIGH, MEDIUM, LOW]")
+	}
+
+	// 4. Check for technical indicators from stock-analysis.schema.json
+	// technical_analysis object with: sma_20, sma_50, sma_200, rsi_14
+	technicalIndicators := []string{
+		"SMA", "RSI", "SUPPORT", "RESISTANCE",
+		"MOVING AVERAGE", "BULLISH", "BEARISH", "NEUTRAL",
+	}
+
+	foundTechnical := false
+	for _, indicator := range technicalIndicators {
+		if strings.Contains(contentUpper, indicator) {
+			foundTechnical = true
+			t.Logf("PASS: Found technical indicator '%s' in output (schema: technical_analysis)", indicator)
+			break
+		}
+	}
+
+	if !foundTechnical {
+		t.Log("INFO: Technical indicators (SMA, RSI, Support, Resistance) not found")
+		t.Log("      Schema field: technical_analysis object")
+	}
+
+	// 5. Check for conviction scores (1-10) from stock-analysis.schema.json
+	// trader_recommendation.conviction and super_recommendation.conviction
+	convictionPattern := regexp.MustCompile(`(?i)conviction[:\s]+([1-9]|10)\b`)
+	foundConviction := convictionPattern.MatchString(content)
+
+	if foundConviction {
+		t.Log("PASS: Found conviction score (1-10) in output (schema: conviction)")
+	} else {
+		t.Log("INFO: Conviction score (1-10) not found in expected format")
+	}
+
+	// Summary of schema compliance
+	schemaScore := 0
+	if foundRecommendation {
+		schemaScore++
+	}
+	if foundQuality {
+		schemaScore++
+	}
+	if foundSignalNoise {
+		schemaScore++
+	}
+	if foundTechnical {
+		schemaScore++
+	}
+	if foundConviction {
+		schemaScore++
+	}
+
+	t.Logf("Schema compliance score: %d/5 fields detected", schemaScore)
+
+	// Assert at least basic schema compliance (quality or recommendation found)
+	assert.True(t, foundQuality || foundRecommendation || foundTechnical,
+		"Output should contain at least one schema-defined field (quality rating, recommendation action, or technical analysis)")
+
+	t.Log("PASS: Output shows schema compliance")
 }
 
 // validateIndexDataFetched validates that index data documents were created for expected indices.

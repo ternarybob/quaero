@@ -34,17 +34,19 @@ type JobDefinitionType string
 
 // JobDefinitionType constants
 const (
-	JobDefinitionTypeCrawler      JobDefinitionType = "crawler"
-	JobDefinitionTypeSummarizer   JobDefinitionType = "summarizer"
-	JobDefinitionTypeCustom       JobDefinitionType = "custom"
-	JobDefinitionTypePlaces       JobDefinitionType = "places"
-	JobDefinitionTypeAgent        JobDefinitionType = "agent"        // Agent-powered document processing jobs
-	JobDefinitionTypeFetch        JobDefinitionType = "fetch"        // API-based data collection with authentication (GitHub, etc.)
-	JobDefinitionTypeWebSearch    JobDefinitionType = "web_search"   // Gemini-powered web search with grounding
-	JobDefinitionTypeLocalDir     JobDefinitionType = "local_dir"    // Local filesystem directory indexing
-	JobDefinitionTypeCodeMap      JobDefinitionType = "code_map"     // Hierarchical code structure analysis
-	JobDefinitionTypeJobTemplate  JobDefinitionType = "job_template" // Template orchestration - executes job templates with variable substitution
-	JobDefinitionTypeOrchestrator JobDefinitionType = "orchestrator" // AI-powered cognitive orchestration with dynamic planning
+	JobDefinitionTypeCrawler         JobDefinitionType = "crawler"
+	JobDefinitionTypeSummarizer      JobDefinitionType = "summarizer"
+	JobDefinitionTypeCustom          JobDefinitionType = "custom"
+	JobDefinitionTypePlaces          JobDefinitionType = "places"
+	JobDefinitionTypeAgent           JobDefinitionType = "agent"            // Agent-powered document processing jobs
+	JobDefinitionTypeFetch           JobDefinitionType = "fetch"            // API-based data collection with authentication (GitHub, etc.)
+	JobDefinitionTypeWebSearch       JobDefinitionType = "web_search"       // Gemini-powered web search with grounding
+	JobDefinitionTypeLocalDir        JobDefinitionType = "local_dir"        // Local filesystem directory indexing
+	JobDefinitionTypeCodeMap         JobDefinitionType = "code_map"         // Hierarchical code structure analysis
+	JobDefinitionTypeJobTemplate     JobDefinitionType = "job_template"     // Template orchestration - executes job templates with variable substitution
+	JobDefinitionTypeOrchestrator    JobDefinitionType = "orchestrator"     // AI-powered cognitive orchestration with dynamic planning
+	JobDefinitionTypeASXStockData    JobDefinitionType = "asx_stock_data"   // ASX stock data fetching
+	JobDefinitionTypeASXAnnouncements JobDefinitionType = "asx_announcements" // ASX company announcements fetching
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -62,7 +64,7 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces,
 		JobDefinitionTypeAgent, JobDefinitionTypeFetch, JobDefinitionTypeWebSearch,
 		JobDefinitionTypeLocalDir, JobDefinitionTypeCodeMap, JobDefinitionTypeJobTemplate,
-		JobDefinitionTypeOrchestrator:
+		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXStockData, JobDefinitionTypeASXAnnouncements:
 		return true
 	default:
 		return false
@@ -205,7 +207,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, asx_stock_data, asx_announcements)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)

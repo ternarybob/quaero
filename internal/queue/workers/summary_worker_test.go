@@ -451,6 +451,7 @@ func TestSummaryWorker_createDocument(t *testing.T) {
 		jobDef,
 		"parent-job-id",
 		nil,
+		nil,
 	)
 
 	assert.NoError(t, err)
@@ -494,6 +495,7 @@ func TestSummaryWorker_createDocument_WithoutJobDef(t *testing.T) {
 		docs,
 		nil,
 		"parent-id",
+		nil,
 		nil,
 	)
 

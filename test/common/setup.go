@@ -112,6 +112,7 @@ type OutputCapture struct {
 	writer       *os.File
 	wg           sync.WaitGroup
 	testLog      *os.File
+	outputFile   *os.File // output.md file for full test output
 	capturing    bool
 	captureMutex sync.Mutex
 }
@@ -146,6 +147,7 @@ type TestEnvironment struct {
 	ResultsDir     string
 	LogFile        *os.File // Service log output
 	TestLog        *os.File // Test execution log
+	OutputFile     *os.File // output.md file for full test output
 	Port           int
 	ConfigFilePath string // Path to config file used (for copying to bin/)
 
@@ -438,6 +440,15 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		return nil, fmt.Errorf("failed to create test log file: %w", err)
 	}
 
+	// Create output.md file for full test output
+	outputPath := filepath.Join(resultsDir, "output.md")
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		logFile.Close()
+		testLogFile.Close()
+		return nil, fmt.Errorf("failed to create output.md file: %w", err)
+	}
+
 	// Determine config file path for copying to bin/
 	configFilePath := "../config/test-config.toml" // Default
 	if len(customConfigPath) > 0 && customConfigPath[0] != "" {
@@ -449,6 +460,7 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		ResultsDir:     resultsDir,
 		LogFile:        logFile,
 		TestLog:        testLogFile,
+		OutputFile:     outputFile,
 		Port:           config.Service.Port,
 		ConfigFilePath: configFilePath,
 		EnvVars:        make(map[string]string), // Initialize empty map
@@ -496,7 +508,7 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 	}
 
 	// Initialize output capture
-	env.outputCapture = NewOutputCapture(testLogFile)
+	env.outputCapture = NewOutputCapture(testLogFile, outputFile)
 	env.outputCapture.Start()
 
 	// Write TestMain output to test log
@@ -1261,8 +1273,26 @@ func (env *TestEnvironment) Cleanup() {
 	if env.LogFile != nil {
 		env.LogFile.Close()
 	}
-	if env.TestLog != nil {
+
+	// Copy test.log content to output.md before closing
+	if env.TestLog != nil && env.OutputFile != nil {
+		// Flush and close TestLog first
+		env.TestLog.Sync()
 		env.TestLog.Close()
+
+		// Read test.log and write to output.md
+		testLogPath := filepath.Join(env.ResultsDir, "test.log")
+		if content, err := os.ReadFile(testLogPath); err == nil {
+			env.OutputFile.Write(content)
+		}
+		env.OutputFile.Close()
+	} else {
+		if env.TestLog != nil {
+			env.TestLog.Close()
+		}
+		if env.OutputFile != nil {
+			env.OutputFile.Close()
+		}
 	}
 }
 
@@ -1483,7 +1513,9 @@ func (h *HTTPTestHelper) Logf(format string, args ...interface{}) {
 		location := getCallerLocation(2) // Skip Logf and getCallerLocation
 		fmt.Fprintf(h.TestLog, "    %s: %s\n", location, msg)
 	}
-	h.T.Log(msg)
+	if h.T != nil {
+		h.T.Log(msg)
+	}
 }
 
 // NewHTTPTestHelper creates a new HTTP test helper with the env's base URL
@@ -1633,12 +1665,13 @@ func (h *HTTPTestHelper) AssertJSONField(resp *http.Response, field string, expe
 }
 
 // NewOutputCapture creates a new output capturer
-func NewOutputCapture(testLog *os.File) *OutputCapture {
+func NewOutputCapture(testLog *os.File, outputFile *os.File) *OutputCapture {
 	return &OutputCapture{
 		buffer:      &bytes.Buffer{},
 		originalOut: os.Stdout,
 		originalErr: os.Stderr,
 		testLog:     testLog,
+		outputFile:  outputFile,
 		capturing:   false,
 	}
 }
@@ -1666,8 +1699,12 @@ func (oc *OutputCapture) Start() {
 	oc.wg.Add(1)
 	go func() {
 		defer oc.wg.Done()
-		// Tee to buffer, original output, and test log
-		mw := io.MultiWriter(oc.buffer, oc.originalOut, oc.testLog)
+		// Tee to buffer, original output, test log, and output.md
+		writers := []io.Writer{oc.buffer, oc.originalOut, oc.testLog}
+		if oc.outputFile != nil {
+			writers = append(writers, oc.outputFile)
+		}
+		mw := io.MultiWriter(writers...)
 		io.Copy(mw, oc.reader)
 	}()
 
