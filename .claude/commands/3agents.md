@@ -62,6 +62,7 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
 - **Requirements are LAW** - No interpretation, no "good enough"
 - **Skills are enforceable** - Violations = automatic REJECT
 - **STEPS ARE MANDATORY** - Every task MUST have step documentation with validation against architecture and requirements. No exceptions.
+- **EXISTING PATTERNS ARE LAW** - New code MUST follow existing codebase patterns. No exceptions.
 
 ### Configuration Directory Rules
 **`./bin` is UNTRACKED (UAT environment):**
@@ -77,6 +78,36 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
 - **Go**: `.claude/skills/go/SKILL.md` - for any Go code changes
 - **Frontend**: `.claude/skills/frontend/SKILL.md` - for any frontend changes
 - **Monitoring**: `.claude/skills/monitoring/SKILL.md` - for UI test changes
+
+### Test Consistency Rules (MANDATORY FOR ALL TESTS)
+**Before writing ANY test code, you MUST:**
+1. **Analyze existing tests** in the target directory (`test/ui/`, `test/api/`, `internal/**/`)
+2. **Read the test architecture doc**: `doc/TEST_ARCHITECTURE.md`
+3. **Document findings** in step documentation before implementation
+
+**UI Tests (`test/ui/`) - Mandatory Patterns:**
+- MUST use `UITestContext` from `test/ui/uitest_context.go`
+- MUST use `chromedp` package for ALL browser automation (NEVER raw Chrome/puppeteer/playwright)
+- MUST call `defer utc.Cleanup()` immediately after context creation
+- MUST use `utc.Log()`, `utc.Screenshot()`, `utc.Navigate()` helpers
+- Reference implementation: `test/ui/job_core_test.go`
+
+**API Tests (`test/api/`) - Mandatory Patterns:**
+- MUST use `common.SetupTestEnvironment()` from `test/common/setup.go`
+- MUST use HTTP test helpers from `test/common/`
+- MUST follow existing authentication patterns
+- Reference implementation: `test/api/jobs_test.go`
+
+**Unit Tests (`internal/**/`) - Mandatory Patterns:**
+- MUST use Go standard testing + testify
+- MUST follow existing mock patterns in the package
+- MUST match naming convention: `{filename}_test.go`
+
+**AUTOMATIC REJECT for tests that:**
+- Use alternative browser automation (selenium, playwright, puppeteer)
+- Create new test infrastructure when existing infrastructure exists
+- Don't use established helper functions
+- Introduce new testing patterns without documented justification
 
 ### Validation Rules
 - VALIDATOR must READ skill files, not rely on memory
@@ -95,17 +126,23 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
 
 ### PHASE 0: ARCHITECT
 
-**Purpose:** Assess requirements, review architecture, create step-by-step implementation plan.
+**Purpose:** Assess requirements, review architecture, analyze existing patterns, create step-by-step implementation plan.
 
 1. **Read architecture docs:**
    - `docs/architecture/ARCHITECTURE.md`
    - `docs/architecture/README.md`
+   - `doc/TEST_ARCHITECTURE.md` (for any test-related work)
    - Relevant architecture docs for the task domain
 2. **Read applicable skills:**
    - `.claude/skills/refactoring/SKILL.md`
    - Domain-specific skills (go, frontend, monitoring)
-3. **Extract ALL requirements** - explicit AND implicit
-4. **Write `$WORKDIR/requirements.md`:**
+3. **Analyze existing patterns (MANDATORY):**
+   - Search for similar existing code in target directories
+   - For tests: Read 2-3 existing tests in same directory
+   - Document patterns found (imports, structure, helpers used)
+   - Identify reusable components and infrastructure
+4. **Extract ALL requirements** - explicit AND implicit
+5. **Write `$WORKDIR/requirements.md`:**
    ```markdown
    ## Requirements
    - [ ] REQ-1: <requirement>
@@ -115,9 +152,9 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
    - [ ] AC-1: <criterion>
    ...
    ```
-5. **Search codebase** for existing code to reuse
-6. **Challenge:** Does this NEED new code?
-7. **Create step documentation** - Break work into discrete steps:
+6. **Search codebase** for existing code to reuse
+7. **Challenge:** Does this NEED new code?
+8. **Create step documentation** - Break work into discrete steps:
 
    **Write `$WORKDIR/step_1.md`:**
    ```markdown
@@ -150,10 +187,24 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
 
    Repeat for `step_2.md`, `step_3.md`, etc.
 
-8. **Write `$WORKDIR/architect-analysis.md`:**
+9. **Write `$WORKDIR/architect-analysis.md`:**
    ```markdown
    ## Overview
    <High-level analysis>
+
+   ## Existing Patterns Analysis (MANDATORY)
+   ### Files Analyzed
+   - `<file1>`: <patterns observed>
+   - `<file2>`: <patterns observed>
+
+   ### Key Patterns to Follow
+   - Imports: <list standard imports>
+   - Test infrastructure: <helpers, contexts used>
+   - Assertions: <library and patterns>
+   - Browser automation: <chromedp patterns> (if UI tests)
+
+   ### Reusable Components Identified
+   - <component>: <how to use>
 
    ## Steps Summary
    1. Step 1: <title> - REQs: 1, 2
@@ -261,6 +312,25 @@ For the current step:
 - [ ] Structured logging with utc.Log()?
 - [ ] All chromedp errors checked?
 - [ ] No hardcoded waits without purpose?
+
+**Test Consistency Audit (MANDATORY for ANY test changes):**
+- [ ] Analyzed existing tests in same directory BEFORE implementation?
+- [ ] Uses EXACT same imports as existing tests?
+- [ ] Uses established test infrastructure (UITestContext for UI, common.SetupTestEnvironment for API)?
+- [ ] Browser automation uses ONLY chromedp (NO selenium/playwright/puppeteer)?
+- [ ] Assertions use testify (assert/require)?
+- [ ] Test structure matches existing tests in directory?
+- [ ] Helper functions reused (not reinvented)?
+- [ ] No new testing patterns introduced without documented justification?
+
+**AUTOMATIC REJECT triggers:**
+```
+- Using chrome package instead of chromedp
+- Creating new test helpers when existing ones cover the use case
+- Different assertion library than testify
+- Different test context pattern than UITestContext (for UI tests)
+- Missing defer utc.Cleanup() (for UI tests)
+```
 
 #### Step 2.5: Adversarial Challenges
 **VALIDATOR must ask these questions and find evidence:**
