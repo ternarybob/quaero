@@ -7,12 +7,41 @@
 Patterns for UI testing with browser automation, screenshots, monitoring, and result data output.
 Reference implementation: `test/ui/job_definition_general_test.go`
 
+## MANDATORY: Browser Automation Standard
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CHROMEDP IS THE ONLY ALLOWED OPTION                       │
+│                                                                              │
+│  ✓ ALLOWED:  github.com/chromedp/chromedp                                   │
+│                                                                              │
+│  ✗ FORBIDDEN (AUTO-REJECT):                                                 │
+│    - selenium/webdriver                                                      │
+│    - playwright                                                              │
+│    - puppeteer                                                               │
+│    - rod                                                                     │
+│    - raw chrome DevTools                                                     │
+│    - Any other browser automation library                                    │
+│                                                                              │
+│  WHY: Consistency, existing infrastructure, shared helpers                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## BEFORE WRITING ANY TEST
+
+**MANDATORY STEPS:**
+1. Read `doc/TEST_ARCHITECTURE.md` for overview
+2. Read 2-3 existing tests in `test/ui/` directory
+3. Identify reusable components from `test/ui/uitest_context.go`
+4. Document patterns you will follow in step documentation
+
 ## Project Context
 
 - **Test Framework:** Go testing with testify (assert/require)
-- **Browser Automation:** chromedp (Chrome DevTools Protocol)
+- **Browser Automation:** chromedp (Chrome DevTools Protocol) - **NO ALTERNATIVES**
 - **Location:** `test/ui/` for UI tests, `test/api/` for API tests
 - **Results:** Screenshots and data saved to `test/results/{run-timestamp}/`
+- **Test Infrastructure:** `test/ui/uitest_context.go` - **ALWAYS USE THIS**
 
 ## UITestContext - Core Test Infrastructure
 
@@ -347,6 +376,47 @@ func TestMyFeature(t *testing.T) {
 
 ## Anti-Patterns (AUTO-FAIL)
 
+### Browser Automation Anti-Patterns (INSTANT REJECT)
+
+```go
+// ❌ FORBIDDEN: Using selenium/webdriver
+import "github.com/tebeka/selenium"  // NEVER USE
+
+// ❌ FORBIDDEN: Using playwright-go
+import "github.com/playwright-community/playwright-go"  // NEVER USE
+
+// ❌ FORBIDDEN: Using rod
+import "github.com/go-rod/rod"  // NEVER USE
+
+// ❌ FORBIDDEN: Creating your own browser context
+ctx, cancel := chromedp.NewContext(context.Background())  // Use UITestContext!
+
+// ❌ FORBIDDEN: Direct Chrome/CDP without chromedp wrappers
+// Any direct websocket connections to Chrome DevTools
+```
+
+### Test Infrastructure Anti-Patterns (INSTANT REJECT)
+
+```go
+// ❌ FORBIDDEN: Not using UITestContext
+func TestSomething(t *testing.T) {
+    // Direct chromedp without UITestContext - WRONG!
+    ctx, cancel := chromedp.NewExecAllocator(...)  // Use NewUITestContext!
+}
+
+// ❌ FORBIDDEN: Creating parallel test infrastructure
+type MyTestContext struct { ... }  // Use existing UITestContext!
+
+// ❌ FORBIDDEN: Custom screenshot functions
+func takeScreenshot(ctx context.Context, ...) { ... }  // Use utc.Screenshot()!
+
+// ❌ FORBIDDEN: Custom logging in tests
+log.Printf("...")  // Use utc.Log()!
+fmt.Printf("...")  // Use utc.Log()!
+```
+
+### General Anti-Patterns
+
 ```go
 // ❌ Missing cleanup
 utc := NewUITestContext(t, timeout)
@@ -365,14 +435,34 @@ chromedp.Evaluate(`...`, nil)  // Ignoring result
 
 // ❌ Missing error checks
 utc.Navigate(url)  // Should check error!
+
+// ❌ Not following existing test patterns
+// Always read existing tests first!
 ```
 
 ## Rules Summary
 
-1. **Always defer Cleanup** - `defer utc.Cleanup()` immediately after context creation
-2. **Screenshot key moments** - Initial, after actions, on errors, final state
-3. **Use structured logging** - `utc.Log()` for all test output
-4. **Check all errors** - Every chromedp operation can fail
-5. **Use helper methods** - Don't reinvent TriggerJob, MonitorJob, etc.
-6. **Save relevant data** - Use SaveToResults for captured data
-7. **Follow timeout patterns** - Set appropriate test and job timeouts
+1. **CHROMEDP ONLY** - Never use selenium, playwright, rod, or other browser automation
+2. **ALWAYS use UITestContext** - Never create your own test context
+3. **Always defer Cleanup** - `defer utc.Cleanup()` immediately after context creation
+4. **Screenshot key moments** - Initial, after actions, on errors, final state
+5. **Use structured logging** - `utc.Log()` for all test output
+6. **Check all errors** - Every chromedp operation can fail
+7. **Use helper methods** - Don't reinvent TriggerJob, MonitorJob, etc.
+8. **Save relevant data** - Use SaveToResults for captured data
+9. **Follow timeout patterns** - Set appropriate test and job timeouts
+10. **Read existing tests first** - Analyze patterns before writing new tests
+
+## Validation Checklist (for VALIDATOR)
+
+Before approving any UI test:
+- [ ] Uses `github.com/chromedp/chromedp` (not alternatives)
+- [ ] Uses `NewUITestContext(t, timeout)`
+- [ ] Has `defer utc.Cleanup()` immediately after context creation
+- [ ] Uses `utc.Log()` for logging (not log.Printf/fmt.Printf)
+- [ ] Uses `utc.Screenshot()` for screenshots (not custom functions)
+- [ ] Uses `utc.Navigate()` for navigation
+- [ ] Error checks on all chromedp operations
+- [ ] Follows patterns from existing tests in same directory
+- [ ] Uses testify (assert/require) for assertions
+- [ ] No parallel test infrastructure created
