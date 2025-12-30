@@ -816,6 +816,24 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(asxStockDataWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxStockDataWorker.GetType().String()).Msg("ASX Stock Data worker registered")
 
+	// Register ASX Director Interest worker (synchronous execution, fetches Appendix 3Y filings)
+	asxDirectorInterestWorker := workers.NewASXDirectorInterestWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(asxDirectorInterestWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", asxDirectorInterestWorker.GetType().String()).Msg("ASX Director Interest worker registered")
+
+	// Register Macro Data worker (synchronous execution, fetches RBA rates and commodity prices)
+	macroDataWorker := workers.NewMacroDataWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(macroDataWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", macroDataWorker.GetType().String()).Msg("Macro Data worker registered")
+
 	// Register Competitor Analysis worker (identifies competitors via LLM and fetches their stock data)
 	competitorAnalysisWorker := workers.NewCompetitorAnalysisWorker(
 		a.StorageManager.DocumentStorage(),

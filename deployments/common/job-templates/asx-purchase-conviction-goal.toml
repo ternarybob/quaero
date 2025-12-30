@@ -1,0 +1,198 @@
+# ASX Purchase Conviction - Orchestrator Goal Template
+# =========================================================================
+# High-conviction purchase analysis with adversarial review and ranking.
+# Referenced by job definitions via goal_template = "asx-purchase-conviction-goal"
+#
+# This template defines:
+# - Deep-dive analysis with adversarial "Short Seller" phase
+# - Specific web search query recipes for targeted data
+# - Multi-step synthesis for conflicting analyst views
+# - Comparative decision matrix with conviction scoring
+#
+# Variables are provided by the referencing job definition in [config].
+# Expected variable keys: ticker, name, industry
+# =========================================================================
+
+id = "asx-purchase-conviction-goal"
+name = "ASX Purchase Conviction Goal Template"
+type = "orchestrator_template"
+description = "High-conviction purchase analysis with adversarial review and comparative ranking"
+
+[template]
+# Thinking level for LLM reasoning depth
+thinking_level = "HIGH"
+
+# Model preference (auto selects based on task complexity)
+model_preference = "auto"
+
+# Output tags - allows email step to find this document via body_from_tag
+output_tags = ["purchase-recommendation"]
+
+# Natural language goal - high-conviction purchase analysis
+goal = """
+Identify the BEST purchase opportunities from the provided list of stocks.
+This is a PURCHASE DECISION analysis - the goal is to find stocks worth buying NOW.
+
+CRITICAL: You MUST analyze ALL stocks in the variables list. Do not skip any stocks.
+The variables list contains multiple stocks - each one requires individual analysis.
+Your final report MUST include analysis for EVERY stock provided.
+
+=== PHASE 1: INDIVIDUAL DEEP DIVE ===
+
+For EACH stock in the variables list (you MUST process ALL of them):
+
+1. DATA COLLECTION:
+   - Use fetch_stock_data with period: Y1 for 1-year historical data
+   - Use fetch_announcements with period: Y1 for annual announcements
+   - Use fetch_index_data for XJO benchmark comparison
+   - Use fetch_director_interest to find insider buying/selling activity
+   - Use fetch_macro_data for RBA rates and commodity prices (Iron Ore, Gold)
+
+2. TARGETED WEB SEARCHES (use these specific query recipes):
+   - search_web: "[TICKER] analyst price target 2025"
+   - search_web: "[TICKER] ASX broker upgrade downgrade"
+   - search_web: "[TICKER] bear case risks concerns"
+   - search_web: "[TICKER] insider buying director trades"
+
+3. INITIAL ANALYSIS (use analyze_summary for EACH stock):
+   Focus on 3 specific criteria:
+
+   A. FUNDAMENTAL CATALYSTS:
+      - Upcoming FY/HY results dates
+      - New contracts or revenue announcements
+      - Expansion plans or acquisitions
+      - Dividend announcements
+
+   B. TECHNICAL ENTRY POINTS:
+      - Current price vs SMA20/50/200
+      - Distance from 52-week high/low
+      - Support/resistance levels
+      - RSI14 overbought/oversold status
+
+   C. RISK/REWARD ASSESSMENT:
+      - Upside potential to analyst price targets
+      - Downside risk to support levels
+      - Risk/reward ratio calculation
+
+=== PHASE 2: ADVERSARIAL "SHORT SELLER" ANALYSIS ===
+
+CRITICAL: For EACH stock, you MUST act as a hostile short seller.
+Your job is to find EVERY reason NOT to buy this stock.
+
+For each stock, document:
+
+1. BEAR CASE ARGUMENTS (find at least 3):
+   - Why might this stock fall 20%+?
+   - What are management's blind spots?
+   - What macro risks threaten this business?
+   - What could cause earnings to disappoint?
+   - Is the current valuation justified?
+
+2. RED FLAGS (use fetch_director_interest data to verify):
+   - Insider selling patterns (check Appendix 3Y filings)
+   - Declining margins or revenue
+   - High debt levels
+   - Competitive threats
+   - Regulatory risks
+   - Customer concentration
+   - Directors disposing shares vs acquiring
+
+3. CONTRARIAN VIEW:
+   - Find one bearish analyst view
+   - Find one bullish analyst view
+   - Resolve which is better supported by current cash flow data
+   - Document: "Bearish view argues X, Bullish view argues Y, Cash flow supports [Bullish/Bearish] because Z"
+
+4. SHORT SELLER VERDICT:
+   - If you CANNOT find strong reasons to hate this stock → STRONG BUY signal
+   - If bear case is compelling → AVOID or reassess entry point
+   - Rate: "Short Seller Confidence" 1-10 (higher = more reasons to short)
+
+=== PHASE 3: INDIVIDUAL CONVICTION SCORING ===
+
+For EACH stock analyzed, calculate and present:
+
+1. CONVICTION SCORE BREAKDOWN:
+   Calculate each component score (1-10) and weighted total:
+
+   | Component    | Weight | Score | Weighted |
+   |--------------|--------|-------|----------|
+   | Fundamental  | 35%    | X/10  | X × 0.35 |
+   | Technical    | 25%    | X/10  | X × 0.25 |
+   | Risk         | 25%    | X/10  | X × 0.25 |
+   | Insider      | 10%    | X/10  | X × 0.10 |
+   | Macro        | 5%     | X/10  | X × 0.05 |
+   | **TOTAL**    | 100%   |       | **X.XX** |
+
+   Component definitions:
+   - Fundamental: Based on catalysts, growth, earnings quality
+   - Technical: Based on entry point, trend strength, momentum
+   - Risk: Based on Short Seller analysis (inverted: low risk = high score)
+   - Insider: Based on director interest filings (buying = positive, selling = negative)
+   - Macro: Based on RBA rate impact and commodity price correlation
+
+2. RECOMMENDATION ASSIGNMENT:
+   Based on total conviction score, assign action:
+   - TIER 1 (Score 8.0-10.0): **BUY** - Strong conviction, immediate purchase
+   - TIER 2 (Score 6.0-7.9): **BUY** - Good conviction, buy on weakness
+   - TIER 3 (Score 4.0-5.9): **HOLD** - Neutral, wait for better entry
+   - TIER 4 (Score <4.0): **SELL/AVOID** - Negative conviction, do not purchase
+
+=== FINAL OUTPUT: STOCK REVIEW ===
+
+MANDATORY FORMAT - COPY THIS STRUCTURE EXACTLY. NO MARKDOWN HEADERS.
+Score all stocks out of 100. Include weighted breakdown in table.
+Each section MUST include the specific data points shown in the examples below.
+
+---BEGIN TEMPLATE---
+
+1. Executive Summary
+[2-3 sentences on top picks and market context]
+
+2. Individual Stock Analyses
+
+ASX: GNP (GenusPlus Group Ltd)
+Fundamental Analysis: GNP is currently valued at a market cap of $1.12B with a P/E ratio of 32.00. While the P/E is elevated, it is supported by an EPS of $0.19 and a dominant position in the Australian power and communications infrastructure sector. The 130% year-over-year growth indicates strong contract execution and market share gains.
+Technical Analysis: The short-term trend is BEARISH, with the price ($6.13) trading below the 20-day SMA ($6.27) and 50-day SMA ($6.38). However, the long-term trend remains BULLISH as the price is significantly above the 200-day SMA ($4.67). RSI at 45.4 suggests the stock is approaching oversold territory but has not yet bottomed.
+Short Seller Bear Case: Critics argue that the 130% run-up is overextended and that a P/E of 32 is unsustainable for a low-margin infrastructure business. They point to the recent 6% monthly decline as the beginning of a mean reversion toward the $4.67 level.
+Analyst Resolution: The current pullback is a healthy consolidation following a parabolic move. We view the $5.75 support level as a high-conviction entry point. The long-term infrastructure tailwinds outweigh short-term valuation concerns.
+Conviction Score: 82/100
+
+ASX: SRL (Sunrise Energy Metals Ltd)
+Fundamental Analysis: SRL is currently valued at a market cap of $180M with no P/E ratio (negative earnings). The EPS is -$0.12, reflecting ongoing exploration and development costs. The company holds strategic lithium assets but lacks near-term production revenue.
+Technical Analysis: The short-term trend is BEARISH, with the price ($0.85) trading below the 20-day SMA ($0.92) and 50-day SMA ($1.05). The long-term trend is also BEARISH as the price is below the 200-day SMA ($1.20). RSI at 38.2 indicates oversold conditions.
+Short Seller Bear Case: Critics argue the lithium price collapse has destroyed the project economics. They point to the 45% decline from 52-week highs and question management's ability to secure project financing in the current environment.
+Analyst Resolution: This is a speculative hold pending lithium price recovery. We view the $0.75 support level as a potential entry, but recommend waiting for confirmed project financing before accumulating.
+Conviction Score: 58/100
+
+[CONTINUE FOR EACH REMAINING STOCK - FOLLOW EXACT FORMAT ABOVE]
+
+3. Comparative Table & Tier Ranking
+
+Ticker	Fundamental (35%)	Technical (25%)	Risk (25%)	Insider (10%)	Macro (5%)	Total Score	Tier
+GNP	30	18	22	8	4	82	Tier 1 (High)
+SRL	18	15	12	8	5	58	Tier 3 (Speculative)
+[ADD ROW FOR EACH STOCK - WEIGHTED SCORES MUST SUM TO TOTAL SCORE]
+
+Tier Definitions:
+- Tier 1 (High): 80-100 = Strong BUY
+- Tier 2 (Medium): 60-79 = BUY on weakness
+- Tier 3 (Speculative): 40-59 = HOLD
+- Tier 4 (Avoid): <40 = SELL/AVOID
+
+4. Warnings & Risks
+[Tier 4 stocks with reasons, market risks, correlation warnings]
+
+---END TEMPLATE---
+"""
+
+# Available tools - workers exposed to the orchestrator as callable tools
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
+    { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
+    { name = "fetch_director_interest", description = "Fetch ASX director interest (Appendix 3Y) filings showing insider buying/selling. Creates document tagged with ['director-interest', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Provides: director name, shares acquired/disposed, filing date. High insider buying is a bullish signal.", worker = "asx_director_interest" },
+    { name = "fetch_macro_data", description = "Fetch macroeconomic data: RBA interest rates and commodity prices. Creates document tagged with ['macro-data', '<data_type>']. OPTIONAL params: data_type (string) - 'rba_cash_rate', 'iron_ore', 'gold', or 'all' (default 'all'). Provides: current rates, commodity prices. Use to assess if stock movement is company-specific or macro-driven.", worker = "macro_data" },
+    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use specific query recipes: '[TICKER] analyst price target 2025', '[TICKER] bear case risks', '[TICKER] insider buying'. Returns analyst coverage, broker notes, news articles.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for conviction scoring and Short Seller analysis. IMPORTANT: filter_tags uses AND logic - do NOT combine tags from different document types (e.g., 'asx-stock-data' and 'web-search' are mutually exclusive). Use a single document type tag or ticker-specific tags only.", worker = "summary" },
+]

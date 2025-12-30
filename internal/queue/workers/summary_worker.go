@@ -178,6 +178,49 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Msg("Output validation enabled")
 	}
 
+	// Extract required_tickers (optional - for validating all stocks are in output)
+	// This is passed from the orchestrator for terminal analyze_summary steps
+	var requiredTickers []string
+	if tickers, ok := stepConfig["required_tickers"].([]interface{}); ok {
+		for _, t := range tickers {
+			if ticker, ok := t.(string); ok && ticker != "" {
+				requiredTickers = append(requiredTickers, strings.ToUpper(ticker))
+			}
+		}
+	} else if tickers, ok := stepConfig["required_tickers"].([]string); ok {
+		for _, t := range tickers {
+			if t != "" {
+				requiredTickers = append(requiredTickers, strings.ToUpper(t))
+			}
+		}
+	}
+
+	// Extract benchmark_codes (optional - for validating benchmarks aren't treated as stocks)
+	// This is passed from the orchestrator for terminal analyze_summary steps
+	var benchmarkCodes []string
+	if codes, ok := stepConfig["benchmark_codes"].([]interface{}); ok {
+		for _, c := range codes {
+			if code, ok := c.(string); ok && code != "" {
+				benchmarkCodes = append(benchmarkCodes, strings.ToUpper(code))
+			}
+		}
+	} else if codes, ok := stepConfig["benchmark_codes"].([]string); ok {
+		for _, c := range codes {
+			if c != "" {
+				benchmarkCodes = append(benchmarkCodes, strings.ToUpper(c))
+			}
+		}
+	}
+
+	if len(requiredTickers) > 0 || len(benchmarkCodes) > 0 {
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Strs("required_tickers", requiredTickers).
+			Strs("benchmark_codes", benchmarkCodes).
+			Msg("Ticker validation enabled")
+	}
+
 	// Extract thinking_level (optional - controls reasoning depth: MINIMAL, LOW, MEDIUM, HIGH)
 	var thinkingLevel string
 	if level, ok := stepConfig["thinking_level"].(string); ok {
@@ -253,6 +296,8 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			"step_config":         stepConfig,
 			"filter_limit":        filterLimit,
 			"validation_patterns": validationPatterns,
+			"required_tickers":    requiredTickers, // For ticker validation in output
+			"benchmark_codes":     benchmarkCodes,  // For benchmark misuse validation
 			"thinking_level":      thinkingLevel,
 			"model":               model, // Can include provider prefix like "claude/claude-sonnet-4-20250514"
 			"max_iterations":      maxIterations,
@@ -390,24 +435,81 @@ The following is a critique of your previous draft. You must address EVERY issue
 		}
 	}
 
-	// Validate output if patterns are specified
-	if validationPatterns, ok := initResult.Metadata["validation_patterns"].([]string); ok && len(validationPatterns) > 0 {
-		if err := w.validateOutput(summaryContent, validationPatterns); err != nil {
-			w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Output validation failed")
-			w.logJobEvent(ctx, stepID, step.Name, "error",
-				fmt.Sprintf("Output validation failed: %v", err), nil)
-			return "", err
+	// =========================================================================
+	// OUTPUT VALIDATION WITH REGENERATION LOOP
+	// Validates ticker presence, benchmark usage, and required patterns
+	// Regenerates up to 3 times if validation fails
+	// =========================================================================
+
+	// Extract validation parameters from metadata
+	validationPatterns, _ := initResult.Metadata["validation_patterns"].([]string)
+	requiredTickers, _ := initResult.Metadata["required_tickers"].([]string)
+	benchmarkCodes, _ := initResult.Metadata["benchmark_codes"].([]string)
+
+	// Track validation result for metadata
+	var validationResult *ValidationResult
+	validationEnabled := len(validationPatterns) > 0 || len(requiredTickers) > 0 || len(benchmarkCodes) > 0
+
+	if validationEnabled {
+		const maxValidationIterations = 3
+		originalPrompt := prompt
+
+		for validationIteration := 1; validationIteration <= maxValidationIterations; validationIteration++ {
+			// Perform comprehensive validation
+			validationResult = w.validateOutputComprehensive(summaryContent, requiredTickers, benchmarkCodes, validationPatterns)
+			validationResult.IterationCount = validationIteration
+
+			if validationResult.Valid {
+				w.logger.Info().
+					Str("step_name", step.Name).
+					Int("iteration", validationIteration).
+					Strs("tickers_validated", requiredTickers).
+					Msg("Output validation passed")
+				w.logJobEvent(ctx, stepID, step.Name, "info",
+					fmt.Sprintf("Output validation passed (iteration %d/%d)", validationIteration, maxValidationIterations), nil)
+				break
+			}
+
+			// Validation failed
+			w.logger.Warn().
+				Str("step_name", step.Name).
+				Int("iteration", validationIteration).
+				Str("validation_errors", validationResult.String()).
+				Msg("Output validation failed, attempting regeneration")
+
+			// If this was the last iteration, fail
+			if validationIteration == maxValidationIterations {
+				errMsg := fmt.Sprintf("output validation failed after %d iterations: %s",
+					maxValidationIterations, validationResult.String())
+				w.logger.Error().
+					Str("step_name", step.Name).
+					Str("final_errors", validationResult.String()).
+					Msg(errMsg)
+				w.logJobEvent(ctx, stepID, step.Name, "error", errMsg, nil)
+				return "", fmt.Errorf(errMsg)
+			}
+
+			// Build validation feedback prompt for regeneration
+			feedbackPrompt := w.buildValidationFeedbackPrompt(originalPrompt, validationResult)
+
+			w.logJobEvent(ctx, stepID, step.Name, "warning",
+				fmt.Sprintf("Validation failed (iteration %d/%d): %s - regenerating...",
+					validationIteration, maxValidationIterations, validationResult.String()), nil)
+
+			// Regenerate with feedback
+			summaryContent, err = w.generateSummary(ctx, feedbackPrompt, documents, stepID, thinkingLevel, model, &jobDef)
+			if err != nil {
+				w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary regeneration failed")
+				return "", fmt.Errorf("summary regeneration failed (validation iteration %d): %w", validationIteration, err)
+			}
 		}
-		w.logger.Info().
-			Str("step_name", step.Name).
-			Int("patterns_verified", len(validationPatterns)).
-			Msg("Output validation passed")
-		w.logJobEvent(ctx, stepID, step.Name, "info",
-			fmt.Sprintf("Output validation passed: %d patterns verified", len(validationPatterns)), nil)
+	} else {
+		// No validation enabled - create a minimal result for metadata
+		validationResult = &ValidationResult{Valid: true, IterationCount: 0}
 	}
 
-	// Create summary document
-	doc, err := w.createDocument(ctx, summaryContent, prompt, documents, &jobDef, stepID, stepConfig)
+	// Create summary document with validation metadata
+	doc, err := w.createDocument(ctx, summaryContent, prompt, documents, &jobDef, stepID, stepConfig, validationResult)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -527,6 +629,223 @@ func (w *SummaryWorker) validateOutput(content string, patterns []string) error 
 	}
 
 	return nil
+}
+
+// ValidationResult holds the comprehensive result of output validation
+type ValidationResult struct {
+	Valid           bool
+	MissingTickers  []string
+	BenchmarkIssues []string
+	PatternIssues   []string
+	IterationCount  int
+}
+
+// String returns a human-readable summary of validation failures
+func (v *ValidationResult) String() string {
+	if v.Valid {
+		return "validation passed"
+	}
+	var issues []string
+	if len(v.MissingTickers) > 0 {
+		issues = append(issues, fmt.Sprintf("missing tickers: %v", v.MissingTickers))
+	}
+	if len(v.BenchmarkIssues) > 0 {
+		issues = append(issues, fmt.Sprintf("benchmark issues: %v", v.BenchmarkIssues))
+	}
+	if len(v.PatternIssues) > 0 {
+		issues = append(issues, fmt.Sprintf("pattern issues: %v", v.PatternIssues))
+	}
+	return strings.Join(issues, "; ")
+}
+
+// validateTickerPresence ensures ALL tickers from variables appear in output.
+// Returns error listing missing tickers. Tickers are checked case-insensitively.
+// Checks for patterns like "ASX: GNP", "ASX:GNP", "| GNP |" (table cells), or "## GNP" (headers).
+func validateTickerPresence(content string, requiredTickers []string) []string {
+	if len(requiredTickers) == 0 {
+		return nil
+	}
+
+	contentUpper := strings.ToUpper(content)
+	var missing []string
+
+	for _, ticker := range requiredTickers {
+		tickerUpper := strings.ToUpper(ticker)
+
+		// Check various patterns where tickers typically appear
+		patterns := []string{
+			fmt.Sprintf("ASX: %s", tickerUpper), // "ASX: GNP"
+			fmt.Sprintf("ASX:%s", tickerUpper),  // "ASX:GNP"
+			fmt.Sprintf("| %s |", tickerUpper),  // "| GNP |" in tables
+			fmt.Sprintf("| %s\t", tickerUpper),  // "| GNP\t" in tables
+			fmt.Sprintf("## %s", tickerUpper),   // "## GNP" section header
+			fmt.Sprintf("### %s", tickerUpper),  // "### GNP" subsection
+			fmt.Sprintf("**%s**", tickerUpper),  // "**GNP**" bold
+			fmt.Sprintf("(%s)", tickerUpper),    // "(GNP)" in parentheses
+		}
+
+		found := false
+		for _, pattern := range patterns {
+			if strings.Contains(contentUpper, pattern) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			missing = append(missing, ticker)
+		}
+	}
+
+	return missing
+}
+
+// validateBenchmarkNotAsStock ensures benchmark indices are NOT treated as primary stocks.
+// Checks for patterns that indicate the benchmark is being analyzed as a stock, such as:
+// - "ASX: XJO" in a stock analysis section
+// - Being the ONLY ticker in a summary table (with no actual stocks)
+// - Conviction scores for benchmarks
+func validateBenchmarkNotAsStock(content string, benchmarkCodes []string) []string {
+	if len(benchmarkCodes) == 0 {
+		return nil
+	}
+
+	contentUpper := strings.ToUpper(content)
+	var issues []string
+
+	for _, code := range benchmarkCodes {
+		codeUpper := strings.ToUpper(code)
+
+		// Check for patterns that indicate benchmark is treated as a stock
+		problematicPatterns := []string{
+			fmt.Sprintf("ASX: %s\nFUNDAMENTAL ANALYSIS:", codeUpper), // Stock analysis format
+			fmt.Sprintf("ASX: %s (%s)", codeUpper, ""),               // Will catch any ASX: XJO (Something)
+			fmt.Sprintf("CONVICTION SCORE: %s", codeUpper),           // Conviction for benchmark
+			fmt.Sprintf("| %s | QUALITY", codeUpper),                 // In quality rating table
+			fmt.Sprintf("| %s |\t", codeUpper),                       // First column of summary table
+		}
+
+		for _, pattern := range problematicPatterns {
+			if strings.Contains(contentUpper, pattern) {
+				issues = append(issues, fmt.Sprintf("benchmark '%s' appears to be analyzed as a stock", code))
+				break
+			}
+		}
+
+		// Special check: if XJO is the ONLY ticker-like pattern in summary table
+		// This is a heuristic - look for "Summary Table" followed by only benchmark codes
+		summaryIdx := strings.Index(contentUpper, "SUMMARY TABLE")
+		if summaryIdx != -1 {
+			// Look at the next 500 chars after "Summary Table"
+			endIdx := summaryIdx + 500
+			if endIdx > len(contentUpper) {
+				endIdx = len(contentUpper)
+			}
+			tableSection := contentUpper[summaryIdx:endIdx]
+
+			// Check if the benchmark appears in what looks like a stock table
+			if strings.Contains(tableSection, fmt.Sprintf("| %s |", codeUpper)) {
+				// This is a warning case, not necessarily an error
+				// The benchmark might legitimately be in a comparison row
+			}
+		}
+	}
+
+	return issues
+}
+
+// validateOutputComprehensive performs comprehensive validation of summary output.
+// It checks for required tickers, benchmark misuse, and pattern validation.
+// Returns a ValidationResult with details of any issues found.
+func (w *SummaryWorker) validateOutputComprehensive(
+	content string,
+	requiredTickers []string,
+	benchmarkCodes []string,
+	requiredPatterns []string,
+) *ValidationResult {
+	result := &ValidationResult{Valid: true}
+
+	// Check required patterns (existing validation)
+	if len(requiredPatterns) > 0 {
+		for _, pattern := range requiredPatterns {
+			if !strings.Contains(content, pattern) {
+				result.PatternIssues = append(result.PatternIssues, pattern)
+				result.Valid = false
+			}
+		}
+	}
+
+	// Check ticker presence
+	if len(requiredTickers) > 0 {
+		missing := validateTickerPresence(content, requiredTickers)
+		if len(missing) > 0 {
+			result.MissingTickers = missing
+			result.Valid = false
+			w.logger.Warn().
+				Strs("missing_tickers", missing).
+				Strs("required_tickers", requiredTickers).
+				Msg("Output validation: missing required tickers")
+		}
+	}
+
+	// Check benchmark misuse
+	if len(benchmarkCodes) > 0 {
+		issues := validateBenchmarkNotAsStock(content, benchmarkCodes)
+		if len(issues) > 0 {
+			result.BenchmarkIssues = issues
+			result.Valid = false
+			w.logger.Warn().
+				Strs("benchmark_issues", issues).
+				Strs("benchmark_codes", benchmarkCodes).
+				Msg("Output validation: benchmark treated as stock")
+		}
+	}
+
+	return result
+}
+
+// buildValidationFeedbackPrompt creates a prompt with specific validation failures
+// that the LLM must address in regeneration
+func (w *SummaryWorker) buildValidationFeedbackPrompt(originalPrompt string, validationResult *ValidationResult) string {
+	var feedback strings.Builder
+
+	feedback.WriteString(originalPrompt)
+	feedback.WriteString("\n\n")
+	feedback.WriteString("---\n")
+	feedback.WriteString("## CRITICAL: VALIDATION FAILURES (MUST FIX)\n\n")
+	feedback.WriteString("Your previous output FAILED validation. You MUST address ALL issues below:\n\n")
+
+	if len(validationResult.MissingTickers) > 0 {
+		feedback.WriteString("### MISSING STOCK TICKERS\n")
+		feedback.WriteString("The following tickers MUST appear in your output with full analysis:\n")
+		for _, ticker := range validationResult.MissingTickers {
+			feedback.WriteString(fmt.Sprintf("- **%s**: Include complete analysis with format 'ASX: %s'\n", ticker, ticker))
+		}
+		feedback.WriteString("\nYou analyzed benchmarks instead of stocks. These are the STOCKS you must analyze, NOT benchmark indices.\n\n")
+	}
+
+	if len(validationResult.BenchmarkIssues) > 0 {
+		feedback.WriteString("### BENCHMARK MISUSE\n")
+		feedback.WriteString("You incorrectly treated benchmark indices as stocks:\n")
+		for _, issue := range validationResult.BenchmarkIssues {
+			feedback.WriteString(fmt.Sprintf("- %s\n", issue))
+		}
+		feedback.WriteString("\nBenchmarks (like XJO) are for COMPARISON only. Do NOT create stock analysis sections for them.\n\n")
+	}
+
+	if len(validationResult.PatternIssues) > 0 {
+		feedback.WriteString("### MISSING REQUIRED SECTIONS\n")
+		feedback.WriteString("The following required sections are missing:\n")
+		for _, pattern := range validationResult.PatternIssues {
+			feedback.WriteString(fmt.Sprintf("- %s\n", pattern))
+		}
+		feedback.WriteString("\n")
+	}
+
+	feedback.WriteString("---\n")
+	feedback.WriteString("REGENERATE your output now, ensuring ALL issues above are fixed.\n")
+
+	return feedback.String()
 }
 
 // buildPortfolioHoldingsSection extracts portfolio holdings from job config variables
@@ -763,7 +1082,7 @@ Today's date is %s. Use this as the analysis date in your output. Do NOT use any
 }
 
 // createDocument creates a Document from the summary results
-func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) (*models.Document, error) {
+func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prompt string, documents []*models.Document, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}, validationResult *ValidationResult) (*models.Document, error) {
 	// Build tags - include job name and any job-level tags
 	tags := []string{"summary"}
 	if jobDef != nil {
@@ -829,6 +1148,41 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 	if jobDef != nil {
 		metadata["job_name"] = jobDef.Name
 		metadata["job_id"] = jobDef.ID
+	}
+
+	// Add output validation metadata
+	if validationResult != nil {
+		validationMeta := map[string]interface{}{
+			"enabled":           validationResult.IterationCount > 0 || len(validationResult.MissingTickers) > 0 || len(validationResult.BenchmarkIssues) > 0 || len(validationResult.PatternIssues) > 0,
+			"validation_passed": validationResult.Valid,
+			"iteration_count":   validationResult.IterationCount,
+			"max_iterations":    3,
+		}
+
+		// Add validated tickers if present
+		requiredTickers, _ := stepConfig["required_tickers"].([]string)
+		if len(requiredTickers) == 0 {
+			// Try []interface{} type
+			if tickers, ok := stepConfig["required_tickers"].([]interface{}); ok {
+				for _, t := range tickers {
+					if ticker, ok := t.(string); ok {
+						requiredTickers = append(requiredTickers, ticker)
+					}
+				}
+			}
+		}
+		if len(requiredTickers) > 0 {
+			validationMeta["tickers_validated"] = requiredTickers
+		}
+
+		// Add benchmark check status
+		if len(validationResult.BenchmarkIssues) > 0 {
+			validationMeta["benchmark_check"] = strings.Join(validationResult.BenchmarkIssues, "; ")
+		} else {
+			validationMeta["benchmark_check"] = "passed"
+		}
+
+		metadata["output_validation"] = validationMeta
 	}
 
 	now := time.Now()

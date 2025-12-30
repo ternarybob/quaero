@@ -1,0 +1,57 @@
+# ASX Purchase Conviction - Test Configuration
+# =========================================================================
+# Simplified test configuration for integration testing.
+# Uses 1 stock to keep test execution fast.
+#
+# TEMPLATE: job-templates/asx-purchase-conviction-goal.toml
+# =========================================================================
+
+id = "asx-purchase-conviction-test"
+name = "ASX Purchase Conviction Test"
+type = "orchestrator"
+description = "Integration test for conviction analysis with new workers"
+tags = ["asx", "trading", "conviction", "test", "orchestrator"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Test Configuration - Matches Production Stocks
+# =========================================================================
+
+[config]
+# Stocks under consideration for purchase - reduced to 3 for faster test execution
+variables = [
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
+    { ticker = "VNT", name = "Ventia Services Group Limited", industry = "infrastructure" },
+]
+
+# Benchmark indices for comparison
+benchmarks = [{ code = "XJO", name = "S&P/ASX 200" }]
+
+# =========================================================================
+# Orchestrator Step - References Goal Template
+# =========================================================================
+
+[step.conviction_analysis]
+type = "orchestrator"
+description = "High-conviction purchase analysis with Short Seller review"
+on_error = "continue"
+
+# Reference the goal template (contains goal, tools, thinking_level, output_tags)
+goal_template = "asx-purchase-conviction-goal"
+
+# =========================================================================
+# Email Step - Send Conviction Report (disabled for test)
+# =========================================================================
+
+[step.email_recommendation]
+type = "email"
+description = "Email purchase conviction report"
+depends = "conviction_analysis"
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "ASX Purchase Conviction Report - Test"
+body_from_tag = "purchase-recommendation"

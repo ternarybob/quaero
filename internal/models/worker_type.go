@@ -34,9 +34,11 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial data workers
-	WorkerTypeASXAnnouncements   WorkerType = "asx_announcements"   // Fetch ASX company announcements
-	WorkerTypeASXStockData       WorkerType = "asx_stock_data"      // Fetch real-time stock prices and technical analysis
-	WorkerTypeCompetitorAnalysis WorkerType = "competitor_analysis" // Analyze competitors and spawn stock data jobs
+	WorkerTypeASXAnnouncements    WorkerType = "asx_announcements"     // Fetch ASX company announcements
+	WorkerTypeASXStockData        WorkerType = "asx_stock_data"        // Fetch real-time stock prices and technical analysis
+	WorkerTypeASXDirectorInterest WorkerType = "asx_director_interest" // Fetch ASX director interest (Appendix 3Y) filings
+	WorkerTypeMacroData           WorkerType = "macro_data"            // Fetch macroeconomic data (RBA rates, commodity prices)
+	WorkerTypeCompetitorAnalysis  WorkerType = "competitor_analysis"   // Analyze competitors and spawn stock data jobs
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
@@ -59,7 +61,8 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
-		WorkerTypeASXStockData, WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
+		WorkerTypeASXStockData, WorkerTypeASXDirectorInterest, WorkerTypeMacroData,
+		WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
 	}
@@ -93,6 +96,8 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeEmail,
 		WorkerTypeASXAnnouncements,
 		WorkerTypeASXStockData,
+		WorkerTypeASXDirectorInterest,
+		WorkerTypeMacroData,
 		WorkerTypeCompetitorAnalysis,
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,

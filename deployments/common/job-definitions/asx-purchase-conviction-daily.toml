@@ -1,0 +1,72 @@
+# ASX Purchase Conviction - Daily Analysis
+# =========================================================================
+# Uses goal_template to reference reusable conviction analysis script.
+# User provides variables (stocks to evaluate) and email config.
+#
+# TEMPLATE: job-templates/asx-purchase-conviction-goal.toml
+# Contains: goal, tools, thinking_level, output_tags
+#
+# THIS FILE: User-specific configuration
+# Contains: variables (stocks to analyze), email settings
+# =========================================================================
+
+id = "asx-purchase-conviction-daily"
+name = "ASX Purchase Conviction Daily Review"
+type = "orchestrator"
+description = "High-conviction purchase analysis with adversarial review"
+tags = ["asx", "trading", "conviction", "purchase", "orchestrator", "thinking"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# User Configuration - Stocks to Analyze for Purchase
+# =========================================================================
+
+[config]
+# Stocks under consideration for purchase - modify as needed
+# Available variable keys: ticker, name, industry
+variables = [
+    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    # { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure" },
+    # { ticker = "WES", name = "Wesfarmers Limited", industry = "retail" },
+    # { ticker = "AMS", name = "Atomos Limited", industry = "technology" },
+    # { ticker = "AV1", name = "Adveritas Limited", industry = "technology" },
+    { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
+    # { ticker = "KYP", name = "Kinatico Limited", industry = "technology" },
+    # { ticker = "PNC", name = "Pioneer Credit Limited", industry = "finance" },
+    # { ticker = "SDF", name = "Steadfast Group Limited", industry = "insurance" },
+    # { ticker = "SGI", name = "Stealth Global Holdings Limited", industry = "industrial" },
+    { ticker = "VBTC", name = "Betashares Crypto Innovators ETF", industry = "etf-crypto" },
+    # { ticker = "VGB", name = "Vanguard Australian Government Bond Index ETF", industry = "etf-bonds" },
+    { ticker = "VNT", name = "Ventia Services Group Limited", industry = "infrastructure" },
+]
+
+# Benchmark indices for comparison
+benchmarks = [{ code = "XJO", name = "S&P/ASX 200" }]
+
+# =========================================================================
+# Orchestrator Step - References Goal Template
+# =========================================================================
+
+[step.conviction_analysis]
+type = "orchestrator"
+description = "High-conviction purchase analysis with Short Seller review"
+on_error = "continue"
+
+# Reference the goal template (contains goal, tools, thinking_level, output_tags)
+goal_template = "asx-purchase-conviction-goal"
+
+# =========================================================================
+# Email Step - Send Conviction Report
+# =========================================================================
+
+[step.email_recommendation]
+type = "email"
+description = "Email purchase conviction report"
+depends = "conviction_analysis"
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "ASX Purchase Conviction Report - High-Conviction Opportunities"
+body_from_tag = "purchase-recommendation"

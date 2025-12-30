@@ -1153,12 +1153,40 @@ search_type = "text_search"
 | `api_key` | string | No | Gemini API key |
 | `output_tags` | []string | No | Additional tags to apply to the output document (useful for downstream steps) |
 | `thinking_level` | string | No | Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Use HIGH for complex analysis. |
+| `required_tickers` | []string | No | Stock tickers that MUST appear in output (for orchestrator terminal steps) |
+| `benchmark_codes` | []string | No | Benchmark codes that should NOT be treated as stocks (for validation) |
+| `output_validation` | []string | No | Required patterns that must appear in output |
+
+#### Output Validation (added 2025-12)
+
+The summary worker supports output validation with regeneration for orchestrated jobs:
+
+**Validation Loop**:
+1. After generating output, validates that all `required_tickers` appear in the content
+2. Checks that `benchmark_codes` are not treated as primary analysis targets
+3. If validation fails, regenerates output with specific feedback (max 3 iterations)
+4. If all iterations fail, the job fails with detailed error message
+
+**Validation Metadata**:
+Documents include an `output_validation` metadata section:
+```json
+{
+  "output_validation": {
+    "enabled": true,
+    "validation_passed": true,
+    "iteration_count": 1,
+    "max_iterations": 3,
+    "tickers_validated": ["GNP", "SKS", "WES"],
+    "benchmark_check": "passed"
+  }
+}
+```
 
 #### Outputs
 
 - Creates new summary document with tags: `["summary", job-name-slug, ...job.Tags, ...output_tags]`
 - Stores aggregated content from source documents
-- Metadata: source_document_count, source_tags, model_used
+- Metadata: source_document_count, source_tags, model_used, output_validation
 
 #### Configuration
 

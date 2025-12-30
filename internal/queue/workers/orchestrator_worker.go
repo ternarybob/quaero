@@ -51,12 +51,26 @@ type PlanStepResult struct {
 // mutuallyExclusiveTags defines tag pairs that should NEVER appear together in filter_tags
 // because they represent different document types (AND logic would find zero documents)
 var mutuallyExclusiveTags = [][2]string{
+	// ASX stock data pairs
 	{"asx-stock-data", "asx-index"},
 	{"asx-stock-data", "asx-announcement"},
 	{"asx-stock-data", "web-search"},
+	{"asx-stock-data", "macro-data"},
+	{"asx-stock-data", "director-interest"},
+	// ASX index pairs
 	{"asx-index", "asx-announcement"},
 	{"asx-index", "web-search"},
+	{"asx-index", "macro-data"},
+	{"asx-index", "director-interest"},
+	// ASX announcement pairs
 	{"asx-announcement", "web-search"},
+	{"asx-announcement", "macro-data"},
+	{"asx-announcement", "director-interest"},
+	// Web search pairs
+	{"web-search", "macro-data"},
+	{"web-search", "director-interest"},
+	// Macro data pairs
+	{"macro-data", "director-interest"},
 }
 
 // validateFilterTags checks if filter_tags contain mutually exclusive tag pairs
@@ -835,15 +849,41 @@ func (w *OrchestratorWorker) CreateJobs(ctx context.Context, step models.JobStep
 				"original_goal": goal,
 			}
 
-			// Add output_tags to terminal steps (steps that no other step depends on)
-			// This allows the final analysis step to tag its output for downstream steps (like email)
-			if terminalSteps[planStep.ID] && len(outputTags) > 0 {
-				jobPayload["output_tags"] = outputTags
-				tagsJSON, _ := json.Marshal(outputTags)
-				w.logger.Debug().
-					Str("step_id", planStep.ID).
-					Str("output_tags", string(tagsJSON)).
-					Msg("Added output_tags to terminal step")
+			// Add output_tags ONLY to terminal analyze_summary steps
+			// This ensures only the final analysis document (not raw data fetches) gets tagged for email
+			// Data fetching tools (fetch_stock_data, fetch_index_data, etc.) should NOT get output_tags
+			// even if they are terminal steps, as they produce raw data, not the final recommendation
+			if terminalSteps[planStep.ID] && planStep.Tool == "analyze_summary" {
+				if len(outputTags) > 0 {
+					jobPayload["output_tags"] = outputTags
+					tagsJSON, _ := json.Marshal(outputTags)
+					w.logger.Debug().
+						Str("step_id", planStep.ID).
+						Str("output_tags", string(tagsJSON)).
+						Msg("Added output_tags to terminal analyze_summary step")
+				}
+
+				// Pass required_tickers and benchmark_codes for output validation
+				// This enables the summary worker to validate that all stocks are present
+				// and benchmarks aren't treated as primary analysis targets
+				requiredTickers := extractTickers(variables)
+				benchmarkCodesList := extractBenchmarkCodes(benchmarks)
+
+				if len(requiredTickers) > 0 {
+					jobPayload["required_tickers"] = requiredTickers
+					w.logger.Debug().
+						Str("step_id", planStep.ID).
+						Strs("required_tickers", requiredTickers).
+						Msg("Added required_tickers to terminal analyze_summary step for validation")
+				}
+
+				if len(benchmarkCodesList) > 0 {
+					jobPayload["benchmark_codes"] = benchmarkCodesList
+					w.logger.Debug().
+						Str("step_id", planStep.ID).
+						Strs("benchmark_codes", benchmarkCodesList).
+						Msg("Added benchmark_codes to terminal analyze_summary step for validation")
+				}
 			}
 
 			// Create tool execution job as queue citizen
@@ -1046,6 +1086,30 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// extractTickers extracts ticker strings from variables array (from job config [config].variables)
+// Returns uppercase ticker values for consistency in validation
+func extractTickers(variables []map[string]interface{}) []string {
+	var tickers []string
+	for _, v := range variables {
+		if ticker, ok := v["ticker"].(string); ok && ticker != "" {
+			tickers = append(tickers, strings.ToUpper(ticker))
+		}
+	}
+	return tickers
+}
+
+// extractBenchmarkCodes extracts benchmark code strings from benchmarks array (from job config [config].benchmarks)
+// Returns uppercase codes for consistency in validation
+func extractBenchmarkCodes(benchmarks []map[string]interface{}) []string {
+	var codes []string
+	for _, b := range benchmarks {
+		if code, ok := b["code"].(string); ok && code != "" {
+			codes = append(codes, strings.ToUpper(code))
+		}
+	}
+	return codes
 }
 
 // formatVariablesAsContext formats variables and benchmarks from the job definition config
