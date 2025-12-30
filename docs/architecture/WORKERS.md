@@ -1155,6 +1155,33 @@ search_type = "text_search"
 | `thinking_level` | string | No | Reasoning depth: MINIMAL, LOW, MEDIUM, HIGH. Use HIGH for complex analysis. |
 | `output_schema` | map | No | Inline JSON schema for structured output (Gemini only). When provided, enforces JSON output matching schema, then converts to markdown. |
 | `schema_ref` | string | No | Reference to external JSON schema file in `schemas/` directory (e.g., `"stock-report.schema.json"`). Alternative to inline `output_schema`. |
+
+#### Schema Reference Resolution (added 2025-12)
+
+When loading schemas via `schema_ref`, the worker automatically resolves `$ref` references to other schema files. This enables modular schema design:
+
+```json
+// stock-report.schema.json
+{
+  "properties": {
+    "stocks": {
+      "type": "array",
+      "items": {
+        "$ref": "stock-analysis.schema.json"  // Resolved at load time
+      }
+    }
+  }
+}
+```
+
+**Resolution Behavior**:
+- `$ref` values ending in `.json` are loaded from the same schemas directory
+- Referenced schema content is inlined, excluding metadata fields (`$id`, `$schema`, `title`, `description`)
+- Nested `$ref` references are resolved recursively
+- On resolution failure, the original `$ref` is kept and a warning is logged (graceful degradation)
+
+This ensures the LLM receives complete schema definitions with all field specifications.
+
 | `required_tickers` | []string | No | Stock tickers that MUST appear in output (for orchestrator terminal steps) |
 | `benchmark_codes` | []string | No | Benchmark codes that should NOT be treated as stocks (for validation) |
 | `output_validation` | []string | No | Required patterns that must appear in output |
@@ -1195,7 +1222,9 @@ The summary worker supports schema-constrained JSON output using Gemini's `Respo
 **How it works**:
 - Schema can be defined inline in job templates as `[template.output_schema]` (TOML) or externally via `output_schema_ref`
 - External schemas are stored in `deployments/common/schemas/` (JSON files, e.g., `stock-report.schema.json`)
-- Orchestrator loads external schemas via `loadSchemaFromFile()` and passes to terminal `analyze_summary` steps
+- Orchestrator loads external schemas via `loadSchemaFromFile()` which automatically resolves `$ref` references to other schema files (e.g., `"$ref": "stock-analysis.schema.json"` is inlined)
+- This resolution ensures the LLM receives complete schema definitions with all nested field specifications
+- Orchestrator passes resolved schema to terminal `analyze_summary` steps
 - Summary worker sets Gemini's `ResponseMIMEType = "application/json"` and `ResponseSchema`
 - Response is parsed and converted to markdown using `jsonToMarkdown()`
 
