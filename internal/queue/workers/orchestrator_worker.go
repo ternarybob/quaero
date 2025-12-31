@@ -355,6 +355,7 @@ type GoalTemplateConfig struct {
 // loadSchemaFromFile loads a JSON schema from the schemas directory.
 // The schemas directory is expected to be a sibling of the templates directory (../schemas/).
 // schemaRef is the filename (e.g., "stock-report.schema.json")
+// This function resolves $ref references by loading and inlining referenced schemas.
 func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]interface{}, error) {
 	if schemaRef == "" {
 		return nil, nil
@@ -381,12 +382,96 @@ func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]in
 		return nil, fmt.Errorf("failed to parse schema JSON: %w", err)
 	}
 
+	// Resolve $ref references by loading and inlining referenced schemas
+	// This is required because Gemini's ResponseSchema doesn't support $ref
+	visited := make(map[string]bool)
+	visited[schemaRef] = true // Mark current schema as visited to prevent self-reference
+	if err := w.resolveSchemaRefs(schema, schemasDir, visited); err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("schema_ref", schemaRef).
+			Msg("Failed to fully resolve $ref in schema, continuing with partial resolution")
+		// Continue with partial resolution rather than failing
+	}
+
 	w.logger.Info().
 		Str("schema_ref", schemaRef).
 		Str("schema_path", schemaPath).
-		Msg("Loaded external JSON schema")
+		Int("refs_resolved", len(visited)-1).
+		Msg("Loaded external JSON schema with $ref resolution")
 
 	return schema, nil
+}
+
+// resolveSchemaRefs recursively resolves $ref references in a JSON schema.
+// It replaces $ref objects with the content of the referenced schema file.
+// schemasDir is the directory containing schema files.
+// visited tracks already-resolved refs to prevent cycles.
+func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, schemasDir string, visited map[string]bool) error {
+	for key, value := range schema {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Check for $ref
+			if ref, ok := v["$ref"].(string); ok {
+				// Security: only allow same-directory refs (no path traversal)
+				if strings.Contains(ref, "/") || strings.Contains(ref, "\\") || strings.HasPrefix(ref, ".") {
+					w.logger.Warn().
+						Str("ref", ref).
+						Msg("Skipping $ref with path components for security")
+					continue
+				}
+
+				// Prevent cycles
+				if visited[ref] {
+					w.logger.Debug().
+						Str("ref", ref).
+						Msg("Skipping already-visited $ref to prevent cycle")
+					continue
+				}
+				visited[ref] = true
+
+				// Load referenced schema
+				refPath := filepath.Join(schemasDir, ref)
+				refData, err := os.ReadFile(refPath)
+				if err != nil {
+					return fmt.Errorf("failed to load $ref '%s': %w", ref, err)
+				}
+
+				var refSchema map[string]interface{}
+				if err := json.Unmarshal(refData, &refSchema); err != nil {
+					return fmt.Errorf("failed to parse $ref '%s': %w", ref, err)
+				}
+
+				// Recursively resolve refs in the referenced schema
+				if err := w.resolveSchemaRefs(refSchema, schemasDir, visited); err != nil {
+					return err
+				}
+
+				// Replace the $ref object with the resolved schema content
+				schema[key] = refSchema
+				w.logger.Debug().
+					Str("ref", ref).
+					Str("key", key).
+					Msg("Resolved $ref and inlined schema")
+			} else {
+				// Recursively resolve refs in nested objects
+				if err := w.resolveSchemaRefs(v, schemasDir, visited); err != nil {
+					return err
+				}
+			}
+		case []interface{}:
+			// Handle arrays (e.g., allOf, anyOf, oneOf)
+			for i, item := range v {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if err := w.resolveSchemaRefs(itemMap, schemasDir, visited); err != nil {
+						return err
+					}
+					v[i] = itemMap
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // loadGoalTemplate loads a goal template from the templates directory.
