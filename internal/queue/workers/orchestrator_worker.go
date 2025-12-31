@@ -54,18 +54,33 @@ var mutuallyExclusiveTags = [][2]string{
 	// ASX stock data pairs
 	{"asx-stock-data", "asx-index"},
 	{"asx-stock-data", "asx-announcement"},
+	{"asx-stock-data", "asx-analyst-coverage"},
+	{"asx-stock-data", "asx-historical-financials"},
 	{"asx-stock-data", "web-search"},
 	{"asx-stock-data", "macro-data"},
 	{"asx-stock-data", "director-interest"},
 	// ASX index pairs
 	{"asx-index", "asx-announcement"},
+	{"asx-index", "asx-analyst-coverage"},
+	{"asx-index", "asx-historical-financials"},
 	{"asx-index", "web-search"},
 	{"asx-index", "macro-data"},
 	{"asx-index", "director-interest"},
 	// ASX announcement pairs
+	{"asx-announcement", "asx-analyst-coverage"},
+	{"asx-announcement", "asx-historical-financials"},
 	{"asx-announcement", "web-search"},
 	{"asx-announcement", "macro-data"},
 	{"asx-announcement", "director-interest"},
+	// ASX analyst coverage pairs
+	{"asx-analyst-coverage", "asx-historical-financials"},
+	{"asx-analyst-coverage", "web-search"},
+	{"asx-analyst-coverage", "macro-data"},
+	{"asx-analyst-coverage", "director-interest"},
+	// ASX historical financials pairs
+	{"asx-historical-financials", "web-search"},
+	{"asx-historical-financials", "macro-data"},
+	{"asx-historical-financials", "director-interest"},
 	// Web search pairs
 	{"web-search", "macro-data"},
 	{"web-search", "director-interest"},
@@ -154,11 +169,15 @@ Document tags by tool:
 - fetch_stock_data: ["asx-stock-data", "<ticker>"] e.g. ["asx-stock-data", "gnp"]
 - fetch_index_data: ["asx-index", "<code>", "benchmark"] e.g. ["asx-index", "xjo"]
 - fetch_announcements: ["asx-announcement", "<ticker>"] e.g. ["asx-announcement", "gnp"]
+- fetch_analyst_coverage: ["asx-analyst-coverage", "<ticker>"] e.g. ["asx-analyst-coverage", "gnp"]
+- fetch_historical_financials: ["asx-historical-financials", "<ticker>"] e.g. ["asx-historical-financials", "gnp"]
 - search_web: ["web-search"] ONLY (no ticker tag)
 
 CORRECT filter_tags examples:
 - Analyze GNP stock data: ["asx-stock-data", "gnp"]
 - Analyze GNP announcements: ["asx-announcement", "gnp"]
+- Analyze GNP analyst coverage: ["asx-analyst-coverage", "gnp"]
+- Analyze GNP historical financials: ["asx-historical-financials", "gnp"]
 - Analyze web search results: ["web-search"]
 
 WRONG filter_tags (will find ZERO documents):
@@ -170,22 +189,27 @@ WRONG filter_tags (will find ZERO documents):
 MUTUALLY EXCLUSIVE TAGS (never combine these):
 - "asx-stock-data" and "asx-index" - different document types
 - "asx-stock-data" and "asx-announcement" - different document types
+- "asx-stock-data" and "asx-analyst-coverage" - different document types
+- "asx-stock-data" and "asx-historical-financials" - different document types
 - "asx-stock-data" and "web-search" - different document types
 - "asx-index" and "asx-announcement" - different document types
+- Any other document type combinations (each tag represents a separate document type)
 
 For comprehensive analysis across data types, create SEPARATE analyze_summary calls:
 1. One for stock data: filter_tags: ["asx-stock-data", "gnp"]
 2. One for announcements: filter_tags: ["asx-announcement", "gnp"]
-3. One for web search: filter_tags: ["web-search"]
-4. Final synthesis step that depends on all analysis steps
+3. One for analyst coverage: filter_tags: ["asx-analyst-coverage", "gnp"]
+4. One for historical financials: filter_tags: ["asx-historical-financials", "gnp"]
+5. One for web search: filter_tags: ["web-search"]
+6. Final synthesis step that depends on all analysis steps
 
 STOCKS vs BENCHMARKS - CRITICAL DISTINCTION:
 The CONTEXT section may contain two types of data:
 
 1. "STOCKS TO ANALYZE" (from variables):
    - These are the PRIMARY TARGETS - you MUST create tool calls for EACH stock
-   - For each stock ticker, call: fetch_stock_data, fetch_announcements, search_web
-   - Example: If stocks = [GNP, SKS, WES], you need 9 data collection steps (3 tools × 3 stocks)
+   - For each stock ticker, call: fetch_stock_data, fetch_announcements, fetch_analyst_coverage, fetch_historical_financials, search_web
+   - Example: If stocks = [GNP, SKS, WES], you need 15 data collection steps (5 tools × 3 stocks)
    - Then create analysis steps for each stock's data
 
 2. "BENCHMARK INDICES" (from benchmarks):

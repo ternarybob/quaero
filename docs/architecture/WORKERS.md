@@ -12,6 +12,10 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Orchestrator Worker](#orchestrator-worker)
   - [Analyze Build Worker](#analyze-build-worker)
   - [ASX Announcements Worker](#asx-announcements-worker)
+  - [ASX Stock Data Worker](#asx-stock-data-worker)
+  - [ASX Analyst Coverage Worker](#asx-analyst-coverage-worker)
+  - [ASX Historical Financials Worker](#asx-historical-financials-worker)
+  - [Competitor Analysis Worker](#competitor-analysis-worker)
   - [Classify Worker](#classify-worker)
   - [Code Map Worker](#code-map-worker)
   - [Crawler Worker](#crawler-worker)
@@ -614,6 +618,100 @@ No additional configuration required. Fetches data from public APIs.
 [step.fetch_stock_data]
 type = "asx_stock_data"
 description = "Fetch real-time stock data for CBA"
+asx_code = "CBA"
+output_tags = ["banking-sector", "portfolio"]
+```
+
+---
+
+### ASX Analyst Coverage Worker
+
+**File**: `asx_analyst_coverage_worker.go`
+
+**Purpose**: Fetches analyst coverage, broker ratings, and price targets from Yahoo Finance. Provides structured output including analyst count, consensus recommendations, price target ranges, upside potential, and recent upgrade/downgrade history.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
+| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
+
+#### Outputs
+
+- Document with comprehensive analyst coverage data including:
+  - Analyst count (number of analysts covering the stock)
+  - Consensus rating (buy/hold/sell) and rating score (1-5 scale)
+  - Price targets: mean, median, high, low
+  - Upside potential (percentage to mean target)
+  - Recommendation distribution (Strong Buy, Buy, Hold, Sell, Strong Sell counts)
+  - Recent upgrade/downgrade history (last 10 actions)
+- Tags: `["asx-analyst-coverage", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- Metadata includes structured data for downstream workers
+
+#### Configuration
+
+No additional configuration required. Fetches data from Yahoo Finance API.
+
+#### Example Job Definition
+
+```toml
+[step.fetch_analyst_coverage]
+type = "asx_analyst_coverage"
+description = "Fetch analyst coverage for CBA"
+asx_code = "CBA"
+output_tags = ["banking-sector", "portfolio"]
+```
+
+---
+
+### ASX Historical Financials Worker
+
+**File**: `asx_historical_financials_worker.go`
+
+**Purpose**: Fetches historical financial data from Yahoo Finance including revenue, profit, margins, cash flow, and growth rates. Provides structured output with annual and quarterly financial statements for multi-year analysis.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
+| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
+
+#### Outputs
+
+- Document with comprehensive financial history including:
+  - Growth Summary: Revenue YoY growth, Profit YoY growth, 3Y and 5Y Revenue CAGR
+  - Annual Financial History: Revenue, Net Income, Gross/Net Margins, Assets, Equity per year
+  - Cash Flow Summary: Operating cash flow, Free cash flow, EBITDA per year
+  - Quarterly Performance: Recent quarters with YoY revenue growth
+- Tags: `["asx-historical-financials", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- Metadata includes structured arrays for downstream workers
+
+#### Configuration
+
+No additional configuration required. Fetches data from Yahoo Finance API.
+
+#### Example Job Definition
+
+```toml
+[step.fetch_historical_financials]
+type = "asx_historical_financials"
+description = "Fetch historical financials for CBA"
 asx_code = "CBA"
 output_tags = ["banking-sector", "portfolio"]
 ```
@@ -1606,6 +1704,8 @@ search:
 - Analyze Build Worker - Process documents inline
 - ASX Announcements Worker - Fetch ASX company announcements
 - ASX Stock Data Worker - Fetch stock prices and indicators
+- ASX Analyst Coverage Worker - Fetch analyst ratings and price targets
+- ASX Historical Financials Worker - Fetch historical financial data
 - Classify Worker - Process documents inline
 - Competitor Analysis Worker - Identify and analyze competitors
 - Dependency Graph Worker - Single graph build
@@ -1626,6 +1726,8 @@ search:
 | Analyze Build | Yes | No |
 | ASX Announcements | Yes | No |
 | ASX Stock Data | Yes | No |
+| ASX Analyst Coverage | Yes | No |
+| ASX Historical Financials | Yes | No |
 | Classify | Yes | No |
 | Code Map | Yes | Yes |
 | Competitor Analysis | Yes | No |
@@ -1659,6 +1761,8 @@ search:
 **Data Source Workers**:
 - ASX Announcements Worker
 - ASX Stock Data Worker
+- ASX Analyst Coverage Worker
+- ASX Historical Financials Worker
 - Crawler Worker
 - GitHub Git Worker
 - GitHub Log Worker

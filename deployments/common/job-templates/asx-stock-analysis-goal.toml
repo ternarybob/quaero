@@ -34,8 +34,10 @@ available_tools = [
     { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance (7D, 1M, 3M, 6M, 1Y, 2Y returns).", worker = "asx_stock_data" },
     { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1), limit (int) - max announcements. Use for FY/HY results, trading updates, contracts. Each announcement includes: date, headline, type, price_sensitive flag, PDF link.", worker = "asx_announcements" },
     { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, news, historical financial data (revenue/profit history), competitor analysis. Useful for data not available from ASX APIs.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
+    { name = "fetch_analyst_coverage", description = "Fetch analyst coverage, broker ratings, and price targets. Creates document tagged with ['asx-analyst-coverage', '<ticker>']. REQUIRED params: asx_code (string). Provides: analyst count, consensus rating (buy/hold/sell), price target (mean/high/low/median), upside potential, recommendation distribution, recent upgrade/downgrades. PREFER this over search_web for analyst data.", worker = "asx_analyst_coverage" },
+    { name = "fetch_historical_financials", description = "Fetch historical financial data (revenue, profit, EPS history). Creates document tagged with ['asx-historical-financials', '<ticker>']. REQUIRED params: asx_code (string). Provides: annual revenue/profit history, quarterly data, gross/net margins, EBITDA, cash flow, YoY growth rates, 3Y/5Y revenue CAGR. PREFER this over search_web for financial history.", worker = "asx_historical_financials" },
+    { name = "search_web", description = "Search web for financial news and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: news, broker notes, competitor analysis, industry trends. NOTE: For analyst coverage use fetch_analyst_coverage instead. For financial history use fetch_historical_financials instead.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'], for analyst coverage use ['asx-analyst-coverage', '<ticker>'], for financials use ['asx-historical-financials', '<ticker>'].", worker = "summary" },
 ]
 
 # Natural language goal - the LLM will plan how to achieve this
@@ -52,15 +54,24 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
    - Use fetch_announcements with period: Y1 (or M6 for recent focus)
    - Captures: all official ASX announcements with price sensitivity flags
 
-3. NEWS: Search for financial news and analyst coverage
-   - Use search_web for recent news, analyst reports, broker notes
+3. ANALYST COVERAGE: Fetch broker ratings and price targets
+   - Use fetch_analyst_coverage for structured analyst data
+   - Captures: analyst count, consensus rating, price targets, upgrades/downgrades
 
-4. BENCHMARK DATA:
+4. HISTORICAL FINANCIALS: Fetch revenue and profit history
+   - Use fetch_historical_financials for structured financial history
+   - Captures: revenue, profit, margins, cash flow, YoY growth, CAGR
+
+5. NEWS: Search for recent financial news
+   - Use search_web for current news and market sentiment
+   - Note: For analyst data, prefer fetch_analyst_coverage. For financials, prefer fetch_historical_financials.
+
+6. BENCHMARK DATA:
    - Fetch ASX 200 (XJO) for market comparison
 
 === PHASE 2: DEEP ANALYSIS ===
 
-5. ANNOUNCEMENT SIGNAL VS NOISE ANALYSIS
+7. ANNOUNCEMENT SIGNAL VS NOISE ANALYSIS
    For each announcement, rate its information value:
    - HIGH SIGNAL: Material financial data (FY/HY results, earnings guidance, major contracts, M&A)
    - MEDIUM SIGNAL: Operational updates, board changes, strategy updates
@@ -68,7 +79,7 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
    Cross-reference price-sensitive flags and stock price movement on announcement dates.
    Calculate signal-to-noise ratio for the company's communication style.
 
-6. FY/HY RESULTS DEEP DIVE
+8. FY/HY RESULTS DEEP DIVE
    Locate the most recent FY or HY results announcement and analyze:
    - KEY POSITIVES (list 3-5): Revenue growth, margin improvement, cash flow, strategic wins
    - KEY NEGATIVES (list 3-5): Cost pressures, debt levels, market headwinds, execution risks
@@ -79,7 +90,7 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
      * Week 1: +/-X% (did reaction sustain or fade?)
      * Assessment: Was reaction proportionate to news quality?
 
-6b. PRICE EVENT ANALYSIS
+8b. PRICE EVENT ANALYSIS
    Identify the 3-5 most significant share price movements in the past year:
    - For each major move (+/-10% or more in a week):
      * DATE: When did it occur?
@@ -92,16 +103,17 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
        - KNEE-JERK: Initial spike/drop that reversed within days
      * CURRENT STATUS: Has the move held, reversed, or continued?
 
-7. 5-YEAR COMPANY PERFORMANCE ANALYSIS
-   Using historical stock data, analyze long-term trajectory:
+9. 5-YEAR COMPANY PERFORMANCE ANALYSIS
+   Using historical stock data AND historical financials, analyze long-term trajectory:
    - STOCK PRICE PROGRESSION: 5-year CAGR, key inflection points
+   - REVENUE PROGRESSION: 3Y and 5Y CAGR from fetch_historical_financials
+   - PROFIT TRAJECTORY: Net income growth and margin trends
    - PERFORMANCE PHASES: Growth periods, consolidation, declines
    - PRICE VS MARKET: Performance vs ASX 200 (XJO) benchmark
    - VOLUME TRENDS: Institutional interest changes over time
-   Note: Revenue/profit progression requires web search for historical financials.
 
-8. COMPANY QUALITY ASSESSMENT
-   Rate overall company quality (A/B/C/D/F) based on fundamental strength:
+10. COMPANY QUALITY ASSESSMENT
+    Rate overall company quality (A/B/C/D/F) based on fundamental strength:
    - REVENUE TRAJECTORY: Growing, stable, or declining over 3-5 years
    - PROFIT TRAJECTORY: NPAT/margin trends, path to profitability
    - SHARE PRICE TRAJECTORY: Long-term capital appreciation vs destruction
@@ -113,9 +125,17 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
    Example: "Quality B: Revenue grew 12% YoY with improving margins (8% to 11%), but high
    debt-to-equity (1.4x) and recent share price weakness (-15% vs XJO +8%) limit the rating."
 
-9. STOCK SUMMARY with key metrics and technical levels
+11. ANALYST CONSENSUS ANALYSIS
+    Using fetch_analyst_coverage data:
+    - BROKER CONSENSUS: Buy/Hold/Sell distribution
+    - PRICE TARGET ANALYSIS: Current price vs mean/median targets
+    - UPSIDE POTENTIAL: Percentage to analyst target
+    - RECENT ACTIONS: Any upgrades/downgrades in past 3 months
+    - COVERAGE DEPTH: Number of analysts covering (more = higher confidence)
 
-10. DUAL INVESTMENT RECOMMENDATIONS
+12. STOCK SUMMARY with key metrics and technical levels
+
+13. DUAL INVESTMENT RECOMMENDATIONS
 
    TRADER RECOMMENDATION (1-6 week horizon):
    - Focus: Technical momentum, short-term catalysts, volatility
