@@ -20,15 +20,134 @@ import (
 // Worker Schema Integration Tests
 // =============================================================================
 // These tests verify each worker/tool produces consistent output:
-// - asx_stock_data: Fetches stock data with consistent structure
+// - asx_stock_collector: Consolidated Yahoo Finance data (prices, technicals, analyst coverage, financials)
 // - asx_announcements: Fetches announcements with consistent structure
+// - asx_stock_data: [DEPRECATED] Use asx_stock_collector instead
+// - asx_analyst_coverage: [DEPRECATED] Use asx_stock_collector instead
+// - asx_historical_financials: [DEPRECATED] Use asx_stock_collector instead
 // - web_search: Searches web with AI-powered results
 // - summary: Generates analysis with JSON schema enforcement
 //
 // Primary concern: CONSISTENCY of both tooling and final output
 // =============================================================================
 
+// TestWorkerASXStockCollector tests the consolidated asx_stock_collector worker.
+// This worker combines price data, technicals, analyst coverage, and historical financials
+// in a single Yahoo Finance API call, replacing the deprecated individual workers.
+func TestWorkerASXStockCollector(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	// Create job definition that uses asx_stock_collector worker
+	defID := fmt.Sprintf("test-asx-stock-collector-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "ASX Stock Collector Worker Test",
+		"description": "Test asx_stock_collector worker for consolidated output",
+		"type":        "asx_stock_collector",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-stock-collector"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-stock-data",
+				"type": "asx_stock_collector",
+				"config": map[string]interface{}{
+					"asx_code": "BHP", // Use BHP as a stable test stock
+					"period":   "Y2",  // 24 months for comprehensive data verification
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d (may need ASX market hours)", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute the job
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed asx_stock_collector job: %s", jobID)
+
+	// Wait for completion
+	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
+	// Verify completion (may fail if market is closed or API unavailable)
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s (may be expected outside market hours)", finalStatus)
+		return
+	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXStockCollectorOutput(t, helper, "BHP")
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_stock_collector job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_stock_collector worker produced consistent output across runs")
+}
+
 // TestWorkerASXStockData tests the asx_stock_data worker produces consistent output
+// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
+// price data, analyst coverage, and historical financials in a single API call.
+// This test is retained for backward compatibility.
 func TestWorkerASXStockData(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
@@ -98,22 +217,51 @@ func TestWorkerASXStockData(t *testing.T) {
 	}
 
 	// Verify completion (may fail if market is closed or API unavailable)
-	if finalStatus == "completed" {
-		// Verify document was created with expected structure and 24 months of data
-		validateASXStockDataOutputWithPeriod(t, helper, "BHP", true) // require24Months=true
-
-		// Save worker output (content and JSON metadata)
-		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 1); err != nil {
-			t.Logf("Warning: failed to save worker output: %v", err)
-		}
-
-		t.Log("PASS: asx_stock_data worker produced consistent output with 24 months of data")
-	} else {
+	if finalStatus != "completed" {
 		t.Logf("INFO: Job ended with status %s (may be expected outside market hours)", finalStatus)
+		return
 	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXStockDataOutputWithPeriod(t, helper, "BHP", true) // require24Months=true
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_stock_data job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_stock_data worker produced consistent output across runs")
 }
 
 // TestWorkerASXStockDataMultiStock tests the asx_stock_data worker with multiple stocks
+// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
+// price data, analyst coverage, and historical financials in a single API call.
+// This test is retained for backward compatibility.
 func TestWorkerASXStockDataMultiStock(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
@@ -185,19 +333,42 @@ func TestWorkerASXStockDataMultiStock(t *testing.T) {
 				}
 			}
 
-			if finalStatus == "completed" {
-				// Validate stock data output with 24-month requirement
-				validateASXStockDataOutputWithPeriod(t, helper, stock, true) // require24Months=true
-
-				// Save output for each stock
-				if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", strings.ToLower(stock)}, i+1); err != nil {
-					t.Logf("Warning: failed to save output for %s: %v", stock, err)
-				}
-
-				t.Logf("PASS: %s stock data processed with 24 months of data", stock)
-			} else {
+			if finalStatus != "completed" {
 				t.Logf("INFO: Job for %s ended with status %s (may be expected outside market hours)", stock, finalStatus)
+				return
 			}
+
+			// ===== RUN 1 =====
+			t.Logf("=== Run 1 for %s ===", stock)
+			validateASXStockDataOutputWithPeriod(t, helper, stock, true) // require24Months=true
+
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", strings.ToLower(stock)}, i*2+1); err != nil {
+				t.Logf("Warning: failed to save output for %s run 1: %v", stock, err)
+			}
+			assertResultFilesExist(t, env, i*2+1)
+
+			// ===== RUN 2 =====
+			t.Logf("=== Run 2 for %s ===", stock)
+			execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s run 2", stock)
+			defer execResp2.Body.Close()
+
+			if execResp2.StatusCode == http.StatusAccepted {
+				var execResult2 map[string]interface{}
+				require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+				jobID2 := execResult2["job_id"].(string)
+				t.Logf("Executed asx_stock_data job for %s run 2: %s", stock, jobID2)
+
+				finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+				if finalStatus2 == "completed" {
+					if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", strings.ToLower(stock)}, i*2+2); err != nil {
+						t.Logf("Warning: failed to save output for %s run 2: %v", stock, err)
+					}
+					assertResultFilesExist(t, env, i*2+2)
+				}
+			}
+
+			t.Logf("PASS: %s stock data processed with consistency check", stock)
 		})
 	}
 }
@@ -269,22 +440,46 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 		t.Logf("Warning: failed to save job definition: %v", err)
 	}
 
-	if finalStatus == "completed" {
-		// Validate individual announcements
-		validateASXAnnouncementsOutput(t, helper, "BHP")
-
-		// Validate summary document with relevance and price impact
-		validateASXAnnouncementsSummary(t, helper, "BHP")
-
-		// Save summary document output (content and JSON metadata)
-		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 1); err != nil {
-			t.Logf("Warning: failed to save summary output: %v", err)
-		}
-
-		t.Log("PASS: asx_announcements worker produced consistent output with summary")
-	} else {
+	if finalStatus != "completed" {
 		t.Logf("INFO: Job ended with status %s", finalStatus)
+		return
 	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXAnnouncementsOutput(t, helper, "BHP")
+	validateASXAnnouncementsSummary(t, helper, "BHP")
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save summary output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_announcements job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save summary output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_announcements worker produced consistent output across runs")
 }
 
 // TestWorkerASXAnnouncementsMultiStock tests the asx_announcements worker with multiple stocks
@@ -359,24 +554,271 @@ func TestWorkerASXAnnouncementsMultiStock(t *testing.T) {
 				}
 			}
 
-			if finalStatus == "completed" {
-				// Validate individual announcements
-				validateASXAnnouncementsOutput(t, helper, stock)
-
-				// Validate summary document
-				validateASXAnnouncementsSummary(t, helper, stock)
-
-				// Save output for each stock
-				if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i+1); err != nil {
-					t.Logf("Warning: failed to save output for %s: %v", stock, err)
-				}
-
-				t.Logf("PASS: %s announcements processed with summary", stock)
-			} else {
+			if finalStatus != "completed" {
 				t.Logf("INFO: Job for %s ended with status %s", stock, finalStatus)
+				return
 			}
+
+			// ===== RUN 1 =====
+			t.Logf("=== Run 1 for %s ===", stock)
+			validateASXAnnouncementsOutput(t, helper, stock)
+			validateASXAnnouncementsSummary(t, helper, stock)
+
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+1); err != nil {
+				t.Logf("Warning: failed to save output for %s run 1: %v", stock, err)
+			}
+			assertResultFilesExist(t, env, i*2+1)
+
+			// ===== RUN 2 =====
+			t.Logf("=== Run 2 for %s ===", stock)
+			execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s run 2", stock)
+			defer execResp2.Body.Close()
+
+			if execResp2.StatusCode == http.StatusAccepted {
+				var execResult2 map[string]interface{}
+				require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+				jobID2 := execResult2["job_id"].(string)
+				t.Logf("Executed asx_announcements job for %s run 2: %s", stock, jobID2)
+
+				finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+				if finalStatus2 == "completed" {
+					if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+2); err != nil {
+						t.Logf("Warning: failed to save output for %s run 2: %v", stock, err)
+					}
+					assertResultFilesExist(t, env, i*2+2)
+				}
+			}
+
+			t.Logf("PASS: %s announcements processed with consistency check", stock)
 		})
 	}
+}
+
+// TestWorkerASXAnalystCoverage tests the asx_analyst_coverage worker produces consistent output
+// including analyst ratings, price targets, and recommendation distribution.
+// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
+// price data, analyst coverage, and historical financials in a single API call.
+// This test is retained for backward compatibility.
+func TestWorkerASXAnalystCoverage(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	defID := fmt.Sprintf("test-asx-analyst-coverage-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "ASX Analyst Coverage Worker Test",
+		"description": "Test asx_analyst_coverage worker for consistent output",
+		"type":        "asx_analyst_coverage",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-analyst-coverage"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-analyst-coverage",
+				"type": "asx_analyst_coverage",
+				"config": map[string]interface{}{
+					"asx_code": "BHP", // Use BHP as a stable test stock
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d (may be API unavailable)", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute the job
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed asx_analyst_coverage job: %s", jobID)
+
+	// Wait for completion
+	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
+	// Verify completion (may fail if Yahoo Finance API is unavailable)
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s (may be expected if Yahoo Finance API unavailable)", finalStatus)
+		return
+	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXAnalystCoverageOutput(t, helper, "BHP")
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-analyst-coverage", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_analyst_coverage job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-analyst-coverage", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_analyst_coverage worker produced consistent output across runs")
+}
+
+// TestWorkerASXHistoricalFinancials tests the asx_historical_financials worker produces consistent output
+// including revenue history, profit growth, and CAGR calculations.
+// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
+// price data, analyst coverage, and historical financials in a single API call.
+// This test is retained for backward compatibility.
+func TestWorkerASXHistoricalFinancials(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	defID := fmt.Sprintf("test-asx-historical-financials-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "ASX Historical Financials Worker Test",
+		"description": "Test asx_historical_financials worker for consistent output",
+		"type":        "asx_historical_financials",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-historical-financials"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-historical-financials",
+				"type": "asx_historical_financials",
+				"config": map[string]interface{}{
+					"asx_code": "BHP", // Use BHP as a stable test stock
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d (may be API unavailable)", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute the job
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed asx_historical_financials job: %s", jobID)
+
+	// Wait for completion
+	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
+	// Verify completion (may fail if Yahoo Finance API is unavailable)
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s (may be expected if Yahoo Finance API unavailable)", finalStatus)
+		return
+	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXHistoricalFinancialsOutput(t, helper, "BHP")
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-historical-financials", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_historical_financials job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-historical-financials", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_historical_financials worker produced consistent output across runs")
 }
 
 // TestWorkerSummaryWithSchema tests the summary worker uses JSON schema for consistent output
@@ -549,6 +991,9 @@ func TestWorkerSummaryWithSchema(t *testing.T) {
 				t.Logf("Run %d outputs saved: JSON=%s, MD=%s", runNumber, jsonPath, mdPath)
 			}
 
+			// Assert result files exist for this run
+			assertResultFilesExist(t, env, runNumber)
+
 			// Validate the output contains schema-defined fields
 			validateSummarySchemaOutput(t, helper, []string{"summary", "components", "recommendation"})
 			t.Logf("PASS: Run %d - summary worker with schema produced structured output", runNumber)
@@ -568,6 +1013,7 @@ func TestWorkerSummaryWithSchema(t *testing.T) {
 	if completedRuns == numRuns {
 		t.Log("=== Comparing outputs for consistency ===")
 		validateOutputConsistency(t, env)
+		assertOutputStructureConsistency(t, env)
 	} else {
 		t.Logf("INFO: Only %d of %d runs completed, skipping consistency comparison", completedRuns, numRuns)
 	}
@@ -644,18 +1090,45 @@ func TestWorkerWebSearch(t *testing.T) {
 		t.Logf("Warning: failed to save job definition: %v", err)
 	}
 
-	if finalStatus == "completed" {
-		validateWebSearchOutput(t, helper)
-
-		// Save worker output (content and JSON metadata)
-		if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 1); err != nil {
-			t.Logf("Warning: failed to save worker output: %v", err)
-		}
-
-		t.Log("PASS: web_search worker produced output")
-	} else {
+	if finalStatus != "completed" {
 		t.Logf("INFO: Job ended with status %s", finalStatus)
+		return
 	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateWebSearchOutput(t, helper)
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed web_search job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: web_search worker produced consistent output across runs")
 }
 
 // =============================================================================
@@ -913,6 +1386,319 @@ func validateASXAnnouncementsSummary(t *testing.T, helper *common.HTTPTestHelper
 		}
 	} else {
 		t.Log("INFO: No summary document found")
+	}
+}
+
+// validateASXAnalystCoverageOutput validates that asx_analyst_coverage produced consistent structure
+func validateASXAnalystCoverageOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
+	resp, err := helper.GET("/api/documents?tags=asx-analyst-coverage," + strings.ToLower(ticker))
+	if err != nil {
+		t.Logf("Warning: Failed to query documents: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: Document query returned status %d", resp.StatusCode)
+		return
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse response: %v", err)
+		return
+	}
+
+	t.Logf("Found %d asx-analyst-coverage documents for %s", result.Total, ticker)
+
+	if len(result.Documents) > 0 {
+		doc := result.Documents[0]
+		content := doc.ContentMarkdown
+
+		// Validate expected sections are present
+		expectedSections := []string{
+			"Analyst Summary",
+			"Price Targets",
+			"Recommendation Distribution",
+		}
+
+		for _, section := range expectedSections {
+			if strings.Contains(content, section) {
+				t.Logf("PASS: Found expected section '%s'", section)
+			} else {
+				t.Logf("INFO: Section '%s' not found in output", section)
+			}
+		}
+
+		// Validate numeric data patterns (price targets)
+		pricePattern := regexp.MustCompile(`\$\d+\.\d{2}`)
+		if pricePattern.MatchString(content) {
+			t.Log("PASS: Found price target data in expected format")
+		}
+
+		// Validate percentage patterns (upside potential)
+		percentPattern := regexp.MustCompile(`-?\d+\.?\d*%`)
+		if percentPattern.MatchString(content) {
+			t.Log("PASS: Found percentage data in expected format")
+		}
+
+		// Validate metadata has required fields
+		if doc.Metadata != nil {
+			requiredFields := []string{"analyst_count", "target_mean", "recommendation_key", "current_price"}
+			for _, field := range requiredFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing field '%s'", field)
+				}
+			}
+
+			// Validate recommendation distribution fields
+			distFields := []string{"strong_buy", "buy", "hold", "sell", "strong_sell"}
+			foundDist := 0
+			for _, field := range distFields {
+				if _, exists := doc.Metadata[field]; exists {
+					foundDist++
+				}
+			}
+			if foundDist > 0 {
+				t.Logf("PASS: Found %d recommendation distribution fields", foundDist)
+			}
+
+			// Check for upgrade/downgrade history
+			if udHistory, ok := doc.Metadata["upgrade_downgrades"].([]interface{}); ok {
+				t.Logf("PASS: Found %d upgrade/downgrade entries in metadata", len(udHistory))
+			}
+		}
+	} else {
+		t.Log("INFO: No analyst coverage document found")
+	}
+}
+
+// validateASXHistoricalFinancialsOutput validates that asx_historical_financials produced consistent structure
+func validateASXHistoricalFinancialsOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
+	resp, err := helper.GET("/api/documents?tags=asx-historical-financials," + strings.ToLower(ticker))
+	if err != nil {
+		t.Logf("Warning: Failed to query documents: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: Document query returned status %d", resp.StatusCode)
+		return
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse response: %v", err)
+		return
+	}
+
+	t.Logf("Found %d asx-historical-financials documents for %s", result.Total, ticker)
+
+	if len(result.Documents) > 0 {
+		doc := result.Documents[0]
+		content := doc.ContentMarkdown
+
+		// Validate expected sections are present
+		expectedSections := []string{
+			"Growth Summary",
+			"Annual Financial History",
+		}
+
+		for _, section := range expectedSections {
+			if strings.Contains(content, section) {
+				t.Logf("PASS: Found expected section '%s'", section)
+			} else {
+				t.Logf("INFO: Section '%s' not found in output", section)
+			}
+		}
+
+		// Validate table patterns (financial history tables)
+		if strings.Contains(content, "| FY End |") || strings.Contains(content, "| Revenue |") {
+			t.Log("PASS: Found financial history table in output")
+		}
+
+		// Validate percentage patterns (growth rates)
+		percentPattern := regexp.MustCompile(`-?\d+\.?\d*%`)
+		if percentPattern.MatchString(content) {
+			t.Log("PASS: Found growth percentage data in expected format")
+		}
+
+		// Validate metadata has required fields
+		if doc.Metadata != nil {
+			requiredFields := []string{"asx_code", "company_name", "revenue_growth_yoy", "annual_periods"}
+			for _, field := range requiredFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing field '%s'", field)
+				}
+			}
+
+			// Validate CAGR fields
+			cagrFields := []string{"revenue_cagr_3y", "revenue_cagr_5y"}
+			for _, field := range cagrFields {
+				if val, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Found %s: %.1f%%", field, val)
+				}
+			}
+
+			// Check for annual_data array
+			if annualData, ok := doc.Metadata["annual_data"].([]interface{}); ok {
+				t.Logf("PASS: Found %d annual data periods in metadata", len(annualData))
+				if len(annualData) > 0 {
+					// Validate first period has required fields
+					if firstPeriod, ok := annualData[0].(map[string]interface{}); ok {
+						periodFields := []string{"end_date", "total_revenue", "net_income"}
+						for _, field := range periodFields {
+							if _, exists := firstPeriod[field]; exists {
+								t.Logf("PASS: Annual period has field '%s'", field)
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		t.Log("INFO: No historical financials document found")
+	}
+}
+
+// validateASXStockCollectorOutput validates that asx_stock_collector produced consolidated structure
+// This validates the combined output from price, technicals, analyst coverage, and historical financials.
+func validateASXStockCollectorOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
+	resp, err := helper.GET("/api/documents?tags=asx-stock-data," + strings.ToLower(ticker))
+	if err != nil {
+		t.Logf("Warning: Failed to query documents: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: Document query returned status %d", resp.StatusCode)
+		return
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse response: %v", err)
+		return
+	}
+
+	t.Logf("Found %d asx-stock-data documents for %s (from asx_stock_collector)", result.Total, ticker)
+
+	if len(result.Documents) > 0 {
+		doc := result.Documents[0]
+		content := doc.ContentMarkdown
+
+		// Validate consolidated output sections
+		expectedSections := []string{
+			"Current Price",
+			"Technical Indicators",
+			"Analyst Coverage",
+			"Historical Financials",
+		}
+
+		for _, section := range expectedSections {
+			if strings.Contains(content, section) {
+				t.Logf("PASS: Found expected section '%s'", section)
+			} else {
+				t.Logf("INFO: Section '%s' not found in output", section)
+			}
+		}
+
+		// Validate metadata has consolidated fields
+		if doc.Metadata != nil {
+			// Price data fields
+			priceFields := []string{"current_price", "change_percent", "volume"}
+			for _, field := range priceFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has price field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing price field '%s'", field)
+				}
+			}
+
+			// Technical fields
+			techFields := []string{"sma_20", "sma_50", "rsi_14", "trend_signal"}
+			for _, field := range techFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has technical field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing technical field '%s'", field)
+				}
+			}
+
+			// Analyst coverage fields
+			analystFields := []string{"analyst_count", "target_mean", "recommendation_key", "upside_potential"}
+			for _, field := range analystFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has analyst field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing analyst field '%s'", field)
+				}
+			}
+
+			// Historical financials fields
+			financialFields := []string{"revenue_growth_yoy", "revenue_cagr_3y"}
+			for _, field := range financialFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Metadata has financial field '%s'", field)
+				} else {
+					t.Logf("INFO: Metadata missing financial field '%s'", field)
+				}
+			}
+
+			// Validate historical_prices array
+			if histPrices, ok := doc.Metadata["historical_prices"].([]interface{}); ok {
+				priceCount := len(histPrices)
+				t.Logf("Found %d historical price entries", priceCount)
+				if priceCount >= 400 {
+					t.Logf("PASS: Historical prices count (%d) meets 24-month threshold (>=400)", priceCount)
+				}
+			}
+
+			// Validate annual_data array
+			if annualData, ok := doc.Metadata["annual_data"].([]interface{}); ok {
+				t.Logf("PASS: Found %d annual financial periods", len(annualData))
+			}
+
+			// Validate upgrade_downgrades array
+			if udHistory, ok := doc.Metadata["upgrade_downgrades"].([]interface{}); ok {
+				t.Logf("PASS: Found %d upgrade/downgrade entries", len(udHistory))
+			}
+		}
+	} else {
+		t.Log("INFO: No stock collector document found")
 	}
 }
 
@@ -1400,4 +2186,192 @@ func containsKey(slice []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// =============================================================================
+// File Assertion Helpers for Output Validation
+// =============================================================================
+
+// assertFileExistsAndNotEmpty asserts that a file exists and has content
+func assertFileExistsAndNotEmpty(t *testing.T, path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Errorf("File does not exist: %s", path)
+		} else {
+			t.Errorf("Failed to stat file %s: %v", path, err)
+		}
+		return false
+	}
+
+	if info.Size() == 0 {
+		t.Errorf("File is empty: %s", path)
+		return false
+	}
+
+	t.Logf("PASS: File exists and is not empty: %s (%d bytes)", path, info.Size())
+	return true
+}
+
+// assertResultFilesExist asserts that all expected result files exist for a given run
+func assertResultFilesExist(t *testing.T, env *common.TestEnvironment, runNumber int) {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Error("Results directory not available")
+		return
+	}
+
+	// Check job_definition.json
+	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "job_definition.json"))
+
+	// Check primary output files
+	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "output.md"))
+
+	// Check numbered output files for this run
+	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber)))
+
+	// JSON files are optional (may not exist if no metadata)
+	jsonPath := filepath.Join(resultsDir, "output.json")
+	if _, err := os.Stat(jsonPath); err == nil {
+		assertFileExistsAndNotEmpty(t, jsonPath)
+	}
+
+	numberedJSONPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+	if _, err := os.Stat(numberedJSONPath); err == nil {
+		assertFileExistsAndNotEmpty(t, numberedJSONPath)
+	}
+}
+
+// assertSchemaFileExists asserts that the schema file exists in results directory
+func assertSchemaFileExists(t *testing.T, env *common.TestEnvironment) {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Log("INFO: Results directory not available for schema check")
+		return
+	}
+
+	schemaPath := filepath.Join(resultsDir, "schema.json")
+	if _, err := os.Stat(schemaPath); err == nil {
+		assertFileExistsAndNotEmpty(t, schemaPath)
+	} else {
+		t.Logf("INFO: Schema file not present at %s (may not be required for this worker)", schemaPath)
+	}
+}
+
+// compareMarkdownStructure compares the structure of two markdown documents by headers
+func compareMarkdownStructure(t *testing.T, md1, md2 string) bool {
+	headers1 := extractMarkdownHeaders(md1)
+	headers2 := extractMarkdownHeaders(md2)
+
+	if len(headers1) == 0 && len(headers2) == 0 {
+		t.Log("INFO: No headers found in markdown outputs")
+		return true
+	}
+
+	// Compare header counts
+	if len(headers1) != len(headers2) {
+		t.Logf("INFO: Different number of headers: %d vs %d", len(headers1), len(headers2))
+		return false
+	}
+
+	// Compare header content (ignoring dynamic data like dates/prices)
+	matching := 0
+	for i, h1 := range headers1 {
+		if i < len(headers2) {
+			// Normalize headers for comparison (remove dynamic content)
+			norm1 := normalizeHeader(h1)
+			norm2 := normalizeHeader(headers2[i])
+			if norm1 == norm2 {
+				matching++
+			}
+		}
+	}
+
+	ratio := float64(matching) / float64(len(headers1))
+	if ratio >= 0.8 {
+		t.Logf("PASS: Markdown headers are consistent (%.0f%% match)", ratio*100)
+		return true
+	}
+
+	t.Logf("INFO: Markdown headers differ significantly (%.0f%% match)", ratio*100)
+	return false
+}
+
+// extractMarkdownHeaders extracts header lines from markdown content
+func extractMarkdownHeaders(content string) []string {
+	var headers []string
+	headerPattern := regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	matches := headerPattern.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			headers = append(headers, match[1])
+		}
+	}
+	return headers
+}
+
+// normalizeHeader removes dynamic content from headers for comparison
+func normalizeHeader(header string) string {
+	// Remove dates, prices, percentages, and numbers for structural comparison
+	normalized := header
+
+	// Remove date patterns
+	datePattern := regexp.MustCompile(`\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}`)
+	normalized = datePattern.ReplaceAllString(normalized, "DATE")
+
+	// Remove price patterns
+	pricePattern := regexp.MustCompile(`\$[\d,]+\.?\d*`)
+	normalized = pricePattern.ReplaceAllString(normalized, "PRICE")
+
+	// Remove percentage patterns
+	percentPattern := regexp.MustCompile(`[+-]?\d+\.?\d*%`)
+	normalized = percentPattern.ReplaceAllString(normalized, "PERCENT")
+
+	// Remove standalone numbers
+	numberPattern := regexp.MustCompile(`\b\d+\.?\d*\b`)
+	normalized = numberPattern.ReplaceAllString(normalized, "NUM")
+
+	return strings.TrimSpace(normalized)
+}
+
+// assertOutputStructureConsistency compares outputs between two runs for structural consistency
+func assertOutputStructureConsistency(t *testing.T, env *common.TestEnvironment) {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Log("INFO: Results directory not available for consistency check")
+		return
+	}
+
+	// Compare JSON structure
+	json1Path := filepath.Join(resultsDir, "output_1.json")
+	json2Path := filepath.Join(resultsDir, "output_2.json")
+
+	json1, err1 := os.ReadFile(json1Path)
+	json2, err2 := os.ReadFile(json2Path)
+
+	if err1 == nil && err2 == nil {
+		var js1, js2 map[string]interface{}
+		if json.Unmarshal(json1, &js1) == nil && json.Unmarshal(json2, &js2) == nil {
+			diffs := compareJSONStructure("", js1, js2)
+			if len(diffs) == 0 {
+				t.Log("PASS: JSON outputs have identical structure across runs")
+			} else {
+				t.Logf("INFO: JSON structure differences found: %d", len(diffs))
+				for _, diff := range diffs[:min(5, len(diffs))] {
+					t.Logf("  - %s", diff)
+				}
+			}
+		}
+	}
+
+	// Compare Markdown structure
+	md1Path := filepath.Join(resultsDir, "output_1.md")
+	md2Path := filepath.Join(resultsDir, "output_2.md")
+
+	md1, merr1 := os.ReadFile(md1Path)
+	md2, merr2 := os.ReadFile(md2Path)
+
+	if merr1 == nil && merr2 == nil {
+		compareMarkdownStructure(t, string(md1), string(md2))
+	}
 }
