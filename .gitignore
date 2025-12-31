@@ -78,3 +78,6 @@ dev-debug.log
 # tasks.json
 # tasks/ 
 .claude/workdir/
+
+# Auto Claude data directory
+.auto-claude/

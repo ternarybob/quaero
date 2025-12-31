@@ -54,7 +54,7 @@ func TestWorkerASXStockData(t *testing.T) {
 				"type": "asx_stock_data",
 				"config": map[string]interface{}{
 					"asx_code": "BHP", // Use BHP as a stable test stock
-					"period":   "M1",  // 1 month for quick test
+					"period":   "Y2",  // 24 months for comprehensive data verification
 				},
 			},
 		},
@@ -99,21 +99,111 @@ func TestWorkerASXStockData(t *testing.T) {
 
 	// Verify completion (may fail if market is closed or API unavailable)
 	if finalStatus == "completed" {
-		// Verify document was created with expected structure
-		validateASXStockDataOutput(t, helper, "BHP")
+		// Verify document was created with expected structure and 24 months of data
+		validateASXStockDataOutputWithPeriod(t, helper, "BHP", true) // require24Months=true
 
 		// Save worker output (content and JSON metadata)
 		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 1); err != nil {
 			t.Logf("Warning: failed to save worker output: %v", err)
 		}
 
-		t.Log("PASS: asx_stock_data worker produced consistent output")
+		t.Log("PASS: asx_stock_data worker produced consistent output with 24 months of data")
 	} else {
 		t.Logf("INFO: Job ended with status %s (may be expected outside market hours)", finalStatus)
 	}
 }
 
+// TestWorkerASXStockDataMultiStock tests the asx_stock_data worker with multiple stocks
+func TestWorkerASXStockDataMultiStock(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	stocks := []string{"BHP", "CSL", "GNP", "EXR"}
+
+	for i, stock := range stocks {
+		t.Run(stock, func(t *testing.T) {
+			defID := fmt.Sprintf("test-asx-stock-data-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
+
+			body := map[string]interface{}{
+				"id":          defID,
+				"name":        fmt.Sprintf("ASX Stock Data Worker Test - %s", stock),
+				"description": "Test asx_stock_data worker for multi-stock support",
+				"type":        "asx_stock_data",
+				"enabled":     true,
+				"tags":        []string{"worker-test", "asx-stock-data", "multi-stock"},
+				"steps": []map[string]interface{}{
+					{
+						"name": "fetch-stock",
+						"type": "asx_stock_data",
+						"config": map[string]interface{}{
+							"asx_code": stock,
+							"period":   "Y2", // 24 months for comprehensive data verification
+						},
+					},
+				},
+			}
+
+			resp, err := helper.POST("/api/job-definitions", body)
+			require.NoError(t, err, "Failed to create job definition for %s", stock)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusCreated {
+				t.Skipf("Job definition creation failed for %s with status: %d (may need ASX market hours)", stock, resp.StatusCode)
+			}
+
+			defer func() {
+				delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+				if delResp != nil {
+					delResp.Body.Close()
+				}
+			}()
+
+			execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s", stock)
+			defer execResp.Body.Close()
+
+			if execResp.StatusCode != http.StatusAccepted {
+				t.Skipf("Job execution failed for %s with status: %d", stock, execResp.StatusCode)
+			}
+
+			var execResult map[string]interface{}
+			require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+			jobID := execResult["job_id"].(string)
+			t.Logf("Executed asx_stock_data job for %s: %s", stock, jobID)
+
+			finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+			// Save job definition for first stock only
+			if i == 0 {
+				if err := saveJobDefinition(t, env, body); err != nil {
+					t.Logf("Warning: failed to save job definition: %v", err)
+				}
+			}
+
+			if finalStatus == "completed" {
+				// Validate stock data output with 24-month requirement
+				validateASXStockDataOutputWithPeriod(t, helper, stock, true) // require24Months=true
+
+				// Save output for each stock
+				if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", strings.ToLower(stock)}, i+1); err != nil {
+					t.Logf("Warning: failed to save output for %s: %v", stock, err)
+				}
+
+				t.Logf("PASS: %s stock data processed with 24 months of data", stock)
+			} else {
+				t.Logf("INFO: Job for %s ended with status %s (may be expected outside market hours)", stock, finalStatus)
+			}
+		})
+	}
+}
+
 // TestWorkerASXAnnouncements tests the asx_announcements worker produces consistent output
+// including the summary document with relevance classification and price impact analysis
 func TestWorkerASXAnnouncements(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
@@ -128,7 +218,7 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 	body := map[string]interface{}{
 		"id":          defID,
 		"name":        "ASX Announcements Worker Test",
-		"description": "Test asx_announcements worker for consistent output",
+		"description": "Test asx_announcements worker for consistent output with summary",
 		"type":        "asx_announcements",
 		"enabled":     true,
 		"tags":        []string{"worker-test", "asx-announcement"},
@@ -138,8 +228,7 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 				"type": "asx_announcements",
 				"config": map[string]interface{}{
 					"asx_code": "BHP",
-					"period":   "M1", // 1 month
-					"limit":    5,    // Limit for quick test
+					// Use worker default Y1 (12 months) for consistent output
 				},
 			},
 		},
@@ -173,7 +262,7 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 	jobID := execResult["job_id"].(string)
 	t.Logf("Executed asx_announcements job: %s", jobID)
 
-	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
 
 	// Save job definition
 	if err := saveJobDefinition(t, env, body); err != nil {
@@ -181,16 +270,112 @@ func TestWorkerASXAnnouncements(t *testing.T) {
 	}
 
 	if finalStatus == "completed" {
+		// Validate individual announcements
 		validateASXAnnouncementsOutput(t, helper, "BHP")
 
-		// Save worker output (content and JSON metadata)
-		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement", "bhp"}, 1); err != nil {
-			t.Logf("Warning: failed to save worker output: %v", err)
+		// Validate summary document with relevance and price impact
+		validateASXAnnouncementsSummary(t, helper, "BHP")
+
+		// Save summary document output (content and JSON metadata)
+		if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 1); err != nil {
+			t.Logf("Warning: failed to save summary output: %v", err)
 		}
 
-		t.Log("PASS: asx_announcements worker produced consistent output")
+		t.Log("PASS: asx_announcements worker produced consistent output with summary")
 	} else {
 		t.Logf("INFO: Job ended with status %s", finalStatus)
+	}
+}
+
+// TestWorkerASXAnnouncementsMultiStock tests the asx_announcements worker with multiple stocks
+func TestWorkerASXAnnouncementsMultiStock(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	stocks := []string{"BHP", "CSL", "GNP", "EXR"}
+
+	for i, stock := range stocks {
+		t.Run(stock, func(t *testing.T) {
+			defID := fmt.Sprintf("test-asx-announcements-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
+
+			body := map[string]interface{}{
+				"id":          defID,
+				"name":        fmt.Sprintf("ASX Announcements Worker Test - %s", stock),
+				"description": "Test asx_announcements worker for multi-stock support",
+				"type":        "asx_announcements",
+				"enabled":     true,
+				"tags":        []string{"worker-test", "asx-announcement", "multi-stock"},
+				"steps": []map[string]interface{}{
+					{
+						"name": "fetch-announcements",
+						"type": "asx_announcements",
+						"config": map[string]interface{}{
+							"asx_code": stock,
+							// Use worker default Y1 (12 months) for consistent output
+						},
+					},
+				},
+			}
+
+			resp, err := helper.POST("/api/job-definitions", body)
+			require.NoError(t, err, "Failed to create job definition for %s", stock)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusCreated {
+				t.Skipf("Job definition creation failed for %s with status: %d", stock, resp.StatusCode)
+			}
+
+			defer func() {
+				delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+				if delResp != nil {
+					delResp.Body.Close()
+				}
+			}()
+
+			execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s", stock)
+			defer execResp.Body.Close()
+
+			if execResp.StatusCode != http.StatusAccepted {
+				t.Skipf("Job execution failed for %s with status: %d", stock, execResp.StatusCode)
+			}
+
+			var execResult map[string]interface{}
+			require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+			jobID := execResult["job_id"].(string)
+			t.Logf("Executed asx_announcements job for %s: %s", stock, jobID)
+
+			finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+			// Save job definition for first stock only
+			if i == 0 {
+				if err := saveJobDefinition(t, env, body); err != nil {
+					t.Logf("Warning: failed to save job definition: %v", err)
+				}
+			}
+
+			if finalStatus == "completed" {
+				// Validate individual announcements
+				validateASXAnnouncementsOutput(t, helper, stock)
+
+				// Validate summary document
+				validateASXAnnouncementsSummary(t, helper, stock)
+
+				// Save output for each stock
+				if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i+1); err != nil {
+					t.Logf("Warning: failed to save output for %s: %v", stock, err)
+				}
+
+				t.Logf("PASS: %s announcements processed with summary", stock)
+			} else {
+				t.Logf("INFO: Job for %s ended with status %s", stock, finalStatus)
+			}
+		})
 	}
 }
 
@@ -479,6 +664,11 @@ func TestWorkerWebSearch(t *testing.T) {
 
 // validateASXStockDataOutput validates that asx_stock_data produced consistent structure
 func validateASXStockDataOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
+	validateASXStockDataOutputWithPeriod(t, helper, ticker, false)
+}
+
+// validateASXStockDataOutputWithPeriod validates asx_stock_data output with optional 24-month check
+func validateASXStockDataOutputWithPeriod(t *testing.T, helper *common.HTTPTestHelper, ticker string, require24Months bool) {
 	// Query for documents created by asx_stock_data
 	resp, err := helper.GET("/api/documents?tags=asx-stock-data," + strings.ToLower(ticker))
 	if err != nil {
@@ -494,9 +684,10 @@ func validateASXStockDataOutput(t *testing.T, helper *common.HTTPTestHelper, tic
 
 	var result struct {
 		Documents []struct {
-			ID              string `json:"id"`
-			Title           string `json:"title"`
-			ContentMarkdown string `json:"content_markdown"`
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
 		} `json:"documents"`
 		Total int `json:"total"`
 	}
@@ -509,7 +700,8 @@ func validateASXStockDataOutput(t *testing.T, helper *common.HTTPTestHelper, tic
 	t.Logf("Found %d asx-stock-data documents for %s", result.Total, ticker)
 
 	if len(result.Documents) > 0 {
-		content := result.Documents[0].ContentMarkdown
+		doc := result.Documents[0]
+		content := doc.ContentMarkdown
 
 		// Validate expected sections are present
 		expectedSections := []string{
@@ -529,6 +721,44 @@ func validateASXStockDataOutput(t *testing.T, helper *common.HTTPTestHelper, tic
 		pricePattern := regexp.MustCompile(`\$?\d+\.\d{2}`)
 		if pricePattern.MatchString(content) {
 			t.Log("PASS: Found price data in expected format")
+		}
+
+		// Validate historical_prices in metadata
+		if doc.Metadata != nil {
+			if histPrices, ok := doc.Metadata["historical_prices"].([]interface{}); ok {
+				priceCount := len(histPrices)
+				t.Logf("Found %d historical price entries for %s", priceCount, ticker)
+
+				if require24Months {
+					// 24 months should have ~500 trading days (252 per year x 2)
+					// Use 400 as minimum threshold to allow for holidays/weekends
+					assert.GreaterOrEqual(t, priceCount, 400,
+						"Expected at least 400 trading days for 24-month period, got %d", priceCount)
+					t.Logf("PASS: Historical prices count (%d) meets 24-month threshold (>=400)", priceCount)
+				}
+
+				// Validate first price entry has required fields
+				if priceCount > 0 {
+					if firstPrice, ok := histPrices[0].(map[string]interface{}); ok {
+						if _, hasDate := firstPrice["date"]; hasDate {
+							t.Log("PASS: Historical price entries have 'date' field")
+						} else {
+							t.Log("FAIL: Historical price entries missing 'date' field")
+						}
+						if _, hasClose := firstPrice["close"]; hasClose {
+							t.Log("PASS: Historical price entries have 'close' field")
+						} else {
+							t.Log("FAIL: Historical price entries missing 'close' field")
+						}
+					}
+				}
+			} else {
+				if require24Months {
+					t.Error("FAIL: historical_prices not found in metadata")
+				} else {
+					t.Log("INFO: historical_prices not found in metadata")
+				}
+			}
 		}
 	}
 }
@@ -583,6 +813,106 @@ func validateASXAnnouncementsOutput(t *testing.T, helper *common.HTTPTestHelper,
 		if datePattern.MatchString(content) {
 			t.Log("PASS: Found date data in expected format")
 		}
+	}
+}
+
+// validateASXAnnouncementsSummary validates the summary document structure
+func validateASXAnnouncementsSummary(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
+	resp, err := helper.GET("/api/documents?tags=asx-announcement-summary," + strings.ToLower(ticker))
+	if err != nil {
+		t.Logf("Warning: Failed to query summary documents: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: Summary document query returned status %d", resp.StatusCode)
+		return
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			Title           string                 `json:"title"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse summary response: %v", err)
+		return
+	}
+
+	t.Logf("Found %d summary documents for %s", result.Total, ticker)
+
+	if len(result.Documents) > 0 {
+		doc := result.Documents[0]
+
+		// Validate content has summary sections
+		assert.Contains(t, doc.ContentMarkdown, "# ASX Announcements Summary", "Should have summary header")
+		assert.Contains(t, doc.ContentMarkdown, "Relevance Distribution", "Should have relevance section")
+		assert.Contains(t, doc.ContentMarkdown, "| Date |", "Should have announcements table")
+
+		t.Log("PASS: Summary document has expected markdown structure")
+
+		// Validate metadata has required fields
+		if doc.Metadata != nil {
+			// Check for announcements array
+			announcements, hasAnn := doc.Metadata["announcements"]
+			if hasAnn {
+				annList, ok := announcements.([]interface{})
+				if ok && len(annList) > 0 {
+					t.Logf("PASS: Summary metadata has %d announcements", len(annList))
+
+					// Validate first announcement has required fields
+					if firstAnn, ok := annList[0].(map[string]interface{}); ok {
+						requiredFields := []string{"date", "headline", "relevance_category"}
+						for _, field := range requiredFields {
+							if _, exists := firstAnn[field]; exists {
+								t.Logf("PASS: Announcement has field '%s'", field)
+							} else {
+								t.Logf("INFO: Announcement missing field '%s'", field)
+							}
+						}
+
+						// Check for price_impact
+						if _, hasPriceImpact := firstAnn["price_impact"]; hasPriceImpact {
+							t.Log("PASS: Announcement has price_impact data")
+						} else {
+							t.Log("INFO: Announcement missing price_impact (may be expected for recent announcements)")
+						}
+
+						// Validate relevance category is one of expected values
+						if category, ok := firstAnn["relevance_category"].(string); ok {
+							validCategories := []string{"HIGH", "MEDIUM", "LOW", "NOISE"}
+							isValid := false
+							for _, vc := range validCategories {
+								if category == vc {
+									isValid = true
+									break
+								}
+							}
+							assert.True(t, isValid, "relevance_category should be HIGH, MEDIUM, LOW, or NOISE")
+							t.Logf("PASS: First announcement has relevance_category: %s", category)
+						}
+					}
+				}
+			} else {
+				t.Log("INFO: Summary metadata missing 'announcements' array")
+			}
+
+			// Check for summary counts
+			countFields := []string{"total_count", "high_count", "medium_count", "low_count", "noise_count"}
+			for _, field := range countFields {
+				if _, exists := doc.Metadata[field]; exists {
+					t.Logf("PASS: Summary has count field '%s'", field)
+				}
+			}
+		}
+	} else {
+		t.Log("INFO: No summary document found")
 	}
 }
 

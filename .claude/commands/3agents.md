@@ -18,6 +18,23 @@ WORKDIR = .claude/workdir/${DATE}-${TIME}-${TASK_SLUG}
 mkdir -p $WORKDIR
 ```
 
+## CONTEXT MANAGEMENT
+
+**Claude Code conversations grow large. Compact aggressively to prevent failures.**
+
+### Compaction Rules
+- **MANDATORY compaction points** are marked with `⟲ COMPACT` throughout this workflow
+- Run `/compact` at each marked point - do NOT skip
+- If `/compact` fails: press Escape twice, move up, retry
+- If still failing: `/clear` and reload from `$WORKDIR` artifacts
+
+### Recovery Protocol
+If context is lost mid-task:
+1. Read `$WORKDIR/requirements.md` for requirements
+2. Read `$WORKDIR/architect-analysis.md` for approach
+3. Read latest `step_N_implementation.md` or `step_N_validation.md`
+4. Resume from current phase
+
 ## AGENTS
 
 1. **ARCHITECT** - Assesses requirements, reads architecture docs, creates step documentation with clear acceptance criteria (STEPS ARE MANDATORY)
@@ -143,7 +160,7 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
    - Identify reusable components and infrastructure
 4. **Extract ALL requirements** - explicit AND implicit
 5. **Write `$WORKDIR/requirements.md`:**
-   ```markdown
+```markdown
    ## Requirements
    - [ ] REQ-1: <requirement>
    - [ ] REQ-2: <requirement>
@@ -151,13 +168,13 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
    ## Acceptance Criteria
    - [ ] AC-1: <criterion>
    ...
-   ```
+```
 6. **Search codebase** for existing code to reuse
 7. **Challenge:** Does this NEED new code?
 8. **Create step documentation** - Break work into discrete steps:
 
    **Write `$WORKDIR/step_1.md`:**
-   ```markdown
+```markdown
    # Step 1: <step title>
 
    ## Objective
@@ -183,12 +200,12 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
    ## Build/Test Requirements
    - Commands to run
    - Expected outcomes
-   ```
+```
 
    Repeat for `step_2.md`, `step_3.md`, etc.
 
 9. **Write `$WORKDIR/architect-analysis.md`:**
-   ```markdown
+```markdown
    ## Overview
    <High-level analysis>
 
@@ -216,7 +233,19 @@ DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture
 
    ## Skill Updates Required
    - <Skill path>: <proposed update reason>
-   ```
+```
+
+---
+### ⟲ COMPACT POINT: ARCHITECT COMPLETE
+
+**Run `/compact` now.** Artifacts are persisted in `$WORKDIR`:
+- `requirements.md` - All requirements
+- `architect-analysis.md` - Analysis and approach
+- `step_*.md` - Step documentation
+
+Context can be rebuilt from these files if needed.
+
+---
 
 ### PHASE 1: WORKER
 
@@ -230,7 +259,7 @@ For each step (starting with `step_1.md`):
 4. **Follow architecture patterns** specified in step doc
 5. **Run build - must pass**
 6. **Document work in `$WORKDIR/step_N_implementation.md`:**
-   ```markdown
+```markdown
    # Step N Implementation
 
    ## Files Changed
@@ -249,7 +278,7 @@ For each step (starting with `step_1.md`):
    - Result: PASS
 
    ## Ready for Validation
-   ```
+```
 
 ### PHASE 2: VALIDATOR
 
@@ -401,10 +430,21 @@ Maximum iterations remaining: <5 - current_iteration>
 - <Skill path>: <pattern that should be documented>
 ```
 
+---
+### ⟲ COMPACT POINT: STEP VALIDATED (PASS)
+
+**Run `/compact` after each step PASSES validation.**
+
+Recovery context for next step:
+- Current step: N (PASSED)
+- Next step: N+1
+- Read: `$WORKDIR/step_N+1.md`
+
+---
+
 ### PHASE 3: ITERATE (per step, max 5 iterations)
 
 **ADVERSARIAL ITERATION PROTOCOL:**
-
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    ITERATION LOOP (max 5 per step)                  │
@@ -430,6 +470,21 @@ Maximum iterations remaining: <5 - current_iteration>
 │  ⚠ ITERATION 5 REJECT = TASK FAILURE (escalate to architect)       │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+### ⟲ COMPACT POINT: ITERATION 3+ REJECT
+
+**Run `/compact` if iteration count reaches 3 or higher.**
+
+Multiple iterations accumulate significant context. Compact to prevent failure.
+
+Recovery context:
+- Current step: N
+- Iteration: <current>
+- Last validation: `$WORKDIR/step_N_validation.md`
+- Issues to fix: Listed in validation report
+
+---
 
 **WORKER Iteration Response Template:**
 Update `$WORKDIR/step_N_implementation.md`:
@@ -459,7 +514,7 @@ Update `$WORKDIR/step_N_implementation.md`:
 **Escalation at Iteration 5:**
 If VALIDATOR rejects at iteration 5:
 1. **Write `$WORKDIR/step_N_escalation.md`:**
-   ```markdown
+```markdown
    # Step N Escalation
 
    ## Iteration History
@@ -478,7 +533,7 @@ If VALIDATOR rejects at iteration 5:
    - [ ] Architecture issue - needs redesign
    - [ ] Skill gap - pattern not documented
    - [ ] Other: <explanation>
-   ```
+```
 2. Return to ARCHITECT for reassessment
 
 **After each step PASS:**
@@ -496,7 +551,7 @@ If VALIDATOR rejects at iteration 5:
    - Review all `step_N_validation.md` for "Skill Updates Identified"
    - Apply updates to `.claude/skills/*/SKILL.md` files
 4. **Write `$WORKDIR/summary.md`:**
-   ```markdown
+```markdown
    # Task Summary
 
    ## Final Build
@@ -540,7 +595,18 @@ If VALIDATOR rejects at iteration 5:
    ## Skills Updated
    - `.claude/skills/go/SKILL.md`: Added pattern for <X>
    - (or "No updates required")
-   ```
+```
+
+---
+### ⟲ COMPACT POINT: IMPLEMENTATION COMPLETE
+
+**Run `/compact` before starting DOCUMENTARIAN phase.**
+
+All implementation artifacts are in `$WORKDIR`. Context needed for Phase 5:
+- `$WORKDIR/summary.md` - What was done
+- `$WORKDIR/architect-analysis.md` - Architecture decisions made
+
+---
 
 ### PHASE 5: ARCHITECTURE DOCUMENTATION
 
@@ -605,6 +671,31 @@ If VALIDATOR rejects at iteration 5:
    - Configuration paths are accurate
    - No contradictions between documents
 2. **Update timestamps/version notes** if the project uses them
+
+---
+### ⟲ COMPACT POINT: TASK COMPLETE
+
+**Run `/compact` at task completion.**
+
+Prepares context for next task. All artifacts preserved in `$WORKDIR`.
+
+---
+
+## COMPACTION SUMMARY
+
+| Point | When | Why |
+|-------|------|-----|
+| After ARCHITECT | Phase 0 complete | Heavy doc reading done, artifacts saved |
+| After step PASS | Each step validated | Step context no longer needed |
+| Iteration 3+ | Multiple rejections | Accumulated iteration context |
+| Before DOCUMENTARIAN | Phase 4 complete | Implementation context can be reloaded |
+| Task complete | End of workflow | Clean slate for next task |
+
+**Emergency recovery:** If `/compact` fails at any point:
+1. Press Escape twice, retry
+2. If still failing: `/clear`
+3. Reload context from `$WORKDIR` artifacts
+4. State current phase and step in first message
 
 ## INVOKE
 ```

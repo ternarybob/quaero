@@ -26,13 +26,32 @@ Execute: $ARGUMENTS
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## CONTEXT MANAGEMENT
+
+**TDD iterations accumulate context fast. Compact aggressively.**
+
+### Compaction Rules
+- **MANDATORY compaction points** marked with `⟲ COMPACT`
+- Run `/compact` at each marked point - do NOT skip
+- If `/compact` fails: press Escape twice, move up, retry
+- If still failing: `/clear` and restart with test file path
+
+### Recovery Protocol
+If context is lost mid-iteration:
+1. Re-read the test file to extract requirements
+2. Check iteration count from git diff or file state
+3. Resume PHASE 3 loop
+
 ## WORKFLOW
 
 ### PHASE 0: RESET CONTEXT
-```
-/compact
-```
-Clear context before starting to ensure maximum headroom for iterations.
+
+---
+### ⟲ COMPACT POINT: START
+
+**Run `/compact` before starting.** Clear context for maximum iteration headroom.
+
+---
 
 ### PHASE 1: UNDERSTAND
 1. Read test file - extract requirements
@@ -90,12 +109,33 @@ TEST FAILS
      ▼             ▼
    FAIL          PASS → Complete
      │
-     └──► Loop
+     └──► Loop (⟲ COMPACT at iteration 3)
 ```
+
+---
+### ⟲ COMPACT POINT: ITERATION 3
+
+**Run `/compact` when iteration count reaches 3.**
+
+Each fix attempt adds significant context (diffs, test output, analysis). Compact to prevent failure before final iterations.
+
+Recovery context:
+- Test file: `{test_file}`
+- Iteration: 3
+- Last failure: Re-run test to see current state
+
+---
 
 ### PHASE 4: COMPLETE
 - All tests pass
 - No test files modified
+
+---
+### ⟲ COMPACT POINT: TASK COMPLETE
+
+**Run `/compact` at completion.** Clean slate for next task.
+
+---
 
 ## FORBIDDEN (AUTO-FAIL)
 
@@ -154,6 +194,19 @@ utc.Log("Job config: %+v", body)
 // Add to test results/artifacts
 utc.AddResult("job_config", body)
 ```
+
+## COMPACTION SUMMARY
+
+| Point | When | Why |
+|-------|------|-----|
+| Start | Phase 0 | Maximum headroom for iterations |
+| Iteration 3 | During Phase 3 | Accumulated fix context |
+| Complete | Phase 4 | Clean slate for next task |
+
+**Emergency recovery:** If `/compact` fails:
+1. Press Escape twice, retry
+2. If still failing: `/clear`
+3. Restart with: `/test-iterate {test_file}`
 
 ## INVOKE
 ```

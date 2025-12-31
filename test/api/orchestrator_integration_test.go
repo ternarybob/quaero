@@ -1,6 +1,15 @@
+// Package api contains API integration tests for the Quaero service.
+//
+// IMPORTANT: Orchestrator tests require extended timeout due to LLM operations:
+//
+//	go test -timeout 15m -run TestOrchestratorIntegration ./test/api/...
+//
+// The default Go test timeout (10 minutes) is insufficient for these tests.
+// Individual tests use 15-minute timeouts for job completion with error monitoring.
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +31,7 @@ type orchestratorTestCase struct {
 	jobDefID               string   // Job definition ID (matches id field in TOML)
 	expectedTickers        []string // Expected stock tickers in the output
 	outputTag              string   // Tag to find output document (default: "stock-recommendation")
+	schemaFile             string   // Schema file name for validation (e.g., "stock-report.schema.json")
 	expectedIndices        []string // Expected index codes (e.g., XJO, XSO) - validates fetch_index_data was called
 	expectDirectorInterest bool     // Whether to validate director-interest documents exist
 	expectMacroData        bool     // Whether to validate macro-data documents exist
@@ -45,6 +55,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-1-stock-test",
 			expectedTickers: []string{"GNP"},
 			outputTag:       "stock-recommendation",
+			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
 		},
 		{
@@ -53,6 +64,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-daily-orchestrated",
 			expectedTickers: []string{"GNP", "SKS"},
 			outputTag:       "stock-recommendation",
+			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
 		},
 		{
@@ -61,6 +73,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "asx-stocks-3-stocks-test",
 			expectedTickers: []string{"GNP", "SKS", "WEB"},
 			outputTag:       "stock-recommendation",
+			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
 		},
 		{
@@ -69,6 +82,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:        "smsf-portfolio-daily-orchestrated",
 			expectedTickers: []string{"GNP", "SKS"},
 			outputTag:       "smsf-portfolio-review",
+			schemaFile:      "portfolio-review.schema.json",
 			expectedIndices: []string{"XJO", "XSO"},
 		},
 		{
@@ -77,6 +91,7 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 			jobDefID:               "asx-purchase-conviction-test",
 			expectedTickers:        []string{"GNP", "SKS", "WES", "AMS", "AV1", "CSL", "KYP", "PNC", "SDF", "SGI", "VBTC", "VGB", "VNT"},
 			outputTag:              "purchase-recommendation",
+			schemaFile:             "purchase-conviction.schema.json",
 			expectedIndices:        []string{"XJO"},
 			expectDirectorInterest: true,
 			expectMacroData:        true,
@@ -112,14 +127,13 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	// Cleanup job after test
 	defer deleteJob(t, helper, jobID)
 
-	// Step 3: Wait for job completion (15 minute timeout for LLM operations)
-	t.Log("Step 3: Waiting for job completion (timeout: 15 minutes)")
-	finalStatus := waitForJobCompletion(t, helper, jobID, 15*time.Minute)
+	// Step 3: Wait for job completion with error monitoring (15 minute timeout for LLM operations)
+	// This monitors for ERROR logs during execution and fails fast if errors are detected
+	t.Log("Step 3: Waiting for job completion with error monitoring (timeout: 15 minutes)")
+	finalStatus, errorLogs := waitForJobCompletionWithMonitoring(t, helper, jobID, 15*time.Minute)
 	t.Logf("Job completed with status: %s", finalStatus)
 
-	// Step 4: Assert NO error logs in job execution
-	t.Log("Step 4: Checking for ERROR logs")
-	errorLogs := getJobErrorLogs(t, helper, jobID)
+	// Step 4: Handle error logs if any were found
 	if len(errorLogs) > 0 {
 		t.Logf("Found %d ERROR log entries:", len(errorLogs))
 		for i, log := range errorLogs {
@@ -130,7 +144,7 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 		}
 
 		// If job failed with errors, verify children also failed
-		if finalStatus == "failed" {
+		if finalStatus == "failed" || finalStatus == "error" {
 			t.Log("Job failed - verifying all children are also failed/stopped")
 			assertChildJobsFailedOrStopped(t, helper, jobID)
 		}
@@ -170,23 +184,26 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	docID, _ := outputDoc["id"].(string)
 	t.Logf("Found output document: %s", docID)
 
-	// Get document content
-	content := getDocumentContent(t, helper, docID)
+	// Get document content and metadata
+	content, metadata := getDocumentContentAndMetadata(t, helper, docID)
 	require.NotEmpty(t, content, "Document content should not be empty")
 	t.Logf("Document content length: %d characters", len(content))
 
 	// Step 7: Save test output and logs to results directory for verification
-	t.Log("Step 7: Saving test output and logs to results directory")
+	t.Log("Step 7: Saving test output, config, schema, and JSON to results directory")
 	saveTestOutput(t, tc.name, jobID, content, env.GetResultsDir())
+	saveOrchestratorJobConfig(t, env.GetResultsDir(), tc.jobDefFile)
+	saveSchemaFile(t, env.GetResultsDir(), tc.schemaFile)
+	saveDocumentMetadata(t, env.GetResultsDir(), metadata)
 
 	// Validate email content
-	validateEmailContent(t, content, tc.expectedTickers)
+	validateEmailContent(t, content, tc.expectedTickers, tc.schemaFile)
 
 	t.Log("SUCCESS: Orchestrator integration test completed successfully")
 }
 
 // validateEmailContent validates that the email content is valid stock analysis
-func validateEmailContent(t *testing.T, content string, expectedTickers []string) {
+func validateEmailContent(t *testing.T, content string, expectedTickers []string, schemaFile string) {
 	// Step 7: Assert email content is NOT a generic placeholder
 	t.Log("Step 6: Asserting email content is NOT a generic placeholder")
 	placeholderTexts := []string{
@@ -245,8 +262,8 @@ func validateEmailContent(t *testing.T, content string, expectedTickers []string
 
 	t.Log("PASS: Email contains actual stock analysis content")
 
-	// Step 10: Validate schema compliance (for stock recommendation outputs)
-	validateSchemaCompliance(t, content)
+	// Step 10: Validate schema compliance based on output type
+	validateSchemaComplianceByType(t, content, schemaFile)
 }
 
 // validateSchemaCompliance validates that the output content contains expected schema fields.
@@ -391,6 +408,312 @@ func validateSchemaCompliance(t *testing.T, content string) {
 	t.Log("PASS: Output shows schema compliance")
 }
 
+// validateSchemaComplianceByType dispatches to the appropriate schema validator based on schema file.
+func validateSchemaComplianceByType(t *testing.T, content string, schemaFile string) {
+	t.Logf("Step 10: Validating output against schema: %s", schemaFile)
+
+	switch schemaFile {
+	case "stock-report.schema.json":
+		validateStockReportSchema(t, content)
+	case "portfolio-review.schema.json":
+		validatePortfolioReviewSchema(t, content)
+	case "purchase-conviction.schema.json":
+		validatePurchaseConvictionSchema(t, content)
+	default:
+		// Fall back to generic validation
+		t.Logf("Using generic schema validation for: %s", schemaFile)
+		validateSchemaCompliance(t, content)
+	}
+}
+
+// validateStockReportSchema validates output against stock-report.schema.json required fields.
+// Required fields: stocks, summary_table, watchlists, definitions
+func validateStockReportSchema(t *testing.T, content string) {
+	t.Log("Validating stock-report.schema.json compliance")
+	contentLower := strings.ToLower(content)
+
+	schemaScore := 0
+	totalFields := 4
+
+	// 1. Check for stocks array indicators (detailed stock analysis)
+	stockIndicators := []string{"stock data", "announcement analysis", "price event", "quality assessment"}
+	foundStocks := false
+	for _, indicator := range stockIndicators {
+		if strings.Contains(contentLower, indicator) {
+			foundStocks = true
+			t.Logf("PASS: Found 'stocks' section indicator: '%s'", indicator)
+			break
+		}
+	}
+	if foundStocks {
+		schemaScore++
+	} else {
+		t.Log("INFO: Stock analysis sections not found in expected format")
+	}
+
+	// 2. Check for summary_table indicators
+	summaryTablePatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\|\s*ticker\s*\|`),         // | Ticker | (table header)
+		regexp.MustCompile(`(?i)summary\s*table`),          // Summary Table heading
+		regexp.MustCompile(`(?i)\|\s*quality\s*\|`),        // | Quality | column
+		regexp.MustCompile(`(?i)\|\s*[A-Z]{2,5}\s*\|.*\|`), // | GNP | ... | (ticker in table)
+	}
+	foundSummaryTable := false
+	for _, pattern := range summaryTablePatterns {
+		if pattern.MatchString(content) {
+			foundSummaryTable = true
+			t.Log("PASS: Found 'summary_table' format in output")
+			break
+		}
+	}
+	if foundSummaryTable {
+		schemaScore++
+	} else {
+		t.Log("INFO: Summary table not found in expected format")
+	}
+
+	// 3. Check for watchlists indicators
+	watchlistPatterns := []string{"watchlist", "trader momentum", "super accumulate", "accumulation"}
+	foundWatchlists := false
+	for _, pattern := range watchlistPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundWatchlists = true
+			t.Logf("PASS: Found 'watchlists' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundWatchlists {
+		schemaScore++
+	} else {
+		t.Log("INFO: Watchlists section not found")
+	}
+
+	// 4. Check for definitions section
+	definitionPatterns := []string{"definition", "rating scale", "quality rating", "signal:noise", "signal-to-noise"}
+	foundDefinitions := false
+	for _, pattern := range definitionPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundDefinitions = true
+			t.Logf("PASS: Found 'definitions' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundDefinitions {
+		schemaScore++
+	} else {
+		t.Log("INFO: Definitions section not found")
+	}
+
+	t.Logf("Stock Report Schema compliance: %d/%d required sections found", schemaScore, totalFields)
+
+	// Also run the general schema compliance for recommendation fields
+	validateSchemaCompliance(t, content)
+
+	// Assert at least 2 of 4 sections are present
+	assert.GreaterOrEqual(t, schemaScore, 2,
+		"Stock report should contain at least 2 of 4 required sections (stocks, summary_table, watchlists, definitions)")
+}
+
+// validatePortfolioReviewSchema validates output against portfolio-review.schema.json required fields.
+// Required fields: portfolio_valuation, total_summary, recommendations, risk_alerts
+func validatePortfolioReviewSchema(t *testing.T, content string) {
+	t.Log("Validating portfolio-review.schema.json compliance")
+	contentLower := strings.ToLower(content)
+
+	schemaScore := 0
+	totalFields := 4
+
+	// 1. Check for portfolio_valuation indicators
+	valuationPatterns := []string{
+		"valuation", "current value", "current price", "cost basis",
+		"unrealized", "profit/loss", "p/l", "market value",
+	}
+	foundValuation := false
+	for _, pattern := range valuationPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundValuation = true
+			t.Logf("PASS: Found 'portfolio_valuation' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundValuation {
+		schemaScore++
+	} else {
+		t.Log("INFO: Portfolio valuation section not found")
+	}
+
+	// 2. Check for total_summary indicators
+	summaryPatterns := []string{
+		"total investment", "total value", "total p/l", "overall return",
+		"portfolio summary", "total portfolio",
+	}
+	foundSummary := false
+	for _, pattern := range summaryPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundSummary = true
+			t.Logf("PASS: Found 'total_summary' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundSummary {
+		schemaScore++
+	} else {
+		t.Log("INFO: Total summary section not found")
+	}
+
+	// 3. Check for recommendations indicators
+	recPatterns := []string{
+		"recommendation", "quality rating", "trader recommendation", "super recommendation",
+		"accumulate", "hold", "reduce", "avoid",
+	}
+	foundRecommendations := false
+	for _, pattern := range recPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundRecommendations = true
+			t.Logf("PASS: Found 'recommendations' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundRecommendations {
+		schemaScore++
+	} else {
+		t.Log("INFO: Recommendations section not found")
+	}
+
+	// 4. Check for risk_alerts indicators
+	riskPatterns := []string{
+		"risk alert", "risk warning", "warning", "concentration risk",
+		"exposure", "diversification",
+	}
+	foundRiskAlerts := false
+	for _, pattern := range riskPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundRiskAlerts = true
+			t.Logf("PASS: Found 'risk_alerts' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundRiskAlerts {
+		schemaScore++
+	} else {
+		t.Log("INFO: Risk alerts section not found")
+	}
+
+	t.Logf("Portfolio Review Schema compliance: %d/%d required sections found", schemaScore, totalFields)
+
+	// Also run the general schema compliance
+	validateSchemaCompliance(t, content)
+
+	// Assert at least 2 of 4 sections are present
+	assert.GreaterOrEqual(t, schemaScore, 2,
+		"Portfolio review should contain at least 2 of 4 required sections (portfolio_valuation, total_summary, recommendations, risk_alerts)")
+}
+
+// validatePurchaseConvictionSchema validates output against purchase-conviction.schema.json required fields.
+// Required fields: executive_summary, stocks (with conviction_score, tier), comparative_table, warnings
+func validatePurchaseConvictionSchema(t *testing.T, content string) {
+	t.Log("Validating purchase-conviction.schema.json compliance")
+	contentLower := strings.ToLower(content)
+
+	schemaScore := 0
+	totalFields := 4
+
+	// 1. Check for executive_summary indicators
+	execSummaryPatterns := []string{
+		"executive summary", "summary", "overview", "top picks",
+		"market context", "key findings",
+	}
+	foundExecSummary := false
+	for _, pattern := range execSummaryPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundExecSummary = true
+			t.Logf("PASS: Found 'executive_summary' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundExecSummary {
+		schemaScore++
+	} else {
+		t.Log("INFO: Executive summary section not found")
+	}
+
+	// 2. Check for stocks with conviction analysis
+	convictionPatterns := []string{
+		"conviction", "fundamental analysis", "technical analysis",
+		"bear case", "bull case", "analyst resolution",
+		"tier 1", "tier 2", "tier 3", "tier 4",
+	}
+	foundConviction := false
+	for _, pattern := range convictionPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundConviction = true
+			t.Logf("PASS: Found conviction analysis indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundConviction {
+		schemaScore++
+	} else {
+		t.Log("INFO: Conviction analysis sections not found")
+	}
+
+	// 3. Check for comparative_table indicators
+	tablePatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)comparative.*table`),
+		regexp.MustCompile(`(?i)\|\s*ticker\s*\|.*score`),
+		regexp.MustCompile(`(?i)\|\s*fundamental\s*\|`),
+		regexp.MustCompile(`(?i)total.*score`),
+	}
+	foundTable := false
+	for _, pattern := range tablePatterns {
+		if pattern.MatchString(content) {
+			foundTable = true
+			t.Log("PASS: Found 'comparative_table' format in output")
+			break
+		}
+	}
+	if !foundTable {
+		// Check string patterns too
+		if strings.Contains(contentLower, "comparison") || strings.Contains(contentLower, "ranking") {
+			foundTable = true
+			t.Log("PASS: Found comparison/ranking section")
+		}
+	}
+	if foundTable {
+		schemaScore++
+	} else {
+		t.Log("INFO: Comparative table not found in expected format")
+	}
+
+	// 4. Check for warnings indicators
+	warningPatterns := []string{
+		"warning", "risk", "caution", "concern", "caveat",
+		"market risk", "downside",
+	}
+	foundWarnings := false
+	for _, pattern := range warningPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundWarnings = true
+			t.Logf("PASS: Found 'warnings' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if foundWarnings {
+		schemaScore++
+	} else {
+		t.Log("INFO: Warnings section not found")
+	}
+
+	t.Logf("Purchase Conviction Schema compliance: %d/%d required sections found", schemaScore, totalFields)
+
+	// Also run the general schema compliance
+	validateSchemaCompliance(t, content)
+
+	// Assert at least 2 of 4 sections are present
+	assert.GreaterOrEqual(t, schemaScore, 2,
+		"Purchase conviction should contain at least 2 of 4 required sections (executive_summary, stocks, comparative_table, warnings)")
+}
+
 // validateIndexDataFetched validates that index data documents were created for expected indices.
 // This ensures fetch_index_data tool was called and returned data.
 func validateIndexDataFetched(t *testing.T, helper *common.HTTPTestHelper, expectedIndices []string) {
@@ -476,6 +799,77 @@ func getJobErrorLogs(t *testing.T, helper *common.HTTPTestHelper, jobID string) 
 	}
 
 	return errorLogs
+}
+
+// waitForJobCompletionWithMonitoring polls job status and checks for ERROR logs during execution.
+// Unlike waitForJobCompletion, this function fails early if ERROR logs are detected,
+// preventing long waits when a job has already failed.
+// Returns the final status and any error logs found.
+func waitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) (status string, errorLogs []map[string]interface{}) {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+	errorCheckInterval := 5 * time.Second
+	lastErrorCheck := time.Time{}
+
+	t.Logf("Waiting for job %s with error monitoring (timeout: %v)", jobID, timeout)
+
+	for time.Now().Before(deadline) {
+		// Get job status
+		resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
+		if err != nil {
+			t.Logf("Warning: Failed to get job status: %v", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		var job map[string]interface{}
+		if err := helper.ParseJSONResponse(resp, &job); err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		jobStatus, ok := job["status"].(string)
+		if !ok {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Check for terminal states
+		if jobStatus == "completed" || jobStatus == "failed" || jobStatus == "cancelled" {
+			t.Logf("Job %s reached terminal state: %s", jobID, jobStatus)
+			// Final error check on completion
+			errorLogs = getJobErrorLogs(t, helper, jobID)
+			return jobStatus, errorLogs
+		}
+
+		// Check for errors periodically (every 5 seconds) to fail fast
+		if time.Since(lastErrorCheck) >= errorCheckInterval {
+			errorLogs = getJobErrorLogs(t, helper, jobID)
+			if len(errorLogs) > 0 {
+				t.Logf("ERROR detected during job execution (found %d errors) - failing early", len(errorLogs))
+				// Log first few errors for visibility
+				for i, log := range errorLogs {
+					if i < 3 {
+						logMsg, _ := log["message"].(string)
+						t.Logf("  ERROR[%d]: %s", i, logMsg)
+					}
+				}
+				return "error", errorLogs
+			}
+			lastErrorCheck = time.Now()
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	t.Logf("Job %s did not reach terminal state within %v", jobID, timeout)
+	return "timeout", nil
 }
 
 // assertChildJobsFailedOrStopped verifies that all child jobs are in failed/stopped state
@@ -703,4 +1097,116 @@ func saveTestOutput(t *testing.T, testName string, jobID string, content string,
 		return
 	}
 	t.Logf("Saved flat output to: %s (%d bytes)", flatPath, len(content))
+}
+
+// getDocumentContentAndMetadata retrieves both the content and metadata of a document by ID
+func getDocumentContentAndMetadata(t *testing.T, helper *common.HTTPTestHelper, docID string) (string, map[string]interface{}) {
+	resp, err := helper.GET(fmt.Sprintf("/api/documents/%s", docID))
+	if err != nil {
+		t.Logf("Warning: Failed to get document: %v", err)
+		return "", nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Warning: GET document returned %d", resp.StatusCode)
+		return "", nil
+	}
+
+	var result map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Warning: Failed to parse document response: %v", err)
+		return "", nil
+	}
+
+	// Extract content
+	var content string
+	if c, ok := result["content"].(string); ok && c != "" {
+		content = c
+	} else if mdContent, ok := result["content_markdown"].(string); ok && mdContent != "" {
+		content = mdContent
+	} else if body, ok := result["body"].(string); ok && body != "" {
+		content = body
+	} else if text, ok := result["text"].(string); ok && text != "" {
+		content = text
+	} else if data, ok := result["data"].(map[string]interface{}); ok {
+		if c, ok := data["content"].(string); ok {
+			content = c
+		}
+	}
+
+	// Extract metadata
+	var metadata map[string]interface{}
+	if m, ok := result["metadata"].(map[string]interface{}); ok {
+		metadata = m
+	}
+
+	return content, metadata
+}
+
+// saveOrchestratorJobConfig saves the job definition TOML file to the results directory
+func saveOrchestratorJobConfig(t *testing.T, resultsDir string, jobDefFile string) {
+	if resultsDir == "" || jobDefFile == "" {
+		return
+	}
+
+	// Job definitions are in test/config/job-definitions/
+	jobDefPath := filepath.Join("..", "config", "job-definitions", jobDefFile)
+	content, err := os.ReadFile(jobDefPath)
+	if err != nil {
+		t.Logf("Warning: Failed to read job definition %s: %v", jobDefFile, err)
+		return
+	}
+
+	destPath := filepath.Join(resultsDir, "job_definition.toml")
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		t.Logf("Warning: Failed to write job definition: %v", err)
+		return
+	}
+
+	t.Logf("Saved job definition to: %s (%d bytes)", destPath, len(content))
+}
+
+// saveSchemaFile copies the schema file to the results directory
+func saveSchemaFile(t *testing.T, resultsDir string, schemaFile string) {
+	if resultsDir == "" || schemaFile == "" {
+		return
+	}
+
+	// Schemas are in test/config/schemas/
+	schemaPath := filepath.Join("..", "config", "schemas", schemaFile)
+	content, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Logf("Warning: Failed to read schema file %s: %v", schemaFile, err)
+		return
+	}
+
+	destPath := filepath.Join(resultsDir, "schema.json")
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		t.Logf("Warning: Failed to write schema file: %v", err)
+		return
+	}
+
+	t.Logf("Saved schema to: %s (%d bytes)", destPath, len(content))
+}
+
+// saveDocumentMetadata saves the document metadata as JSON to the results directory
+func saveDocumentMetadata(t *testing.T, resultsDir string, metadata map[string]interface{}) {
+	if resultsDir == "" || metadata == nil {
+		return
+	}
+
+	jsonData, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		t.Logf("Warning: Failed to marshal metadata: %v", err)
+		return
+	}
+
+	destPath := filepath.Join(resultsDir, "output.json")
+	if err := os.WriteFile(destPath, jsonData, 0644); err != nil {
+		t.Logf("Warning: Failed to write output.json: %v", err)
+		return
+	}
+
+	t.Logf("Saved document metadata to: %s (%d bytes)", destPath, len(jsonData))
 }

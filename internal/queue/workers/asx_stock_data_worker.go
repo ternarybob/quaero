@@ -208,8 +208,8 @@ func (w *ASXStockDataWorker) Init(ctx context.Context, step models.JobStep, jobD
 	}
 	asxCode = strings.ToUpper(asxCode)
 
-	// Period for historical data (default 1y)
-	period := "1y"
+	// Period for historical data (default Y2 = 24 months for comprehensive analysis)
+	period := "Y2"
 	if p, ok := stepConfig["period"].(string); ok && p != "" {
 		period = p
 	}
@@ -946,6 +946,17 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 	}
 	content.WriteString(fmt.Sprintf("**Position in 52-Week Range**: %.1f%% (%.2f low, %.2f high)\n\n", rangePercent, data.Week52Low, data.Week52High))
 
+	// 6-Month Price Chart (ASCII visualization)
+	if len(data.HistoricalPrices) >= 20 {
+		chart := generateASCIIPriceChart(data.HistoricalPrices, 126) // 126 trading days ≈ 6 months
+		if chart != "" {
+			content.WriteString("## 6-Month Price Chart\n\n")
+			content.WriteString("```\n")
+			content.WriteString(chart)
+			content.WriteString("```\n\n")
+		}
+	}
+
 	// Historical Daily Data (CSV format for LLM consumption)
 	if len(data.HistoricalPrices) > 0 {
 		content.WriteString("## Historical Daily Data (OHLCV)\n\n")
@@ -993,6 +1004,33 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 		})
 	}
 
+	// Build OHLCV data for metadata (for downstream workers like asx_announcements)
+	// Includes daily change calculations for each trading day
+	var ohlcvMeta []map[string]interface{}
+	var prevClose float64
+	for i, p := range data.HistoricalPrices {
+		entry := map[string]interface{}{
+			"date":   p.Date.Format("2006-01-02"),
+			"open":   p.Open,
+			"high":   p.High,
+			"low":    p.Low,
+			"close":  p.Close,
+			"volume": p.Volume,
+		}
+
+		// Add daily change metrics (skip first day - no previous day to compare)
+		if i > 0 && prevClose > 0 {
+			changeValue := p.Close - prevClose
+			changePercent := (changeValue / prevClose) * 100
+			entry["change_value"] = changeValue
+			entry["change_percent"] = changePercent
+			entry["prev_close"] = prevClose
+		}
+
+		ohlcvMeta = append(ohlcvMeta, entry)
+		prevClose = p.Close
+	}
+
 	// Build metadata
 	metadata := map[string]interface{}{
 		"asx_code":           asxCode,
@@ -1014,6 +1052,7 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 		"trend_signal":       data.TrendSignal,
 		"parent_job_id":      parentJobID,
 		"period_performance": periodPerfMeta, // Structured price change data for 7D, 1M, 3M, 6M, 1Y, 2Y
+		"historical_prices":  ohlcvMeta,      // Raw OHLCV data for downstream workers (e.g., asx_announcements)
 	}
 
 	// Set source type and URL based on whether this is an index or stock
@@ -1148,6 +1187,166 @@ func formatDecimal(n float64) string {
 	intPart := int64(n)
 	decPart := n - float64(intPart)
 	return fmt.Sprintf("%s.%02d", formatNumber(intPart), int(decPart*100))
+}
+
+// generateASCIIPriceChart creates a simple ASCII chart of closing prices
+// Uses approximately 6 months of data (126 trading days) with 60 columns
+func generateASCIIPriceChart(prices []OHLCV, days int) string {
+	if len(prices) == 0 {
+		return ""
+	}
+
+	// Get last N days of data
+	startIdx := 0
+	if len(prices) > days {
+		startIdx = len(prices) - days
+	}
+	chartPrices := prices[startIdx:]
+
+	if len(chartPrices) < 5 {
+		return ""
+	}
+
+	// Find min and max for scaling
+	minPrice := chartPrices[0].Close
+	maxPrice := chartPrices[0].Close
+	for _, p := range chartPrices {
+		if p.Close < minPrice && p.Close > 0 {
+			minPrice = p.Close
+		}
+		if p.Close > maxPrice {
+			maxPrice = p.Close
+		}
+	}
+
+	// Add 5% padding to range
+	priceRange := maxPrice - minPrice
+	if priceRange < 0.01 {
+		priceRange = maxPrice * 0.1 // 10% range for flat stocks
+	}
+	minPrice -= priceRange * 0.05
+	maxPrice += priceRange * 0.05
+	priceRange = maxPrice - minPrice
+
+	// Chart dimensions
+	chartWidth := 60
+	chartHeight := 12
+
+	// Sample prices to fit width
+	sampleInterval := len(chartPrices) / chartWidth
+	if sampleInterval < 1 {
+		sampleInterval = 1
+	}
+
+	var sampledPrices []float64
+	var sampledDates []time.Time
+	for i := 0; i < len(chartPrices); i += sampleInterval {
+		sampledPrices = append(sampledPrices, chartPrices[i].Close)
+		sampledDates = append(sampledDates, chartPrices[i].Date)
+	}
+	// Ensure we include the last price
+	if len(sampledPrices) > 0 && sampledPrices[len(sampledPrices)-1] != chartPrices[len(chartPrices)-1].Close {
+		sampledPrices = append(sampledPrices, chartPrices[len(chartPrices)-1].Close)
+		sampledDates = append(sampledDates, chartPrices[len(chartPrices)-1].Date)
+	}
+
+	// Create the chart grid
+	var result strings.Builder
+
+	// Price labels for Y-axis (show 5 levels)
+	priceLabels := make([]string, chartHeight)
+	for i := 0; i < chartHeight; i++ {
+		price := maxPrice - (priceRange * float64(i) / float64(chartHeight-1))
+		priceLabels[i] = fmt.Sprintf("$%.2f", price)
+	}
+	labelWidth := 8
+
+	// Draw chart line by line (top to bottom)
+	for row := 0; row < chartHeight; row++ {
+		priceThreshold := maxPrice - (priceRange * float64(row) / float64(chartHeight-1))
+		nextThreshold := maxPrice - (priceRange * float64(row+1) / float64(chartHeight-1))
+
+		// Y-axis label
+		if row == 0 || row == chartHeight/2 || row == chartHeight-1 {
+			result.WriteString(fmt.Sprintf("%*s ", labelWidth, priceLabels[row]))
+		} else {
+			result.WriteString(fmt.Sprintf("%*s ", labelWidth, ""))
+		}
+
+		// Draw chart line for this row
+		result.WriteString("│")
+		for col := 0; col < len(sampledPrices) && col < chartWidth; col++ {
+			price := sampledPrices[col]
+			if price >= nextThreshold && price <= priceThreshold {
+				// Price is at this level
+				if col > 0 {
+					prevPrice := sampledPrices[col-1]
+					if price > prevPrice {
+						result.WriteString("╱")
+					} else if price < prevPrice {
+						result.WriteString("╲")
+					} else {
+						result.WriteString("─")
+					}
+				} else {
+					result.WriteString("─")
+				}
+			} else if row < chartHeight-1 {
+				// Check if line passes through this cell
+				if col > 0 {
+					prevPrice := sampledPrices[col-1]
+					if (prevPrice <= priceThreshold && price >= nextThreshold) ||
+						(price <= priceThreshold && prevPrice >= nextThreshold) {
+						if price > prevPrice {
+							result.WriteString("│")
+						} else {
+							result.WriteString("│")
+						}
+					} else {
+						result.WriteString(" ")
+					}
+				} else {
+					result.WriteString(" ")
+				}
+			} else {
+				result.WriteString(" ")
+			}
+		}
+		result.WriteString("\n")
+	}
+
+	// X-axis
+	result.WriteString(fmt.Sprintf("%*s └", labelWidth, ""))
+	for i := 0; i < chartWidth && i < len(sampledPrices); i++ {
+		result.WriteString("─")
+	}
+	result.WriteString("\n")
+
+	// Month labels on X-axis
+	result.WriteString(fmt.Sprintf("%*s  ", labelWidth, ""))
+	lastMonth := -1
+	for col := 0; col < len(sampledDates) && col < chartWidth; col++ {
+		month := int(sampledDates[col].Month())
+		if month != lastMonth && col > 0 {
+			result.WriteString(sampledDates[col].Format("Jan"))
+			col += 2 // Skip next 2 positions
+			lastMonth = month
+		} else if lastMonth == -1 {
+			result.WriteString(sampledDates[col].Format("Jan"))
+			col += 2
+			lastMonth = month
+		} else {
+			result.WriteString(" ")
+		}
+	}
+	result.WriteString("\n")
+
+	// Summary line
+	currentPrice := chartPrices[len(chartPrices)-1].Close
+	result.WriteString(fmt.Sprintf("\nHigh: $%.2f  Low: $%.2f  Current: $%.2f\n",
+		findMax(sampledPrices), findMin(sampledPrices), currentPrice))
+
+	return result.String()
 }
 
 // Ensure math is used

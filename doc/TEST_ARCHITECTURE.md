@@ -245,7 +245,7 @@ test/results/
 
 ### Worker Test Output Files
 
-For tests that execute workers (like `TestWorkerASXStockData`, `TestWorkerSummaryWithSchema`):
+For tests that execute workers (like `TestWorkerASXStockData`, `TestWorkerASXAnnouncements`, `TestWorkerSummaryWithSchema`):
 
 | File | Description |
 |------|-------------|
@@ -256,6 +256,75 @@ For tests that execute workers (like `TestWorkerASXStockData`, `TestWorkerSummar
 | `output_N.json` | Numbered metadata for multi-run comparison |
 
 **Important**: `output.md` contains the actual worker output (document content), NOT test logs. Test logs go to `test.log`.
+
+### Orchestrator Test Output Files
+
+**Timeout Requirement**: Orchestrator tests require extended timeout due to LLM operations:
+```bash
+go test -timeout 15m -run TestOrchestratorIntegration ./test/api/...
+```
+The default Go test timeout (10 minutes) is insufficient. Tests use error monitoring to fail fast on errors.
+
+For tests that execute orchestrator jobs (like `TestOrchestratorIntegration_FullWorkflow`):
+
+| File | Description |
+|------|-------------|
+| `output.md` | Primary output - document content_markdown from the orchestrator |
+| `output.json` | Document metadata - JSON output from document metadata |
+| `job_definition.toml` | The job definition TOML used for the test (preserves original format) |
+| `schema.json` | The JSON schema file used for output validation |
+| `service.log` | Service output logs |
+| `test.log` | Test execution logs |
+
+**Schema-Specific Validation**: Orchestrator tests validate output against the schema specified in the job definition:
+- `stock-report.schema.json`: Validates stocks, summary_table, watchlists, definitions
+- `portfolio-review.schema.json`: Validates portfolio_valuation, total_summary, recommendations, risk_alerts
+- `purchase-conviction.schema.json`: Validates executive_summary, stocks, comparative_table, warnings
+
+### ASX Announcements Summary Schema
+
+The `asx_announcements` worker produces summary documents with the following metadata schema:
+
+```json
+{
+  "asx_code": "BHP",
+  "total_count": 25,
+  "high_count": 5,
+  "medium_count": 8,
+  "low_count": 7,
+  "noise_count": 5,
+  "announcements": [
+    {
+      "date": "2024-12-30T10:30:00Z",
+      "headline": "Half Year Results",
+      "type": "FINANCIAL REPORT",
+      "price_sensitive": true,
+      "relevance_category": "HIGH",
+      "relevance_reason": "Price-sensitive announcement",
+      "price_impact": {
+        "price_before": 45.20,
+        "price_after": 47.50,
+        "change_percent": 5.09,
+        "volume_before": 5000000,
+        "volume_after": 12000000,
+        "volume_change_ratio": 2.4,
+        "impact_signal": "SIGNIFICANT"
+      }
+    }
+  ]
+}
+```
+
+**Relevance Categories:**
+- `HIGH`: Price-sensitive announcements, financial results, dividends, M&A, guidance
+- `MEDIUM`: Director changes, contracts, agreements, exploration results
+- `LOW`: Progress reports, routine disclosures, compliance notices
+- `NOISE`: Non-material announcements, PR releases
+
+**Impact Signals:**
+- `SIGNIFICANT`: >5% price change OR >2x volume change
+- `MODERATE`: >2% price change OR >1.5x volume change
+- `MINIMAL`: <2% price change AND <1.5x volume change
 
 ## Anti-Patterns (Will Be Rejected)
 

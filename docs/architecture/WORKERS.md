@@ -525,6 +525,24 @@ Each announcement is stored as a markdown document:
 
 No additional configuration required. The worker fetches announcements from the public ASX website.
 
+#### Price Impact Analysis
+
+For price impact analysis, the worker first attempts to retrieve historical price data from an existing `asx_stock_data` document (stored in document metadata as `historical_prices`). If no document exists, it falls back to fetching directly from Yahoo Finance.
+
+**Best Practice**: Run `asx_stock_data` before `asx_announcements` for the same stock to ensure consistent price data and avoid duplicate API calls.
+
+```toml
+[step.fetch_stock_data]
+type = "asx_stock_data"
+asx_code = "GNP"
+
+[step.fetch_announcements]
+type = "asx_announcements"
+depends = "fetch_stock_data"  # Ensures stock data is available first
+asx_code = "GNP"
+period = "Y1"
+```
+
 #### Example Job Definition
 
 ```toml
@@ -556,7 +574,7 @@ output_tags = ["asx-gnp-search", "gnp"]
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `asx_code` | string | Yes | ASX company code (e.g., "BHP", "CBA") or index code (e.g., "XJO", "XSO") |
-| `period` | string | No | Historical data period (default: "Y1" = 1 year). Options: M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y2 (2 years), Y5 (5 years) |
+| `period` | string | No | Historical data period (default: "Y2" = 2 years). Options: M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y2 (2 years), Y5 (5 years) |
 | `output_tags` | []string | No | Additional tags to apply to output documents |
 | `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
 | `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
@@ -567,8 +585,8 @@ output_tags = ["asx-gnp-search", "gnp"]
 | M1 | Last 1 month | Short-term technical analysis |
 | M3 | Last 3 months | Quarterly performance |
 | M6 | Last 6 months | Half-year trends |
-| Y1 | Last 1 year | Annual analysis (default) |
-| Y2 | Last 2 years | Medium-term performance |
+| Y1 | Last 1 year | Annual analysis |
+| Y2 | Last 2 years | Medium-term performance (default) |
 | Y5 | Last 5 years | Long-term CAGR, growth trajectory |
 
 #### Outputs
@@ -578,10 +596,12 @@ output_tags = ["asx-gnp-search", "gnp"]
   - Day range, 52-week range
   - Volume and average volume
   - Market cap, P/E ratio, EPS, dividend yield
-  - Historical OHLCV data (last 365 days)
+  - Historical OHLCV data (up to 500 trading days for Y2)
+  - 6-month ASCII price chart for quick visualization
   - Technical indicators: SMA20, SMA50, SMA200, RSI14
   - Support/resistance levels
   - Trend signal (bullish/bearish/neutral)
+- Metadata includes `historical_prices` array for downstream workers (e.g., `asx_announcements`)
 - Tags: `["asx-stock-data", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
 
 #### Configuration
