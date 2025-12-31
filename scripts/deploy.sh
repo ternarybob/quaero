@@ -11,6 +11,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+echo -e "\033[0;35mternarybob (parent) -> quaero\033[0m"
 echo -e "\033[0;36mQuaero Docker Deployment\033[0m"
 echo -e "\033[0;36m========================\033[0m"
 
@@ -68,7 +69,16 @@ mkdir -p "$STAGING/config" "$STAGING/job-definitions" "$STAGING/job-templates" "
 echo -e "\033[0;90m  Staging configuration...\033[0m"
 [ -f "$COMMON_CONFIG/connectors.toml" ] && cp "$COMMON_CONFIG/connectors.toml" "$STAGING/config/"
 [ -f "$COMMON_CONFIG/email.toml" ] && cp "$COMMON_CONFIG/email.toml" "$STAGING/config/"
-[ -f "$DOCKER_CONFIG/quaero.toml" ] && cp "$DOCKER_CONFIG/quaero.toml" "$STAGING/config/"
+# Use docker-specific config template from common, or fall back to docker config dir
+if [ -f "$COMMON_CONFIG/quaero.docker.toml" ]; then
+    cp "$COMMON_CONFIG/quaero.docker.toml" "$STAGING/config/quaero.toml"
+elif [ -f "$DOCKER_CONFIG/quaero.toml" ]; then
+    cp "$DOCKER_CONFIG/quaero.toml" "$STAGING/config/"
+else
+    echo -e "\033[0;31mERROR: No quaero.toml found for Docker deployment!\033[0m"
+    echo "Expected at: $COMMON_CONFIG/quaero.docker.toml or $DOCKER_CONFIG/quaero.toml"
+    exit 1
+fi
 [ -f "$DOCKER_CONFIG/connectors.toml" ] && cp "$DOCKER_CONFIG/connectors.toml" "$STAGING/config/"
 [ -f "$DOCKER_CONFIG/email.toml" ] && cp "$DOCKER_CONFIG/email.toml" "$STAGING/config/"
 [ -f "$DOCKER_CONFIG/variables.toml" ] && cp "$DOCKER_CONFIG/variables.toml" "$STAGING/config/"

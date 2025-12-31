@@ -18,6 +18,7 @@ $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
 $projectRoot = Split-Path -Parent $scriptDir
 
+Write-Host "ternarybob (parent) -> quaero" -ForegroundColor Magenta
 Write-Host "Quaero Docker Deployment" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
 
@@ -75,7 +76,16 @@ New-Item -ItemType Directory -Path "$staging\docs" -Force | Out-Null
 Write-Host "  Staging configuration..." -ForegroundColor Gray
 if (Test-Path "$commonConfig\connectors.toml") { Copy-Item "$commonConfig\connectors.toml" "$staging\config\" }
 if (Test-Path "$commonConfig\email.toml") { Copy-Item "$commonConfig\email.toml" "$staging\config\" }
-if (Test-Path "$dockerConfig\quaero.toml") { Copy-Item "$dockerConfig\quaero.toml" "$staging\config\" }
+# Use docker-specific config template from common, or fall back to docker config dir
+if (Test-Path "$commonConfig\quaero.docker.toml") {
+    Copy-Item "$commonConfig\quaero.docker.toml" "$staging\config\quaero.toml"
+} elseif (Test-Path "$dockerConfig\quaero.toml") {
+    Copy-Item "$dockerConfig\quaero.toml" "$staging\config\"
+} else {
+    Write-Host "ERROR: No quaero.toml found for Docker deployment!" -ForegroundColor Red
+    Write-Host "Expected at: $commonConfig\quaero.docker.toml or $dockerConfig\quaero.toml"
+    exit 1
+}
 if (Test-Path "$dockerConfig\connectors.toml") { Copy-Item "$dockerConfig\connectors.toml" "$staging\config\" -Force }
 if (Test-Path "$dockerConfig\email.toml") { Copy-Item "$dockerConfig\email.toml" "$staging\config\" -Force }
 if (Test-Path "$dockerConfig\variables.toml") { Copy-Item "$dockerConfig\variables.toml" "$staging\config\" }

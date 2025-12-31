@@ -1,0 +1,77 @@
+# Quaero Docker Configuration
+# ============================
+#
+# This configuration is optimized for Docker container deployment.
+# Paths are configured for the container filesystem layout.
+#
+# Configuration Load Order (priority from lowest to highest):
+#   1. Defaults (hardcoded in application)
+#   2. TOML file (this file)
+#   3. Environment variables (QUAERO_*)
+#   4. Command line flags (--port, --host, --config)
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
+environment = "production"
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+# Docker internal port - mapped to host via docker-compose
+[server]
+port = 8080
+host = "0.0.0.0"  # Listen on all interfaces in container
+
+# =============================================================================
+# Storage Configuration
+# =============================================================================
+# Paths are mounted as Docker volumes for persistence
+[storage.badger]
+path = "/app/data"
+
+[storage.filesystem]
+images = "/app/data/images"
+attachments = "/app/data/attachments"
+
+# =============================================================================
+# Job Definitions Configuration
+# =============================================================================
+[jobs]
+definitions_dir = "/app/job-definitions"
+
+# =============================================================================
+# Job Templates Configuration
+# =============================================================================
+[job_templates]
+dir = "/app/job-templates"
+
+# =============================================================================
+# Documentation Configuration
+# =============================================================================
+[docs]
+dir = "/app/docs"
+extensions = [".md"]
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+# Logs go to both stdout (for docker logs) and file (for persistence)
+[logging]
+level = "info"
+format = "json"  # JSON format for better log aggregation
+output = ["stdout", "file"]
+file_path = "/app/logs/quaero.log"
+min_event_level = "info"
+
+# =============================================================================
+# API Keys (set via environment variables in docker-compose)
+# =============================================================================
+# [gemini]
+# api_key = "${QUAERO_GEMINI_API_KEY}"
+
+# [claude]
+# api_key = "${ANTHROPIC_API_KEY}"
+
+# [places_api]
+# api_key = "${QUAERO_PLACES_API_KEY}"

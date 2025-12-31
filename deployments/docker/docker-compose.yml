@@ -1,4 +1,5 @@
 services:
+  # ternarybob (parent) -> quaero
   quaero:
     # Use pre-built image (built by deploy.ps1 with configs baked in)
     image: quaero:latest
@@ -14,6 +15,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_OUTPUT=${LOG_OUTPUT:-both}
       - SERVER_PORT=${PORT:-8080}
+    # Ensure logs are visible even on startup failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
