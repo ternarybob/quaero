@@ -377,65 +377,77 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			}
 
 			if hasDependencyFailed {
-				// Skip this step since a dependency failed
-				d.logger.Info().
-					Str("step_name", step.Name).
-					Str("failed_dependency", failedDep).
-					Msg("Skipping step due to failed dependency")
+				// Check if step has always_run=true (e.g., error notification steps)
+				if step.AlwaysRun {
+					d.logger.Info().
+						Str("step_name", step.Name).
+						Str("failed_dependency", failedDep).
+						Msg("Running step with always_run=true despite failed dependency")
 
-				d.jobManager.AddJobLog(ctx, managerID, "warning",
-					fmt.Sprintf("Skipping step %s: dependency '%s' failed", step.Name, failedDep))
+					d.jobManager.AddJobLog(ctx, managerID, "info",
+						fmt.Sprintf("Step %s running despite failed dependency '%s' (always_run=true)", step.Name, failedDep))
+					// Continue to step execution below (don't skip)
+				} else {
+					// Skip this step since a dependency failed
+					d.logger.Info().
+						Str("step_name", step.Name).
+						Str("failed_dependency", failedDep).
+						Msg("Skipping step due to failed dependency")
 
-				// Mark this step as failed too (cascading failure)
-				failedSteps[step.Name] = true
+					d.jobManager.AddJobLog(ctx, managerID, "warning",
+						fmt.Sprintf("Skipping step %s: dependency '%s' failed", step.Name, failedDep))
 
-				// Create step job record in skipped state
-				stepID := uuid.New().String()
-				stepJobIDs[step.Name] = stepID
+					// Mark this step as failed too (cascading failure)
+					failedSteps[step.Name] = true
 
-				stepJob := &Job{
-					ID:        stepID,
-					ParentID:  &managerID,
-					Type:      string(models.JobTypeStep),
-					Name:      step.Name,
-					Phase:     "execution",
-					Status:    "skipped",
-					CreatedAt: time.Now(),
-				}
-				if err := d.jobManager.CreateJobRecord(ctx, stepJob); err != nil {
-					// Log but continue
-				}
+					// Create step job record in skipped state
+					stepID := uuid.New().String()
+					stepJobIDs[step.Name] = stepID
 
-				stepStats[i] = map[string]interface{}{
-					"step_index":     i,
-					"step_id":        stepID,
-					"step_name":      step.Name,
-					"step_type":      step.Type.String(),
-					"child_count":    0,
-					"document_count": 0,
-					"status":         "skipped",
-					"skip_reason":    fmt.Sprintf("dependency '%s' failed", failedDep),
-				}
-
-				// Return error if this step had on_error = "fail" or "fatal"
-				if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
-					skippedStepMetadata := map[string]interface{}{
-						"current_step":        i + 1,
-						"current_step_name":   step.Name,
-						"current_step_type":   step.Type.String(),
-						"current_step_status": "skipped",
-						"step_stats":          stepStats[:i+1],
-						"step_job_ids":        stepJobIDs,
+					stepJob := &Job{
+						ID:        stepID,
+						ParentID:  &managerID,
+						Type:      string(models.JobTypeStep),
+						Name:      step.Name,
+						Phase:     "execution",
+						Status:    "skipped",
+						CreatedAt: time.Now(),
 					}
-					d.jobManager.UpdateJobMetadata(ctx, managerID, skippedStepMetadata)
-					// For fatal errors, cancel all pending/running child jobs
-					if step.OnError == models.ErrorStrategyFatal {
-						d.jobManager.StopAllChildJobs(ctx, managerID)
+					if err := d.jobManager.CreateJobRecord(ctx, stepJob); err != nil {
+						// Log but continue
 					}
-					return managerID, fmt.Errorf("step %s skipped: dependency '%s' failed", step.Name, failedDep)
-				}
 
-				continue
+					stepStats[i] = map[string]interface{}{
+						"step_index":     i,
+						"step_id":        stepID,
+						"step_name":      step.Name,
+						"step_type":      step.Type.String(),
+						"child_count":    0,
+						"document_count": 0,
+						"status":         "skipped",
+						"skip_reason":    fmt.Sprintf("dependency '%s' failed", failedDep),
+					}
+
+					// Return error if this step had on_error = "fail" or "fatal"
+					if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+						skippedStepMetadata := map[string]interface{}{
+							"current_step":        i + 1,
+							"current_step_name":   step.Name,
+							"current_step_type":   step.Type.String(),
+							"current_step_status": "skipped",
+							"step_stats":          stepStats[:i+1],
+							"step_job_ids":        stepJobIDs,
+						}
+						d.jobManager.UpdateJobMetadata(ctx, managerID, skippedStepMetadata)
+						// For fatal errors, cancel all pending/running child jobs
+						if step.OnError == models.ErrorStrategyFatal {
+							d.jobManager.StopAllChildJobs(ctx, managerID)
+						}
+						return managerID, fmt.Errorf("step %s skipped: dependency '%s' failed", step.Name, failedDep)
+					}
+
+					continue
+				}
 			}
 		}
 		// Create step job (child of manager, parent of spawned jobs)

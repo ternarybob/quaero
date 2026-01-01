@@ -154,6 +154,7 @@ template = "smsf-portfolio-summary"
 type = "email"
 description = "Email consolidated SMSF portfolio review"
 depends = "generate_portfolio_summary"
+always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "SMSF Portfolio Review - Practical Investment Analysis"

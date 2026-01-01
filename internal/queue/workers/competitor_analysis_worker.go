@@ -43,7 +43,7 @@ func NewCompetitorAnalysisWorker(
 	logger arbor.ILogger,
 ) *CompetitorAnalysisWorker {
 	// Create embedded stock collector worker for fetching competitor data
-	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, logger, jobMgr)
+	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, kvStorage, logger, jobMgr)
 
 	return &CompetitorAnalysisWorker{
 		documentStorage:      documentStorage,

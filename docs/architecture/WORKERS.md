@@ -628,10 +628,15 @@ output_tags = ["benchmark"]
 
 - **Single document** with comprehensive stock data including:
   - **Price Data**: Current price, change, day range, 52-week range, volume, market cap
-  - **Valuation**: P/E ratio, EPS, dividend yield
+  - **Valuation**: P/E ratio, Forward P/E, PEG ratio, EPS, dividend yield, book value, price/book, price/sales, EV/Revenue, EV/EBITDA, beta
+  - **Profitability**: Profit margin, operating margin, ROA, ROE
+  - **Shares Statistics**: Shares outstanding, float, insider ownership %, institutional ownership %
   - **Technical Indicators**: SMA20, SMA50, SMA200, RSI14, support/resistance, trend signal
   - **Period Performance**: 7D, 1M, 3M, 6M, 1Y, 2Y price changes
-  - **Analyst Coverage**: Analyst count, consensus rating, price targets (mean/high/low/median), upside potential, recommendation distribution (Strong Buy/Buy/Hold/Sell/Strong Sell), recent upgrades/downgrades
+  - **Analyst Coverage**: Analyst count, consensus rating, price targets (mean/high/low/median), upside potential, recommendation distribution (Strong Buy/Buy/Hold/Sell/Strong Sell)
+  - **ESG Scores**: Total ESG score, environment, social, governance, controversy level
+  - **Earnings History**: EPS actual vs estimate, surprise percentage
+  - **Dividends**: Dividend rate, ex-date, pay date, payout ratio
   - **Historical Financials**: Annual and quarterly data - revenue, profit, margins, EBITDA, cash flow, YoY growth, 3Y/5Y revenue CAGR
   - **Historical Prices**: Full OHLCV array for charting
 - Tags: `["asx-stock-data", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
@@ -639,14 +644,23 @@ output_tags = ["benchmark"]
 
 #### Benefits
 
-1. **Single API Call**: Reduces API usage by 3x compared to separate workers
+1. **Comprehensive Data**: Full fundamental, valuation, and price data from single provider
 2. **Consistent Data**: All data fetched at same timestamp, no timing discrepancies
 3. **In-Code Schema**: Uses Go structs for type safety, no external JSON schema files
 4. **No AI Processing**: Pure data collection and calculation - no LLM calls
+5. **Extended Metrics**: ESG scores, earnings history, ownership data
 
 #### Configuration
 
-No additional configuration required. Fetches data from Yahoo Finance API.
+**Data Source**: EODHD API (https://eodhd.com)
+- Fundamentals endpoint for company info, valuation, analyst ratings, financials, ESG
+- EOD endpoint for historical and current price data
+
+**Environment Variables** (in .env):
+```bash
+# Required - EODHD API for all stock data
+eodhd_api_key="your-eodhd-api-key"
+```
 
 #### Example Job Definition
 
@@ -970,6 +984,7 @@ body = "The daily report job has completed successfully."
 type = "email"
 description = "Email consolidated report"
 depends = "analyze"
+always_run = true  # Run even if 'analyze' step fails
 on_error = "fail"
 to = "team@example.com"
 subject = "Daily Analysis Report"
@@ -1687,6 +1702,42 @@ depends = "fetch_data"
 **Fatal vs Fail**:
 - `fail`: Stops the current job execution but does not affect already-running child jobs
 - `fatal`: Stops execution AND actively cancels all pending/running child jobs in the hierarchy
+
+### Always Run Configuration
+
+Steps can be configured to run even when their dependencies fail using the `always_run` field. This is useful for notification steps (like email) that should send failure notifications when earlier steps fail.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `always_run` | bool | false | Run this step even if dependencies failed |
+
+**Example - Email notification with error reporting**:
+```toml
+[step.analyze_stocks]
+type = "orchestrator"
+goal_template = "asx-stock-analysis-goal"
+on_error = "continue"
+
+[step.email_report]
+type = "email"
+description = "Email consolidated stock analysis report"
+depends = "analyze_stocks"
+always_run = true  # Run even if analyze_stocks fails
+on_error = "fail"
+to = "team@example.com"
+subject = "ASX Daily Stock Analysis"
+body_from_tag = "stock-recommendation"
+
+# Error reporting configuration
+on_error_subject = "ASX Daily Analysis - An Error Occurred"
+include_logs_on_error = true
+```
+
+**Behavior**:
+- When `always_run = true` and a dependency fails, the step still executes
+- The email worker automatically detects previous failures via `checkJobForErrors`
+- Error emails include failed step names, error messages, and step logs
+- The `on_error_subject` is used instead of the normal subject when errors are detected
 
 ---
 

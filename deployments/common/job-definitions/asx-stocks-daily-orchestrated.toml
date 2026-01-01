@@ -63,6 +63,7 @@ goal_template = "asx-stock-analysis-goal"
 type = "email"
 description = "Email consolidated stock analysis report"
 depends = "analyze_stocks"
+always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "ASX Daily Stock Analysis - AI-Powered Report"

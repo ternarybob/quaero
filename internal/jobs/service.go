@@ -105,6 +105,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 			onError, _ := stepData["on_error"].(string)
 			depends, _ := stepData["depends"].(string)
 			condition, _ := stepData["condition"].(string)
+			alwaysRun, _ := stepData["always_run"].(bool)
 
 			// Validate that we have a valid type
 			stepType := models.WorkerType(typeStr)
@@ -124,6 +125,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 				"on_error":    true,
 				"depends":     true,
 				"condition":   true,
+				"always_run":  true,
 			}
 			for k, v := range stepData {
 				if !knownFields[k] {
@@ -138,6 +140,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 				Config:      config,
 				OnError:     models.ErrorStrategy(onError),
 				Depends:     depends,
+				AlwaysRun:   alwaysRun,
 				Condition:   condition,
 			}
 			// Default OnError if empty

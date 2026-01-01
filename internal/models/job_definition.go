@@ -126,6 +126,7 @@ type JobStep struct {
 	Config      map[string]interface{} `json:"config"`                // Step-specific configuration parameters (flat structure)
 	OnError     ErrorStrategy          `json:"on_error"`              // Error handling strategy
 	Depends     string                 `json:"depends,omitempty"`     // Comma-separated list of step names this step depends on
+	AlwaysRun   bool                   `json:"always_run,omitempty"`  // Run even if dependencies failed (e.g., error notification steps)
 	Condition   string                 `json:"condition,omitempty"`   // Optional conditional execution expression (for future use)
 }
 

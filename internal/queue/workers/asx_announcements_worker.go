@@ -484,9 +484,11 @@ func (w *ASXAnnouncementsWorker) fetchAnnouncementsFromHTML(ctx context.Context,
 	var allAnnouncements []ASXAnnouncement
 
 	// Determine how many years to fetch based on period
-	yearsToFetch := 1
+	// For Y1, fetch 2 years to ensure we get 12 months of data
+	// (e.g., if today is Jan 2026, we need 2025 + 2026 data)
+	yearsToFetch := 2
 	if period == "Y5" {
-		yearsToFetch = 5
+		yearsToFetch = 6
 	}
 
 	for yearOffset := 0; yearOffset < yearsToFetch; yearOffset++ {

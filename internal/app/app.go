@@ -829,6 +829,7 @@ func (a *App) initServices() error {
 	// Register ASX Stock Collector worker (consolidated: price, analyst coverage, historical financials)
 	asxStockCollectorWorker := workers.NewASXStockCollectorWorker(
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 	)

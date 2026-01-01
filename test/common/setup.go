@@ -961,6 +961,21 @@ func (env *TestEnvironment) buildService() error {
 		}
 	}
 
+	// Load EODHD API key from .env.test
+	if key := env.EnvVars["eodhd_api_key"]; key != "" {
+		variablesConfig["eodhd_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from eodhd_api_key in .env.test",
+		}
+	}
+	// Override with EODHD_API_KEY environment variable if set
+	if key := env.EnvVars["EODHD_API_KEY"]; key != "" {
+		variablesConfig["eodhd_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from EODHD_API_KEY environment variable",
+		}
+	}
+
 	// Write updated variables.toml
 	if data, err := toml.Marshal(variablesConfig); err == nil {
 		if err := os.WriteFile(variablesFile, data, 0644); err != nil {

@@ -18,3 +18,7 @@ description = "Fake Gemini API key for keyword extractor agent job (overridden b
 [google_places_api_key]
 value = "fake-places-api-key-for-testing"
 description = "Fake Google Places API key for nearby restaurants job (overridden by .env.test)"
+
+[eodhd_api_key]
+value = "fake-eodhd-api-key-for-testing"
+description = "Fake EODHD API key for ASX stock data (overridden by .env.test)"

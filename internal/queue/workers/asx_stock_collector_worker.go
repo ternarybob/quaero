@@ -8,6 +8,7 @@ package workers
 
 import (
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,16 +19,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// ASXStockCollectorWorker fetches comprehensive stock data in a single Yahoo Finance API call.
+// EODHD API configuration
+const (
+	eodhdAPIBaseURL   = "https://eodhd.com/api"
+	eodhdAPIKeyEnvVar = "eodhd_api_key"
+)
+
+// ASXStockCollectorWorker fetches comprehensive stock data using EODHD API.
 // This consolidates asx_stock_data, asx_analyst_coverage, and asx_historical_financials.
 // NO AI processing - pure data collection only.
 type ASXStockCollectorWorker struct {
 	documentStorage interfaces.DocumentStorage
+	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
@@ -43,8 +52,11 @@ type StockCollectorData struct {
 	CompanyName string `json:"company_name"`
 	AsxCode     string `json:"asx_code"`
 	Currency    string `json:"currency"`
+	ISIN        string `json:"isin,omitempty"`
+	Sector      string `json:"sector,omitempty"`
+	Industry    string `json:"industry,omitempty"`
 
-	// Price data (from price module)
+	// Price data (from EOD)
 	CurrentPrice  float64 `json:"current_price"`
 	PriceChange   float64 `json:"price_change"`
 	ChangePercent float64 `json:"change_percent"`
@@ -56,10 +68,31 @@ type StockCollectorData struct {
 	AvgVolume     int64   `json:"avg_volume"`
 	MarketCap     int64   `json:"market_cap"`
 
-	// Valuation (from summaryDetail)
-	PERatio       float64 `json:"pe_ratio"`
-	EPS           float64 `json:"eps"`
-	DividendYield float64 `json:"dividend_yield"`
+	// Valuation
+	PERatio         float64 `json:"pe_ratio"`
+	ForwardPE       float64 `json:"forward_pe"`
+	PEGRatio        float64 `json:"peg_ratio"`
+	EPS             float64 `json:"eps"`
+	DividendYield   float64 `json:"dividend_yield"`
+	BookValue       float64 `json:"book_value"`
+	PriceToBook     float64 `json:"price_to_book"`
+	PriceToSales    float64 `json:"price_to_sales"`
+	EnterpriseValue int64   `json:"enterprise_value"`
+	EVToRevenue     float64 `json:"ev_to_revenue"`
+	EVToEBITDA      float64 `json:"ev_to_ebitda"`
+	Beta            float64 `json:"beta"`
+
+	// Profitability metrics
+	ProfitMargin    float64 `json:"profit_margin"`
+	OperatingMargin float64 `json:"operating_margin"`
+	ReturnOnAssets  float64 `json:"return_on_assets"`
+	ReturnOnEquity  float64 `json:"return_on_equity"`
+
+	// Shares statistics
+	SharesOutstanding   int64   `json:"shares_outstanding"`
+	SharesFloat         int64   `json:"shares_float"`
+	PercentInsiders     float64 `json:"percent_insiders"`
+	PercentInstitutions float64 `json:"percent_institutions"`
 
 	// Technicals (calculated from historical prices)
 	SMA20       float64 `json:"sma_20"`
@@ -70,7 +103,7 @@ type StockCollectorData struct {
 	Resistance  float64 `json:"resistance"`
 	TrendSignal string  `json:"trend_signal"` // "BULLISH", "BEARISH", "NEUTRAL"
 
-	// Analyst coverage (from financialData, recommendationTrend)
+	// Analyst coverage
 	AnalystCount       int     `json:"analyst_count"`
 	TargetMean         float64 `json:"target_mean"`
 	TargetHigh         float64 `json:"target_high"`
@@ -88,7 +121,23 @@ type StockCollectorData struct {
 	// Upgrade/downgrade history
 	UpgradeDowngrades []UpgradeDowngradeEntry `json:"upgrade_downgrades,omitempty"`
 
-	// Historical financials (from incomeStatementHistory)
+	// ESG Scores
+	ESGTotalScore       float64 `json:"esg_total_score"`
+	ESGEnvironmentScore float64 `json:"esg_environment_score"`
+	ESGSocialScore      float64 `json:"esg_social_score"`
+	ESGGovernanceScore  float64 `json:"esg_governance_score"`
+	ESGControversy      int     `json:"esg_controversy"`
+
+	// Earnings history
+	EarningsHistory []EarningsEntry `json:"earnings_history,omitempty"`
+
+	// Dividends
+	DividendRate    float64 `json:"dividend_rate"`
+	DividendExDate  string  `json:"dividend_ex_date,omitempty"`
+	DividendPayDate string  `json:"dividend_pay_date,omitempty"`
+	PayoutRatio     float64 `json:"payout_ratio"`
+
+	// Historical financials
 	RevenueGrowthYoY float64                `json:"revenue_growth_yoy"`
 	ProfitGrowthYoY  float64                `json:"profit_growth_yoy"`
 	RevenueCAGR3Y    float64                `json:"revenue_cagr_3y"`
@@ -104,6 +153,16 @@ type StockCollectorData struct {
 
 	// Metadata
 	LastUpdated time.Time `json:"last_updated"`
+}
+
+// EarningsEntry holds earnings data for a single period
+type EarningsEntry struct {
+	Date            string  `json:"date"`
+	ReportDate      string  `json:"report_date"`
+	EPSActual       float64 `json:"eps_actual"`
+	EPSEstimate     float64 `json:"eps_estimate"`
+	EPSSurprise     float64 `json:"eps_surprise"`
+	EPSSurprisePerc float64 `json:"eps_surprise_percent"`
 }
 
 // UpgradeDowngradeEntry represents a single analyst action
@@ -156,204 +215,223 @@ type PeriodPerformanceEntry struct {
 	Value1k       float64 `json:"value_1k"`  // Current value of those shares
 }
 
-// yahooQuoteSummaryFullResponse for Yahoo Finance quoteSummary with all modules
-type yahooQuoteSummaryFullResponse struct {
-	QuoteSummary struct {
-		Result []yahooQuoteSummaryResult `json:"result"`
-		Error  interface{}               `json:"error"`
-	} `json:"quoteSummary"`
+func init() {
+	// Register types for gob encoding (required for BadgerHold storage of interface{} fields)
+	gob.Register([]OHLCVEntry{})
+	gob.Register([]PeriodPerformanceEntry{})
+	gob.Register([]EarningsEntry{})
+	gob.Register([]UpgradeDowngradeEntry{})
+	gob.Register([]FinancialPeriodEntry{})
 }
 
-type yahooQuoteSummaryResult struct {
-	Price struct {
-		RegularMarketPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"regularMarketPrice"`
-		RegularMarketChange struct {
-			Raw float64 `json:"raw"`
-		} `json:"regularMarketChange"`
-		RegularMarketChangePercent struct {
-			Raw float64 `json:"raw"`
-		} `json:"regularMarketChangePercent"`
-		RegularMarketDayLow struct {
-			Raw float64 `json:"raw"`
-		} `json:"regularMarketDayLow"`
-		RegularMarketDayHigh struct {
-			Raw float64 `json:"raw"`
-		} `json:"regularMarketDayHigh"`
-		RegularMarketVolume struct {
-			Raw int64 `json:"raw"`
-		} `json:"regularMarketVolume"`
-		AverageVolume struct {
-			Raw int64 `json:"raw"`
-		} `json:"averageDailyVolume10Day"`
-		MarketCap struct {
-			Raw int64 `json:"raw"`
-		} `json:"marketCap"`
-		ShortName string `json:"shortName"`
-		Symbol    string `json:"symbol"`
-		Currency  string `json:"currency"`
-	} `json:"price"`
-	SummaryDetail struct {
-		FiftyTwoWeekLow struct {
-			Raw float64 `json:"raw"`
-		} `json:"fiftyTwoWeekLow"`
-		FiftyTwoWeekHigh struct {
-			Raw float64 `json:"raw"`
-		} `json:"fiftyTwoWeekHigh"`
-		TrailingPE struct {
-			Raw float64 `json:"raw"`
-		} `json:"trailingPE"`
-		DividendYield struct {
-			Raw float64 `json:"raw"`
-		} `json:"dividendYield"`
-	} `json:"summaryDetail"`
-	DefaultKeyStatistics struct {
-		TrailingEps struct {
-			Raw float64 `json:"raw"`
-		} `json:"trailingEps"`
-	} `json:"defaultKeyStatistics"`
-	FinancialData struct {
-		TargetHighPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"targetHighPrice"`
-		TargetLowPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"targetLowPrice"`
-		TargetMeanPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"targetMeanPrice"`
-		TargetMedianPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"targetMedianPrice"`
-		RecommendationMean struct {
-			Raw float64 `json:"raw"`
-		} `json:"recommendationMean"`
-		RecommendationKey       string `json:"recommendationKey"`
-		NumberOfAnalystOpinions struct {
-			Raw int `json:"raw"`
-		} `json:"numberOfAnalystOpinions"`
-		CurrentPrice struct {
-			Raw float64 `json:"raw"`
-		} `json:"currentPrice"`
-	} `json:"financialData"`
-	RecommendationTrend struct {
-		Trend []struct {
-			Period     string `json:"period"`
-			StrongBuy  int    `json:"strongBuy"`
-			Buy        int    `json:"buy"`
-			Hold       int    `json:"hold"`
-			Sell       int    `json:"sell"`
-			StrongSell int    `json:"strongSell"`
-		} `json:"trend"`
-	} `json:"recommendationTrend"`
-	UpgradeDowngradeHistory struct {
-		History []struct {
-			EpochGradeDate int64  `json:"epochGradeDate"`
-			Firm           string `json:"firm"`
-			ToGrade        string `json:"toGrade"`
-			FromGrade      string `json:"fromGrade"`
-			Action         string `json:"action"`
-		} `json:"history"`
-	} `json:"upgradeDowngradeHistory"`
-	IncomeStatementHistory struct {
-		IncomeStatementHistory []struct {
-			EndDate struct {
-				Raw int64 `json:"raw"`
-			} `json:"endDate"`
-			TotalRevenue struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalRevenue"`
-			GrossProfit struct {
-				Raw int64 `json:"raw"`
-			} `json:"grossProfit"`
-			OperatingIncome struct {
-				Raw int64 `json:"raw"`
-			} `json:"operatingIncome"`
-			NetIncome struct {
-				Raw int64 `json:"raw"`
-			} `json:"netIncome"`
-			EBITDA struct {
-				Raw int64 `json:"raw"`
-			} `json:"ebitda"`
-		} `json:"incomeStatementHistory"`
-	} `json:"incomeStatementHistory"`
-	IncomeStatementHistoryQuarterly struct {
-		IncomeStatementHistory []struct {
-			EndDate struct {
-				Raw int64 `json:"raw"`
-			} `json:"endDate"`
-			TotalRevenue struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalRevenue"`
-			GrossProfit struct {
-				Raw int64 `json:"raw"`
-			} `json:"grossProfit"`
-			OperatingIncome struct {
-				Raw int64 `json:"raw"`
-			} `json:"operatingIncome"`
-			NetIncome struct {
-				Raw int64 `json:"raw"`
-			} `json:"netIncome"`
-		} `json:"incomeStatementHistory"`
-	} `json:"incomeStatementHistoryQuarterly"`
-	BalanceSheetHistory struct {
-		BalanceSheetStatements []struct {
-			EndDate struct {
-				Raw int64 `json:"raw"`
-			} `json:"endDate"`
-			TotalAssets struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalAssets"`
-			TotalLiab struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalLiab"`
-			TotalStockholderEquity struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalStockholderEquity"`
-		} `json:"balanceSheetStatements"`
-	} `json:"balanceSheetHistory"`
-	CashflowStatementHistory struct {
-		CashflowStatements []struct {
-			EndDate struct {
-				Raw int64 `json:"raw"`
-			} `json:"endDate"`
-			TotalCashFromOperatingActivities struct {
-				Raw int64 `json:"raw"`
-			} `json:"totalCashFromOperatingActivities"`
-			FreeCashFlow struct {
-				Raw int64 `json:"raw"`
-			} `json:"freeCashFlow"`
-		} `json:"cashflowStatements"`
-	} `json:"cashflowStatementHistory"`
+// eodhdEODData represents a single EOD record from EODHD
+type eodhdEODData struct {
+	Date          string  `json:"date"`
+	Open          float64 `json:"open"`
+	High          float64 `json:"high"`
+	Low           float64 `json:"low"`
+	Close         float64 `json:"close"`
+	AdjustedClose float64 `json:"adjusted_close"`
+	Volume        int64   `json:"volume"`
 }
 
-// yahooChartResponseCollector for Yahoo Finance chart endpoint
-type yahooChartResponseCollector struct {
-	Chart struct {
-		Result []struct {
-			Timestamp  []int64 `json:"timestamp"`
-			Indicators struct {
-				Quote []struct {
-					Open   []float64 `json:"open"`
-					High   []float64 `json:"high"`
-					Low    []float64 `json:"low"`
-					Close  []float64 `json:"close"`
-					Volume []int64   `json:"volume"`
-				} `json:"quote"`
-			} `json:"indicators"`
-		} `json:"result"`
-	} `json:"chart"`
+// eodhdFundamentalsResponse for EODHD /api/fundamentals/ endpoint
+type eodhdFundamentalsResponse struct {
+	General         eodhdGeneral         `json:"General"`
+	Highlights      eodhdHighlights      `json:"Highlights"`
+	Valuation       eodhdValuation       `json:"Valuation"`
+	SharesStats     eodhdSharesStats     `json:"SharesStats"`
+	Technicals      eodhdTechnicals      `json:"Technicals"`
+	SplitsDividends eodhdSplitsDividends `json:"SplitsDividends"`
+	AnalystRatings  eodhdAnalystRatings  `json:"AnalystRatings"`
+	Holders         eodhdHolders         `json:"Holders"`
+	ESGScores       eodhdESGScores       `json:"ESGScores"`
+	Earnings        eodhdEarnings        `json:"Earnings"`
+	Financials      eodhdFinancials      `json:"Financials"`
+}
+
+type eodhdGeneral struct {
+	Code              string `json:"Code"`
+	Name              string `json:"Name"`
+	Exchange          string `json:"Exchange"`
+	CurrencyCode      string `json:"CurrencyCode"`
+	CurrencyName      string `json:"CurrencyName"`
+	CurrencySymbol    string `json:"CurrencySymbol"`
+	CountryName       string `json:"CountryName"`
+	CountryISO        string `json:"CountryISO"`
+	ISIN              string `json:"ISIN"`
+	Sector            string `json:"Sector"`
+	Industry          string `json:"Industry"`
+	Description       string `json:"Description"`
+	FullTimeEmployees int    `json:"FullTimeEmployees"`
+	WebURL            string `json:"WebURL"`
+}
+
+type eodhdHighlights struct {
+	MarketCapitalization       int64   `json:"MarketCapitalization"`
+	MarketCapitalizationMln    float64 `json:"MarketCapitalizationMln"`
+	EBITDA                     int64   `json:"EBITDA"`
+	PERatio                    float64 `json:"PERatio"`
+	PEGRatio                   float64 `json:"PEGRatio"`
+	WallStreetTargetPrice      float64 `json:"WallStreetTargetPrice"`
+	BookValue                  float64 `json:"BookValue"`
+	DividendShare              float64 `json:"DividendShare"`
+	DividendYield              float64 `json:"DividendYield"`
+	EarningsShare              float64 `json:"EarningsShare"`
+	EPSEstimateCurrentYear     float64 `json:"EPSEstimateCurrentYear"`
+	EPSEstimateNextYear        float64 `json:"EPSEstimateNextYear"`
+	EPSEstimateNextQuarter     float64 `json:"EPSEstimateNextQuarter"`
+	EPSEstimateCurrentQuarter  float64 `json:"EPSEstimateCurrentQuarter"`
+	MostRecentQuarter          string  `json:"MostRecentQuarter"`
+	ProfitMargin               float64 `json:"ProfitMargin"`
+	OperatingMarginTTM         float64 `json:"OperatingMarginTTM"`
+	ReturnOnAssetsTTM          float64 `json:"ReturnOnAssetsTTM"`
+	ReturnOnEquityTTM          float64 `json:"ReturnOnEquityTTM"`
+	RevenueTTM                 int64   `json:"RevenueTTM"`
+	RevenuePerShareTTM         float64 `json:"RevenuePerShareTTM"`
+	QuarterlyRevenueGrowthYOY  float64 `json:"QuarterlyRevenueGrowthYOY"`
+	GrossProfitTTM             int64   `json:"GrossProfitTTM"`
+	DilutedEpsTTM              float64 `json:"DilutedEpsTTM"`
+	QuarterlyEarningsGrowthYOY float64 `json:"QuarterlyEarningsGrowthYOY"`
+}
+
+type eodhdValuation struct {
+	TrailingPE             float64 `json:"TrailingPE"`
+	ForwardPE              float64 `json:"ForwardPE"`
+	PriceSalesTTM          float64 `json:"PriceSalesTTM"`
+	PriceBookMRQ           float64 `json:"PriceBookMRQ"`
+	EnterpriseValue        int64   `json:"EnterpriseValue"`
+	EnterpriseValueRevenue float64 `json:"EnterpriseValueRevenue"`
+	EnterpriseValueEbitda  float64 `json:"EnterpriseValueEbitda"`
+}
+
+type eodhdSharesStats struct {
+	SharesOutstanding       int64   `json:"SharesOutstanding"`
+	SharesFloat             int64   `json:"SharesFloat"`
+	PercentInsiders         float64 `json:"PercentInsiders"`
+	PercentInstitutions     float64 `json:"PercentInstitutions"`
+	SharesShort             int64   `json:"SharesShort"`
+	ShortRatio              float64 `json:"ShortRatio"`
+	ShortPercentOutstanding float64 `json:"ShortPercentOutstanding"`
+	ShortPercentFloat       float64 `json:"ShortPercentFloat"`
+}
+
+type eodhdTechnicals struct {
+	Beta                  float64 `json:"Beta"`
+	FiftyTwoWeekHigh      float64 `json:"52WeekHigh"`
+	FiftyTwoWeekLow       float64 `json:"52WeekLow"`
+	FiftyDayMA            float64 `json:"50DayMA"`
+	TwoHundredDayMA       float64 `json:"200DayMA"`
+	SharesShort           int64   `json:"SharesShort"`
+	SharesShortPriorMonth int64   `json:"SharesShortPriorMonth"`
+	ShortRatio            float64 `json:"ShortRatio"`
+	ShortPercent          float64 `json:"ShortPercent"`
+}
+
+type eodhdSplitsDividends struct {
+	ForwardAnnualDividendRate  float64 `json:"ForwardAnnualDividendRate"`
+	ForwardAnnualDividendYield float64 `json:"ForwardAnnualDividendYield"`
+	PayoutRatio                float64 `json:"PayoutRatio"`
+	DividendDate               string  `json:"DividendDate"`
+	ExDividendDate             string  `json:"ExDividendDate"`
+	LastSplitFactor            string  `json:"LastSplitFactor"`
+	LastSplitDate              string  `json:"LastSplitDate"`
+}
+
+type eodhdAnalystRatings struct {
+	Rating      float64 `json:"Rating"`
+	TargetPrice float64 `json:"TargetPrice"`
+	StrongBuy   int     `json:"StrongBuy"`
+	Buy         int     `json:"Buy"`
+	Hold        int     `json:"Hold"`
+	Sell        int     `json:"Sell"`
+	StrongSell  int     `json:"StrongSell"`
+}
+
+type eodhdHolders struct {
+	// EODHD returns Institutions as an object with numeric keys: {"0": {...}, "1": {...}}
+	Institutions map[string]eodhdInstitution `json:"Institutions"`
+	Funds        map[string]eodhdInstitution `json:"Funds"`
+}
+
+type eodhdInstitution struct {
+	Name          string  `json:"name"`
+	Date          string  `json:"date"`
+	TotalShares   float64 `json:"totalShares"`
+	TotalAssets   float64 `json:"totalAssets"`
+	CurrentShares int64   `json:"currentShares"`
+	Change        int64   `json:"change"`
+	ChangeP       float64 `json:"change_p"`
+}
+
+type eodhdESGScores struct {
+	RatingDate       string  `json:"ratingDate"`
+	TotalEsg         float64 `json:"totalEsg"`
+	EnvironmentScore float64 `json:"environmentScore"`
+	SocialScore      float64 `json:"socialScore"`
+	GovernanceScore  float64 `json:"governanceScore"`
+	ControversyLevel int     `json:"controversyLevel"`
+}
+
+type eodhdEarnings struct {
+	// EODHD returns History as an object with numeric keys: {"0": {...}, "1": {...}}
+	History map[string]eodhdEarningsHistory `json:"History"`
+	Trend   map[string]eodhdEarningsTrend   `json:"Trend"`
+	Annual  map[string]eodhdEarningsAnnual  `json:"Annual"`
+}
+
+type eodhdEarningsHistory struct {
+	ReportDate        string  `json:"reportDate"`
+	Date              string  `json:"date"`
+	BeforeAfterMarket string  `json:"beforeAfterMarket"`
+	Currency          string  `json:"currency"`
+	EpsActual         float64 `json:"epsActual"`
+	EpsEstimate       float64 `json:"epsEstimate"`
+	EpsDifference     float64 `json:"epsDifference"`
+	SurprisePercent   float64 `json:"surprisePercent"`
+}
+
+// eodhdEarningsTrend uses interface{} for numeric fields because EODHD API returns
+// these as strings (e.g., "-0.0401") instead of numbers
+type eodhdEarningsTrend struct {
+	Date                 string      `json:"date"`
+	Period               string      `json:"period"`
+	Growth               interface{} `json:"growth"`
+	EarningsEstimateAvg  interface{} `json:"earningsEstimateAvg"`
+	EarningsEstimateLow  interface{} `json:"earningsEstimateLow"`
+	EarningsEstimateHigh interface{} `json:"earningsEstimateHigh"`
+	RevenueEstimateAvg   interface{} `json:"revenueEstimateAvg"`
+	RevenueEstimateLow   interface{} `json:"revenueEstimateLow"`
+	RevenueEstimateHigh  interface{} `json:"revenueEstimateHigh"`
+}
+
+type eodhdEarningsAnnual struct {
+	Date      string  `json:"date"`
+	EpsActual float64 `json:"epsActual"`
+}
+
+type eodhdFinancials struct {
+	BalanceSheet    eodhdFinancialStatements `json:"Balance_Sheet"`
+	CashFlow        eodhdFinancialStatements `json:"Cash_Flow"`
+	IncomeStatement eodhdFinancialStatements `json:"Income_Statement"`
+}
+
+type eodhdFinancialStatements struct {
+	Currency  string                            `json:"currency"`
+	Yearly    map[string]map[string]interface{} `json:"yearly"`
+	Quarterly map[string]map[string]interface{} `json:"quarterly"`
 }
 
 // NewASXStockCollectorWorker creates a new consolidated stock collector worker
 func NewASXStockCollectorWorker(
 	documentStorage interfaces.DocumentStorage,
+	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 ) *ASXStockCollectorWorker {
 	return &ASXStockCollectorWorker{
 		documentStorage: documentStorage,
+		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
 		httpClient: &http.Client{
@@ -546,35 +624,25 @@ func (w *ASXStockCollectorWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
-// fetchComprehensiveData fetches all stock data from Yahoo Finance in a single API call
-func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, asxCode, period string) (*StockCollectorData, error) {
-	data := &StockCollectorData{
-		Symbol:      asxCode,
-		AsxCode:     asxCode,
-		LastUpdated: time.Now(),
+// getEODHDAPIKey retrieves the EODHD API key from KV storage
+func (w *ASXStockCollectorWorker) getEODHDAPIKey(ctx context.Context) string {
+	if w.kvStorage == nil {
+		w.logger.Warn().Msg("EODHD API key lookup failed: kvStorage is nil")
+		return ""
 	}
-
-	yahooSymbol := strings.ToUpper(asxCode) + ".AX"
-
-	// Single Yahoo Finance API call with all modules
-	modules := []string{
-		"price",
-		"summaryDetail",
-		"defaultKeyStatistics",
-		"financialData",
-		"recommendationTrend",
-		"upgradeDowngradeHistory",
-		"incomeStatementHistory",
-		"incomeStatementHistoryQuarterly",
-		"balanceSheetHistory",
-		"cashflowStatementHistory",
+	apiKey, err := common.ResolveAPIKey(ctx, w.kvStorage, eodhdAPIKeyEnvVar, "")
+	if err != nil {
+		w.logger.Warn().Err(err).Str("key_name", eodhdAPIKeyEnvVar).Msg("Failed to resolve EODHD API key")
+		return ""
 	}
+	if apiKey == "" {
+		w.logger.Warn().Str("key_name", eodhdAPIKeyEnvVar).Msg("EODHD API key is empty")
+	}
+	return apiKey
+}
 
-	url := fmt.Sprintf(
-		"https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=%s",
-		yahooSymbol, strings.Join(modules, ","),
-	)
-
+// makeRequest makes an HTTP request
+func (w *ASXStockCollectorWorker) makeRequest(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -582,210 +650,412 @@ func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, as
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch stock data: %w", err)
-	}
-	defer resp.Body.Close()
+	return w.httpClient.Do(req)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Yahoo Finance API returned status %d", resp.StatusCode)
-	}
-
-	var apiResp yahooQuoteSummaryFullResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+// fetchComprehensiveData fetches all stock data from EODHD API
+func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, asxCode, period string) (*StockCollectorData, error) {
+	data := &StockCollectorData{
+		Symbol:      asxCode,
+		AsxCode:     asxCode,
+		LastUpdated: time.Now(),
 	}
 
-	if len(apiResp.QuoteSummary.Result) == 0 {
-		return nil, fmt.Errorf("no data in response for %s", yahooSymbol)
+	apiKey := w.getEODHDAPIKey(ctx)
+	if apiKey == "" {
+		w.logger.Error().
+			Str("asx_code", asxCode).
+			Str("key_name", eodhdAPIKeyEnvVar).
+			Msg("EODHD API key not found - stock data will be empty")
+		return nil, fmt.Errorf("EODHD API key '%s' not configured in KV store", eodhdAPIKeyEnvVar)
 	}
 
-	result := apiResp.QuoteSummary.Result[0]
+	// EODHD uses .AU for ASX stocks
+	eodhdSymbol := strings.ToUpper(asxCode) + ".AU"
 
-	// Extract price data
-	data.CompanyName = result.Price.ShortName
-	data.Currency = result.Price.Currency
-	if data.Currency == "" {
-		data.Currency = "AUD"
+	// STEP 1: Fetch fundamentals (includes most data)
+	if err := w.fetchEODHDFundamentals(ctx, apiKey, eodhdSymbol, data); err != nil {
+		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch EODHD fundamentals")
+		// Continue anyway - we'll try to get historical prices
 	}
-	data.CurrentPrice = result.Price.RegularMarketPrice.Raw
-	data.PriceChange = result.Price.RegularMarketChange.Raw
-	data.ChangePercent = result.Price.RegularMarketChangePercent.Raw
-	data.DayLow = result.Price.RegularMarketDayLow.Raw
-	data.DayHigh = result.Price.RegularMarketDayHigh.Raw
-	data.Volume = result.Price.RegularMarketVolume.Raw
-	data.AvgVolume = result.Price.AverageVolume.Raw
-	data.MarketCap = result.Price.MarketCap.Raw
 
-	// Summary detail
-	data.Week52Low = result.SummaryDetail.FiftyTwoWeekLow.Raw
-	data.Week52High = result.SummaryDetail.FiftyTwoWeekHigh.Raw
-	data.PERatio = result.SummaryDetail.TrailingPE.Raw
-	data.DividendYield = result.SummaryDetail.DividendYield.Raw * 100 // Convert to percentage
-	data.EPS = result.DefaultKeyStatistics.TrailingEps.Raw
+	// STEP 2: Fetch historical prices
+	if err := w.fetchEODHDHistoricalPrices(ctx, apiKey, eodhdSymbol, period, data); err != nil {
+		w.logger.Warn().Err(err).Msg("Failed to fetch EODHD historical prices")
+	}
 
-	// Analyst coverage
-	data.AnalystCount = result.FinancialData.NumberOfAnalystOpinions.Raw
-	data.TargetMean = result.FinancialData.TargetMeanPrice.Raw
-	data.TargetHigh = result.FinancialData.TargetHighPrice.Raw
-	data.TargetLow = result.FinancialData.TargetLowPrice.Raw
-	data.TargetMedian = result.FinancialData.TargetMedianPrice.Raw
-	data.RecommendationMean = result.FinancialData.RecommendationMean.Raw
-	data.RecommendationKey = result.FinancialData.RecommendationKey
+	// STEP 3: Calculate technicals from historical data
+	w.calculateTechnicals(data)
+
+	// STEP 4: Calculate period performance
+	w.calculatePeriodPerformance(data)
 
 	// Calculate upside potential
 	if data.CurrentPrice > 0 && data.TargetMean > 0 {
 		data.UpsidePotential = ((data.TargetMean - data.CurrentPrice) / data.CurrentPrice) * 100
 	}
 
-	// Recommendation distribution
-	if len(result.RecommendationTrend.Trend) > 0 {
-		currentTrend := result.RecommendationTrend.Trend[0]
-		data.StrongBuy = currentTrend.StrongBuy
-		data.Buy = currentTrend.Buy
-		data.Hold = currentTrend.Hold
-		data.Sell = currentTrend.Sell
-		data.StrongSell = currentTrend.StrongSell
+	w.logger.Info().
+		Str("asx_code", asxCode).
+		Float64("price", data.CurrentPrice).
+		Str("source", "eodhd").
+		Msg("Fetched comprehensive stock data from EODHD")
+
+	return data, nil
+}
+
+// fetchEODHDFundamentals fetches all fundamental data from EODHD
+func (w *ASXStockCollectorWorker) fetchEODHDFundamentals(ctx context.Context, apiKey, symbol string, data *StockCollectorData) error {
+	url := fmt.Sprintf("%s/fundamentals/%s?api_token=%s&fmt=json", eodhdAPIBaseURL, symbol, apiKey)
+
+	resp, err := w.makeRequest(ctx, url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch EODHD fundamentals: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("EODHD fundamentals API returned status %d", resp.StatusCode)
 	}
 
-	// Upgrade/downgrade history (last 10)
-	for i, h := range result.UpgradeDowngradeHistory.History {
-		if i >= 10 {
+	var fundResp eodhdFundamentalsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&fundResp); err != nil {
+		return fmt.Errorf("failed to decode EODHD fundamentals: %w", err)
+	}
+
+	// Debug logging for EODHD fundamentals data
+	w.logger.Debug().
+		Str("symbol", symbol).
+		Int64("market_cap", fundResp.Highlights.MarketCapitalization).
+		Int64("shares_outstanding", fundResp.SharesStats.SharesOutstanding).
+		Float64("50_day_ma", fundResp.Technicals.FiftyDayMA).
+		Float64("200_day_ma", fundResp.Technicals.TwoHundredDayMA).
+		Float64("52_week_high", fundResp.Technicals.FiftyTwoWeekHigh).
+		Float64("52_week_low", fundResp.Technicals.FiftyTwoWeekLow).
+		Msg("EODHD fundamentals decoded")
+
+	// General info
+	data.CompanyName = fundResp.General.Name
+	data.Currency = fundResp.General.CurrencyCode
+	if data.Currency == "" {
+		data.Currency = "AUD"
+	}
+	data.ISIN = fundResp.General.ISIN
+	data.Sector = fundResp.General.Sector
+	data.Industry = fundResp.General.Industry
+
+	// Highlights
+	data.MarketCap = fundResp.Highlights.MarketCapitalization
+	data.PERatio = fundResp.Highlights.PERatio
+	data.PEGRatio = fundResp.Highlights.PEGRatio
+	data.EPS = fundResp.Highlights.EarningsShare
+	data.DividendYield = fundResp.Highlights.DividendYield * 100 // Convert to percentage
+	data.BookValue = fundResp.Highlights.BookValue
+	data.TargetMean = fundResp.Highlights.WallStreetTargetPrice
+	data.ProfitMargin = fundResp.Highlights.ProfitMargin * 100
+	data.OperatingMargin = fundResp.Highlights.OperatingMarginTTM * 100
+	data.ReturnOnAssets = fundResp.Highlights.ReturnOnAssetsTTM * 100
+	data.ReturnOnEquity = fundResp.Highlights.ReturnOnEquityTTM * 100
+	data.RevenueGrowthYoY = fundResp.Highlights.QuarterlyRevenueGrowthYOY * 100
+
+	// Valuation
+	data.ForwardPE = fundResp.Valuation.ForwardPE
+	data.PriceToBook = fundResp.Valuation.PriceBookMRQ
+	data.PriceToSales = fundResp.Valuation.PriceSalesTTM
+	data.EnterpriseValue = fundResp.Valuation.EnterpriseValue
+	data.EVToRevenue = fundResp.Valuation.EnterpriseValueRevenue
+	data.EVToEBITDA = fundResp.Valuation.EnterpriseValueEbitda
+
+	// Shares stats
+	data.SharesOutstanding = fundResp.SharesStats.SharesOutstanding
+	data.SharesFloat = fundResp.SharesStats.SharesFloat
+	data.PercentInsiders = fundResp.SharesStats.PercentInsiders
+	data.PercentInstitutions = fundResp.SharesStats.PercentInstitutions
+
+	// Technicals from EODHD (52-week range, beta, and SMAs)
+	data.Week52High = fundResp.Technicals.FiftyTwoWeekHigh
+	data.Week52Low = fundResp.Technicals.FiftyTwoWeekLow
+	data.Beta = fundResp.Technicals.Beta
+	data.SMA50 = fundResp.Technicals.FiftyDayMA
+	data.SMA200 = fundResp.Technicals.TwoHundredDayMA
+
+	// Calculate current price from market cap and shares outstanding
+	// This works when EOD endpoint is not available (Fundamental Data subscription only)
+	if fundResp.SharesStats.SharesOutstanding > 0 && fundResp.Highlights.MarketCapitalization > 0 {
+		data.CurrentPrice = float64(fundResp.Highlights.MarketCapitalization) / float64(fundResp.SharesStats.SharesOutstanding)
+	} else if fundResp.Technicals.FiftyDayMA > 0 {
+		// Fallback to 50-day MA as price proxy
+		data.CurrentPrice = fundResp.Technicals.FiftyDayMA
+	}
+
+	// Splits/Dividends
+	data.DividendRate = fundResp.SplitsDividends.ForwardAnnualDividendRate
+	data.PayoutRatio = fundResp.SplitsDividends.PayoutRatio * 100
+	data.DividendExDate = fundResp.SplitsDividends.ExDividendDate
+	data.DividendPayDate = fundResp.SplitsDividends.DividendDate
+
+	// Analyst ratings
+	data.RecommendationMean = fundResp.AnalystRatings.Rating
+	data.TargetMean = fundResp.AnalystRatings.TargetPrice
+	data.StrongBuy = fundResp.AnalystRatings.StrongBuy
+	data.Buy = fundResp.AnalystRatings.Buy
+	data.Hold = fundResp.AnalystRatings.Hold
+	data.Sell = fundResp.AnalystRatings.Sell
+	data.StrongSell = fundResp.AnalystRatings.StrongSell
+	data.AnalystCount = data.StrongBuy + data.Buy + data.Hold + data.Sell + data.StrongSell
+
+	// Determine recommendation key from rating
+	if data.RecommendationMean > 0 {
+		if data.RecommendationMean <= 1.5 {
+			data.RecommendationKey = "strong_buy"
+		} else if data.RecommendationMean <= 2.5 {
+			data.RecommendationKey = "buy"
+		} else if data.RecommendationMean <= 3.5 {
+			data.RecommendationKey = "hold"
+		} else if data.RecommendationMean <= 4.5 {
+			data.RecommendationKey = "sell"
+		} else {
+			data.RecommendationKey = "strong_sell"
+		}
+	}
+
+	// ESG Scores
+	data.ESGTotalScore = fundResp.ESGScores.TotalEsg
+	data.ESGEnvironmentScore = fundResp.ESGScores.EnvironmentScore
+	data.ESGSocialScore = fundResp.ESGScores.SocialScore
+	data.ESGGovernanceScore = fundResp.ESGScores.GovernanceScore
+	data.ESGControversy = fundResp.ESGScores.ControversyLevel
+
+	// Earnings history (last 10 - iterate over map and limit to 10 entries)
+	count := 0
+	for _, eh := range fundResp.Earnings.History {
+		if count >= 10 {
 			break
 		}
-		data.UpgradeDowngrades = append(data.UpgradeDowngrades, UpgradeDowngradeEntry{
-			Date:      time.Unix(h.EpochGradeDate, 0).Format("2006-01-02"),
-			Firm:      h.Firm,
-			Action:    h.Action,
-			FromGrade: h.FromGrade,
-			ToGrade:   h.ToGrade,
+		data.EarningsHistory = append(data.EarningsHistory, EarningsEntry{
+			Date:            eh.Date,
+			ReportDate:      eh.ReportDate,
+			EPSActual:       eh.EpsActual,
+			EPSEstimate:     eh.EpsEstimate,
+			EPSSurprise:     eh.EpsDifference,
+			EPSSurprisePerc: eh.SurprisePercent,
 		})
+		count++
 	}
 
-	// Build balance sheet and cashflow maps
-	balanceMap := make(map[int64]struct {
-		Assets int64
-		Liab   int64
-		Equity int64
-	})
-	for _, bs := range result.BalanceSheetHistory.BalanceSheetStatements {
-		balanceMap[bs.EndDate.Raw] = struct {
-			Assets int64
-			Liab   int64
-			Equity int64
-		}{
-			Assets: bs.TotalAssets.Raw,
-			Liab:   bs.TotalLiab.Raw,
-			Equity: bs.TotalStockholderEquity.Raw,
-		}
-	}
+	// Parse financial statements
+	w.parseEODHDFinancials(fundResp.Financials, data)
 
-	cashflowMap := make(map[int64]struct {
-		OperatingCF int64
-		FreeCF      int64
-	})
-	for _, cf := range result.CashflowStatementHistory.CashflowStatements {
-		cashflowMap[cf.EndDate.Raw] = struct {
-			OperatingCF int64
-			FreeCF      int64
-		}{
-			OperatingCF: cf.TotalCashFromOperatingActivities.Raw,
-			FreeCF:      cf.FreeCashFlow.Raw,
-		}
-	}
+	return nil
+}
 
-	// Annual financial data
-	for _, is := range result.IncomeStatementHistory.IncomeStatementHistory {
+// parseEODHDFinancials parses EODHD financial statements into annual/quarterly data
+func (w *ASXStockCollectorWorker) parseEODHDFinancials(financials eodhdFinancials, data *StockCollectorData) {
+	// Get sorted years from income statement
+	incomeYears := make([]string, 0, len(financials.IncomeStatement.Yearly))
+	for year := range financials.IncomeStatement.Yearly {
+		incomeYears = append(incomeYears, year)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(incomeYears)))
+
+	// Process yearly financial data
+	for _, year := range incomeYears {
+		incomeData := financials.IncomeStatement.Yearly[year]
+		balanceData := financials.BalanceSheet.Yearly[year]
+		cashflowData := financials.CashFlow.Yearly[year]
+
 		entry := FinancialPeriodEntry{
-			EndDate:         time.Unix(is.EndDate.Raw, 0).Format("2006-01-02"),
-			PeriodType:      "annual",
-			TotalRevenue:    is.TotalRevenue.Raw,
-			GrossProfit:     is.GrossProfit.Raw,
-			OperatingIncome: is.OperatingIncome.Raw,
-			NetIncome:       is.NetIncome.Raw,
-			EBITDA:          is.EBITDA.Raw,
+			EndDate:    year,
+			PeriodType: "annual",
 		}
 
-		if is.TotalRevenue.Raw > 0 {
-			entry.GrossMargin = float64(is.GrossProfit.Raw) / float64(is.TotalRevenue.Raw) * 100
-			entry.NetMargin = float64(is.NetIncome.Raw) / float64(is.TotalRevenue.Raw) * 100
+		// Income statement
+		if v, ok := incomeData["totalRevenue"].(float64); ok {
+			entry.TotalRevenue = int64(v)
+		}
+		if v, ok := incomeData["grossProfit"].(float64); ok {
+			entry.GrossProfit = int64(v)
+		}
+		if v, ok := incomeData["operatingIncome"].(float64); ok {
+			entry.OperatingIncome = int64(v)
+		}
+		if v, ok := incomeData["netIncome"].(float64); ok {
+			entry.NetIncome = int64(v)
+		}
+		if v, ok := incomeData["ebitda"].(float64); ok {
+			entry.EBITDA = int64(v)
 		}
 
-		if bs, ok := balanceMap[is.EndDate.Raw]; ok {
-			entry.TotalAssets = bs.Assets
-			entry.TotalLiab = bs.Liab
-			entry.TotalEquity = bs.Equity
+		// Balance sheet
+		if balanceData != nil {
+			if v, ok := balanceData["totalAssets"].(float64); ok {
+				entry.TotalAssets = int64(v)
+			}
+			if v, ok := balanceData["totalLiab"].(float64); ok {
+				entry.TotalLiab = int64(v)
+			}
+			if v, ok := balanceData["totalStockholderEquity"].(float64); ok {
+				entry.TotalEquity = int64(v)
+			}
 		}
 
-		if cf, ok := cashflowMap[is.EndDate.Raw]; ok {
-			entry.OperatingCF = cf.OperatingCF
-			entry.FreeCF = cf.FreeCF
+		// Cash flow
+		if cashflowData != nil {
+			if v, ok := cashflowData["totalCashFromOperatingActivities"].(float64); ok {
+				entry.OperatingCF = int64(v)
+			}
+			if v, ok := cashflowData["freeCashFlow"].(float64); ok {
+				entry.FreeCF = int64(v)
+			}
+		}
+
+		// Calculate margins
+		if entry.TotalRevenue > 0 {
+			entry.GrossMargin = float64(entry.GrossProfit) / float64(entry.TotalRevenue) * 100
+			entry.NetMargin = float64(entry.NetIncome) / float64(entry.TotalRevenue) * 100
 		}
 
 		data.AnnualData = append(data.AnnualData, entry)
 	}
 
-	// Sort annual data by date (newest first)
-	sort.Slice(data.AnnualData, func(i, j int) bool {
-		return data.AnnualData[i].EndDate > data.AnnualData[j].EndDate
-	})
+	// Process quarterly financial data
+	quarterKeys := make([]string, 0, len(financials.IncomeStatement.Quarterly))
+	for qtr := range financials.IncomeStatement.Quarterly {
+		quarterKeys = append(quarterKeys, qtr)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(quarterKeys)))
 
-	// Quarterly financial data
-	for _, is := range result.IncomeStatementHistoryQuarterly.IncomeStatementHistory {
+	for i, qtr := range quarterKeys {
+		if i >= 8 { // Limit to last 8 quarters
+			break
+		}
+		incomeData := financials.IncomeStatement.Quarterly[qtr]
+
 		entry := FinancialPeriodEntry{
-			EndDate:         time.Unix(is.EndDate.Raw, 0).Format("2006-01-02"),
-			PeriodType:      "quarterly",
-			TotalRevenue:    is.TotalRevenue.Raw,
-			GrossProfit:     is.GrossProfit.Raw,
-			OperatingIncome: is.OperatingIncome.Raw,
-			NetIncome:       is.NetIncome.Raw,
+			EndDate:    qtr,
+			PeriodType: "quarterly",
 		}
 
-		if is.TotalRevenue.Raw > 0 {
-			entry.GrossMargin = float64(is.GrossProfit.Raw) / float64(is.TotalRevenue.Raw) * 100
-			entry.NetMargin = float64(is.NetIncome.Raw) / float64(is.TotalRevenue.Raw) * 100
+		if v, ok := incomeData["totalRevenue"].(float64); ok {
+			entry.TotalRevenue = int64(v)
+		}
+		if v, ok := incomeData["grossProfit"].(float64); ok {
+			entry.GrossProfit = int64(v)
+		}
+		if v, ok := incomeData["operatingIncome"].(float64); ok {
+			entry.OperatingIncome = int64(v)
+		}
+		if v, ok := incomeData["netIncome"].(float64); ok {
+			entry.NetIncome = int64(v)
+		}
+
+		if entry.TotalRevenue > 0 {
+			entry.GrossMargin = float64(entry.GrossProfit) / float64(entry.TotalRevenue) * 100
+			entry.NetMargin = float64(entry.NetIncome) / float64(entry.TotalRevenue) * 100
 		}
 
 		data.QuarterlyData = append(data.QuarterlyData, entry)
 	}
 
-	// Sort quarterly data by date (newest first)
-	sort.Slice(data.QuarterlyData, func(i, j int) bool {
-		return data.QuarterlyData[i].EndDate > data.QuarterlyData[j].EndDate
-	})
+	// Calculate CAGR from annual data
+	data.RevenueCAGR3Y = w.calculateRevenueCAGR(data.AnnualData, 3)
+	data.RevenueCAGR5Y = w.calculateRevenueCAGR(data.AnnualData, 5)
 
-	// Calculate growth metrics
+	// Calculate profit growth YoY
 	if len(data.AnnualData) >= 2 {
-		currentRev := data.AnnualData[0].TotalRevenue
-		prevRev := data.AnnualData[1].TotalRevenue
-		if prevRev > 0 {
-			data.RevenueGrowthYoY = float64(currentRev-prevRev) / float64(prevRev) * 100
-		}
-
 		currentIncome := data.AnnualData[0].NetIncome
 		prevIncome := data.AnnualData[1].NetIncome
 		if prevIncome > 0 {
 			data.ProfitGrowthYoY = float64(currentIncome-prevIncome) / float64(prevIncome) * 100
 		}
 	}
+}
 
-	// Calculate CAGR
-	data.RevenueCAGR3Y = w.calculateRevenueCAGR(data.AnnualData, 3)
-	data.RevenueCAGR5Y = w.calculateRevenueCAGR(data.AnnualData, 5)
+// fetchEODHDHistoricalPrices fetches historical OHLCV data from EODHD
+func (w *ASXStockCollectorWorker) fetchEODHDHistoricalPrices(ctx context.Context, apiKey, symbol, period string, data *StockCollectorData) error {
+	now := time.Now()
+	var dateFrom time.Time
 
-	// Fetch historical prices
-	if err := w.fetchHistoricalPrices(ctx, asxCode, period, data); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to fetch historical prices")
+	switch period {
+	case "M1":
+		dateFrom = now.AddDate(0, -1, 0)
+	case "M3":
+		dateFrom = now.AddDate(0, -3, 0)
+	case "M6":
+		dateFrom = now.AddDate(0, -6, 0)
+	case "Y1":
+		dateFrom = now.AddDate(-1, 0, 0)
+	case "Y2":
+		dateFrom = now.AddDate(-2, 0, 0)
+	case "Y5":
+		dateFrom = now.AddDate(-5, 0, 0)
+	default:
+		dateFrom = now.AddDate(-1, 0, 0)
 	}
 
-	// Calculate technicals
-	w.calculateTechnicals(data)
+	url := fmt.Sprintf("%s/eod/%s?api_token=%s&from=%s&to=%s&fmt=json",
+		eodhdAPIBaseURL, symbol, apiKey,
+		dateFrom.Format("2006-01-02"), now.Format("2006-01-02"))
 
-	// Calculate period performance
-	w.calculatePeriodPerformance(data)
+	resp, err := w.makeRequest(ctx, url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch EODHD historical prices: %w", err)
+	}
+	defer resp.Body.Close()
 
-	return data, nil
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("EODHD EOD API returned status %d", resp.StatusCode)
+	}
+
+	var eodData []eodhdEODData
+	if err := json.NewDecoder(resp.Body).Decode(&eodData); err != nil {
+		return fmt.Errorf("failed to decode EODHD EOD response: %w", err)
+	}
+
+	if len(eodData) == 0 {
+		return fmt.Errorf("no historical data returned from EODHD")
+	}
+
+	var prevClose float64
+	for _, eod := range eodData {
+		entry := OHLCVEntry{
+			Date:   eod.Date,
+			Open:   eod.Open,
+			High:   eod.High,
+			Low:    eod.Low,
+			Close:  eod.Close,
+			Volume: eod.Volume,
+		}
+
+		// Calculate daily change
+		if prevClose > 0 {
+			entry.ChangeValue = entry.Close - prevClose
+			entry.ChangePercent = (entry.ChangeValue / prevClose) * 100
+		}
+		prevClose = entry.Close
+
+		data.HistoricalPrices = append(data.HistoricalPrices, entry)
+	}
+
+	// Set current price from latest EOD data
+	if len(eodData) > 0 {
+		latest := eodData[len(eodData)-1]
+		data.CurrentPrice = latest.Close
+		data.DayLow = latest.Low
+		data.DayHigh = latest.High
+		data.Volume = latest.Volume
+
+		// Calculate change from previous day
+		if len(eodData) > 1 {
+			prevDay := eodData[len(eodData)-2]
+			data.PriceChange = latest.Close - prevDay.Close
+			if prevDay.Close > 0 {
+				data.ChangePercent = (data.PriceChange / prevDay.Close) * 100
+			}
+		}
+	}
+
+	return nil
 }
 
 // calculateRevenueCAGR calculates Compound Annual Growth Rate for revenue
@@ -805,103 +1075,14 @@ func (w *ASXStockCollectorWorker) calculateRevenueCAGR(annualData []FinancialPer
 	return (math.Pow(endValue/startValue, 1.0/float64(years)) - 1) * 100
 }
 
-// fetchHistoricalPrices fetches historical OHLCV from Yahoo Finance
-func (w *ASXStockCollectorWorker) fetchHistoricalPrices(ctx context.Context, asxCode, period string, data *StockCollectorData) error {
-	// Convert period to Yahoo format
-	yahooRange := "1y"
-	switch period {
-	case "M1":
-		yahooRange = "1mo"
-	case "M3":
-		yahooRange = "3mo"
-	case "M6":
-		yahooRange = "6mo"
-	case "Y1":
-		yahooRange = "1y"
-	case "Y2":
-		yahooRange = "2y"
-	case "Y5":
-		yahooRange = "5y"
-	}
-
-	yahooSymbol := strings.ToUpper(asxCode) + ".AX"
-	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=%s",
-		yahooSymbol, yahooRange)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var apiResp yahooChartResponseCollector
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return err
-	}
-
-	if len(apiResp.Chart.Result) == 0 || len(apiResp.Chart.Result[0].Indicators.Quote) == 0 {
-		return fmt.Errorf("no data in response")
-	}
-
-	result := apiResp.Chart.Result[0]
-	quote := result.Indicators.Quote[0]
-
-	var prevClose float64
-	for i, ts := range result.Timestamp {
-		if i >= len(quote.Close) || quote.Close[i] == 0 {
-			continue
-		}
-
-		entry := OHLCVEntry{
-			Date:   time.Unix(ts, 0).Format("2006-01-02"),
-			Close:  quote.Close[i],
-			Volume: 0,
-		}
-		if i < len(quote.Open) {
-			entry.Open = quote.Open[i]
-		}
-		if i < len(quote.High) {
-			entry.High = quote.High[i]
-		}
-		if i < len(quote.Low) {
-			entry.Low = quote.Low[i]
-		}
-		if i < len(quote.Volume) {
-			entry.Volume = quote.Volume[i]
-		}
-
-		// Calculate daily change
-		if prevClose > 0 {
-			entry.ChangeValue = entry.Close - prevClose
-			entry.ChangePercent = (entry.ChangeValue / prevClose) * 100
-		}
-		prevClose = entry.Close
-
-		data.HistoricalPrices = append(data.HistoricalPrices, entry)
-	}
-
-	// Sort by date ascending
-	sort.Slice(data.HistoricalPrices, func(i, j int) bool {
-		return data.HistoricalPrices[i].Date < data.HistoricalPrices[j].Date
-	})
-
-	return nil
-}
-
-// calculateTechnicals calculates technical indicators
+// calculateTechnicals calculates technical indicators from historical data
+// If no historical data available, uses SMA50/SMA200 from fundamentals (if set)
 func (w *ASXStockCollectorWorker) calculateTechnicals(data *StockCollectorData) {
 	if len(data.HistoricalPrices) == 0 {
+		// No historical data - determine trend from fundamentals-provided SMAs
+		if data.CurrentPrice > 0 && data.SMA50 > 0 {
+			data.TrendSignal = w.determineTrend(data.CurrentPrice, 0, data.SMA50, data.SMA200, 50)
+		}
 		return
 	}
 
@@ -910,10 +1091,14 @@ func (w *ASXStockCollectorWorker) calculateTechnicals(data *StockCollectorData) 
 		closes[i] = p.Close
 	}
 
-	// Calculate SMAs
+	// Calculate SMAs from historical data (override fundamentals values for accuracy)
 	data.SMA20 = w.calculateSMA(closes, 20)
-	data.SMA50 = w.calculateSMA(closes, 50)
-	data.SMA200 = w.calculateSMA(closes, 200)
+	if data.SMA50 == 0 {
+		data.SMA50 = w.calculateSMA(closes, 50)
+	}
+	if data.SMA200 == 0 {
+		data.SMA200 = w.calculateSMA(closes, 200)
+	}
 
 	// Calculate RSI
 	data.RSI14 = w.calculateRSI(closes, 14)
@@ -1127,7 +1312,8 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 
 	content.WriteString(fmt.Sprintf("# ASX:%s Comprehensive Stock Data - %s\n\n", asxCode, data.CompanyName))
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
-	content.WriteString(fmt.Sprintf("**Currency**: %s\n\n", data.Currency))
+	content.WriteString(fmt.Sprintf("**Currency**: %s\n", data.Currency))
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeASXStockCollector))
 
 	// Current Price Section
 	content.WriteString("## Current Price\n\n")
@@ -1145,8 +1331,46 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 	content.WriteString("| Metric | Value |\n")
 	content.WriteString("|--------|-------|\n")
 	content.WriteString(fmt.Sprintf("| P/E Ratio | %.2f |\n", data.PERatio))
+	content.WriteString(fmt.Sprintf("| Forward P/E | %.2f |\n", data.ForwardPE))
+	content.WriteString(fmt.Sprintf("| PEG Ratio | %.2f |\n", data.PEGRatio))
 	content.WriteString(fmt.Sprintf("| EPS | $%.2f |\n", data.EPS))
-	content.WriteString(fmt.Sprintf("| Dividend Yield | %.2f%% |\n\n", data.DividendYield))
+	content.WriteString(fmt.Sprintf("| Dividend Yield | %.2f%% |\n", data.DividendYield))
+	content.WriteString(fmt.Sprintf("| Price/Book | %.2f |\n", data.PriceToBook))
+	content.WriteString(fmt.Sprintf("| Price/Sales | %.2f |\n", data.PriceToSales))
+	content.WriteString(fmt.Sprintf("| EV/EBITDA | %.2f |\n", data.EVToEBITDA))
+	content.WriteString(fmt.Sprintf("| Beta | %.2f |\n\n", data.Beta))
+
+	// ESG Scores Section (if available)
+	if data.ESGTotalScore > 0 {
+		content.WriteString("## ESG Scores\n\n")
+		content.WriteString("| Category | Score |\n")
+		content.WriteString("|----------|-------|\n")
+		content.WriteString(fmt.Sprintf("| Total ESG | %.1f |\n", data.ESGTotalScore))
+		content.WriteString(fmt.Sprintf("| Environment | %.1f |\n", data.ESGEnvironmentScore))
+		content.WriteString(fmt.Sprintf("| Social | %.1f |\n", data.ESGSocialScore))
+		content.WriteString(fmt.Sprintf("| Governance | %.1f |\n", data.ESGGovernanceScore))
+		content.WriteString(fmt.Sprintf("| Controversy Level | %d |\n\n", data.ESGControversy))
+	}
+
+	// Profitability Section
+	content.WriteString("## Profitability\n\n")
+	content.WriteString("| Metric | Value |\n")
+	content.WriteString("|--------|-------|\n")
+	content.WriteString(fmt.Sprintf("| Profit Margin | %.2f%% |\n", data.ProfitMargin))
+	content.WriteString(fmt.Sprintf("| Operating Margin | %.2f%% |\n", data.OperatingMargin))
+	content.WriteString(fmt.Sprintf("| Return on Assets | %.2f%% |\n", data.ReturnOnAssets))
+	content.WriteString(fmt.Sprintf("| Return on Equity | %.2f%% |\n\n", data.ReturnOnEquity))
+
+	// Ownership Section
+	if data.SharesOutstanding > 0 {
+		content.WriteString("## Ownership\n\n")
+		content.WriteString("| Metric | Value |\n")
+		content.WriteString("|--------|-------|\n")
+		content.WriteString(fmt.Sprintf("| Shares Outstanding | %s |\n", w.formatLargeNumber(data.SharesOutstanding)))
+		content.WriteString(fmt.Sprintf("| Float | %s |\n", w.formatLargeNumber(data.SharesFloat)))
+		content.WriteString(fmt.Sprintf("| Insider Ownership | %.2f%% |\n", data.PercentInsiders))
+		content.WriteString(fmt.Sprintf("| Institutional | %.2f%% |\n\n", data.PercentInstitutions))
+	}
 
 	// Technical Analysis Section
 	content.WriteString("## Technical Analysis\n\n")
@@ -1206,15 +1430,24 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 	content.WriteString(fmt.Sprintf("| Revenue 3Y CAGR | %.1f%% |\n", data.RevenueCAGR3Y))
 	content.WriteString(fmt.Sprintf("| Revenue 5Y CAGR | %.1f%% |\n\n", data.RevenueCAGR5Y))
 
-	// Annual Financial History
-	if len(data.AnnualData) > 0 {
-		content.WriteString("## Annual Financial History\n\n")
-		content.WriteString("| FY End | Revenue | Net Income | Gross Margin | Net Margin |\n")
-		content.WriteString("|--------|---------|------------|--------------|------------|\n")
-		for _, p := range data.AnnualData {
-			content.WriteString(fmt.Sprintf("| %s | %s | %s | %.1f%% | %.1f%% |\n",
-				p.EndDate, w.formatLargeNumber(p.TotalRevenue), w.formatLargeNumber(p.NetIncome),
-				p.GrossMargin, p.NetMargin))
+	// Historical Prices (last 20 entries for readability, full data in metadata)
+	if len(data.HistoricalPrices) > 0 {
+		content.WriteString("## Historical Prices (Last 24 Months)\n\n")
+		content.WriteString("| Date | Open | High | Low | Close | Volume |\n")
+		content.WriteString("|------|------|------|-----|-------|--------|\n")
+
+		// Show most recent 20 entries (reverse order - newest first)
+		startIdx := 0
+		if len(data.HistoricalPrices) > 20 {
+			startIdx = len(data.HistoricalPrices) - 20
+		}
+		for i := len(data.HistoricalPrices) - 1; i >= startIdx; i-- {
+			p := data.HistoricalPrices[i]
+			content.WriteString(fmt.Sprintf("| %s | $%.2f | $%.2f | $%.2f | $%.2f | %s |\n",
+				p.Date, p.Open, p.High, p.Low, p.Close, w.formatNumber(p.Volume)))
+		}
+		if len(data.HistoricalPrices) > 20 {
+			content.WriteString(fmt.Sprintf("\n*Showing 20 of %d trading days. Full data available in metadata.*\n", len(data.HistoricalPrices)))
 		}
 		content.WriteString("\n")
 	}
@@ -1277,18 +1510,46 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 		"revenue_cagr_3y":     data.RevenueCAGR3Y,
 		"revenue_cagr_5y":     data.RevenueCAGR5Y,
 		"parent_job_id":       parentJobID,
+		// Extended fields from EODHD
+		"isin":                  data.ISIN,
+		"sector":                data.Sector,
+		"industry":              data.Industry,
+		"forward_pe":            data.ForwardPE,
+		"peg_ratio":             data.PEGRatio,
+		"book_value":            data.BookValue,
+		"price_to_book":         data.PriceToBook,
+		"price_to_sales":        data.PriceToSales,
+		"enterprise_value":      data.EnterpriseValue,
+		"ev_to_revenue":         data.EVToRevenue,
+		"ev_to_ebitda":          data.EVToEBITDA,
+		"beta":                  data.Beta,
+		"profit_margin":         data.ProfitMargin,
+		"operating_margin":      data.OperatingMargin,
+		"return_on_assets":      data.ReturnOnAssets,
+		"return_on_equity":      data.ReturnOnEquity,
+		"shares_outstanding":    data.SharesOutstanding,
+		"shares_float":          data.SharesFloat,
+		"percent_insiders":      data.PercentInsiders,
+		"percent_institutions":  data.PercentInstitutions,
+		"esg_total_score":       data.ESGTotalScore,
+		"esg_environment_score": data.ESGEnvironmentScore,
+		"esg_social_score":      data.ESGSocialScore,
+		"esg_governance_score":  data.ESGGovernanceScore,
+		"esg_controversy":       data.ESGControversy,
+		"dividend_rate":         data.DividendRate,
+		"dividend_ex_date":      data.DividendExDate,
+		"dividend_pay_date":     data.DividendPayDate,
+		"payout_ratio":          data.PayoutRatio,
 	}
 
 	// Add structured arrays to metadata
+	if len(data.EarningsHistory) > 0 {
+		metadata["earnings_history"] = data.EarningsHistory
+	}
 	if len(data.UpgradeDowngrades) > 0 {
 		metadata["upgrade_downgrades"] = data.UpgradeDowngrades
 	}
-	if len(data.AnnualData) > 0 {
-		metadata["annual_data"] = data.AnnualData
-	}
-	if len(data.QuarterlyData) > 0 {
-		metadata["quarterly_data"] = data.QuarterlyData
-	}
+	// Note: annual_data and quarterly_data removed - obtained via company announcements
 	if len(data.HistoricalPrices) > 0 {
 		metadata["historical_prices"] = data.HistoricalPrices
 	}
@@ -1301,7 +1562,7 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 		ID:              "doc_" + uuid.New().String(),
 		SourceType:      "asx_stock_collector",
 		SourceID:        fmt.Sprintf("asx:%s:stock_collector", asxCode),
-		URL:             fmt.Sprintf("https://finance.yahoo.com/quote/%s.AX", asxCode),
+		URL:             fmt.Sprintf("https://eodhd.com/financial-summary/%s.AU", asxCode),
 		Title:           fmt.Sprintf("ASX:%s Comprehensive Stock Data", asxCode),
 		ContentMarkdown: content.String(),
 		DetailLevel:     models.DetailLevelFull,

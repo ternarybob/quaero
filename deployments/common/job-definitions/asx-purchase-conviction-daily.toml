@@ -66,6 +66,7 @@ goal_template = "asx-purchase-conviction-goal"
 type = "email"
 description = "Email purchase conviction report"
 depends = "conviction_analysis"
+always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "ASX Purchase Conviction Report - High-Conviction Opportunities"
