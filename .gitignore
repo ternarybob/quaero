@@ -64,6 +64,18 @@ dev-debug.log
 /pages/styles/bulma/
 # Environment variables
 .env
+.env.*
+!.env.example
+
+# Credentials & Keys (extra safety)
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+**/auth/*.json
+!**/auth/*.example.json
 # Editor directories and files
 .idea
 .vscode
