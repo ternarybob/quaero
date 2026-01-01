@@ -39,9 +39,12 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
 
 === PHASE 1: DATA COLLECTION ===
 
-1. STOCK DATA: For EACH holding in variables:
+1. COMPREHENSIVE STOCK DATA: For EACH holding in variables:
    - Use fetch_stock_data with period: Y5 for 5-year historical data
-   - Captures: current price, OHLCV history, technical indicators, period performance
+   - This single call includes: prices, technicals, analyst coverage, and financials
+   - Captures: current price, OHLCV history, technical indicators, period performance,
+     analyst count, consensus rating, price targets, upgrade/downgrades,
+     revenue, profit, margins, cash flow, YoY growth, 3Y/5Y CAGR
 
 2. ANNOUNCEMENTS: For EACH holding:
    - Use fetch_announcements with period: Y1 for annual announcements
@@ -49,14 +52,15 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
 
 3. BENCHMARK DATA:
    - Fetch ASX 200 (XJO) for large cap comparison
-   - Fetch Small Ords (XSO) for small cap comparison
+   - Fetch Small Ords (XSO) for small cap comparison using fetch_index_data
 
-4. NEWS: Search for financial news on each holding
-   - Use search_web for analyst coverage, broker notes
+4. NEWS (optional): Search for financial news on each holding
+   - Use search_web for current news and market sentiment
+   - Use sparingly - analyst coverage and financials are already in fetch_stock_data
 
 === PHASE 2: PROFIT & LOSS ANALYSIS ===
 
-5. PORTFOLIO VALUATION (for EACH holding):
+7. PORTFOLIO VALUATION (for EACH holding):
    - Current Price: from stock data
    - Cost Basis: Units × Avg Purchase Price (from variables)
    - Current Value: Units × Current Price
@@ -64,7 +68,7 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
    - Return %: (Current Value - Cost Basis) / Cost Basis × 100
    - Contribution: Holding's % of total portfolio gain/loss
 
-6. TOTAL PORTFOLIO P/L:
+8. TOTAL PORTFOLIO P/L:
    - Sum of all Cost Bases = Total Investment
    - Sum of all Current Values = Total Portfolio Value
    - Total Unrealized P/L = Total Value - Total Investment
@@ -72,18 +76,18 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
 
 === PHASE 3: PORTFOLIO MIX ANALYSIS ===
 
-7. DIVERSIFICATION ASSESSMENT:
+9. DIVERSIFICATION ASSESSMENT:
    - Industry concentration: % in each industry/sector
    - Single-stock risk: Flag any holding >20% of portfolio
    - Sector correlation: How holdings might move together
    - For single-stock portfolio: Emphasize concentration risk
 
-8. COMPANY QUALITY ASSESSMENT (for EACH holding):
+10. COMPANY QUALITY ASSESSMENT (for EACH holding):
    - Revenue trajectory (growing/stable/declining)
    - Profit trajectory (NPAT/margin trends)
    - Quality Grade: A (excellent) / B (good) / C (average) / D (weak) / F (speculative)
 
-9. PORTFOLIO MIX RATING:
+11. PORTFOLIO MIX RATING:
    - DEFENSIVE: % in ETFs, bonds, cash, blue chips
    - GROWTH: % in small caps, technology, emerging
    - INCOME: Dividend yield of portfolio
@@ -91,7 +95,7 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
 
 === PHASE 4: RECOMMENDATIONS ===
 
-10. DUAL RECOMMENDATIONS (for EACH holding):
+12. DUAL RECOMMENDATIONS (for EACH holding):
 
     TRADER VIEW (1-6 weeks):
     - Focus: Technical momentum, near-term catalysts
@@ -104,7 +108,7 @@ IMPORTANT: The portfolio may contain 1 or more stocks. Adjust analysis appropria
     - Conviction: 1-10
     - Only recommend ACCUMULATE for Quality A or B companies
 
-11. PORTFOLIO ACTIONS:
+13. PORTFOLIO ACTIONS:
     - Rebalancing recommendations if any holding drifted from target weight
     - Add/trim suggestions based on quality and valuation
     - SMSF compliance notes (diversification rules, arm's length requirements)
@@ -142,12 +146,13 @@ FINAL OUTPUT MUST INCLUDE:
 """
 
 # Available tools - workers exposed to the orchestrator as callable tools
+# NOTE: fetch_stock_data now uses asx_stock_collector which includes analyst coverage and historical financials
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
+    { name = "fetch_stock_data", description = "Fetch comprehensive ASX stock data including prices, technicals, analyst coverage, and historical financials in ONE call. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y2). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance, analyst count, consensus rating, price targets, upside potential, revenue/profit history, YoY growth, 3Y/5Y CAGR, upgrade/downgrades.", worker = "asx_stock_collector" },
     { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
     { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: analyst coverage, broker notes, competitor analysis.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for portfolio P/L calculations and recommendations.", worker = "summary" },
+    { name = "search_web", description = "Search web for financial news and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: news, competitor analysis. NOTE: Analyst coverage and financial history are included in fetch_stock_data.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for portfolio P/L calculations and recommendations. For stock data (includes analyst/financials) use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
 ]
 
 # Output schema reference - loads external JSON schema from ../schemas/

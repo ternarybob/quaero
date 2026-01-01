@@ -35,10 +35,11 @@ const (
 
 	// Financial data workers
 	WorkerTypeASXAnnouncements        WorkerType = "asx_announcements"         // Fetch ASX company announcements
-	WorkerTypeASXStockData            WorkerType = "asx_stock_data"            // Fetch real-time stock prices and technical analysis
+	WorkerTypeASXStockData            WorkerType = "asx_stock_data"            // DEPRECATED: Use asx_stock_collector instead
 	WorkerTypeASXDirectorInterest     WorkerType = "asx_director_interest"     // Fetch ASX director interest (Appendix 3Y) filings
-	WorkerTypeASXAnalystCoverage      WorkerType = "asx_analyst_coverage"      // Fetch analyst coverage, price targets, and broker ratings
-	WorkerTypeASXHistoricalFinancials WorkerType = "asx_historical_financials" // Fetch historical financial data (revenue, profit, EPS history)
+	WorkerTypeASXAnalystCoverage      WorkerType = "asx_analyst_coverage"      // DEPRECATED: Use asx_stock_collector instead
+	WorkerTypeASXHistoricalFinancials WorkerType = "asx_historical_financials" // DEPRECATED: Use asx_stock_collector instead
+	WorkerTypeASXStockCollector       WorkerType = "asx_stock_collector"       // Consolidated worker: price, analyst coverage, and historical financials
 	WorkerTypeMacroData               WorkerType = "macro_data"                // Fetch macroeconomic data (RBA rates, commodity prices)
 	WorkerTypeCompetitorAnalysis      WorkerType = "competitor_analysis"       // Analyze competitors and spawn stock data jobs
 
@@ -64,7 +65,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
 		WorkerTypeASXStockData, WorkerTypeASXDirectorInterest, WorkerTypeASXAnalystCoverage,
-		WorkerTypeASXHistoricalFinancials, WorkerTypeMacroData,
+		WorkerTypeASXHistoricalFinancials, WorkerTypeASXStockCollector, WorkerTypeMacroData,
 		WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
@@ -102,6 +103,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeASXDirectorInterest,
 		WorkerTypeASXAnalystCoverage,
 		WorkerTypeASXHistoricalFinancials,
+		WorkerTypeASXStockCollector,
 		WorkerTypeMacroData,
 		WorkerTypeCompetitorAnalysis,
 		WorkerTypeTestJobGenerator,

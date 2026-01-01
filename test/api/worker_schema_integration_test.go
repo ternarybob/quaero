@@ -231,8 +231,16 @@ func TestWorkerASXStockData(t *testing.T) {
 	}
 	assertResultFilesExist(t, env, 1)
 
-	// ===== RUN 2 =====
-	t.Log("=== Run 2 ===")
+	// Capture Run 1 timestamp for cache validation
+	timestamp1, docID1, err := getDocumentLastSynced(t, helper, []string{"asx-stock-data", "bhp"})
+	if err != nil {
+		t.Logf("Warning: failed to get document timestamp for run 1: %v", err)
+	} else {
+		t.Logf("Run 1 document ID: %s", docID1)
+	}
+
+	// ===== RUN 2 (should use cache) =====
+	t.Log("=== Run 2 (should use cache) ===")
 	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
 	require.NoError(t, err, "Failed to execute job definition for run 2")
 	defer execResp2.Body.Close()
@@ -252,10 +260,85 @@ func TestWorkerASXStockData(t *testing.T) {
 
 			// Compare consistency between runs
 			assertOutputStructureConsistency(t, env)
+
+			// Verify cache was used - timestamp should match Run 1
+			timestamp2, _, err := getDocumentLastSynced(t, helper, []string{"asx-stock-data", "bhp"})
+			if err != nil {
+				t.Logf("Warning: failed to get document timestamp for run 2: %v", err)
+			} else {
+				assertCacheUsed(t, timestamp1, timestamp2)
+			}
 		}
 	}
 
-	t.Log("PASS: asx_stock_data worker produced consistent output across runs")
+	// ===== RUN 3 (force_refresh=true, should bypass cache) =====
+	t.Log("=== Run 3 (force_refresh=true, should bypass cache) ===")
+
+	// Create new job definition with force_refresh enabled
+	defID3 := fmt.Sprintf("test-asx-stock-data-force-%d", time.Now().UnixNano())
+	body3 := map[string]interface{}{
+		"id":          defID3,
+		"name":        "ASX Stock Data Worker Test - Force Refresh",
+		"description": "Test asx_stock_data worker with force_refresh to bypass cache",
+		"type":        "asx_stock_data",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-stock-data"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-stock",
+				"type": "asx_stock_data",
+				"config": map[string]interface{}{
+					"asx_code":      "BHP",
+					"period":        "Y2",
+					"force_refresh": true, // Bypass cache
+				},
+			},
+		},
+	}
+
+	resp3, err := helper.POST("/api/job-definitions", body3)
+	require.NoError(t, err, "Failed to create job definition for run 3")
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode == http.StatusCreated {
+		defer func() {
+			delResp, _ := helper.DELETE("/api/job-definitions/" + defID3)
+			if delResp != nil {
+				delResp.Body.Close()
+			}
+		}()
+
+		execResp3, err := helper.POST("/api/job-definitions/"+defID3+"/execute", nil)
+		require.NoError(t, err, "Failed to execute job definition for run 3")
+		defer execResp3.Body.Close()
+
+		if execResp3.StatusCode == http.StatusAccepted {
+			var execResult3 map[string]interface{}
+			require.NoError(t, helper.ParseJSONResponse(execResp3, &execResult3))
+			jobID3 := execResult3["job_id"].(string)
+			t.Logf("Executed asx_stock_data job run 3 (force_refresh): %s", jobID3)
+
+			finalStatus3 := waitForJobCompletion(t, helper, jobID3, 2*time.Minute)
+			if finalStatus3 == "completed" {
+				if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-stock-data", "bhp"}, 3); err != nil {
+					t.Logf("Warning: failed to save worker output run 3: %v", err)
+				}
+				assertResultFilesExist(t, env, 3)
+
+				// Verify cache was bypassed - timestamp should differ from Run 1
+				timestamp3, _, err := getDocumentLastSynced(t, helper, []string{"asx-stock-data", "bhp"})
+				if err != nil {
+					t.Logf("Warning: failed to get document timestamp for run 3: %v", err)
+				} else {
+					assertCacheBypass(t, timestamp1, timestamp3)
+				}
+			}
+		}
+	} else {
+		t.Logf("INFO: Job definition creation failed for run 3 with status: %d", resp3.StatusCode)
+	}
+
+	t.Log("PASS: asx_stock_data worker produced consistent output across runs with cache validation")
 }
 
 // TestWorkerASXStockDataMultiStock tests the asx_stock_data worker with multiple stocks
@@ -2373,5 +2456,110 @@ func assertOutputStructureConsistency(t *testing.T, env *common.TestEnvironment)
 
 	if merr1 == nil && merr2 == nil {
 		compareMarkdownStructure(t, string(md1), string(md2))
+	}
+}
+
+// =============================================================================
+// Cache Validation Helpers
+// =============================================================================
+
+// getDocumentLastSynced queries the API and returns the LastSynced timestamp for a document.
+// Returns the timestamp, document ID, and any error encountered.
+// The timestamp is extracted from the document's metadata or last_synced field.
+func getDocumentLastSynced(t *testing.T, helper *common.HTTPTestHelper, tags []string) (*time.Time, string, error) {
+	tagStr := strings.Join(tags, ",")
+	resp, err := helper.GET("/api/documents?tags=" + tagStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to query documents: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("document query returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Documents []struct {
+			ID         string     `json:"id"`
+			Title      string     `json:"title"`
+			LastSynced *time.Time `json:"last_synced"`
+			CreatedAt  *time.Time `json:"created_at"`
+			UpdatedAt  *time.Time `json:"updated_at"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		return nil, "", fmt.Errorf("failed to parse document response: %w", err)
+	}
+
+	if len(result.Documents) == 0 {
+		return nil, "", fmt.Errorf("no documents found with tags: %s", tagStr)
+	}
+
+	doc := result.Documents[0]
+
+	// Prefer LastSynced, fall back to UpdatedAt, then CreatedAt
+	var timestamp *time.Time
+	if doc.LastSynced != nil {
+		timestamp = doc.LastSynced
+	} else if doc.UpdatedAt != nil {
+		timestamp = doc.UpdatedAt
+	} else if doc.CreatedAt != nil {
+		timestamp = doc.CreatedAt
+	}
+
+	if timestamp != nil {
+		t.Logf("Document %s timestamp: %s", doc.ID, timestamp.Format("2006-01-02 15:04:05"))
+	} else {
+		t.Logf("Document %s has no timestamp fields", doc.ID)
+	}
+
+	return timestamp, doc.ID, nil
+}
+
+// assertCacheUsed verifies that run2 used cached data from run1 by comparing timestamps.
+// If timestamps match (or are within 1 second), cache was used successfully.
+func assertCacheUsed(t *testing.T, timestamp1, timestamp2 *time.Time) {
+	if timestamp1 == nil || timestamp2 == nil {
+		t.Log("INFO: Cannot verify cache usage - one or both timestamps are nil")
+		return
+	}
+
+	// Allow 1 second tolerance for timing differences
+	diff := timestamp1.Sub(*timestamp2)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	if diff <= time.Second {
+		t.Logf("PASS: Cache was used - timestamps match (t1: %s, t2: %s)",
+			timestamp1.Format("15:04:05"), timestamp2.Format("15:04:05"))
+	} else {
+		t.Errorf("FAIL: Cache was NOT used - timestamps differ by %v (t1: %s, t2: %s)",
+			diff, timestamp1.Format("15:04:05"), timestamp2.Format("15:04:05"))
+	}
+}
+
+// assertCacheBypass verifies that cache was bypassed by checking timestamps differ.
+// If timestamps are different, fresh data was fetched (cache bypassed).
+func assertCacheBypass(t *testing.T, timestamp1, timestamp2 *time.Time) {
+	if timestamp1 == nil || timestamp2 == nil {
+		t.Log("INFO: Cannot verify cache bypass - one or both timestamps are nil")
+		return
+	}
+
+	// Timestamps should differ by more than 1 second for fresh data
+	diff := timestamp1.Sub(*timestamp2)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	if diff > time.Second {
+		t.Logf("PASS: Cache was bypassed - new data fetched (t1: %s, t2: %s, diff: %v)",
+			timestamp1.Format("15:04:05"), timestamp2.Format("15:04:05"), diff)
+	} else {
+		t.Errorf("FAIL: Cache was NOT bypassed - timestamps match (t1: %s, t2: %s)",
+			timestamp1.Format("15:04:05"), timestamp2.Format("15:04:05"))
 	}
 }

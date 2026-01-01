@@ -2,6 +2,11 @@
 // ASXStockDataWorker - Fetches real-time and historical stock data
 // Uses Markit Digital API for fundamentals and Yahoo Finance for OHLCV
 // Provides accurate price data and technical analysis for summaries
+//
+// DEPRECATED: Use asx_stock_collector instead.
+// This worker is kept for backward compatibility with existing jobs.
+// New integrations should use ASXStockCollectorWorker which consolidates
+// price data, analyst coverage, and historical financials into a single call.
 // -----------------------------------------------------------------------
 
 package workers
@@ -296,11 +301,15 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 		sourceID = fmt.Sprintf("asx:%s:index_data", asxCode)
 	}
 
-	// Delete existing cached document if delete_history is set
-	// This ensures stale data is removed when job/template content changes
-	if deleteHistory {
+	// Delete existing cached document if delete_history or force_refresh is set
+	// This ensures stale data is removed when job/template content changes or fresh data is requested
+	if deleteHistory || forceRefresh {
 		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
 		if err == nil && existingDoc != nil {
+			reason := "job/template changed (delete_history)"
+			if forceRefresh {
+				reason = "force_refresh requested"
+			}
 			if err := w.documentStorage.DeleteDocument(existingDoc.ID); err != nil {
 				w.logger.Warn().Err(err).
 					Str("asx_code", asxCode).
@@ -310,10 +319,11 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 				w.logger.Info().
 					Str("asx_code", asxCode).
 					Str("doc_id", existingDoc.ID).
-					Msg("Deleted cached document - job/template changed (delete_history)")
+					Str("reason", reason).
+					Msg("Deleted cached document")
 				if w.jobMgr != nil {
 					w.jobMgr.AddJobLog(ctx, stepID, "info",
-						fmt.Sprintf("ASX:%s - Deleted cached document (job/template changed)", asxCode))
+						fmt.Sprintf("ASX:%s - Deleted cached document (%s)", asxCode, reason))
 				}
 			}
 		}

@@ -29,14 +29,15 @@ model_preference = "auto"
 output_tags = ["purchase-recommendation"]
 
 # Available tools - workers exposed to the orchestrator as callable tools
+# NOTE: fetch_stock_data now uses asx_stock_collector which includes analyst coverage and historical financials
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance.", worker = "asx_stock_data" },
+    { name = "fetch_stock_data", description = "Fetch comprehensive ASX stock data including prices, technicals, analyst coverage, and historical financials in ONE call. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y2). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance, analyst count, consensus rating, price targets, upside potential, revenue/profit history, YoY growth, 3Y/5Y CAGR, upgrade/downgrades.", worker = "asx_stock_collector" },
     { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Use for FY/HY results, trading updates, contracts.", worker = "asx_announcements" },
     { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
     { name = "fetch_director_interest", description = "Fetch ASX director interest (Appendix 3Y) filings showing insider buying/selling. Creates document tagged with ['director-interest', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1). Provides: director name, shares acquired/disposed, filing date. High insider buying is a bullish signal.", worker = "asx_director_interest" },
     { name = "fetch_macro_data", description = "Fetch macroeconomic data: RBA interest rates and commodity prices. Creates document tagged with ['macro-data', '<data_type>']. OPTIONAL params: data_type (string) - 'rba_cash_rate', 'iron_ore', 'gold', or 'all' (default 'all'). Provides: current rates, commodity prices. Use to assess if stock movement is company-specific or macro-driven.", worker = "macro_data" },
-    { name = "search_web", description = "Search web for financial news, analyst reports, and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use specific query recipes: '[TICKER] analyst price target 2025', '[TICKER] bear case risks', '[TICKER] insider buying'. Returns analyst coverage, broker notes, news articles.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for conviction scoring and Short Seller analysis. IMPORTANT: filter_tags uses AND logic - do NOT combine tags from different document types (e.g., 'asx-stock-data' and 'web-search' are mutually exclusive). Use a single document type tag or ticker-specific tags only.", worker = "summary" },
+    { name = "search_web", description = "Search web for financial news and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use specific query recipes: '[TICKER] bear case risks', '[TICKER] insider buying'. NOTE: Analyst coverage and financial history are included in fetch_stock_data.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH. Use HIGH for conviction scoring and Short Seller analysis. IMPORTANT: filter_tags uses AND logic - do NOT combine tags from different document types. For stock data (includes analyst/financials) use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
 ]
 
 # Natural language goal - high-conviction purchase analysis
@@ -52,18 +53,18 @@ Your final report MUST include analysis for EVERY stock provided.
 
 For EACH stock in the variables list (you MUST process ALL of them):
 
-1. DATA COLLECTION:
+1. DATA COLLECTION (consolidated in ONE call per stock):
    - Use fetch_stock_data with period: Y1 for 1-year historical data
+     * This single call includes: prices, technicals, analyst coverage, and financials
    - Use fetch_announcements with period: Y1 for annual announcements
    - Use fetch_index_data for XJO benchmark comparison
    - Use fetch_director_interest to find insider buying/selling activity
    - Use fetch_macro_data for RBA rates and commodity prices (Iron Ore, Gold)
 
 2. TARGETED WEB SEARCHES (use these specific query recipes):
-   - search_web: "[TICKER] analyst price target 2025"
-   - search_web: "[TICKER] ASX broker upgrade downgrade"
    - search_web: "[TICKER] bear case risks concerns"
    - search_web: "[TICKER] insider buying director trades"
+   - NOTE: Analyst coverage and financial history are already included in fetch_stock_data
 
 3. INITIAL ANALYSIS (use analyze_summary for EACH stock):
    Focus on 3 specific criteria:

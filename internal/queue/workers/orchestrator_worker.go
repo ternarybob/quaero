@@ -21,6 +21,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/schemas"
 	"github.com/ternarybob/quaero/internal/services/llm"
 )
 
@@ -376,8 +377,7 @@ type GoalTemplateConfig struct {
 	OutputSchemaRef string                 // Reference to external schema file (e.g., "stock-report.schema.json")
 }
 
-// loadSchemaFromFile loads a JSON schema from the schemas directory.
-// The schemas directory is expected to be a sibling of the templates directory (../schemas/).
+// loadSchemaFromFile loads a JSON schema from the embedded schemas.
 // schemaRef is the filename (e.g., "stock-report.schema.json")
 // This function resolves $ref references by loading and inlining referenced schemas.
 func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]interface{}, error) {
@@ -385,19 +385,10 @@ func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]in
 		return nil, nil
 	}
 
-	// Schemas are in ../schemas/ relative to templates directory
-	schemasDir := filepath.Join(filepath.Dir(w.templatesDir), "schemas")
-	schemaPath := filepath.Join(schemasDir, schemaRef)
-
-	// Check if file exists
-	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("schema file not found: %s", schemaPath)
-	}
-
-	// Read schema file
-	schemaContent, err := os.ReadFile(schemaPath)
+	// Load schema from embedded schemas
+	schemaContent, err := schemas.GetSchema(schemaRef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read schema file: %w", err)
+		return nil, fmt.Errorf("schema file not found: %s: %w", schemaRef, err)
 	}
 
 	// Parse JSON schema
@@ -410,7 +401,7 @@ func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]in
 	// This is required because Gemini's ResponseSchema doesn't support $ref
 	visited := make(map[string]bool)
 	visited[schemaRef] = true // Mark current schema as visited to prevent self-reference
-	if err := w.resolveSchemaRefs(schema, schemasDir, visited); err != nil {
+	if err := w.resolveSchemaRefs(schema, visited); err != nil {
 		w.logger.Warn().
 			Err(err).
 			Str("schema_ref", schemaRef).
@@ -420,18 +411,16 @@ func (w *OrchestratorWorker) loadSchemaFromFile(schemaRef string) (map[string]in
 
 	w.logger.Info().
 		Str("schema_ref", schemaRef).
-		Str("schema_path", schemaPath).
 		Int("refs_resolved", len(visited)-1).
-		Msg("Loaded external JSON schema with $ref resolution")
+		Msg("Loaded embedded JSON schema with $ref resolution")
 
 	return schema, nil
 }
 
 // resolveSchemaRefs recursively resolves $ref references in a JSON schema.
 // It replaces $ref objects with the content of the referenced schema file.
-// schemasDir is the directory containing schema files.
 // visited tracks already-resolved refs to prevent cycles.
-func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, schemasDir string, visited map[string]bool) error {
+func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, visited map[string]bool) error {
 	for key, value := range schema {
 		switch v := value.(type) {
 		case map[string]interface{}:
@@ -454,9 +443,8 @@ func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, sc
 				}
 				visited[ref] = true
 
-				// Load referenced schema
-				refPath := filepath.Join(schemasDir, ref)
-				refData, err := os.ReadFile(refPath)
+				// Load referenced schema from embedded schemas
+				refData, err := schemas.GetSchema(ref)
 				if err != nil {
 					return fmt.Errorf("failed to load $ref '%s': %w", ref, err)
 				}
@@ -467,7 +455,7 @@ func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, sc
 				}
 
 				// Recursively resolve refs in the referenced schema
-				if err := w.resolveSchemaRefs(refSchema, schemasDir, visited); err != nil {
+				if err := w.resolveSchemaRefs(refSchema, visited); err != nil {
 					return err
 				}
 
@@ -479,7 +467,7 @@ func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, sc
 					Msg("Resolved $ref and inlined schema")
 			} else {
 				// Recursively resolve refs in nested objects
-				if err := w.resolveSchemaRefs(v, schemasDir, visited); err != nil {
+				if err := w.resolveSchemaRefs(v, visited); err != nil {
 					return err
 				}
 			}
@@ -487,7 +475,7 @@ func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, sc
 			// Handle arrays (e.g., allOf, anyOf, oneOf)
 			for i, item := range v {
 				if itemMap, ok := item.(map[string]interface{}); ok {
-					if err := w.resolveSchemaRefs(itemMap, schemasDir, visited); err != nil {
+					if err := w.resolveSchemaRefs(itemMap, visited); err != nil {
 						return err
 					}
 					v[i] = itemMap

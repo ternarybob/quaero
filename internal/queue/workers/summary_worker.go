@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/schemas"
 	"github.com/ternarybob/quaero/internal/services/llm"
 )
 
@@ -65,41 +65,17 @@ func (w *SummaryWorker) GetType() models.WorkerType {
 	return models.WorkerTypeSummary
 }
 
-// loadSchemaFromFile loads a JSON schema from the schemas directory.
-// The schemas directory is expected to be at deployments/common/schemas/ (relative to working dir).
+// loadSchemaFromFile loads a JSON schema from the embedded schemas.
 // schemaRef is the filename (e.g., "stock-analysis.schema.json")
 func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interface{}, error) {
 	if schemaRef == "" {
 		return nil, nil
 	}
 
-	// Try multiple schema directory locations
-	schemaDirs := []string{
-		"deployments/common/schemas", // Standard deployment location
-		"../schemas",                 // Relative to job-templates
-		"./schemas",                  // Current directory
-		"job-templates/../schemas",   // Relative to job-templates directory
-	}
-
-	var schemaPath string
-	var found bool
-	for _, dir := range schemaDirs {
-		path := fmt.Sprintf("%s/%s", dir, schemaRef)
-		if _, err := os.Stat(path); err == nil {
-			schemaPath = path
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("schema file not found: %s (searched: %v)", schemaRef, schemaDirs)
-	}
-
-	// Read schema file
-	schemaContent, err := os.ReadFile(schemaPath)
+	// Read schema file from embedded FS
+	schemaContent, err := schemas.GetSchema(schemaRef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read schema file: %w", err)
+		return nil, fmt.Errorf("failed to read embedded schema file: %w", err)
 	}
 
 	// Parse JSON schema
@@ -110,8 +86,7 @@ func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interfa
 
 	w.logger.Info().
 		Str("schema_ref", schemaRef).
-		Str("schema_path", schemaPath).
-		Msg("Loaded external JSON schema")
+		Msg("Loaded embedded JSON schema")
 
 	return schema, nil
 }

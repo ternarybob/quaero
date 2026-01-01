@@ -2,6 +2,11 @@
 // ASXAnalystCoverageWorker - Fetches analyst coverage and broker ratings
 // Uses Yahoo Finance API for analyst estimates, price targets, and recommendations
 // Provides structured output for orchestrator consumption
+//
+// DEPRECATED: Use asx_stock_collector instead.
+// This worker is kept for backward compatibility with existing jobs.
+// New integrations should use ASXStockCollectorWorker which consolidates
+// price data, analyst coverage, and historical financials into a single call.
 // -----------------------------------------------------------------------
 
 package workers

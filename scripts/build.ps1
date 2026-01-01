@@ -449,16 +449,8 @@ function Deploy-Files {
         }
     }
 
-    # Deploy schemas from common - always override (same as job-templates)
-    $schemasSourcePath = Join-Path -Path $commonConfigPath -ChildPath "schemas"
-    $schemasDestPath = Join-Path -Path $BinDirectory -ChildPath "schemas"
-
-    if (Test-Path $schemasSourcePath) {
-        if (Test-Path $schemasDestPath) {
-            Remove-Item -Path $schemasDestPath -Recurse -Force
-        }
-        Copy-Item -Path $schemasSourcePath -Destination $schemasDestPath -Recurse
-    }
+    # NOTE: Schemas are now embedded in the binary via internal/schemas/embed.go
+    # No need to deploy schema files to bin directory
 
     # Deploy connectors.toml from common, then local override (only if not exists in bin)
     $connectorsDestPath = Join-Path -Path $BinDirectory -ChildPath "connectors.toml"

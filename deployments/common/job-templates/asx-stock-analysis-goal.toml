@@ -30,14 +30,13 @@ model_preference = "auto"
 output_tags = ["stock-recommendation"]
 
 # Available tools - workers exposed to the orchestrator as callable tools
+# NOTE: fetch_stock_data now uses asx_stock_collector which includes analyst coverage and historical financials
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices, historical data, and technical indicators. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y1). Use period=Y5 for 5-year historical analysis. Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance (7D, 1M, 3M, 6M, 1Y, 2Y returns).", worker = "asx_stock_data" },
+    { name = "fetch_stock_data", description = "Fetch comprehensive ASX stock data including prices, technicals, analyst coverage, and historical financials in ONE call. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2, Y5 (default Y2). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance, period performance, analyst count, consensus rating, price targets, upside potential, revenue/profit history, YoY growth, 3Y/5Y CAGR, upgrade/downgrades.", worker = "asx_stock_collector" },
     { name = "fetch_announcements", description = "Fetch official ASX company announcements with price sensitivity flags. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED params: asx_code (string). OPTIONAL: period (string) - D1, W1, M1, M3, M6, Y1, Y5 (default Y1), limit (int) - max announcements. Use for FY/HY results, trading updates, contracts. Each announcement includes: date, headline, type, price_sensitive flag, PDF link.", worker = "asx_announcements" },
     { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks (XJO, XSO). Creates document tagged with ['asx-index', '<code>', 'benchmark']. REQUIRED params: asx_code (string) - e.g. 'XJO', 'XSO'. Provides: current value, period performance, OHLCV history, technicals.", worker = "asx_stock_data" },
-    { name = "fetch_analyst_coverage", description = "Fetch analyst coverage, broker ratings, and price targets. Creates document tagged with ['asx-analyst-coverage', '<ticker>']. REQUIRED params: asx_code (string). Provides: analyst count, consensus rating (buy/hold/sell), price target (mean/high/low/median), upside potential, recommendation distribution, recent upgrade/downgrades. PREFER this over search_web for analyst data.", worker = "asx_analyst_coverage" },
-    { name = "fetch_historical_financials", description = "Fetch historical financial data (revenue, profit, EPS history). Creates document tagged with ['asx-historical-financials', '<ticker>']. REQUIRED params: asx_code (string). Provides: annual revenue/profit history, quarterly data, gross/net margins, EBITDA, cash flow, YoY growth rates, 3Y/5Y revenue CAGR. PREFER this over search_web for financial history.", worker = "asx_historical_financials" },
-    { name = "search_web", description = "Search web for financial news and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: news, broker notes, competitor analysis, industry trends. NOTE: For analyst coverage use fetch_analyst_coverage instead. For financial history use fetch_historical_financials instead.", worker = "web_search" },
-    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'], for analyst coverage use ['asx-analyst-coverage', '<ticker>'], for financials use ['asx-historical-financials', '<ticker>'].", worker = "summary" },
+    { name = "search_web", description = "Search web for financial news and company research. Creates document tagged with ['web-search']. REQUIRED params: query (string). Use for: news, broker notes, competitor analysis, industry trends. NOTE: Analyst coverage and financial history are included in fetch_stock_data - use search_web only for news/sentiment.", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for complex analysis like FY results deep dive, signal/noise rating). For stock data (includes analyst/financials) use ['asx-stock-data', '<ticker>'], for announcements use ['asx-announcement', '<ticker>'].", worker = "summary" },
 ]
 
 # Natural language goal - the LLM will plan how to achieve this
@@ -46,28 +45,24 @@ Perform a comprehensive daily analysis of all ASX stocks in the variables list.
 
 === PHASE 1: DATA COLLECTION (for EACH stock) ===
 
-1. STOCK DATA: Fetch current market data with 5-year history
+1. COMPREHENSIVE STOCK DATA: Fetch all stock data in ONE call
    - Use fetch_stock_data with period: Y5 for 5-year historical data
-   - Captures: prices, volume, technical indicators, period performance
+   - This single call includes: prices, volume, technical indicators, period performance,
+     analyst coverage (count, consensus, price targets, upgrades/downgrades),
+     AND historical financials (revenue, profit, margins, cash flow, YoY growth, CAGR)
+   - Creates document tagged with ['asx-stock-data', '<ticker>']
 
 2. ANNOUNCEMENTS: Fetch 1-year of ASX announcements
    - Use fetch_announcements with period: Y1 (or M6 for recent focus)
    - Captures: all official ASX announcements with price sensitivity flags
+   - Creates document tagged with ['asx-announcement', '<ticker>']
 
-3. ANALYST COVERAGE: Fetch broker ratings and price targets
-   - Use fetch_analyst_coverage for structured analyst data
-   - Captures: analyst count, consensus rating, price targets, upgrades/downgrades
-
-4. HISTORICAL FINANCIALS: Fetch revenue and profit history
-   - Use fetch_historical_financials for structured financial history
-   - Captures: revenue, profit, margins, cash flow, YoY growth, CAGR
-
-5. NEWS: Search for recent financial news
+3. NEWS: Search for recent financial news (optional)
    - Use search_web for current news and market sentiment
-   - Note: For analyst data, prefer fetch_analyst_coverage. For financials, prefer fetch_historical_financials.
+   - Use sparingly - analyst coverage and financials are already in fetch_stock_data
 
-6. BENCHMARK DATA:
-   - Fetch ASX 200 (XJO) for market comparison
+4. BENCHMARK DATA:
+   - Fetch ASX 200 (XJO) for market comparison using fetch_index_data
 
 === PHASE 2: DEEP ANALYSIS ===
 

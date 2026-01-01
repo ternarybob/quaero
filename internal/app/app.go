@@ -843,6 +843,15 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(asxHistoricalFinancialsWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxHistoricalFinancialsWorker.GetType().String()).Msg("ASX Historical Financials worker registered")
 
+	// Register ASX Stock Collector worker (consolidated: price, analyst coverage, historical financials)
+	asxStockCollectorWorker := workers.NewASXStockCollectorWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(asxStockCollectorWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", asxStockCollectorWorker.GetType().String()).Msg("ASX Stock Collector worker registered")
+
 	// Register Macro Data worker (synchronous execution, fetches RBA rates and commodity prices)
 	macroDataWorker := workers.NewMacroDataWorker(
 		a.StorageManager.DocumentStorage(),

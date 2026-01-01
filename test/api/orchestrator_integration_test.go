@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ternarybob/quaero/internal/schemas"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -1168,16 +1169,16 @@ func saveOrchestratorJobConfig(t *testing.T, resultsDir string, jobDefFile strin
 }
 
 // saveSchemaFile copies the schema file to the results directory
+// Uses embedded schemas from internal/schemas instead of file system
 func saveSchemaFile(t *testing.T, resultsDir string, schemaFile string) {
 	if resultsDir == "" || schemaFile == "" {
 		return
 	}
 
-	// Schemas are in test/config/schemas/
-	schemaPath := filepath.Join("..", "config", "schemas", schemaFile)
-	content, err := os.ReadFile(schemaPath)
+	// Use embedded schemas from internal/schemas package
+	content, err := schemas.GetSchema(schemaFile)
 	if err != nil {
-		t.Logf("Warning: Failed to read schema file %s: %v", schemaFile, err)
+		t.Logf("Warning: Failed to get embedded schema %s: %v", schemaFile, err)
 		return
 	}
 

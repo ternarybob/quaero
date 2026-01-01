@@ -12,9 +12,10 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Orchestrator Worker](#orchestrator-worker)
   - [Analyze Build Worker](#analyze-build-worker)
   - [ASX Announcements Worker](#asx-announcements-worker)
-  - [ASX Stock Data Worker](#asx-stock-data-worker)
-  - [ASX Analyst Coverage Worker](#asx-analyst-coverage-worker)
-  - [ASX Historical Financials Worker](#asx-historical-financials-worker)
+  - [ASX Stock Data Worker](#asx-stock-data-worker) (DEPRECATED)
+  - [ASX Analyst Coverage Worker](#asx-analyst-coverage-worker) (DEPRECATED)
+  - [ASX Historical Financials Worker](#asx-historical-financials-worker) (DEPRECATED)
+  - [ASX Stock Collector Worker](#asx-stock-collector-worker) (RECOMMENDED)
   - [Competitor Analysis Worker](#competitor-analysis-worker)
   - [Classify Worker](#classify-worker)
   - [Code Map Worker](#code-map-worker)
@@ -564,6 +565,8 @@ output_tags = ["asx-gnp-search", "gnp"]
 
 ### ASX Stock Data Worker
 
+> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
+
 **File**: `asx_stock_data_worker.go`
 
 **Purpose**: Fetches real-time and historical stock data from the ASX. Uses Markit Digital API for fundamentals and Yahoo Finance for OHLCV data. Provides accurate price data and calculates technical indicators for analysis summaries.
@@ -626,6 +629,8 @@ output_tags = ["banking-sector", "portfolio"]
 
 ### ASX Analyst Coverage Worker
 
+> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
+
 **File**: `asx_analyst_coverage_worker.go`
 
 **Purpose**: Fetches analyst coverage, broker ratings, and price targets from Yahoo Finance. Provides structured output including analyst count, consensus recommendations, price target ranges, upside potential, and recent upgrade/downgrade history.
@@ -674,6 +679,8 @@ output_tags = ["banking-sector", "portfolio"]
 
 ### ASX Historical Financials Worker
 
+> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
+
 **File**: `asx_historical_financials_worker.go`
 
 **Purpose**: Fetches historical financial data from Yahoo Finance including revenue, profit, margins, cash flow, and growth rates. Provides structured output with annual and quarterly financial statements for multi-year analysis.
@@ -714,6 +721,90 @@ type = "asx_historical_financials"
 description = "Fetch historical financials for CBA"
 asx_code = "CBA"
 output_tags = ["banking-sector", "portfolio"]
+```
+
+---
+
+### ASX Stock Collector Worker
+
+**File**: `asx_stock_collector_worker.go`
+
+**Purpose**: Consolidated Yahoo Finance data collector. Fetches price data, analyst coverage, and historical financials in a **single API call**. This is the recommended replacement for the deprecated `asx_stock_data`, `asx_analyst_coverage`, and `asx_historical_financials` workers.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
+| `period` | string | No | Historical data period (default: "Y2"). Options: M1, M3, M6, Y1, Y2, Y5 |
+| `output_tags` | []string | No | Additional tags to apply to output documents |
+| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
+| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
+
+#### Outputs
+
+- **Single document** with comprehensive stock data including:
+  - **Price Data**: Current price, change, day range, 52-week range, volume, market cap
+  - **Valuation**: P/E ratio, EPS, dividend yield
+  - **Technical Indicators**: SMA20, SMA50, SMA200, RSI14, support/resistance, trend signal
+  - **Period Performance**: 7D, 1M, 3M, 6M, 1Y, 2Y price changes
+  - **Analyst Coverage**: Analyst count, consensus rating, price targets (mean/high/low/median), upside potential, recommendation distribution (Strong Buy/Buy/Hold/Sell/Strong Sell), recent upgrades/downgrades
+  - **Historical Financials**: Annual and quarterly data - revenue, profit, margins, EBITDA, cash flow, YoY growth, 3Y/5Y revenue CAGR
+  - **Historical Prices**: Full OHLCV array for charting
+- Tags: `["asx-stock-data", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- Full structured data in document metadata for downstream consumption
+
+#### Benefits
+
+1. **Single API Call**: Reduces API usage by 3x compared to separate workers
+2. **Consistent Data**: All data fetched at same timestamp, no timing discrepancies
+3. **In-Code Schema**: Uses Go structs for type safety, no external JSON schema files
+4. **No AI Processing**: Pure data collection and calculation - no LLM calls
+
+#### Configuration
+
+No additional configuration required. Fetches data from Yahoo Finance API.
+
+#### Example Job Definition
+
+```toml
+[step.fetch_stock_data]
+type = "asx_stock_collector"
+description = "Fetch comprehensive stock data for CBA"
+asx_code = "CBA"
+period = "Y2"
+output_tags = ["banking-sector", "portfolio"]
+```
+
+#### Migration from Deprecated Workers
+
+Replace separate calls to `asx_stock_data`, `asx_analyst_coverage`, and `asx_historical_financials` with a single `asx_stock_collector` call:
+
+**Before (3 API calls)**:
+```toml
+[step.fetch_price]
+type = "asx_stock_data"
+asx_code = "CBA"
+
+[step.fetch_analysts]
+type = "asx_analyst_coverage"
+asx_code = "CBA"
+
+[step.fetch_financials]
+type = "asx_historical_financials"
+asx_code = "CBA"
+```
+
+**After (1 API call)**:
+```toml
+[step.fetch_stock_data]
+type = "asx_stock_collector"
+asx_code = "CBA"
 ```
 
 ---
@@ -1324,7 +1415,7 @@ The summary worker supports schema-constrained JSON output using Gemini's `Respo
 output_schema_ref = "stock-report.schema.json"  # Loads from ../schemas/
 ```
 
-Schema files location: `deployments/common/schemas/` and `test/config/schemas/` (must be mirrored)
+Schema files location: `internal/schemas/` (embedded in binary via embed.go)
 
 **Available schemas**:
 - `stock-report.schema.json` - Combined multi-stock analysis report
@@ -1760,9 +1851,10 @@ search:
 
 **Data Source Workers**:
 - ASX Announcements Worker
-- ASX Stock Data Worker
-- ASX Analyst Coverage Worker
-- ASX Historical Financials Worker
+- ASX Stock Data Worker (DEPRECATED)
+- ASX Analyst Coverage Worker (DEPRECATED)
+- ASX Historical Financials Worker (DEPRECATED)
+- ASX Stock Collector Worker (RECOMMENDED - replaces 3 workers above)
 - Crawler Worker
 - GitHub Git Worker
 - GitHub Log Worker
