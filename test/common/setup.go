@@ -976,6 +976,21 @@ func (env *TestEnvironment) buildService() error {
 		}
 	}
 
+	// Load Navexa API key from .env.test
+	if key := env.EnvVars["navexa_api_key"]; key != "" {
+		variablesConfig["navexa_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from navexa_api_key in .env.test",
+		}
+	}
+	// Override with NAVEXA_API_KEY environment variable if set
+	if key := env.EnvVars["NAVEXA_API_KEY"]; key != "" {
+		variablesConfig["navexa_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from NAVEXA_API_KEY environment variable",
+		}
+	}
+
 	// Write updated variables.toml
 	if data, err := toml.Marshal(variablesConfig); err == nil {
 		if err := os.WriteFile(variablesFile, data, 0644); err != nil {

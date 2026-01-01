@@ -859,6 +859,36 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(competitorAnalysisWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", competitorAnalysisWorker.GetType().String()).Msg("Competitor Analysis worker registered")
 
+	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
+	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(navexaPortfoliosWorker)
+	a.Logger.Debug().Str("step_type", navexaPortfoliosWorker.GetType().String()).Msg("Navexa Portfolios worker registered")
+
+	// Register Navexa Holdings worker (fetches holdings for a specific portfolio)
+	navexaHoldingsWorker := workers.NewNavexaHoldingsWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(navexaHoldingsWorker)
+	a.Logger.Debug().Str("step_type", navexaHoldingsWorker.GetType().String()).Msg("Navexa Holdings worker registered")
+
+	// Register Navexa Performance worker (fetches P/L performance for a portfolio)
+	navexaPerformanceWorker := workers.NewNavexaPerformanceWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(navexaPerformanceWorker)
+	a.Logger.Debug().Str("step_type", navexaPerformanceWorker.GetType().String()).Msg("Navexa Performance worker registered")
+
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory
 	summaryWorker := workers.NewSummaryWorker(

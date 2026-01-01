@@ -42,6 +42,11 @@ const (
 	WorkerTypeMacroData           WorkerType = "macro_data"            // Fetch macroeconomic data (RBA rates, commodity prices)
 	WorkerTypeCompetitorAnalysis  WorkerType = "competitor_analysis"   // Analyze competitors and spawn stock data jobs
 
+	// Navexa portfolio workers
+	WorkerTypeNavexaPortfolios  WorkerType = "navexa_portfolios"  // Fetch all Navexa portfolios for the user
+	WorkerTypeNavexaHoldings    WorkerType = "navexa_holdings"    // Fetch holdings for a Navexa portfolio
+	WorkerTypeNavexaPerformance WorkerType = "navexa_performance" // Fetch P/L performance for a Navexa portfolio
+
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
 
@@ -65,6 +70,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
 		WorkerTypeASXIndexData, WorkerTypeASXDirectorInterest, WorkerTypeASXStockCollector,
 		WorkerTypeASXStockData, WorkerTypeMacroData, WorkerTypeCompetitorAnalysis,
+		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
 	}
@@ -103,6 +109,9 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeASXStockData, // DEPRECATED: backward compatibility
 		WorkerTypeMacroData,
 		WorkerTypeCompetitorAnalysis,
+		WorkerTypeNavexaPortfolios,
+		WorkerTypeNavexaHoldings,
+		WorkerTypeNavexaPerformance,
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,

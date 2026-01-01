@@ -5,6 +5,20 @@ description: Adversarial multi-agent loop - CORRECTNESS over SPEED
 
 Execute: $ARGUMENTS
 
+## EXECUTION MODE
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ AUTONOMOUS BATCH EXECUTION - NO USER INTERACTION               │
+│                                                                 │
+│ • Do NOT stop for confirmation between phases                   │
+│ • Do NOT ask "should I proceed?" or "continue?"                 │
+│ • Do NOT pause after completing steps                           │
+│ • Do NOT wait for user input at any point                       │
+│ • ONLY stop on unrecoverable errors (missing files, no access)  │
+│ • Execute ALL phases sequentially until $WORKDIR/summary.md     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## SETUP
 ```bash
 WORKDIR=".claude/workdir/$(date +%Y-%m-%d-%H%M)-$(echo "$ARGUMENTS" | tr ' ' '-' | cut -c1-40)"
@@ -23,6 +37,7 @@ mkdir -p "$WORKDIR"
 │ • CLEANUP IS MANDATORY - remove dead/redundant code             │
 │ • STEPS ARE MANDATORY - no implementation without step docs     │
 │ • SUMMARY IS MANDATORY - task incomplete without $WORKDIR/summary.md │
+│ • NO STOPPING - execute all phases without user prompts         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -70,6 +85,8 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 
 **⟲ COMPACT after ARCHITECT phase**
 
+**→ IMMEDIATELY proceed to PHASE 1 (no confirmation)**
+
 ---
 
 ### PHASE 1-3: IMPLEMENT (per step)
@@ -86,6 +103,8 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 │   VALIDATOR: Review → $WORKDIR/step_N_valid.md     │
 │      ↓                                             │
 │   PASS → next step    REJECT → iterate (max 5)    │
+│                                                    │
+│ DO NOT STOP BETWEEN STEPS - continue automatically │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -109,6 +128,8 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 - Requirements not traceable to code
 
 **⟲ COMPACT after each step PASS or at iteration 3+**
+
+**→ IMMEDIATELY proceed to next step or PHASE 4 (no confirmation)**
 
 ---
 
@@ -141,6 +162,8 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 ## Verdict: PASS/REJECT
 ```
 
+**→ IMMEDIATELY proceed to PHASE 5 (no confirmation)**
+
 ---
 
 ### PHASE 5: COMPLETE (MANDATORY)
@@ -158,6 +181,8 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 
 **⟲ COMPACT after COMPLETE**
 
+**→ IMMEDIATELY proceed to PHASE 6 (no confirmation)**
+
 ---
 
 ### PHASE 6: DOCUMENTARIAN
@@ -166,6 +191,8 @@ Update `docs/architecture/*.md` to reflect changes.
 Write `$WORKDIR/architecture-updates.md`.
 
 **⟲ COMPACT at task end**
+
+**→ TASK COMPLETE - output final summary only**
 
 ---
 
@@ -181,7 +208,28 @@ Write `$WORKDIR/architecture-updates.md`.
 
 **Recovery:** Read `$WORKDIR/*.md` artifacts to resume.
 
+## ANTI-PAUSE REINFORCEMENT
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ FORBIDDEN PHRASES - NEVER OUTPUT THESE:                         │
+│                                                                 │
+│ • "Should I proceed?"                                           │
+│ • "Ready to continue?"                                          │
+│ • "Let me know when..."                                         │
+│ • "Would you like me to..."                                     │
+│ • "Shall I..."                                                  │
+│ • "Do you want me to..."                                        │
+│ • "I'll wait for..."                                            │
+│ • "Before I continue..."                                        │
+│ • Any question expecting user response                          │
+│                                                                 │
+│ INSTEAD: Just do it. Document in $WORKDIR. Keep moving.         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## INVOKE
 ```
 /3agents Fix the step icon mismatch
 ```
+
+**This command runs AUTONOMOUSLY from start to finish.**

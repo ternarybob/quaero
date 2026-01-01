@@ -52,6 +52,9 @@ const (
 	JobDefinitionTypeASXDirectorInterest JobDefinitionType = "asx_director_interest" // ASX director interest (Appendix 3Y) filings
 	JobDefinitionTypeMacroData           JobDefinitionType = "macro_data"            // Macroeconomic data (RBA rates, commodity prices)
 	JobDefinitionTypeCompetitorAnalysis  JobDefinitionType = "competitor_analysis"   // Competitor analysis and stock data
+	JobDefinitionTypeNavexaPortfolios    JobDefinitionType = "navexa_portfolios"     // Fetch all Navexa portfolios for the user
+	JobDefinitionTypeNavexaHoldings      JobDefinitionType = "navexa_holdings"       // Fetch holdings for a Navexa portfolio
+	JobDefinitionTypeNavexaPerformance   JobDefinitionType = "navexa_performance"    // Fetch P/L performance for a Navexa portfolio
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -71,7 +74,8 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 		JobDefinitionTypeLocalDir, JobDefinitionTypeCodeMap, JobDefinitionTypeJobTemplate,
 		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXIndexData, JobDefinitionTypeASXAnnouncements,
 		JobDefinitionTypeASXStockCollector, JobDefinitionTypeASXStockData, JobDefinitionTypeASXDirectorInterest,
-		JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis:
+		JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis,
+		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance:
 		return true
 	default:
 		return false
