@@ -272,6 +272,12 @@ func (s *Server) handleKVRoute(w http.ResponseWriter, r *http.Request) {
 
 // handleKVRoutes routes /api/kv/{key} requests
 func (s *Server) handleKVRoutes(w http.ResponseWriter, r *http.Request) {
+	// Check for /api/kv/defaults endpoint first
+	if r.URL.Path == "/api/kv/defaults" && r.Method == "GET" {
+		s.app.KVHandler.ListDefaultsHandler(w, r)
+		return
+	}
+
 	RouteResourceItem(w, r,
 		s.app.KVHandler.GetKVHandler,
 		s.app.KVHandler.UpdateKVHandler,

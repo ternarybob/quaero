@@ -52,6 +52,21 @@
 # description = "Custom API key for my service"
 
 # =============================================================================
+# Navexa Portfolio API
+# =============================================================================
+# Used for portfolio tracking and performance analysis
+# Get your API key from your Navexa account settings
+
+# [navexa_api_key]
+# value = "YOUR_NAVEXA_API_KEY_HERE"
+# description = "Navexa API key for portfolio tracking"
+
+# Base URL configuration (default: https://api.navexa.com.au)
+# [navexa_base_url]
+# value = "https://api.navexa.com.au"
+# description = "Navexa API base URL"
+
+# =============================================================================
 # Cookie-Based Authentication
 # =============================================================================
 # Cookie-based authentication should NOT be stored in this directory!

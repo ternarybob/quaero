@@ -21,8 +21,9 @@ import (
 
 // Navexa API configuration
 const (
-	navexaAPIBaseURL   = "https://api.navexa.io"
-	navexaAPIKeyEnvVar = "navexa_api_key"
+	navexaDefaultBaseURL = "https://api.navexa.com.au"
+	navexaBaseURLKey     = "navexa_base_url"
+	navexaAPIKeyEnvVar   = "navexa_api_key"
 )
 
 // NavexaPortfoliosWorker fetches all portfolios for the authenticated user.
@@ -147,12 +148,26 @@ func (w *NavexaPortfoliosWorker) CreateJobs(ctx context.Context, step models.Job
 		}
 	}
 
+	// Convert portfolios to JSON-friendly format for storage
+	portfolioData := make([]map[string]interface{}, len(portfolios))
+	for i, p := range portfolios {
+		portfolioData[i] = map[string]interface{}{
+			"id":               p.ID,
+			"name":             p.Name,
+			"dateCreated":      p.DateCreated,
+			"baseCurrencyCode": p.BaseCurrencyCode,
+		}
+	}
+
+	// Get base URL for document metadata
+	baseURL := w.getBaseURL(ctx)
+
 	// Create document
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
 		Title:           "Navexa Portfolios",
-		URL:             navexaAPIBaseURL + "/v1/portfolios",
+		URL:             baseURL + "/v1/portfolios",
 		SourceType:      "navexa_portfolios",
 		SourceID:        "navexa:portfolios",
 		ContentMarkdown: markdown,
@@ -161,7 +176,7 @@ func (w *NavexaPortfoliosWorker) CreateJobs(ctx context.Context, step models.Job
 		UpdatedAt:       now,
 		LastSynced:      &now,
 		Metadata: map[string]interface{}{
-			"portfolios":      portfolios,
+			"portfolios":      portfolioData,
 			"portfolio_count": len(portfolios),
 			"fetched_at":      now.Format(time.RFC3339),
 		},
@@ -206,16 +221,25 @@ func (w *NavexaPortfoliosWorker) getAPIKey(ctx context.Context, stepConfig map[s
 	return "", fmt.Errorf("navexa_api_key not found in KV storage or step config")
 }
 
+// getBaseURL retrieves the Navexa API base URL from KV storage or returns default
+func (w *NavexaPortfoliosWorker) getBaseURL(ctx context.Context) string {
+	if val, err := w.kvStorage.Get(ctx, navexaBaseURLKey); err == nil && val != "" {
+		return val
+	}
+	return navexaDefaultBaseURL
+}
+
 // fetchPortfolios fetches all portfolios from the Navexa API
 func (w *NavexaPortfoliosWorker) fetchPortfolios(ctx context.Context, apiKey string, stepID string) ([]NavexaPortfolio, error) {
-	url := navexaAPIBaseURL + "/v1/portfolios"
+	baseURL := w.getBaseURL(ctx)
+	url := baseURL + "/v1/portfolios"
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	if w.jobMgr != nil {

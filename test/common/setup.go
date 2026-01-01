@@ -218,6 +218,49 @@ func extractSuiteName(testName string) string {
 		return "job-definition"
 	}
 
+	// Special handling for Worker tests to produce readable names like "navexa-worker", "schema-worker"
+	// Examples: TestWorkerNavexaPortfolios -> navexa-worker
+	//           TestWorkerSchemaIntegration -> schema-worker
+	if strings.HasPrefix(remainder, "Worker") {
+		afterWorker := remainder[6:] // len("Worker") = 6
+
+		// Find the first capital letter to get the worker type name
+		firstCapital := -1
+		for i := 0; i < len(afterWorker); i++ {
+			if afterWorker[i] >= 'A' && afterWorker[i] <= 'Z' {
+				firstCapital = i
+				break
+			}
+		}
+
+		var workerType string
+		if firstCapital == 0 {
+			// Find second capital to extract first word
+			secondCapital := -1
+			for i := 1; i < len(afterWorker); i++ {
+				if afterWorker[i] >= 'A' && afterWorker[i] <= 'Z' {
+					secondCapital = i
+					break
+				}
+			}
+			if secondCapital > 0 {
+				workerType = strings.ToLower(afterWorker[:secondCapital])
+			} else {
+				workerType = strings.ToLower(afterWorker)
+			}
+		} else if firstCapital > 0 {
+			workerType = strings.ToLower(afterWorker[:firstCapital])
+		} else {
+			workerType = strings.ToLower(afterWorker)
+		}
+
+		// Return "{type}-worker" format for better readability
+		if workerType != "" {
+			return workerType + "-worker"
+		}
+		return "worker"
+	}
+
 	// Find all capital letter positions
 	var capitals []int
 	for i := 0; i < len(remainder); i++ {

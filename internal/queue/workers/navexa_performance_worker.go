@@ -221,12 +221,51 @@ func (w *NavexaPerformanceWorker) CreateJobs(ctx context.Context, step models.Jo
 		}
 	}
 
+	// Convert holdings performance to JSON-friendly format
+	holdingsData := make([]map[string]interface{}, len(performance.Holdings))
+	for i, h := range performance.Holdings {
+		holdingsData[i] = map[string]interface{}{
+			"symbol":        h.Symbol,
+			"name":          h.Name,
+			"exchange":      h.Exchange,
+			"currentValue":  h.CurrentValue,
+			"costBasis":     h.CostBasis,
+			"return":        h.Return,
+			"returnPercent": h.ReturnPercent,
+			"weight":        h.Weight,
+			"capitalGains":  h.CapitalGains,
+			"dividends":     h.Dividends,
+			"currencyGains": h.CurrencyGains,
+			"units":         h.Units,
+			"averageCost":   h.AvgCost,
+		}
+	}
+
+	// Create performance data map for storage
+	performanceData := map[string]interface{}{
+		"portfolioId":        performance.PortfolioID,
+		"portfolioName":      performance.PortfolioName,
+		"baseCurrencyCode":   performance.BaseCurrencyCode,
+		"holdings":           holdingsData,
+		"totalValue":         performance.TotalValue,
+		"totalCostBasis":     performance.TotalCostBasis,
+		"totalReturn":        performance.TotalReturn,
+		"totalReturnPercent": performance.TotalReturnPct,
+		"capitalGains":       performance.CapitalGains,
+		"dividends":          performance.Dividends,
+		"currencyGains":      performance.CurrencyGains,
+		"generatedAt":        performance.GeneratedAt,
+	}
+
+	// Get base URL for document metadata
+	baseURL := w.getBaseURL(ctx)
+
 	// Create document
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
 		Title:           fmt.Sprintf("Navexa Performance - %s", portfolioName),
-		URL:             fmt.Sprintf("%s/v1/portfolios/%d/performance", navexaAPIBaseURL, portfolioID),
+		URL:             fmt.Sprintf("%s/v1/portfolios/%d/performance", baseURL, portfolioID),
 		SourceType:      "navexa_performance",
 		SourceID:        fmt.Sprintf("navexa:portfolio:%d:performance", portfolioID),
 		ContentMarkdown: markdown,
@@ -239,7 +278,7 @@ func (w *NavexaPerformanceWorker) CreateJobs(ctx context.Context, step models.Jo
 			"portfolio_name":   portfolioName,
 			"from":             fromDate,
 			"to":               toDate,
-			"performance":      performance,
+			"performance":      performanceData,
 			"total_value":      performance.TotalValue,
 			"total_return":     performance.TotalReturn,
 			"total_return_pct": performance.TotalReturnPct,
@@ -302,9 +341,18 @@ func (w *NavexaPerformanceWorker) getAPIKey(ctx context.Context, stepConfig map[
 	return "", fmt.Errorf("navexa_api_key not found in KV storage or step config")
 }
 
+// getBaseURL retrieves the Navexa API base URL from KV storage or returns default
+func (w *NavexaPerformanceWorker) getBaseURL(ctx context.Context) string {
+	if val, err := w.kvStorage.Get(ctx, navexaBaseURLKey); err == nil && val != "" {
+		return val
+	}
+	return navexaDefaultBaseURL
+}
+
 // fetchPerformance fetches performance from the Navexa API
 func (w *NavexaPerformanceWorker) fetchPerformance(ctx context.Context, apiKey string, portfolioID int, fromDate, toDate, groupBy string, stepID string) (*NavexaPerformance, error) {
-	baseURL := fmt.Sprintf("%s/v1/portfolios/%d/performance", navexaAPIBaseURL, portfolioID)
+	apiBaseURL := w.getBaseURL(ctx)
+	baseURL := fmt.Sprintf("%s/v1/portfolios/%d/performance", apiBaseURL, portfolioID)
 
 	// Build query parameters
 	params := url.Values{}
@@ -321,7 +369,7 @@ func (w *NavexaPerformanceWorker) fetchPerformance(ctx context.Context, apiKey s
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	if w.jobMgr != nil {

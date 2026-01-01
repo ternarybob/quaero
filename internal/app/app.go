@@ -531,6 +531,10 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Debug().Msg("Variables service initialized")
 
+	// Seed default KV values (only creates if not already set)
+	// These are service-specific defaults that workers fall back to
+	a.seedDefaultKVValues(context.Background())
+
 	// 5.12. Initialize config service with event-driven cache invalidation
 	a.ConfigService, err = config.NewService(
 		a.Config,
@@ -1358,4 +1362,28 @@ func (a *App) Close() error {
 	}
 
 	return nil
+}
+
+// seedDefaultKVValues seeds default key/value pairs that workers depend on.
+// These are only created if they don't already exist, preserving user-configured values.
+// This ensures workers have sensible defaults without requiring manual configuration.
+func (a *App) seedDefaultKVValues(ctx context.Context) {
+	defaults := common.GetDefaultKVValues()
+
+	// Seed each default
+	seededCount := 0
+	for _, d := range defaults {
+		created, err := a.KVService.SetIfNotExists(ctx, d.Key, d.Value, d.Description)
+		if err != nil {
+			a.Logger.Warn().Err(err).Str("key", d.Key).Msg("Failed to seed default KV value")
+			continue
+		}
+		if created {
+			seededCount++
+		}
+	}
+
+	if seededCount > 0 {
+		a.Logger.Info().Int("count", seededCount).Msg("Seeded default KV values")
+	}
 }

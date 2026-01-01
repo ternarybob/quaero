@@ -181,3 +181,30 @@ func (s *Service) GetAll(ctx context.Context) (map[string]string, error) {
 	s.logger.Debug().Int("count", len(kvMap)).Msg("Retrieved all key/value pairs")
 	return kvMap, nil
 }
+
+// SetIfNotExists sets a key/value pair only if the key does not already exist.
+// Returns true if the key was created, false if it already existed.
+// This is useful for seeding default values without overwriting user-configured values.
+func (s *Service) SetIfNotExists(ctx context.Context, key string, value string, description string) (bool, error) {
+	if key == "" {
+		return false, fmt.Errorf("key cannot be empty")
+	}
+
+	// Check if key already exists
+	existing, err := s.storage.Get(ctx, key)
+	if err == nil && existing != "" {
+		// Key exists, don't overwrite
+		s.logger.Debug().Str("key", key).Msg("Key already exists, skipping default")
+		return false, nil
+	}
+
+	// Key doesn't exist, create it
+	err = s.storage.Set(ctx, key, value, description)
+	if err != nil {
+		s.logger.Error().Err(err).Str("key", key).Msg("Failed to set default key/value pair")
+		return false, err
+	}
+
+	s.logger.Debug().Str("key", key).Msg("Created default key/value pair")
+	return true, nil
+}

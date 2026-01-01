@@ -22,3 +22,8 @@ description = "Fake Google Places API key for nearby restaurants job (overridden
 [eodhd_api_key]
 value = "fake-eodhd-api-key-for-testing"
 description = "Fake EODHD API key for ASX stock data (overridden by .env.test)"
+
+# Navexa API configuration
+[navexa_base_url]
+value = "https://api.navexa.com.au"
+description = "Navexa API base URL"

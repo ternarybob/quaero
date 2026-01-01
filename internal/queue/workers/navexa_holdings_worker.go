@@ -176,12 +176,38 @@ func (w *NavexaHoldingsWorker) CreateJobs(ctx context.Context, step models.JobSt
 		}
 	}
 
+	// Convert holdings to JSON-friendly format for storage
+	holdingsData := make([]map[string]interface{}, len(holdings))
+	for i, h := range holdings {
+		holdingsData[i] = map[string]interface{}{
+			"id":                h.ID,
+			"symbol":            h.Symbol,
+			"exchange":          h.Exchange,
+			"name":              h.Name,
+			"currencyCode":      h.CurrencyCode,
+			"sector":            h.Sector,
+			"sectorCode":        h.SectorCode,
+			"industryGroup":     h.IndustryGroup,
+			"industryGroupCode": h.IndustryGroupCode,
+			"industry":          h.Industry,
+			"industryCode":      h.IndustryCode,
+			"subIndustry":       h.SubIndustry,
+			"subIndustryCode":   h.SubIndustryCode,
+			"portfolioId":       h.PortfolioID,
+			"holdingTypeId":     h.HoldingTypeID,
+			"dateCreated":       h.DateCreated,
+		}
+	}
+
+	// Get base URL for document metadata
+	baseURL := w.getBaseURL(ctx)
+
 	// Create document
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
 		Title:           fmt.Sprintf("Navexa Holdings - %s", portfolioName),
-		URL:             fmt.Sprintf("%s/v1/portfolios/%d/holdings", navexaAPIBaseURL, portfolioID),
+		URL:             fmt.Sprintf("%s/v1/portfolios/%d/holdings", baseURL, portfolioID),
 		SourceType:      "navexa_holdings",
 		SourceID:        fmt.Sprintf("navexa:portfolio:%d:holdings", portfolioID),
 		ContentMarkdown: markdown,
@@ -192,7 +218,7 @@ func (w *NavexaHoldingsWorker) CreateJobs(ctx context.Context, step models.JobSt
 		Metadata: map[string]interface{}{
 			"portfolio_id":   portfolioID,
 			"portfolio_name": portfolioName,
-			"holdings":       holdings,
+			"holdings":       holdingsData,
 			"holding_count":  len(holdings),
 			"fetched_at":     now.Format(time.RFC3339),
 		},
@@ -250,16 +276,25 @@ func (w *NavexaHoldingsWorker) getAPIKey(ctx context.Context, stepConfig map[str
 	return "", fmt.Errorf("navexa_api_key not found in KV storage or step config")
 }
 
+// getBaseURL retrieves the Navexa API base URL from KV storage or returns default
+func (w *NavexaHoldingsWorker) getBaseURL(ctx context.Context) string {
+	if val, err := w.kvStorage.Get(ctx, navexaBaseURLKey); err == nil && val != "" {
+		return val
+	}
+	return navexaDefaultBaseURL
+}
+
 // fetchHoldings fetches holdings from the Navexa API
 func (w *NavexaHoldingsWorker) fetchHoldings(ctx context.Context, apiKey string, portfolioID int, stepID string) ([]NavexaHolding, error) {
-	url := fmt.Sprintf("%s/v1/portfolios/%d/holdings", navexaAPIBaseURL, portfolioID)
+	baseURL := w.getBaseURL(ctx)
+	url := fmt.Sprintf("%s/v1/portfolios/%d/holdings", baseURL, portfolioID)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	if w.jobMgr != nil {

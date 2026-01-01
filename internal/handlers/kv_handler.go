@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
@@ -325,4 +326,15 @@ func (h *KVHandler) maskValue(value string) string {
 	}
 
 	return value[:4] + "..." + value[len(value)-4:]
+}
+
+// ListDefaultsHandler handles GET /api/kv/defaults - lists default KV values
+func (h *KVHandler) ListDefaultsHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	defaults := common.GetDefaultKVValues()
+	h.logger.Debug().Int("count", len(defaults)).Msg("Listed default KV values")
+	WriteJSON(w, http.StatusOK, defaults)
 }
