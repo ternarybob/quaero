@@ -807,10 +807,13 @@ func getJobErrorLogs(t *testing.T, helper *common.HTTPTestHelper, jobID string) 
 // preventing long waits when a job has already failed.
 // Returns the final status and any error logs found.
 func waitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) (status string, errorLogs []map[string]interface{}) {
+	startTime := time.Now()
 	deadline := time.Now().Add(timeout)
 	pollInterval := 500 * time.Millisecond
 	errorCheckInterval := 5 * time.Second
 	lastErrorCheck := time.Time{}
+	lastProgressLog := time.Now()
+	progressLogInterval := 30 * time.Second
 
 	t.Logf("Waiting for job %s with error monitoring (timeout: %v)", jobID, timeout)
 
@@ -843,10 +846,20 @@ func waitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHel
 
 		// Check for terminal states
 		if jobStatus == "completed" || jobStatus == "failed" || jobStatus == "cancelled" {
-			t.Logf("Job %s reached terminal state: %s", jobID, jobStatus)
+			elapsed := time.Since(startTime)
+			t.Logf("Job %s reached terminal state: %s (elapsed: %s)", jobID, jobStatus, formatTestDuration(elapsed))
+			// Log child job timings
+			logChildJobTimings(t, helper, jobID)
 			// Final error check on completion
 			errorLogs = getJobErrorLogs(t, helper, jobID)
 			return jobStatus, errorLogs
+		}
+
+		// Log progress every 30 seconds
+		if time.Since(lastProgressLog) >= progressLogInterval {
+			elapsed := time.Since(startTime)
+			t.Logf("Job %s still %s... (elapsed: %s)", jobID[:8], jobStatus, formatTestDuration(elapsed))
+			lastProgressLog = time.Now()
 		}
 
 		// Check for errors periodically (every 5 seconds) to fail fast
@@ -871,6 +884,81 @@ func waitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHel
 
 	t.Logf("Job %s did not reach terminal state within %v", jobID, timeout)
 	return "timeout", nil
+}
+
+// formatTestDuration formats a duration for test output (e.g., "2m15s")
+func formatTestDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm%ds", minutes, seconds)
+}
+
+// logChildJobTimings logs timing information for all child jobs
+func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID string) {
+	childJobs := getChildJobs(t, helper, parentJobID)
+	if len(childJobs) == 0 {
+		t.Log("No child jobs found for timing analysis")
+		return
+	}
+
+	t.Log("=== Child Job Timing Summary ===")
+
+	// Group by worker type for summary
+	workerTimings := make(map[string][]time.Duration)
+	var totalDuration time.Duration
+
+	for _, job := range childJobs {
+		jobID, _ := job["id"].(string)
+		name, _ := job["name"].(string)
+		workerType, _ := job["worker_type"].(string)
+		status, _ := job["status"].(string)
+
+		// Parse duration from job stats if available
+		var duration time.Duration
+		if stats, ok := job["stats"].(map[string]interface{}); ok {
+			if durationSec, ok := stats["duration_seconds"].(float64); ok {
+				duration = time.Duration(durationSec * float64(time.Second))
+			}
+		}
+
+		// Fallback: calculate from started_at/completed_at
+		if duration == 0 {
+			if startedAtStr, ok := job["started_at"].(string); ok {
+				if startedAt, err := time.Parse(time.RFC3339, startedAtStr); err == nil {
+					if completedAtStr, ok := job["completed_at"].(string); ok {
+						if completedAt, err := time.Parse(time.RFC3339, completedAtStr); err == nil {
+							duration = completedAt.Sub(startedAt)
+						}
+					}
+				}
+			}
+		}
+
+		if duration > 0 {
+			workerTimings[workerType] = append(workerTimings[workerType], duration)
+			totalDuration += duration
+			t.Logf("  %s (%s): %s [%s] - %s", name, workerType, formatTestDuration(duration), status, jobID[:8])
+		} else {
+			t.Logf("  %s (%s): duration unknown [%s] - %s", name, workerType, status, jobID[:8])
+		}
+	}
+
+	// Log summary by worker type
+	if len(workerTimings) > 0 {
+		t.Log("--- Worker Type Summary ---")
+		for workerType, durations := range workerTimings {
+			var totalWorkerDuration time.Duration
+			for _, d := range durations {
+				totalWorkerDuration += d
+			}
+			avgDuration := totalWorkerDuration / time.Duration(len(durations))
+			t.Logf("  %s: %d jobs, total=%s, avg=%s", workerType, len(durations), formatTestDuration(totalWorkerDuration), formatTestDuration(avgDuration))
+		}
+		t.Logf("--- Total child job time: %s (may overlap if parallel) ---", formatTestDuration(totalDuration))
+	}
 }
 
 // assertChildJobsFailedOrStopped verifies that all child jobs are in failed/stopped state
@@ -1034,15 +1122,14 @@ func validateMacroDataFetched(t *testing.T, helper *common.HTTPTestHelper) {
 	t.Logf("PASS: Found %d macro data documents", len(docs))
 }
 
-// saveTestOutput saves the generated output and logs to BOTH locations:
-// 1. Structured: test/results/api/orchestrator-YYYYMMDD-HHMMSS/TestName/output.md + service.log + test.log
-// 2. Flat: test/api/results/output-TIMESTAMP-TestName-jobID.md
+// saveTestOutput saves the generated output and logs to:
+// test/results/api/orchestrator-YYYYMMDD-HHMMSS/TestName/output.md + service.log + test.log
 // This allows manual inspection of test outputs and historical tracking of analysis quality.
 func saveTestOutput(t *testing.T, testName string, jobID string, content string, envResultsDir string) {
 	timestamp := time.Now().Format("20060102-150405")
 	fullTestName := t.Name() // Gets full path like "TestOrchestratorIntegration_FullWorkflow/SingleStock"
 
-	// 1. Save to structured directory: test/results/api/orchestrator-TIMESTAMP/TestName/output.md
+	// Save to structured directory: test/results/api/orchestrator-TIMESTAMP/TestName/output.md
 	structuredDir := filepath.Join("..", "results", "api", fmt.Sprintf("orchestrator-%s", timestamp), fullTestName)
 	if err := os.MkdirAll(structuredDir, 0755); err != nil {
 		t.Logf("Warning: Failed to create structured results directory: %v", err)
@@ -1081,23 +1168,6 @@ func saveTestOutput(t *testing.T, testName string, jobID string, content string,
 			t.Logf("Warning: Could not read test.log from %s: %v", testLogSrc, err)
 		}
 	}
-
-	// 2. Save to flat directory: test/api/results/output-TIMESTAMP-TestName-jobID.md
-	flatDir := filepath.Join("results")
-	if err := os.MkdirAll(flatDir, 0755); err != nil {
-		t.Logf("Warning: Failed to create flat results directory: %v", err)
-		return
-	}
-	safeTestName := strings.ReplaceAll(testName, "/", "-")
-	safeTestName = strings.ReplaceAll(safeTestName, " ", "-")
-	flatTimestamp := time.Now().Format("2006-01-02T15-04-05")
-	flatFilename := fmt.Sprintf("output-%s-%s-%s.md", flatTimestamp, safeTestName, jobID[:8])
-	flatPath := filepath.Join(flatDir, flatFilename)
-	if err := os.WriteFile(flatPath, []byte(content), 0644); err != nil {
-		t.Logf("Warning: Failed to write flat output file: %v", err)
-		return
-	}
-	t.Logf("Saved flat output to: %s (%d bytes)", flatPath, len(content))
 }
 
 // getDocumentContentAndMetadata retrieves both the content and metadata of a document by ID
