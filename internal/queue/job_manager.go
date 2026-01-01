@@ -1457,7 +1457,11 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			m.UpdateJobStatus(ctx, stepID, "failed")
 
 			// Handle based on error strategy
-			if step.OnError == models.ErrorStrategyFail {
+			if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+				// For fatal errors, cancel all pending/running child jobs
+				if step.OnError == models.ErrorStrategyFatal {
+					m.StopAllChildJobs(ctx, managerID)
+				}
 				m.SetJobError(ctx, managerID, err.Error())
 				return managerID, err
 			}
@@ -1470,7 +1474,11 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			m.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Validation failed: %v", err))
 			m.UpdateJobStatus(ctx, stepID, "failed")
 
-			if step.OnError == models.ErrorStrategyFail {
+			if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+				// For fatal errors, cancel all pending/running child jobs
+				if step.OnError == models.ErrorStrategyFatal {
+					m.StopAllChildJobs(ctx, managerID)
+				}
 				m.SetJobError(ctx, managerID, err.Error())
 				return managerID, fmt.Errorf("step %s validation failed: %w", step.Name, err)
 			}
@@ -1488,7 +1496,11 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			m.SetJobError(ctx, managerID, err.Error())
 			m.UpdateJobStatus(ctx, stepID, "failed")
 
-			if step.OnError == models.ErrorStrategyFail {
+			if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+				// For fatal errors, cancel all pending/running child jobs
+				if step.OnError == models.ErrorStrategyFatal {
+					m.StopAllChildJobs(ctx, managerID)
+				}
 				return managerID, fmt.Errorf("step %s failed: %w", step.Name, err)
 			}
 

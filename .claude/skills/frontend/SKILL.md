@@ -1,6 +1,6 @@
 # Frontend Skill for Quaero
 
-**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` before any code changes.
+**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` first.
 
 ## Project Context
 - **Templates:** Go html/template (server-side rendering)
@@ -13,8 +13,6 @@
 pages/
 ├── *.html              # Page templates
 ├── partials/           # Reusable components
-│   ├── navbar.html
-│   └── footer.html
 └── static/
     ├── quaero.css      # Global styles
     └── common.js       # Common utilities
@@ -33,31 +31,19 @@ pages/
 
 ### Bulma Components
 ```html
-<!-- Cards -->
 <div class="card">
     <div class="card-content">
         <p class="title is-5">Title</p>
     </div>
 </div>
 
-<!-- Buttons -->
 <button class="button is-primary" @click="submit()">Save</button>
-
-<!-- Forms -->
-<div class="field">
-    <label class="label">Name</label>
-    <div class="control">
-        <input class="input" type="text" x-model="name">
-    </div>
-</div>
 ```
 
 ### Template Composition
 ```html
 {{template "navbar" .}}
-<main class="section">
-    {{template "content" .}}
-</main>
+<main class="section">{{template "content" .}}</main>
 {{template "footer" .}}
 ```
 
@@ -66,7 +52,6 @@ pages/
 const ws = new WebSocket(`ws://${location.host}/ws`);
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    // Handle real-time updates
 };
 ```
 
@@ -78,18 +63,18 @@ ws.onmessage = (event) => {
 <!-- ❌ jQuery or other frameworks -->
 <script src="jquery.js">
 
-<!-- ❌ Client-side routing -->
-<router-view>
-
 <!-- ❌ React/Vue/SPA patterns -->
 <div id="app"></div>
+
+<!-- ❌ Dead template blocks -->
+{{/* Old unused template - REMOVE! */}}
 ```
 ```javascript
-// ❌ Direct DOM manipulation (use Alpine)
+// ❌ Direct DOM manipulation
 document.getElementById('x').innerHTML = y;
 
-// ❌ Fetch without error handling
-fetch('/api/data').then(r => r.json());
+// ❌ Unused functions - REMOVE!
+function oldHelper() { }
 ```
 
 ## Rules Summary
@@ -99,3 +84,4 @@ fetch('/api/data').then(r => r.json());
 3. Bulma CSS only - no custom CSS frameworks
 4. WebSockets for real-time - not polling
 5. Progressive enhancement - works without JS where possible
+6. **Remove dead templates/JS** - clean up unused code

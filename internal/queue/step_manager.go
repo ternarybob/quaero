@@ -64,6 +64,20 @@ func (m *StepManager) RegisterWorker(worker interfaces.DefinitionWorker) {
 	m.logger.Debug().Str("step_type", string(stepType)).Msg("Registered step worker")
 }
 
+// RegisterWorkerAlias registers an existing worker under an additional alias type.
+// This is useful for backward compatibility when deprecating worker types.
+// The worker will be invoked for both its original type and the alias type.
+func (m *StepManager) RegisterWorkerAlias(worker interfaces.DefinitionWorker, aliasType models.WorkerType) {
+	if worker == nil {
+		return
+	}
+	m.workers[aliasType] = worker
+	m.logger.Debug().
+		Str("step_type", string(aliasType)).
+		Str("target_type", string(worker.GetType())).
+		Msg("Registered step worker alias (deprecated)")
+}
+
 // HasWorker checks if a worker is registered for the given WorkerType.
 func (m *StepManager) HasWorker(workerType models.WorkerType) bool {
 	_, exists := m.workers[workerType]

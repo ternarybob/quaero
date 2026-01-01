@@ -1,12 +1,10 @@
 // -----------------------------------------------------------------------
-// ASXStockDataWorker - Fetches real-time and historical stock data
-// Uses Markit Digital API for fundamentals and Yahoo Finance for OHLCV
-// Provides accurate price data and technical analysis for summaries
+// ASXIndexDataWorker - Fetches real-time and historical index data
+// Uses Yahoo Finance for ASX index OHLCV data (XJO, XSO, XAO, etc.)
+// Provides benchmark data for comparison with individual stock performance.
 //
-// DEPRECATED: Use asx_stock_collector instead.
-// This worker is kept for backward compatibility with existing jobs.
-// New integrations should use ASXStockCollectorWorker which consolidates
-// price data, analyst coverage, and historical financials into a single call.
+// NOTE: This worker is specifically for ASX indices (XJO, XSO, etc.).
+// For individual stock data, use asx_stock_collector instead.
 // -----------------------------------------------------------------------
 
 package workers
@@ -28,9 +26,9 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// ASXStockDataWorker fetches stock price data and calculates technical indicators.
-// Supports both individual stocks (e.g., ROC, BHP) and market indices (e.g., XJO, XSO).
-type ASXStockDataWorker struct {
+// ASXIndexDataWorker fetches ASX index price data and calculates technical indicators.
+// Supports market indices (e.g., XJO, XSO, XAO, XKO) for benchmark comparisons.
+type ASXIndexDataWorker struct {
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
@@ -77,7 +75,7 @@ func getYahooSymbol(asxCode string) string {
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*ASXStockDataWorker)(nil)
+var _ interfaces.DefinitionWorker = (*ASXIndexDataWorker)(nil)
 
 // StockData holds all fetched and calculated stock data
 type StockData struct {
@@ -179,13 +177,13 @@ type yahooChartResponse struct {
 	} `json:"chart"`
 }
 
-// NewASXStockDataWorker creates a new stock data worker
-func NewASXStockDataWorker(
+// NewASXIndexDataWorker creates a new index data worker
+func NewASXIndexDataWorker(
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-) *ASXStockDataWorker {
-	return &ASXStockDataWorker{
+) *ASXIndexDataWorker {
+	return &ASXIndexDataWorker{
 		documentStorage: documentStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
@@ -195,16 +193,16 @@ func NewASXStockDataWorker(
 	}
 }
 
-// GetType returns WorkerTypeASXStockData
-func (w *ASXStockDataWorker) GetType() models.WorkerType {
-	return models.WorkerTypeASXStockData
+// GetType returns WorkerTypeASXIndexData
+func (w *ASXIndexDataWorker) GetType() models.WorkerType {
+	return models.WorkerTypeASXIndexData
 }
 
-// Init initializes the stock data worker
-func (w *ASXStockDataWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+// Init initializes the index data worker
+func (w *ASXIndexDataWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for asx_stock_data")
+		return nil, fmt.Errorf("step config is required for asx_index_data")
 	}
 
 	asxCode, ok := stepConfig["asx_code"].(string)
@@ -231,7 +229,7 @@ func (w *ASXStockDataWorker) Init(ctx context.Context, step models.JobStep, jobD
 			{
 				ID:   asxCode,
 				Name: fmt.Sprintf("Fetch ASX:%s stock data", asxCode),
-				Type: "asx_stock_data",
+				Type: "asx_index_data",
 				Config: map[string]interface{}{
 					"asx_code": asxCode,
 					"period":   period,
@@ -250,7 +248,7 @@ func (w *ASXStockDataWorker) Init(ctx context.Context, step models.JobStep, jobD
 }
 
 // isCacheFresh checks if a document was synced within the cache window
-func (w *ASXStockDataWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
+func (w *ASXIndexDataWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
 	if doc == nil || doc.LastSynced == nil {
 		return false
 	}
@@ -259,12 +257,12 @@ func (w *ASXStockDataWorker) isCacheFresh(doc *models.Document, cacheHours int) 
 }
 
 // CreateJobs fetches stock data and stores as document
-func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *ASXIndexDataWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize asx_stock_data worker: %w", err)
+			return "", fmt.Errorf("failed to initialize asx_index_data worker: %w", err)
 		}
 	}
 
@@ -292,7 +290,7 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 	}
 
 	// Build source identifiers
-	sourceType := "asx_stock_data"
+	sourceType := "asx_index_data"
 	if isIndexCode(asxCode) {
 		sourceType = "asx_index"
 	}
@@ -408,25 +406,25 @@ func (w *ASXStockDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 }
 
 // ReturnsChildJobs returns false
-func (w *ASXStockDataWorker) ReturnsChildJobs() bool {
+func (w *ASXIndexDataWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates step configuration
-func (w *ASXStockDataWorker) ValidateConfig(step models.JobStep) error {
+func (w *ASXIndexDataWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("asx_stock_data step requires config")
+		return fmt.Errorf("asx_index_data step requires config")
 	}
 	asxCode, ok := step.Config["asx_code"].(string)
 	if !ok || asxCode == "" {
-		return fmt.Errorf("asx_stock_data step requires 'asx_code' in config")
+		return fmt.Errorf("asx_index_data step requires 'asx_code' in config")
 	}
 	return nil
 }
 
 // fetchStockData fetches data from multiple sources.
 // For indices (XJO, XSO, etc.), only Yahoo Finance is used as Markit API doesn't support indices.
-func (w *ASXStockDataWorker) fetchStockData(ctx context.Context, asxCode, period string) (*StockData, error) {
+func (w *ASXIndexDataWorker) fetchStockData(ctx context.Context, asxCode, period string) (*StockData, error) {
 	stockData := &StockData{
 		Symbol:      asxCode,
 		LastUpdated: time.Now(),
@@ -463,7 +461,7 @@ func (w *ASXStockDataWorker) fetchStockData(ctx context.Context, asxCode, period
 }
 
 // fetchMarkitHeader fetches current price from Markit Digital
-func (w *ASXStockDataWorker) fetchMarkitHeader(ctx context.Context, asxCode string, data *StockData) error {
+func (w *ASXIndexDataWorker) fetchMarkitHeader(ctx context.Context, asxCode string, data *StockData) error {
 	url := fmt.Sprintf("https://asx.api.markitdigital.com/asx-research/1.0/companies/%s/header",
 		strings.ToLower(asxCode))
 
@@ -501,7 +499,7 @@ func (w *ASXStockDataWorker) fetchMarkitHeader(ctx context.Context, asxCode stri
 }
 
 // fetchMarkitStats fetches statistics from Markit Digital
-func (w *ASXStockDataWorker) fetchMarkitStats(ctx context.Context, asxCode string, data *StockData) error {
+func (w *ASXIndexDataWorker) fetchMarkitStats(ctx context.Context, asxCode string, data *StockData) error {
 	url := fmt.Sprintf("https://asx.api.markitdigital.com/asx-research/1.0/companies/%s/key-statistics",
 		strings.ToLower(asxCode))
 
@@ -540,7 +538,7 @@ func (w *ASXStockDataWorker) fetchMarkitStats(ctx context.Context, asxCode strin
 
 // fetchYahooHistory fetches historical OHLCV from Yahoo Finance.
 // Uses getYahooSymbol to handle both stocks (ROC.AX) and indices (^AXJO).
-func (w *ASXStockDataWorker) fetchYahooHistory(ctx context.Context, asxCode, period string, data *StockData) error {
+func (w *ASXIndexDataWorker) fetchYahooHistory(ctx context.Context, asxCode, period string, data *StockData) error {
 	// Convert period to Yahoo format
 	yahooRange := "1y"
 	switch period {
@@ -626,7 +624,7 @@ func (w *ASXStockDataWorker) fetchYahooHistory(ctx context.Context, asxCode, per
 }
 
 // calculateTechnicals calculates technical indicators
-func (w *ASXStockDataWorker) calculateTechnicals(data *StockData) {
+func (w *ASXIndexDataWorker) calculateTechnicals(data *StockData) {
 	prices := data.HistoricalPrices
 	if len(prices) == 0 {
 		return
@@ -796,7 +794,7 @@ func determineTrend(price, sma20, sma50, sma200, rsi float64) string {
 
 // createDocument creates a document from stock data.
 // For indices, uses "asx_index" source type and adds index-specific tags.
-func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXIndexDataWorker) createDocument(ctx context.Context, data *StockData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	var content strings.Builder
 
 	isIndex := isIndexCode(asxCode)
@@ -1066,7 +1064,7 @@ func (w *ASXStockDataWorker) createDocument(ctx context.Context, data *StockData
 	}
 
 	// Set source type and URL based on whether this is an index or stock
-	sourceType := "asx_stock_data"
+	sourceType := "asx_index_data"
 	sourceID := fmt.Sprintf("asx:%s:stock_data", asxCode)
 	docURL := fmt.Sprintf("https://www.asx.com.au/markets/company/%s", asxCode)
 	title := fmt.Sprintf("ASX:%s Stock Data & Technical Analysis", asxCode)

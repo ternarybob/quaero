@@ -50,6 +50,27 @@ type ASXAnnouncement struct {
 	Type           string
 }
 
+// SignalNoiseRating represents the signal quality of an announcement based on actual market impact
+type SignalNoiseRating string
+
+const (
+	// SignalNoiseHigh indicates significant market impact - high signal, low noise
+	// Criteria: Price change >=3% OR volume ratio >=2x, typically with price-sensitive flag
+	SignalNoiseHigh SignalNoiseRating = "HIGH_SIGNAL"
+
+	// SignalNoiseModerate indicates notable market reaction
+	// Criteria: Price change >=1.5% OR volume ratio >=1.5x
+	SignalNoiseModerate SignalNoiseRating = "MODERATE_SIGNAL"
+
+	// SignalNoiseLow indicates minimal market reaction
+	// Criteria: Price change >=0.5% OR volume ratio >=1.2x
+	SignalNoiseLow SignalNoiseRating = "LOW_SIGNAL"
+
+	// SignalNoiseNone indicates no meaningful price/volume impact - pure noise
+	// Criteria: Price change <0.5% AND volume ratio <1.2x
+	SignalNoiseNone SignalNoiseRating = "NOISE"
+)
+
 // AnnouncementAnalysis represents an analyzed announcement with classification and price impact
 type AnnouncementAnalysis struct {
 	Date              time.Time
@@ -58,9 +79,15 @@ type AnnouncementAnalysis struct {
 	PriceSensitive    bool
 	PDFURL            string
 	DocumentKey       string
-	RelevanceCategory string // HIGH, MEDIUM, LOW, NOISE
+	RelevanceCategory string // HIGH, MEDIUM, LOW, NOISE (keyword-based)
 	RelevanceReason   string // Why this classification was assigned
 	PriceImpact       *PriceImpactData
+
+	// Signal-to-noise analysis based on actual market impact
+	SignalNoiseRating    SignalNoiseRating // Overall signal quality based on price/volume impact
+	SignalNoiseRationale string            // Explanation of why this rating was assigned
+	IsTradingHalt        bool              // Whether this announcement is a trading halt
+	IsReinstatement      bool              // Whether this is a reinstatement from trading halt
 }
 
 // PriceImpactData contains stock price movement around an announcement date
@@ -801,19 +828,28 @@ func (w *ASXAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, asxC
 	return w.fetchPricesFromYahoo(ctx, asxCode, period)
 }
 
-// getPricesFromStockDataDocument retrieves OHLCV data from an existing asx_stock_data document.
+// getPricesFromStockDataDocument retrieves OHLCV data from an existing stock data document.
+// First tries asx_stock_collector (recommended), then falls back to asx_stock_data (deprecated).
 // Returns the historical_prices array from document metadata if available.
 func (w *ASXAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Context, asxCode string) ([]OHLCV, error) {
-	sourceType := "asx_stock_data"
-	sourceID := fmt.Sprintf("asx:%s:stock_data", strings.ToUpper(asxCode))
+	upperCode := strings.ToUpper(asxCode)
+
+	// Try asx_stock_collector first (preferred source)
+	sourceType := "asx_stock_collector"
+	sourceID := fmt.Sprintf("asx:%s:stock_collector", upperCode)
 
 	doc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get stock data document: %w", err)
-	}
-
-	if doc == nil {
-		return nil, fmt.Errorf("no stock data document found for %s", asxCode)
+	if err != nil || doc == nil {
+		// Fallback to deprecated asx_stock_data
+		sourceType = "asx_stock_data"
+		sourceID = fmt.Sprintf("asx:%s:stock_data", upperCode)
+		doc, err = w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get stock data document: %w", err)
+		}
+		if doc == nil {
+			return nil, fmt.Errorf("no stock data document found for %s (tried asx_stock_collector and asx_stock_data)", asxCode)
+		}
 	}
 
 	// Check if document is fresh enough (within 24 hours)
@@ -970,12 +1006,143 @@ func (w *ASXAnnouncementsWorker) fetchPricesFromYahoo(ctx context.Context, asxCo
 	return prices, nil
 }
 
+// detectTradingHalt checks if an announcement is a trading halt or reinstatement
+func detectTradingHalt(headline string) (isTradingHalt bool, isReinstatement bool) {
+	headlineUpper := strings.ToUpper(headline)
+
+	// Trading halt keywords
+	haltKeywords := []string{
+		"TRADING HALT",
+		"VOLUNTARY SUSPENSION",
+		"SUSPENSION FROM QUOTATION",
+		"SUSPENDED FROM TRADING",
+	}
+
+	for _, kw := range haltKeywords {
+		if strings.Contains(headlineUpper, kw) {
+			return true, false
+		}
+	}
+
+	// Reinstatement keywords
+	reinstatementKeywords := []string{
+		"REINSTATEMENT",
+		"RESUMPTION OF TRADING",
+		"TRADING RESUMES",
+		"LIFTED SUSPENSION",
+		"END OF SUSPENSION",
+	}
+
+	for _, kw := range reinstatementKeywords {
+		if strings.Contains(headlineUpper, kw) {
+			return false, true
+		}
+	}
+
+	return false, false
+}
+
+// calculateSignalNoiseRating determines the overall signal quality based on price/volume impact
+// Returns the rating and a comprehensive rationale explaining the assessment
+func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, isTradingHalt, isReinstatement bool) (SignalNoiseRating, string) {
+	var rationale strings.Builder
+
+	// If no price data available, base rating on announcement characteristics only
+	if impact == nil {
+		if ann.PriceSensitive {
+			return SignalNoiseModerate, "Price-sensitive announcement (no price data available for impact analysis)"
+		}
+		if isTradingHalt {
+			return SignalNoiseLow, "Trading halt announced (no price data available for impact analysis)"
+		}
+		return SignalNoiseNone, "No price data available for impact analysis"
+	}
+
+	// Calculate absolute price change for comparison
+	absPriceChange := impact.ChangePercent
+	if absPriceChange < 0 {
+		absPriceChange = -absPriceChange
+	}
+
+	// Determine direction description
+	direction := "no change"
+	if impact.ChangePercent > 0.1 {
+		direction = fmt.Sprintf("+%.1f%% increase", impact.ChangePercent)
+	} else if impact.ChangePercent < -0.1 {
+		direction = fmt.Sprintf("%.1f%% decrease", impact.ChangePercent)
+	}
+
+	// Volume analysis
+	volumeDesc := "normal volume"
+	if impact.VolumeChangeRatio >= 2.0 {
+		volumeDesc = fmt.Sprintf("%.1fx volume spike", impact.VolumeChangeRatio)
+	} else if impact.VolumeChangeRatio >= 1.5 {
+		volumeDesc = fmt.Sprintf("%.1fx elevated volume", impact.VolumeChangeRatio)
+	} else if impact.VolumeChangeRatio <= 0.5 {
+		volumeDesc = fmt.Sprintf("%.1fx reduced volume", impact.VolumeChangeRatio)
+	}
+
+	// HIGH_SIGNAL: Significant market impact
+	// Criteria: Price change >=3% OR volume ratio >=2x, especially with price-sensitive flag
+	if absPriceChange >= 3.0 || impact.VolumeChangeRatio >= 2.0 {
+		rationale.WriteString(fmt.Sprintf("HIGH SIGNAL: Significant market reaction with %s and %s. ", direction, volumeDesc))
+		if ann.PriceSensitive {
+			rationale.WriteString("Confirmed price-sensitive announcement. ")
+		}
+		if absPriceChange >= 5.0 {
+			rationale.WriteString("Price movement exceeds 5% threshold indicating major market reassessment.")
+		} else if impact.VolumeChangeRatio >= 3.0 {
+			rationale.WriteString("Exceptional volume indicates strong investor interest.")
+		}
+		return SignalNoiseHigh, rationale.String()
+	}
+
+	// MODERATE_SIGNAL: Notable market reaction
+	// Criteria: Price change >=1.5% OR volume ratio >=1.5x
+	if absPriceChange >= 1.5 || impact.VolumeChangeRatio >= 1.5 {
+		rationale.WriteString(fmt.Sprintf("MODERATE SIGNAL: Notable market reaction with %s and %s. ", direction, volumeDesc))
+		if ann.PriceSensitive {
+			rationale.WriteString("Price-sensitive flag indicates company deemed this material. ")
+		}
+		if isTradingHalt || isReinstatement {
+			rationale.WriteString("Associated with trading halt activity. ")
+		}
+		return SignalNoiseModerate, rationale.String()
+	}
+
+	// LOW_SIGNAL: Minimal but detectable market reaction
+	// Criteria: Price change >=0.5% OR volume ratio >=1.2x
+	if absPriceChange >= 0.5 || impact.VolumeChangeRatio >= 1.2 {
+		rationale.WriteString(fmt.Sprintf("LOW SIGNAL: Minor market reaction with %s and %s. ", direction, volumeDesc))
+		if ann.PriceSensitive {
+			rationale.WriteString("Despite price-sensitive flag, market showed limited reaction. ")
+		}
+		return SignalNoiseLow, rationale.String()
+	}
+
+	// NOISE: No meaningful price/volume impact
+	rationale.WriteString(fmt.Sprintf("NOISE: No meaningful market impact - %s with %s. ", direction, volumeDesc))
+	if isTradingHalt {
+		rationale.WriteString("Trading halt with no subsequent price movement indicates non-material purpose. ")
+	} else if isReinstatement {
+		rationale.WriteString("Reinstatement with no price change suggests halt was procedural. ")
+	} else if ann.PriceSensitive {
+		rationale.WriteString("Despite price-sensitive flag, market showed no reaction. ")
+	} else {
+		rationale.WriteString("Announcement had no measurable effect on price or volume. ")
+	}
+	return SignalNoiseNone, rationale.String()
+}
+
 // analyzeAnnouncements analyzes all announcements and adds relevance classification and price impact
 func (w *ASXAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, announcements []ASXAnnouncement, asxCode string, prices []OHLCV) []AnnouncementAnalysis {
 	var analyses []AnnouncementAnalysis
 
 	for _, ann := range announcements {
 		category, reason := classifyRelevance(ann)
+
+		// Detect trading halts
+		isTradingHalt, isReinstatement := detectTradingHalt(ann.Headline)
 
 		analysis := AnnouncementAnalysis{
 			Date:              ann.Date,
@@ -986,12 +1153,18 @@ func (w *ASXAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, annou
 			DocumentKey:       ann.DocumentKey,
 			RelevanceCategory: category,
 			RelevanceReason:   reason,
+			IsTradingHalt:     isTradingHalt,
+			IsReinstatement:   isReinstatement,
 		}
 
 		// Add price impact if we have price data
 		if len(prices) > 0 {
 			analysis.PriceImpact = w.calculatePriceImpact(ann.Date, prices)
 		}
+
+		// Calculate signal-to-noise rating based on actual market impact
+		analysis.SignalNoiseRating, analysis.SignalNoiseRationale = calculateSignalNoiseRating(
+			ann, analysis.PriceImpact, isTradingHalt, isReinstatement)
 
 		analyses = append(analyses, analysis)
 	}
@@ -1199,9 +1372,61 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	// Header
 	content.WriteString(fmt.Sprintf("# ASX Announcements Summary: %s\n\n", asxCode))
 	content.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM AEST")))
-	content.WriteString(fmt.Sprintf("**Total Announcements**: %d\n\n", len(analyses)))
+	content.WriteString(fmt.Sprintf("**Total Announcements**: %d\n", len(analyses)))
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeASXAnnouncements))
 
-	// Classification summary
+	// Signal-to-Noise Analysis Summary
+	highSignalCount, modSignalCount, lowSignalCount, noiseSignalCount := 0, 0, 0, 0
+	tradingHaltCount := 0
+	for _, a := range analyses {
+		switch a.SignalNoiseRating {
+		case SignalNoiseHigh:
+			highSignalCount++
+		case SignalNoiseModerate:
+			modSignalCount++
+		case SignalNoiseLow:
+			lowSignalCount++
+		case SignalNoiseNone:
+			noiseSignalCount++
+		}
+		if a.IsTradingHalt || a.IsReinstatement {
+			tradingHaltCount++
+		}
+	}
+
+	content.WriteString("## Signal-to-Noise Analysis\n\n")
+	content.WriteString("**Rating Definitions:**\n")
+	content.WriteString("- **HIGH_SIGNAL**: Significant market impact (price change >=3% OR volume >=2x)\n")
+	content.WriteString("- **MODERATE_SIGNAL**: Notable market reaction (price change >=1.5% OR volume >=1.5x)\n")
+	content.WriteString("- **LOW_SIGNAL**: Minor market reaction (price change >=0.5% OR volume >=1.2x)\n")
+	content.WriteString("- **NOISE**: No meaningful impact (price change <0.5% AND volume <1.2x)\n\n")
+
+	content.WriteString("| Signal Rating | Count | Interpretation |\n")
+	content.WriteString("|---------------|-------|----------------|\n")
+	content.WriteString(fmt.Sprintf("| **HIGH_SIGNAL** | %d | Announcements with significant market reaction |\n", highSignalCount))
+	content.WriteString(fmt.Sprintf("| MODERATE_SIGNAL | %d | Announcements with notable price/volume movement |\n", modSignalCount))
+	content.WriteString(fmt.Sprintf("| LOW_SIGNAL | %d | Announcements with minor detectable impact |\n", lowSignalCount))
+	content.WriteString(fmt.Sprintf("| NOISE | %d | Announcements with no meaningful market effect |\n", noiseSignalCount))
+	if tradingHaltCount > 0 {
+		content.WriteString(fmt.Sprintf("| *Trading Halts* | %d | Trading halt/reinstatement announcements |\n", tradingHaltCount))
+	}
+	content.WriteString("\n")
+
+	// Calculate signal-to-noise ratio
+	signalCount := highSignalCount + modSignalCount
+	noiseRatioDesc := "Very High"
+	if signalCount > 0 {
+		if noiseSignalCount <= signalCount {
+			noiseRatioDesc = "Low"
+		} else if noiseSignalCount <= signalCount*2 {
+			noiseRatioDesc = "Moderate"
+		} else {
+			noiseRatioDesc = "High"
+		}
+	}
+	content.WriteString(fmt.Sprintf("**Noise Ratio**: %s (%d signal vs %d noise announcements)\n\n", noiseRatioDesc, signalCount, noiseSignalCount+lowSignalCount))
+
+	// Keyword-based classification summary (legacy)
 	highCount, mediumCount, lowCount, noiseCount := 0, 0, 0, 0
 	for _, a := range analyses {
 		switch a.RelevanceCategory {
@@ -1224,60 +1449,96 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	content.WriteString(fmt.Sprintf("| LOW | %d | Routine disclosures |\n", lowCount))
 	content.WriteString(fmt.Sprintf("| NOISE | %d | Non-material announcements |\n\n", noiseCount))
 
-	// Announcements table
+	// Announcements table with signal-to-noise column
 	content.WriteString("## Announcements\n\n")
-	content.WriteString("| Date | Headline | Type | Relevance | Price Impact |\n")
-	content.WriteString("|------|----------|------|-----------|-------------|\n")
+	content.WriteString("| Date | Headline | Signal | Price Change | Volume |\n")
+	content.WriteString("|------|----------|--------|--------------|--------|\n")
 
 	for _, a := range analyses {
 		// Truncate headline for table
 		headline := a.Headline
-		if len(headline) > 60 {
-			headline = headline[:57] + "..."
+		if len(headline) > 50 {
+			headline = headline[:47] + "..."
 		}
 
-		priceImpactStr := "N/A"
+		priceChangeStr := "N/A"
+		volumeStr := "N/A"
 		if a.PriceImpact != nil {
 			sign := ""
 			if a.PriceImpact.ChangePercent > 0 {
 				sign = "+"
 			}
-			priceImpactStr = fmt.Sprintf("%s%.1f%% (%s)", sign, a.PriceImpact.ChangePercent, a.PriceImpact.ImpactSignal)
+			priceChangeStr = fmt.Sprintf("%s%.1f%%", sign, a.PriceImpact.ChangePercent)
+			volumeStr = fmt.Sprintf("%.1fx", a.PriceImpact.VolumeChangeRatio)
 		}
 
-		priceSensitive := ""
+		markers := ""
 		if a.PriceSensitive {
-			priceSensitive = " ⚠️"
+			markers += "⚠️"
+		}
+		if a.IsTradingHalt {
+			markers += "⏸️"
+		}
+		if a.IsReinstatement {
+			markers += "▶️"
+		}
+		if markers != "" {
+			markers = " " + markers
 		}
 
 		content.WriteString(fmt.Sprintf("| %s | %s%s | %s | %s | %s |\n",
 			a.Date.Format("2006-01-02"),
 			headline,
-			priceSensitive,
-			a.Type,
-			a.RelevanceCategory,
-			priceImpactStr,
+			markers,
+			string(a.SignalNoiseRating),
+			priceChangeStr,
+			volumeStr,
 		))
 	}
 	content.WriteString("\n")
+	content.WriteString("*Legend: ⚠️ Price-sensitive | ⏸️ Trading Halt | ▶️ Reinstatement*\n\n")
 
-	// High relevance detail section
-	if highCount > 0 {
-		content.WriteString("## High Relevance Announcements (Detail)\n\n")
+	// High signal detail section
+	if highSignalCount > 0 {
+		content.WriteString("## High Signal Announcements (Detail)\n\n")
 		for _, a := range analyses {
-			if a.RelevanceCategory == "HIGH" {
+			if a.SignalNoiseRating == SignalNoiseHigh {
 				content.WriteString(fmt.Sprintf("### %s\n", a.Headline))
 				content.WriteString(fmt.Sprintf("- **Date**: %s\n", a.Date.Format("2 January 2006")))
 				content.WriteString(fmt.Sprintf("- **Type**: %s\n", a.Type))
 				content.WriteString(fmt.Sprintf("- **Price Sensitive**: %v\n", a.PriceSensitive))
-				content.WriteString(fmt.Sprintf("- **Classification Reason**: %s\n", a.RelevanceReason))
+				content.WriteString(fmt.Sprintf("- **Signal Rating**: %s\n", string(a.SignalNoiseRating)))
+				content.WriteString(fmt.Sprintf("- **Rationale**: %s\n", a.SignalNoiseRationale))
 
 				if a.PriceImpact != nil {
 					content.WriteString(fmt.Sprintf("- **Price Before**: $%.2f\n", a.PriceImpact.PriceBefore))
 					content.WriteString(fmt.Sprintf("- **Price After**: $%.2f\n", a.PriceImpact.PriceAfter))
 					content.WriteString(fmt.Sprintf("- **Price Change**: %.2f%%\n", a.PriceImpact.ChangePercent))
 					content.WriteString(fmt.Sprintf("- **Volume Ratio**: %.2fx\n", a.PriceImpact.VolumeChangeRatio))
-					content.WriteString(fmt.Sprintf("- **Market Impact**: %s\n", a.PriceImpact.ImpactSignal))
+				}
+
+				if a.PDFURL != "" {
+					content.WriteString(fmt.Sprintf("- **Document**: [View PDF](%s)\n", a.PDFURL))
+				}
+				content.WriteString("\n")
+			}
+		}
+	}
+
+	// Moderate signal announcements
+	if modSignalCount > 0 {
+		content.WriteString("## Moderate Signal Announcements\n\n")
+		for _, a := range analyses {
+			if a.SignalNoiseRating == SignalNoiseModerate {
+				content.WriteString(fmt.Sprintf("### %s\n", a.Headline))
+				content.WriteString(fmt.Sprintf("- **Date**: %s\n", a.Date.Format("2 January 2006")))
+				content.WriteString(fmt.Sprintf("- **Signal Rating**: %s\n", string(a.SignalNoiseRating)))
+				content.WriteString(fmt.Sprintf("- **Rationale**: %s\n", a.SignalNoiseRationale))
+
+				if a.PriceImpact != nil {
+					content.WriteString(fmt.Sprintf("- **Price Change**: %.2f%% ($%.2f -> $%.2f)\n",
+						a.PriceImpact.ChangePercent, a.PriceImpact.PriceBefore, a.PriceImpact.PriceAfter))
+					content.WriteString(fmt.Sprintf("- **Volume Ratio**: %.2fx\n", a.PriceImpact.VolumeChangeRatio))
 				}
 
 				if a.PDFURL != "" {
@@ -1307,14 +1568,18 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	announcementsMetadata := make([]map[string]interface{}, 0, len(analyses))
 	for _, a := range analyses {
 		annMeta := map[string]interface{}{
-			"date":               a.Date.Format(time.RFC3339),
-			"headline":           a.Headline,
-			"type":               a.Type,
-			"price_sensitive":    a.PriceSensitive,
-			"relevance_category": a.RelevanceCategory,
-			"relevance_reason":   a.RelevanceReason,
-			"document_key":       a.DocumentKey,
-			"pdf_url":            a.PDFURL,
+			"date":                   a.Date.Format(time.RFC3339),
+			"headline":               a.Headline,
+			"type":                   a.Type,
+			"price_sensitive":        a.PriceSensitive,
+			"relevance_category":     a.RelevanceCategory,
+			"relevance_reason":       a.RelevanceReason,
+			"document_key":           a.DocumentKey,
+			"pdf_url":                a.PDFURL,
+			"signal_noise_rating":    string(a.SignalNoiseRating),
+			"signal_noise_rationale": a.SignalNoiseRationale,
+			"is_trading_halt":        a.IsTradingHalt,
+			"is_reinstatement":       a.IsReinstatement,
 		}
 
 		if a.PriceImpact != nil {
@@ -1335,13 +1600,24 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	metadata := map[string]interface{}{
 		"asx_code":      asxCode,
 		"total_count":   len(analyses),
-		"high_count":    highCount,
-		"medium_count":  mediumCount,
-		"low_count":     lowCount,
-		"noise_count":   noiseCount,
 		"parent_job_id": parentJobID,
 		"announcements": announcementsMetadata,
 		"generated_at":  time.Now().Format(time.RFC3339),
+		// Signal-to-noise summary
+		"signal_noise_summary": map[string]interface{}{
+			"high_signal_count":     highSignalCount,
+			"moderate_signal_count": modSignalCount,
+			"low_signal_count":      lowSignalCount,
+			"noise_count":           noiseSignalCount,
+			"trading_halt_count":    tradingHaltCount,
+		},
+		// Keyword-based classification summary (legacy)
+		"relevance_summary": map[string]interface{}{
+			"high_count":   highCount,
+			"medium_count": mediumCount,
+			"low_count":    lowCount,
+			"noise_count":  noiseCount,
+		},
 	}
 
 	now := time.Now()

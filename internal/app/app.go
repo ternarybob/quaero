@@ -20,6 +20,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/logs"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/queue/workers"
@@ -807,14 +808,14 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(asxAnnouncementsWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxAnnouncementsWorker.GetType().String()).Msg("ASX Announcements worker registered")
 
-	// Register ASX Stock Data worker (synchronous execution, fetches real-time prices and technicals)
-	asxStockDataWorker := workers.NewASXStockDataWorker(
+	// Register ASX Index Data worker (synchronous execution, fetches index benchmarks like XJO, XSO)
+	asxIndexDataWorker := workers.NewASXIndexDataWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(asxStockDataWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxStockDataWorker.GetType().String()).Msg("ASX Stock Data worker registered")
+	a.StepManager.RegisterWorker(asxIndexDataWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", asxIndexDataWorker.GetType().String()).Msg("ASX Index Data worker registered")
 
 	// Register ASX Director Interest worker (synchronous execution, fetches Appendix 3Y filings)
 	asxDirectorInterestWorker := workers.NewASXDirectorInterestWorker(
@@ -825,24 +826,6 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(asxDirectorInterestWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxDirectorInterestWorker.GetType().String()).Msg("ASX Director Interest worker registered")
 
-	// Register ASX Analyst Coverage worker (synchronous execution, fetches broker ratings and price targets)
-	asxAnalystCoverageWorker := workers.NewASXAnalystCoverageWorker(
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-		jobMgr,
-	)
-	a.StepManager.RegisterWorker(asxAnalystCoverageWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxAnalystCoverageWorker.GetType().String()).Msg("ASX Analyst Coverage worker registered")
-
-	// Register ASX Historical Financials worker (synchronous execution, fetches revenue/profit history)
-	asxHistoricalFinancialsWorker := workers.NewASXHistoricalFinancialsWorker(
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-		jobMgr,
-	)
-	a.StepManager.RegisterWorker(asxHistoricalFinancialsWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxHistoricalFinancialsWorker.GetType().String()).Msg("ASX Historical Financials worker registered")
-
 	// Register ASX Stock Collector worker (consolidated: price, analyst coverage, historical financials)
 	asxStockCollectorWorker := workers.NewASXStockCollectorWorker(
 		a.StorageManager.DocumentStorage(),
@@ -851,6 +834,10 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(asxStockCollectorWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxStockCollectorWorker.GetType().String()).Msg("ASX Stock Collector worker registered")
+
+	// Register asx_stock_data as an alias for asx_stock_collector (backward compatibility)
+	a.StepManager.RegisterWorkerAlias(asxStockCollectorWorker, models.WorkerTypeASXStockData)
+	a.Logger.Debug().Str("step_type", models.WorkerTypeASXStockData.String()).Msg("ASX Stock Data worker alias registered (deprecated)")
 
 	// Register Macro Data worker (synchronous execution, fetches RBA rates and commodity prices)
 	macroDataWorker := workers.NewMacroDataWorker(

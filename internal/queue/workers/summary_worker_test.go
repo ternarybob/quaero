@@ -310,23 +310,8 @@ func TestSummaryWorker_Init(t *testing.T) {
 			setupMocks: func() {},
 			wantErr:    true,
 		},
-		{
-			name: "missing api_key",
-			step: models.JobStep{
-				Name: "summarize",
-				Type: "summary",
-				Config: map[string]interface{}{
-					"prompt":      "Summarize this",
-					"filter_tags": []interface{}{"codebase"},
-				},
-			},
-			jobDef: models.JobDefinition{
-				ID:   "test-job",
-				Name: "Test Summary Job",
-			},
-			setupMocks: func() {},
-			wantErr:    true,
-		},
+		// Note: api_key test case removed - api_key is no longer required in Init
+		// It's resolved by provider factory during CreateJobs
 		{
 			name: "nil config",
 			step: models.JobStep{
@@ -409,9 +394,7 @@ func TestSummaryWorker_Init(t *testing.T) {
 					if _, ok := result.Metadata["filter_tags"].([]string); !ok {
 						t.Error("Init() metadata missing filter_tags")
 					}
-					if _, ok := result.Metadata["api_key"].(string); !ok {
-						t.Error("Init() metadata missing api_key")
-					}
+					// Note: api_key is no longer in metadata - it's resolved by provider factory
 					if _, ok := result.Metadata["documents"].([]*models.Document); !ok {
 						t.Error("Init() metadata missing documents")
 					}
@@ -520,43 +503,5 @@ func TestNewSummaryWorker(t *testing.T) {
 	assert.Equal(t, logger, worker.logger)
 }
 
-// TestSummaryWorker_InitWithAPIKeyPlaceholder tests API key resolution from placeholder
-func TestSummaryWorker_InitWithAPIKeyPlaceholder(t *testing.T) {
-	logger := arbor.NewLogger()
-	mockSearch := new(MockSearchService)
-	mockKV := new(MockKVStorage)
-
-	testDocs := []*models.Document{
-		{ID: "doc_1", Title: "main.go", ContentMarkdown: "package main", Tags: []string{"codebase"}},
-	}
-
-	// Setup mocks
-	mockSearch.On("Search", mock.Anything, "", mock.Anything).Return(testDocs, nil).Once()
-	mockKV.On("Get", mock.Anything, "google_gemini_api_key").Return("resolved-api-key", nil).Once()
-
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
-
-	step := models.JobStep{
-		Name: "summarize",
-		Type: "summary",
-		Config: map[string]interface{}{
-			"prompt":      "Summarize this",
-			"filter_tags": []interface{}{"codebase"},
-			"api_key":     "{google_gemini_api_key}",
-		},
-	}
-
-	jobDef := models.JobDefinition{
-		ID:   "test-job",
-		Name: "Test Job",
-	}
-
-	ctx := context.Background()
-	result, err := worker.Init(ctx, step, jobDef)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, "resolved-api-key", result.Metadata["api_key"])
-
-	mockKV.AssertExpectations(t)
-}
+// Note: TestSummaryWorker_InitWithAPIKeyPlaceholder removed
+// API key resolution is now handled by provider factory in CreateJobs, not Init

@@ -34,14 +34,13 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial data workers
-	WorkerTypeASXAnnouncements        WorkerType = "asx_announcements"         // Fetch ASX company announcements
-	WorkerTypeASXStockData            WorkerType = "asx_stock_data"            // DEPRECATED: Use asx_stock_collector instead
-	WorkerTypeASXDirectorInterest     WorkerType = "asx_director_interest"     // Fetch ASX director interest (Appendix 3Y) filings
-	WorkerTypeASXAnalystCoverage      WorkerType = "asx_analyst_coverage"      // DEPRECATED: Use asx_stock_collector instead
-	WorkerTypeASXHistoricalFinancials WorkerType = "asx_historical_financials" // DEPRECATED: Use asx_stock_collector instead
-	WorkerTypeASXStockCollector       WorkerType = "asx_stock_collector"       // Consolidated worker: price, analyst coverage, and historical financials
-	WorkerTypeMacroData               WorkerType = "macro_data"                // Fetch macroeconomic data (RBA rates, commodity prices)
-	WorkerTypeCompetitorAnalysis      WorkerType = "competitor_analysis"       // Analyze competitors and spawn stock data jobs
+	WorkerTypeASXAnnouncements    WorkerType = "asx_announcements"     // Fetch ASX company announcements
+	WorkerTypeASXIndexData        WorkerType = "asx_index_data"        // Fetch ASX index data (XJO, XSO benchmarks)
+	WorkerTypeASXDirectorInterest WorkerType = "asx_director_interest" // Fetch ASX director interest (Appendix 3Y) filings
+	WorkerTypeASXStockCollector   WorkerType = "asx_stock_collector"   // Consolidated worker: price, analyst coverage, and historical financials
+	WorkerTypeASXStockData        WorkerType = "asx_stock_data"        // DEPRECATED: Use asx_stock_collector instead - alias for backward compatibility
+	WorkerTypeMacroData           WorkerType = "macro_data"            // Fetch macroeconomic data (RBA rates, commodity prices)
+	WorkerTypeCompetitorAnalysis  WorkerType = "competitor_analysis"   // Analyze competitors and spawn stock data jobs
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
@@ -64,10 +63,9 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
-		WorkerTypeASXStockData, WorkerTypeASXDirectorInterest, WorkerTypeASXAnalystCoverage,
-		WorkerTypeASXHistoricalFinancials, WorkerTypeASXStockCollector, WorkerTypeMacroData,
-		WorkerTypeCompetitorAnalysis, WorkerTypeTestJobGenerator,
-		WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
+		WorkerTypeASXIndexData, WorkerTypeASXDirectorInterest, WorkerTypeASXStockCollector,
+		WorkerTypeASXStockData, WorkerTypeMacroData, WorkerTypeCompetitorAnalysis,
+		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
 	}
 	return false
@@ -99,11 +97,10 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeAggregateSummary,
 		WorkerTypeEmail,
 		WorkerTypeASXAnnouncements,
-		WorkerTypeASXStockData,
+		WorkerTypeASXIndexData,
 		WorkerTypeASXDirectorInterest,
-		WorkerTypeASXAnalystCoverage,
-		WorkerTypeASXHistoricalFinancials,
 		WorkerTypeASXStockCollector,
+		WorkerTypeASXStockData, // DEPRECATED: backward compatibility
 		WorkerTypeMacroData,
 		WorkerTypeCompetitorAnalysis,
 		WorkerTypeTestJobGenerator,

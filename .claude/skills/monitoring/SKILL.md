@@ -1,468 +1,96 @@
 # UI Testing & Monitoring Skill for Quaero
 
-**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` before any code changes.
-
-## Purpose
-
-Patterns for UI testing with browser automation, screenshots, monitoring, and result data output.
-Reference implementation: `test/ui/job_definition_general_test.go`
-
-## MANDATORY: Browser Automation Standard
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    CHROMEDP IS THE ONLY ALLOWED OPTION                       │
-│                                                                              │
-│  ✓ ALLOWED:  github.com/chromedp/chromedp                                   │
-│                                                                              │
-│  ✗ FORBIDDEN (AUTO-REJECT):                                                 │
-│    - selenium/webdriver                                                      │
-│    - playwright                                                              │
-│    - puppeteer                                                               │
-│    - rod                                                                     │
-│    - raw chrome DevTools                                                     │
-│    - Any other browser automation library                                    │
-│                                                                              │
-│  WHY: Consistency, existing infrastructure, shared helpers                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` first.
 
 ## BEFORE WRITING ANY TEST
 
-**MANDATORY STEPS:**
-1. Read `doc/TEST_ARCHITECTURE.md` for overview
-2. Read 2-3 existing tests in `test/ui/` directory
-3. Identify reusable components from `test/ui/uitest_context.go`
-4. Document patterns you will follow in step documentation
+**MANDATORY:**
+1. Read `docs/TEST_ARCHITECTURE.md`
+2. Read 2-3 existing tests in `test/ui/`
+3. Use patterns from `test/ui/uitest_context.go`
 
-## Project Context
-
-- **Test Framework:** Go testing with testify (assert/require)
-- **Browser Automation:** chromedp (Chrome DevTools Protocol) - **NO ALTERNATIVES**
-- **Location:** `test/ui/` for UI tests, `test/api/` for API tests
-- **Results:** Screenshots and data saved to `test/results/{run-timestamp}/`
-- **Test Infrastructure:** `test/ui/uitest_context.go` - **ALWAYS USE THIS**
-
-## UITestContext - Core Test Infrastructure
-
-### Creating Test Context
-
-```go
-// Always use UITestContext for UI tests
-func TestMyFeature(t *testing.T) {
-    utc := NewUITestContext(t, 5*time.Minute)  // Set appropriate timeout
-    defer utc.Cleanup()  // ALWAYS defer cleanup
-
-    // Test code here
-}
+## BROWSER AUTOMATION STANDARD
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ CHROMEDP IS THE ONLY ALLOWED OPTION                             │
+│                                                                  │
+│ ✓ github.com/chromedp/chromedp                                  │
+│                                                                  │
+│ ✗ FORBIDDEN: selenium, playwright, puppeteer, rod               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Available URLs
-
+## TEST CONTEXT (MANDATORY)
 ```go
-utc.BaseURL     // Base server URL
-utc.JobsURL     // /jobs page
-utc.QueueURL    // /queue page
-utc.DocsURL     // /documents page
-utc.SettingsURL // /settings page
-```
-
-## Screenshots
-
-### Sequential Screenshot Naming
-
-Screenshots are auto-numbered sequentially (01_, 02_, etc.) for clear ordering:
-
-```go
-// Basic screenshot (auto-numbered, full page)
-utc.Screenshot("queue_page")        // → 01_queue_page.png
-
-// Full page screenshot (same as Screenshot)
-utc.FullScreenshot("expanded_view") // → 02_expanded_view.png
-
-// Refresh page then screenshot
-utc.RefreshAndScreenshot("final_state")
-```
-
-### Screenshot Timing Patterns
-
-```go
-// Take screenshots at key moments:
-utc.Screenshot("initial_state")
-
-// After navigation
-err = utc.Navigate(utc.QueueURL)
-utc.Screenshot("after_navigation")
-
-// After action
-err = utc.Click(".button")
-utc.Screenshot("after_click")
-
-// On error conditions
-if err != nil {
-    utc.Screenshot("error_state_" + sanitizeName(errorType))
-}
-
-// During monitoring (automatic every 30s in MonitorJob)
-utc.Screenshot("status_" + currentStatus)
-```
-
-## Logging
-
-### Structured Test Logging
-
-All logs go to both console and `test.log` file in results:
-
-```go
-// Simple log
-utc.Log("Starting test for job: %s", jobName)
-
-// Status changes
-utc.Log("Status change: %s -> %s (at %v)", lastStatus, currentStatus, elapsed)
-
-// Assertions passed
-utc.Log("✓ ASSERTION PASSED: Filter dropdown with correct structure")
-
-// Warnings (non-fatal issues)
-utc.Log("⚠ WARNING: Feature not implemented yet")
-
-// Test completion
-utc.Log("Test completed with status: %s", finalStatus)
-```
-
-## Saving Result Data
-
-### Save Arbitrary Data to Results
-
-```go
-// Save text content to results directory
-utc.SaveToResults("captured_data.json", jsonString)
-utc.SaveToResults("api_response.txt", responseBody)
-
-// Copy job definition to results
-utc.CopyJobDefinitionToResults("job_definitions/my_job.toml")
-```
-
-## Navigation & Interaction
-
-### Page Navigation
-
-```go
-// Navigate with automatic wait for page load
-err := utc.Navigate(utc.QueueURL)
-require.NoError(t, err, "Failed to navigate to Queue page")
-
-// Wait for specific element
-err = utc.WaitForElement(".job-card", 10*time.Second)
-```
-
-### Element Interaction
-
-```go
-// Click element
-err := utc.Click(".run-button")
-
-// Get text content
-text, err := utc.GetText(".status-badge")
-```
-
-## Job Monitoring Patterns
-
-### Trigger and Monitor Job
-
-```go
-// Trigger job via UI
-err := utc.TriggerJob("My Job Name")
-require.NoError(t, err, "Failed to trigger job")
-
-// Monitor with options
-opts := MonitorJobOptions{
-    Timeout:         5 * time.Minute,
-    ExpectDocuments: true,
-    AllowFailure:    false,  // Set true if job failure is acceptable
-}
-err = utc.MonitorJob("My Job Name", opts)
-
-// Or use convenience method
-err = utc.TriggerAndMonitorJob("My Job Name", 5*time.Minute)
-```
-
-### Custom Polling Loop (for complex monitoring)
-
-```go
-startTime := time.Now()
-jobTimeout := 2 * time.Minute
-var finalStatus string
-
-for {
-    if time.Since(startTime) > jobTimeout {
-        utc.Screenshot("timeout_state")
-        break
-    }
-
-    // Get status via JavaScript evaluation
-    var currentStatus string
-    err := chromedp.Run(utc.Ctx,
-        chromedp.Evaluate(`
-            (() => {
-                const card = document.querySelector('.job-card');
-                const badge = card?.querySelector('[data-status]');
-                return badge?.getAttribute('data-status') || '';
-            })()
-        `, &currentStatus),
-    )
-
-    if currentStatus != "" && currentStatus != finalStatus {
-        utc.Log("Status change: %s -> %s", finalStatus, currentStatus)
-        utc.Screenshot("status_" + currentStatus)
-        finalStatus = currentStatus
-    }
-
-    if currentStatus == "completed" || currentStatus == "failed" {
-        utc.Log("Job reached terminal state: %s", currentStatus)
-        break
-    }
-
-    time.Sleep(2 * time.Second)
-}
-```
-
-## WebSocket & API Tracking
-
-### Track WebSocket Messages
-
-```go
-wsTracker := NewWebSocketMessageTracker()
-
-chromedp.ListenTarget(utc.Ctx, func(ev interface{}) {
-    switch e := ev.(type) {
-    case *network.EventWebSocketFrameReceived:
-        payload := e.Response.PayloadData
-        if strings.Contains(payload, "refresh_logs") {
-            var msg struct {
-                Type    string                 `json:"type"`
-                Payload map[string]interface{} `json:"payload"`
-            }
-            if err := json.Unmarshal([]byte(payload), &msg); err == nil {
-                wsTracker.AddRefreshLogs(msg.Payload, time.Now())
-            }
-        }
-    }
-})
-
-// Enable network tracking
-chromedp.Run(utc.Ctx, network.Enable())
-```
-
-### Track API Calls
-
-```go
-apiTracker := NewAPICallTracker()
-
-chromedp.ListenTarget(utc.Ctx, func(ev interface{}) {
-    switch e := ev.(type) {
-    case *network.EventRequestWillBeSent:
-        apiTracker.AddRequest(e.Request.URL, time.Now())
-    }
-})
-
-// Later: assert API calls are gated by WebSocket triggers
-jobLogs := apiTracker.GetJobLogsCalls()
-serviceLogs := apiTracker.GetServiceLogsCalls()
-```
-
-## Assertions
-
-### DOM-Based Assertions
-
-```go
-var result map[string]interface{}
-err := chromedp.Run(utc.Ctx,
-    chromedp.Evaluate(`
-        (() => {
-            return {
-                hasElement: document.querySelector('.my-element') !== null,
-                elementText: document.querySelector('.my-element')?.textContent || '',
-                itemCount: document.querySelectorAll('.list-item').length
-            };
-        })()
-    `, &result),
-)
-require.NoError(t, err, "Failed to evaluate DOM")
-
-assert.True(t, result["hasElement"].(bool), "Element should exist")
-assert.Equal(t, "Expected Text", result["elementText"].(string))
-utc.Log("Found %d items", int(result["itemCount"].(float64)))
-```
-
-### Step Expansion Tracking
-
-```go
-tracker := NewStepExpansionTracker()
-
-// During monitoring, check expansion state
-func checkStepExpansionState(utc *UITestContext, tracker *StepExpansionTracker) {
-    chromedp.Run(utc.Ctx,
-        chromedp.Evaluate(`
-            (() => {
-                const expanded = [];
-                document.querySelectorAll('.tree-step').forEach(step => {
-                    const logs = step.querySelector('.tree-step-logs');
-                    if (logs) {
-                        const name = step.querySelector('.tree-step-name')?.textContent;
-                        if (name) expanded.push(name.trim());
-                    }
-                });
-                return expanded;
-            })()
-        `, &expandedSteps),
-    )
-
-    for _, stepName := range expandedSteps {
-        tracker.RecordExpansion(stepName)
-    }
-}
-
-// Assert expansion order
-order := tracker.GetExpansionOrder()
-utc.Log("Steps expanded in order: %v", order)
-```
-
-## Test File Structure
-
-```go
-// test/ui/my_feature_test.go
-package ui
-
-import (
-    "testing"
-    "time"
-
-    "github.com/chromedp/chromedp"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-)
-
 func TestMyFeature(t *testing.T) {
     utc := NewUITestContext(t, 5*time.Minute)
-    defer utc.Cleanup()
+    defer utc.Cleanup()  // ALWAYS
 
-    utc.Log("--- Testing My Feature ---")
-
-    // 1. Setup (create test data via API)
-    helper := utc.Env.NewHTTPTestHelper(t)
-    // ... create test data ...
-    defer helper.DELETE("/api/cleanup/...")
-
-    // 2. Navigate and take initial screenshot
-    err := utc.Navigate(utc.QueueURL)
-    require.NoError(t, err)
-    utc.Screenshot("initial_state")
-
-    // 3. Perform actions
-    // ... interact with UI ...
-
-    // 4. Assert results
-    var result map[string]interface{}
-    chromedp.Run(utc.Ctx, chromedp.Evaluate(`...`, &result))
-
-    assert.True(t, result["expected"].(bool), "Assertion message")
-    utc.Log("✓ Test passed")
-
-    // 5. Final screenshot
-    utc.Screenshot("final_state")
+    utc.Log("Starting test")
+    utc.Screenshot("initial")
+    // ...
 }
 ```
+
+## Available Helpers
+
+| Method | Purpose |
+|--------|---------|
+| `utc.Navigate(url)` | Navigate to page |
+| `utc.Screenshot(name)` | Auto-numbered screenshot |
+| `utc.Log(fmt, args...)` | Structured logging |
+| `utc.Click(selector)` | Click element |
+| `utc.GetText(selector)` | Get element text |
+| `utc.TriggerJob(name)` | Trigger job via UI |
+| `utc.MonitorJob(name, opts)` | Monitor job status |
+| `utc.SaveToResults(file, data)` | Save data to results |
 
 ## Anti-Patterns (AUTO-FAIL)
-
-### Browser Automation Anti-Patterns (INSTANT REJECT)
-
 ```go
-// ❌ FORBIDDEN: Using selenium/webdriver
-import "github.com/tebeka/selenium"  // NEVER USE
+// ❌ Not using UITestContext
+ctx, cancel := chromedp.NewContext(...)  // Use NewUITestContext!
 
-// ❌ FORBIDDEN: Using playwright-go
-import "github.com/playwright-community/playwright-go"  // NEVER USE
+// ❌ Alternative browser automation
+import "github.com/tebeka/selenium"       // FORBIDDEN
+import "github.com/playwright-community/playwright-go"  // FORBIDDEN
 
-// ❌ FORBIDDEN: Using rod
-import "github.com/go-rod/rod"  // NEVER USE
+// ❌ Custom infrastructure
+type MyTestContext struct { }  // Use existing UITestContext!
 
-// ❌ FORBIDDEN: Creating your own browser context
-ctx, cancel := chromedp.NewContext(context.Background())  // Use UITestContext!
-
-// ❌ FORBIDDEN: Direct Chrome/CDP without chromedp wrappers
-// Any direct websocket connections to Chrome DevTools
-```
-
-### Test Infrastructure Anti-Patterns (INSTANT REJECT)
-
-```go
-// ❌ FORBIDDEN: Not using UITestContext
-func TestSomething(t *testing.T) {
-    // Direct chromedp without UITestContext - WRONG!
-    ctx, cancel := chromedp.NewExecAllocator(...)  // Use NewUITestContext!
-}
-
-// ❌ FORBIDDEN: Creating parallel test infrastructure
-type MyTestContext struct { ... }  // Use existing UITestContext!
-
-// ❌ FORBIDDEN: Custom screenshot functions
-func takeScreenshot(ctx context.Context, ...) { ... }  // Use utc.Screenshot()!
-
-// ❌ FORBIDDEN: Custom logging in tests
-log.Printf("...")  // Use utc.Log()!
-fmt.Printf("...")  // Use utc.Log()!
-```
-
-### General Anti-Patterns
-
-```go
 // ❌ Missing cleanup
 utc := NewUITestContext(t, timeout)
 // Missing: defer utc.Cleanup()
 
-// ❌ Hardcoded waits without purpose
-time.Sleep(5 * time.Second)  // Why 5 seconds?
+// ❌ Custom logging
+log.Printf(...)  // Use utc.Log()
+fmt.Printf(...)  // Use utc.Log()
 
-// ❌ No screenshots on failure
-if err != nil {
-    t.Fatal(err)  // Should screenshot first!
-}
-
-// ❌ Silent failures in evaluation
-chromedp.Evaluate(`...`, nil)  // Ignoring result
-
-// ❌ Missing error checks
-utc.Navigate(url)  // Should check error!
-
-// ❌ Not following existing test patterns
-// Always read existing tests first!
+// ❌ No error checks
+utc.Navigate(url)  // Check error!
 ```
 
-## Rules Summary
+## MISALIGNED TEST HANDLING
 
-1. **CHROMEDP ONLY** - Never use selenium, playwright, rod, or other browser automation
-2. **ALWAYS use UITestContext** - Never create your own test context
-3. **Always defer Cleanup** - `defer utc.Cleanup()` immediately after context creation
-4. **Screenshot key moments** - Initial, after actions, on errors, final state
-5. **Use structured logging** - `utc.Log()` for all test output
-6. **Check all errors** - Every chromedp operation can fail
-7. **Use helper methods** - Don't reinvent TriggerJob, MonitorJob, etc.
-8. **Save relevant data** - Use SaveToResults for captured data
-9. **Follow timeout patterns** - Set appropriate test and job timeouts
-10. **Read existing tests first** - Analyze patterns before writing new tests
+If a test expects **deprecated behavior** (not a code bug):
 
-## Validation Checklist (for VALIDATOR)
+1. **DO NOT** add backward compatibility to make test pass
+2. **DO NOT** modify the test
+3. **Document** in `$WORKDIR/test_issues.md`:
+   - What test expects (deprecated)
+   - What test SHOULD expect (current)
+   - Suggested test change
+4. **Continue** with remaining tests
 
-Before approving any UI test:
-- [ ] Uses `github.com/chromedp/chromedp` (not alternatives)
+See `3agents-tdd` workflow for full protocol.
+
+## Validation Checklist
+
 - [ ] Uses `NewUITestContext(t, timeout)`
-- [ ] Has `defer utc.Cleanup()` immediately after context creation
-- [ ] Uses `utc.Log()` for logging (not log.Printf/fmt.Printf)
-- [ ] Uses `utc.Screenshot()` for screenshots (not custom functions)
-- [ ] Uses `utc.Navigate()` for navigation
-- [ ] Error checks on all chromedp operations
-- [ ] Follows patterns from existing tests in same directory
-- [ ] Uses testify (assert/require) for assertions
-- [ ] No parallel test infrastructure created
+- [ ] Has `defer utc.Cleanup()`
+- [ ] Uses `utc.Log()` not log/fmt
+- [ ] Uses `utc.Screenshot()` at key moments
+- [ ] Error checks on chromedp operations
+- [ ] Follows patterns from existing tests
+- [ ] Uses testify (assert/require)
+- [ ] No parallel test infrastructure
+- [ ] No dead test code left behind

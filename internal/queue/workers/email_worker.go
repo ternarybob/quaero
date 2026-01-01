@@ -139,13 +139,56 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	subject, _ := initResult.Metadata["subject"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
+	// Check for errors in previous steps
+	errorInfo := w.checkJobForErrors(ctx, stepID)
+	includeLogsOnError := true // Default to including logs
+	if val, ok := stepConfig["include_logs_on_error"].(bool); ok {
+		includeLogsOnError = val
+	}
+
 	// Get body - can be from step config, or from previous step's output document
 	// Also track source document for adding source links
 	bodyResult := w.resolveBodyWithSource(ctx, stepConfig)
 	body := bodyResult.textBody
 	htmlBody := bodyResult.htmlBody
 
-	if body == "" && htmlBody == "" {
+	// Determine if we should switch to error mode:
+	// 1. Previous steps have errors, or
+	// 2. Body is empty (no data scenario)
+	isErrorMode := errorInfo.hasErrors || (body == "" && htmlBody == "")
+
+	if isErrorMode {
+		// Switch to error reporting mode
+		if onErrorSubject, ok := stepConfig["on_error_subject"].(string); ok && onErrorSubject != "" {
+			subject = onErrorSubject
+		} else if errorInfo.hasErrors {
+			// Append error indicator to subject
+			subject = subject + " - Error Occurred"
+		}
+
+		// Generate error body
+		if includeLogsOnError || body == "" {
+			// Get parent job ID for error report
+			parentJobID := ""
+			if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil {
+				if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+					parentJobID = *stepJob.ParentID
+				}
+			}
+			body = w.generateErrorEmailBody(errorInfo, parentJobID)
+			htmlBody = w.convertMarkdownToHTML(body)
+		}
+
+		w.logger.Info().
+			Bool("has_errors", errorInfo.hasErrors).
+			Int("failed_steps", len(errorInfo.failedSteps)).
+			Str("step_id", stepID).
+			Msg("Email worker detected errors, switching to error mode")
+
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "warn", "Sending error notification email due to job failures or missing data")
+		}
+	} else if body == "" && htmlBody == "" {
 		body = "Job completed. No content was specified for this email."
 	}
 
@@ -280,6 +323,14 @@ type emailBodyResult struct {
 	sourceTags []string         // Tags used to find the source document
 }
 
+// jobErrorInfo contains information about job errors for error reporting
+type jobErrorInfo struct {
+	hasErrors     bool
+	failedSteps   []string
+	errorMessages []string
+	logs          []string
+}
+
 // resolveBody determines the email body from step configuration
 // Supports:
 //   - body (direct text/markdown)
@@ -410,6 +461,124 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 	}
 
 	return result
+}
+
+// checkJobForErrors checks if the parent job or any previous steps have failed
+// Returns error info including failed steps and their logs
+func (w *EmailWorker) checkJobForErrors(ctx context.Context, stepID string) jobErrorInfo {
+	result := jobErrorInfo{}
+
+	// Get the step job to find the parent manager
+	stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID)
+	if err != nil {
+		w.logger.Debug().Err(err).Str("step_id", stepID).Msg("Could not get step job for error check")
+		return result
+	}
+
+	stepJob, ok := stepJobInterface.(*models.QueueJobState)
+	if !ok || stepJob == nil {
+		return result
+	}
+
+	// Get the parent manager job
+	if stepJob.ParentID == nil || *stepJob.ParentID == "" {
+		return result
+	}
+	parentID := *stepJob.ParentID
+
+	managerJobInterface, err := w.jobMgr.GetJob(ctx, parentID)
+	if err != nil {
+		w.logger.Debug().Err(err).Str("parent_id", parentID).Msg("Could not get manager job for error check")
+		return result
+	}
+
+	managerJob, ok := managerJobInterface.(*models.QueueJobState)
+	if !ok || managerJob == nil {
+		return result
+	}
+
+	// Check step_stats in manager metadata for failed steps
+	if managerJob.Metadata != nil {
+		if stepStats, ok := managerJob.Metadata["step_stats"].([]interface{}); ok {
+			for _, statInterface := range stepStats {
+				if stat, ok := statInterface.(map[string]interface{}); ok {
+					status, _ := stat["status"].(string)
+					stepName, _ := stat["step_name"].(string)
+					stepJobID, _ := stat["step_id"].(string)
+
+					if status == "failed" || status == "error" {
+						result.hasErrors = true
+						result.failedSteps = append(result.failedSteps, stepName)
+
+						// Get logs from the failed step
+						if stepJobID != "" {
+							logs, err := w.jobMgr.GetJobLogs(ctx, stepJobID, 50)
+							if err == nil {
+								for _, log := range logs {
+									if log.Level == "error" || log.Level == "fatal" {
+										result.errorMessages = append(result.errorMessages, log.Message)
+									}
+									result.logs = append(result.logs, fmt.Sprintf("[%s] %s", log.Level, log.Message))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Also check manager job error field
+	if managerJob.Error != "" {
+		result.hasErrors = true
+		result.errorMessages = append(result.errorMessages, managerJob.Error)
+	}
+
+	return result
+}
+
+// generateErrorEmailBody creates the email body for error notifications
+func (w *EmailWorker) generateErrorEmailBody(errorInfo jobErrorInfo, jobID string) string {
+	var content strings.Builder
+
+	content.WriteString("# An Error Occurred\n\n")
+	content.WriteString("The job encountered errors during execution.\n\n")
+
+	if len(errorInfo.failedSteps) > 0 {
+		content.WriteString("## Failed Steps\n\n")
+		for _, step := range errorInfo.failedSteps {
+			content.WriteString(fmt.Sprintf("- %s\n", step))
+		}
+		content.WriteString("\n")
+	}
+
+	if len(errorInfo.errorMessages) > 0 {
+		content.WriteString("## Error Details\n\n")
+		for _, msg := range errorInfo.errorMessages {
+			content.WriteString(fmt.Sprintf("- %s\n", msg))
+		}
+		content.WriteString("\n")
+	}
+
+	if len(errorInfo.logs) > 0 {
+		content.WriteString("## Step Logs\n\n")
+		content.WriteString("```\n")
+		// Limit to last 30 logs
+		startIdx := 0
+		if len(errorInfo.logs) > 30 {
+			startIdx = len(errorInfo.logs) - 30
+			content.WriteString("... (earlier logs truncated)\n")
+		}
+		for _, log := range errorInfo.logs[startIdx:] {
+			content.WriteString(log + "\n")
+		}
+		content.WriteString("```\n\n")
+	}
+
+	content.WriteString("---\n\n")
+	content.WriteString(fmt.Sprintf("Job ID: %s\n", jobID))
+
+	return content.String()
 }
 
 // saveHTMLDocument saves the HTML email body as a document for verification

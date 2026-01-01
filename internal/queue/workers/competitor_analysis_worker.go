@@ -25,11 +25,11 @@ import (
 // CompetitorAnalysisWorker analyzes a target company, identifies competitors,
 // and fetches stock data for each competitor inline.
 type CompetitorAnalysisWorker struct {
-	documentStorage interfaces.DocumentStorage
-	kvStorage       interfaces.KeyValueStorage
-	jobMgr          *queue.Manager
-	logger          arbor.ILogger
-	stockDataWorker *ASXStockDataWorker // Reuses existing stock data worker
+	documentStorage      interfaces.DocumentStorage
+	kvStorage            interfaces.KeyValueStorage
+	jobMgr               *queue.Manager
+	logger               arbor.ILogger
+	stockCollectorWorker *ASXStockCollectorWorker // Reuses stock collector for competitor data
 }
 
 // Compile-time assertion
@@ -42,15 +42,15 @@ func NewCompetitorAnalysisWorker(
 	jobMgr *queue.Manager,
 	logger arbor.ILogger,
 ) *CompetitorAnalysisWorker {
-	// Create embedded stock data worker for fetching competitor data
-	stockDataWorker := NewASXStockDataWorker(documentStorage, logger, jobMgr)
+	// Create embedded stock collector worker for fetching competitor data
+	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, logger, jobMgr)
 
 	return &CompetitorAnalysisWorker{
-		documentStorage: documentStorage,
-		kvStorage:       kvStorage,
-		jobMgr:          jobMgr,
-		logger:          logger,
-		stockDataWorker: stockDataWorker,
+		documentStorage:      documentStorage,
+		kvStorage:            kvStorage,
+		jobMgr:               jobMgr,
+		logger:               logger,
+		stockCollectorWorker: stockCollectorWorker,
 	}
 }
 
@@ -222,12 +222,12 @@ func (w *CompetitorAnalysisWorker) CreateJobs(ctx context.Context, step models.J
 	return stepID, nil
 }
 
-// fetchCompetitorStockData fetches stock data for a single competitor using ASXStockDataWorker
+// fetchCompetitorStockData fetches stock data for a single competitor using ASXStockCollectorWorker
 func (w *CompetitorAnalysisWorker) fetchCompetitorStockData(ctx context.Context, asxCode, period string, outputTags []string, stepID string, jobDef models.JobDefinition) error {
-	// Create a synthetic step for the stock data worker
+	// Create a synthetic step for the stock collector worker
 	stockStep := models.JobStep{
 		Name:        fmt.Sprintf("fetch_competitor_%s", strings.ToLower(asxCode)),
-		Type:        models.WorkerTypeASXStockData,
+		Type:        models.WorkerTypeASXStockCollector,
 		Description: fmt.Sprintf("Fetch stock data for competitor ASX:%s", asxCode),
 		Config: map[string]interface{}{
 			"asx_code":    asxCode,
@@ -236,8 +236,8 @@ func (w *CompetitorAnalysisWorker) fetchCompetitorStockData(ctx context.Context,
 		},
 	}
 
-	// Call the stock data worker directly
-	_, err := w.stockDataWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
+	// Call the stock collector worker directly
+	_, err := w.stockCollectorWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
 	if err != nil {
 		return fmt.Errorf("stock data fetch failed for %s: %w", asxCode, err)
 	}

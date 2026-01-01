@@ -9,18 +9,9 @@ This document analyzes the data collection capabilities of workers and their usa
 | Worker | Type | Data Source | Document Tags | Data Provided |
 |--------|------|-------------|---------------|---------------|
 | `asx_stock_collector` | Structured | Yahoo Finance | `asx-stock-data`, `<ticker>` | **Consolidated**: Price, OHLCV, technicals, analyst coverage, historical financials (single API call) |
+| `asx_index_data` | Structured | Yahoo Finance | `asx-index`, `<index>` | Index data for benchmarks (XJO, XSO) |
 | `asx_announcements` | Structured | ASX API | `asx-announcement`, `<ticker>` | Official announcements, price sensitivity flags, PDF links |
 | `asx_director_interest` | Structured | ASX API | `director-interest`, `<ticker>` | Appendix 3Y filings, insider buying/selling |
-
-### Deprecated Workers (Use asx_stock_collector instead)
-
-| Worker | Status | Replacement |
-|--------|--------|-------------|
-| `asx_stock_data` | DEPRECATED | `asx_stock_collector` |
-| `asx_analyst_coverage` | DEPRECATED | `asx_stock_collector` |
-| `asx_historical_financials` | DEPRECATED | `asx_stock_collector` |
-
-> **Migration Note**: These workers are kept for backward compatibility. New integrations should use `asx_stock_collector` which combines all data into a single API call.
 
 ### General Workers
 
@@ -76,7 +67,7 @@ fetch_stock_data (asx_stock_collector)
 |------|-------------------|------------------------|-------------------------|
 | `fetch_stock_data` (asx_stock_collector) | ✓ | ✓ | ✓ |
 | `fetch_announcements` | ✓ | ✓ | ✓ |
-| `fetch_index_data` (asx_stock_data) | ✓ | ✓ | ✓ |
+| `fetch_index_data` (asx_index_data) | ✓ | ✓ | ✓ |
 | `fetch_director_interest` | ✗ | ✓ | ✗ |
 | `fetch_macro_data` | ✗ | ✓ | ✗ |
 | `search_web` | ✓ | ✓ | ✓ |
@@ -86,19 +77,7 @@ fetch_stock_data (asx_stock_collector)
 
 ## Data Collection Flow
 
-### Before (3 API calls per stock)
-
-```
-┌─────────────────┐     ┌─────────────────────┐     ┌────────────────────────┐
-│ asx_stock_data  │     │ asx_analyst_coverage│     │ asx_historical_financials│
-│ (Yahoo Finance) │     │ (Yahoo Finance)     │     │ (Yahoo Finance)        │
-└────────┬────────┘     └──────────┬──────────┘     └───────────┬────────────┘
-         │                         │                             │
-         ▼                         ▼                             ▼
-   asx-stock-data           asx-analyst-coverage         asx-historical-financials
-```
-
-### After (1 API call per stock)
+### Consolidated Architecture (1 API call per stock)
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -139,7 +118,7 @@ The following data is collected by all three templates via `asx_stock_collector`
    - Official ASX announcements
    - Price sensitivity flags
 
-5. **Benchmark Comparison** (`asx_stock_data` as index)
+5. **Benchmark Comparison** (`asx_index_data`)
    - ASX 200 (XJO) performance
    - Small Ords (XSO) for small caps
 
@@ -181,37 +160,22 @@ The following data is collected by all three templates via `asx_stock_collector`
 4. **Type Safety**: In-code Go structs instead of external JSON schemas
 5. **No AI Processing**: Pure data collection - no LLM summarization in worker
 
-## Migration Guide
+## Worker Selection Guide
 
-### Updating Job Templates
+### Stock Data Collection
 
-**Before (legacy)**:
-```toml
-available_tools = [
-    { name = "fetch_stock_data", worker = "asx_stock_data" },
-    { name = "fetch_analyst_coverage", worker = "asx_analyst_coverage" },
-    { name = "fetch_historical_financials", worker = "asx_historical_financials" },
-]
-```
-
-**After (recommended)**:
+**For individual stocks** (company analysis):
 ```toml
 available_tools = [
     { name = "fetch_stock_data", worker = "asx_stock_collector" },
-    # analyst_coverage and historical_financials are included in asx_stock_collector
 ]
 ```
+Uses `asx_stock_collector` - single API call includes prices, technicals, analyst coverage, and historical financials.
 
-### Updating Goal Text
-
-**Before**:
+**For index benchmarks** (XJO, XSO):
+```toml
+available_tools = [
+    { name = "fetch_index_data", worker = "asx_index_data" },
+]
 ```
-1. Use fetch_stock_data for price data
-2. Use fetch_analyst_coverage for broker ratings
-3. Use fetch_historical_financials for revenue history
-```
-
-**After**:
-```
-1. Use fetch_stock_data (single call includes price, analyst, and financial data)
-```
+Uses `asx_index_data` for index data retrieval.

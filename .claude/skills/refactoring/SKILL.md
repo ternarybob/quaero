@@ -3,28 +3,37 @@
 ## Purpose
 Core patterns for ALL code modifications in Quaero. Referenced by commands and other skills.
 
-## MODEL RECOMMENDATION
-```yaml
-model: opus              # Use Claude Opus 4.5 for refactoring analysis
-thinking: extended       # Extended thinking enables deeper code analysis
-rationale: |
-  Opus 4.5 with extended thinking is recommended for refactoring because:
-  - Analyzing existing code patterns requires deep context understanding
-  - EXTEND > MODIFY > CREATE decisions need thorough codebase exploration
-  - Identifying extension points requires reasoning across multiple files
-  - Preventing parallel structures needs comprehensive pattern recognition
-```
-
-## ANTI-CREATION BIAS
+## FUNDAMENTAL RULES
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Before creating ANYTHING, prove existing code can't be extended │
+│ ANTI-CREATION BIAS                                              │
 │                                                                  │
 │ PRIORITY: EXTEND > MODIFY > CREATE                              │
 │                                                                  │
+│ Before creating ANYTHING, prove existing code can't be extended │
 │ CREATE requires written justification:                          │
 │ • Why existing code cannot be extended                          │
 │ • What pattern from existing codebase it follows                │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ BACKWARD COMPATIBILITY IS NOT REQUIRED                          │
+│                                                                  │
+│ • Requirements define the ONLY valid behavior                   │
+│ • Legacy code behavior is IRRELEVANT if requirements differ     │
+│ • Breaking changes are ALLOWED to satisfy requirements          │
+│ • NEVER add compatibility shims for old behavior                │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ CLEANUP IS MANDATORY                                            │
+│                                                                  │
+│ • Remove redundant functions when replacing with new impl       │
+│ • Delete dead code paths made obsolete by changes               │
+│ • Remove unused parameters, variables, and imports              │
+│ • Consolidate duplicate logic - don't leave old version         │
+│                                                                  │
+│ Leave the codebase CLEANER than you found it.                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +52,7 @@ BUILD FAIL = TASK FAIL (no exceptions)
 
 ## ARCHITECTURE COMPLIANCE
 
-Always read before modifying code:
+Read before modifying code:
 - `docs/architecture/*.md` - Architecture requirements (LAW)
 - `.claude/skills/go/SKILL.md` - Go patterns
 - `.claude/skills/frontend/SKILL.md` - Frontend patterns
@@ -58,10 +67,13 @@ Always read before modifying code:
 ### When Modifying:
 1. Follow EXACT patterns from existing codebase
 2. Minimum viable change (not "proper" or "complete")
-3. Build must pass before completion
+3. Remove any code made redundant by changes
+4. Build must pass before completion
 
 ### Forbidden:
 - Creating parallel structures
 - Duplicating existing logic
 - Ignoring existing patterns
 - Modifying tests to make code pass
+- Leaving dead code behind
+- Adding backward compatibility shims

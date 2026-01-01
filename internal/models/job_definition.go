@@ -38,21 +38,20 @@ const (
 	JobDefinitionTypeSummarizer          JobDefinitionType = "summarizer"
 	JobDefinitionTypeCustom              JobDefinitionType = "custom"
 	JobDefinitionTypePlaces              JobDefinitionType = "places"
-	JobDefinitionTypeAgent               JobDefinitionType = "agent"                     // Agent-powered document processing jobs
-	JobDefinitionTypeFetch               JobDefinitionType = "fetch"                     // API-based data collection with authentication (GitHub, etc.)
-	JobDefinitionTypeWebSearch           JobDefinitionType = "web_search"                // Gemini-powered web search with grounding
-	JobDefinitionTypeLocalDir            JobDefinitionType = "local_dir"                 // Local filesystem directory indexing
-	JobDefinitionTypeCodeMap             JobDefinitionType = "code_map"                  // Hierarchical code structure analysis
-	JobDefinitionTypeJobTemplate         JobDefinitionType = "job_template"              // Template orchestration - executes job templates with variable substitution
-	JobDefinitionTypeOrchestrator        JobDefinitionType = "orchestrator"              // AI-powered cognitive orchestration with dynamic planning
-	JobDefinitionTypeASXStockData        JobDefinitionType = "asx_stock_data"            // ASX stock data fetching (DEPRECATED: use asx_stock_collector)
-	JobDefinitionTypeASXAnnouncements    JobDefinitionType = "asx_announcements"         // ASX company announcements fetching
-	JobDefinitionTypeASXStockCollector   JobDefinitionType = "asx_stock_collector"       // Consolidated stock data: price, analyst coverage, and historical financials
-	JobDefinitionTypeASXAnalystCoverage  JobDefinitionType = "asx_analyst_coverage"      // ASX analyst coverage data (DEPRECATED: use asx_stock_collector)
-	JobDefinitionTypeASXHistoricalFin    JobDefinitionType = "asx_historical_financials" // ASX historical financials (DEPRECATED: use asx_stock_collector)
-	JobDefinitionTypeASXDirectorInterest JobDefinitionType = "asx_director_interest"     // ASX director interest (Appendix 3Y) filings
-	JobDefinitionTypeMacroData           JobDefinitionType = "macro_data"                // Macroeconomic data (RBA rates, commodity prices)
-	JobDefinitionTypeCompetitorAnalysis  JobDefinitionType = "competitor_analysis"       // Competitor analysis and stock data
+	JobDefinitionTypeAgent               JobDefinitionType = "agent"                 // Agent-powered document processing jobs
+	JobDefinitionTypeFetch               JobDefinitionType = "fetch"                 // API-based data collection with authentication (GitHub, etc.)
+	JobDefinitionTypeWebSearch           JobDefinitionType = "web_search"            // Gemini-powered web search with grounding
+	JobDefinitionTypeLocalDir            JobDefinitionType = "local_dir"             // Local filesystem directory indexing
+	JobDefinitionTypeCodeMap             JobDefinitionType = "code_map"              // Hierarchical code structure analysis
+	JobDefinitionTypeJobTemplate         JobDefinitionType = "job_template"          // Template orchestration - executes job templates with variable substitution
+	JobDefinitionTypeOrchestrator        JobDefinitionType = "orchestrator"          // AI-powered cognitive orchestration with dynamic planning
+	JobDefinitionTypeASXIndexData        JobDefinitionType = "asx_index_data"        // ASX index data fetching (XJO, XSO benchmarks)
+	JobDefinitionTypeASXAnnouncements    JobDefinitionType = "asx_announcements"     // ASX company announcements fetching
+	JobDefinitionTypeASXStockCollector   JobDefinitionType = "asx_stock_collector"   // Consolidated stock data: price, analyst coverage, and historical financials
+	JobDefinitionTypeASXStockData        JobDefinitionType = "asx_stock_data"        // DEPRECATED: Use asx_stock_collector instead - alias for backward compatibility
+	JobDefinitionTypeASXDirectorInterest JobDefinitionType = "asx_director_interest" // ASX director interest (Appendix 3Y) filings
+	JobDefinitionTypeMacroData           JobDefinitionType = "macro_data"            // Macroeconomic data (RBA rates, commodity prices)
+	JobDefinitionTypeCompetitorAnalysis  JobDefinitionType = "competitor_analysis"   // Competitor analysis and stock data
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -70,9 +69,9 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces,
 		JobDefinitionTypeAgent, JobDefinitionTypeFetch, JobDefinitionTypeWebSearch,
 		JobDefinitionTypeLocalDir, JobDefinitionTypeCodeMap, JobDefinitionTypeJobTemplate,
-		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXStockData, JobDefinitionTypeASXAnnouncements,
-		JobDefinitionTypeASXStockCollector, JobDefinitionTypeASXAnalystCoverage, JobDefinitionTypeASXHistoricalFin,
-		JobDefinitionTypeASXDirectorInterest, JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis:
+		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXIndexData, JobDefinitionTypeASXAnnouncements,
+		JobDefinitionTypeASXStockCollector, JobDefinitionTypeASXStockData, JobDefinitionTypeASXDirectorInterest,
+		JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis:
 		return true
 	default:
 		return false
@@ -87,6 +86,7 @@ const (
 	ErrorStrategyContinue ErrorStrategy = "continue" // Log error and continue to next step
 	ErrorStrategyFail     ErrorStrategy = "fail"     // Stop job execution immediately
 	ErrorStrategyRetry    ErrorStrategy = "retry"    // Retry step with exponential backoff
+	ErrorStrategyFatal    ErrorStrategy = "fatal"    // Stop job immediately AND cancel all pending/running children
 )
 
 // JobStep represents a single execution step in a job definition
@@ -215,7 +215,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, asx_stock_data, asx_announcements, asx_stock_collector, asx_analyst_coverage, asx_historical_financials, asx_director_interest, macro_data, competitor_analysis)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, asx_index_data, asx_announcements, asx_stock_collector, asx_director_interest, macro_data, competitor_analysis)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -314,16 +314,16 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, asx_announcements, asx_stock_data, asx_director_interest, asx_analyst_coverage, asx_historical_financials, asx_stock_collector, macro_data, competitor_analysis, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, asx_announcements, asx_index_data, asx_director_interest, asx_stock_collector, macro_data, competitor_analysis, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
 	}
 
 	// Validate error strategy if provided
 	if step.OnError != "" {
 		switch step.OnError {
-		case ErrorStrategyContinue, ErrorStrategyFail, ErrorStrategyRetry:
+		case ErrorStrategyContinue, ErrorStrategyFail, ErrorStrategyRetry, ErrorStrategyFatal:
 			// Valid strategy
 		default:
-			return fmt.Errorf("invalid error strategy: %s (must be one of: continue, fail, retry)", step.OnError)
+			return fmt.Errorf("invalid error strategy: %s (must be one of: continue, fail, retry, fatal)", step.OnError)
 		}
 	}
 

@@ -417,8 +417,8 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 					"skip_reason":    fmt.Sprintf("dependency '%s' failed", failedDep),
 				}
 
-				// Return error if this step had on_error = "fail"
-				if step.OnError == models.ErrorStrategyFail {
+				// Return error if this step had on_error = "fail" or "fatal"
+				if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
 					skippedStepMetadata := map[string]interface{}{
 						"current_step":        i + 1,
 						"current_step_name":   step.Name,
@@ -428,6 +428,10 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 						"step_job_ids":        stepJobIDs,
 					}
 					d.jobManager.UpdateJobMetadata(ctx, managerID, skippedStepMetadata)
+					// For fatal errors, cancel all pending/running child jobs
+					if step.OnError == models.ErrorStrategyFatal {
+						d.jobManager.StopAllChildJobs(ctx, managerID)
+					}
 					return managerID, fmt.Errorf("step %s skipped: dependency '%s' failed", step.Name, failedDep)
 				}
 
@@ -611,7 +615,11 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			}
 			d.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
-			if step.OnError == models.ErrorStrategyFail {
+			if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+				// For fatal errors, cancel all pending/running child jobs
+				if step.OnError == models.ErrorStrategyFatal {
+					d.jobManager.StopAllChildJobs(ctx, managerID)
+				}
 				return managerID, fmt.Errorf("step %s init failed: %w", step.Name, err)
 			}
 			lastValidationError = fmt.Sprintf("Step %s init failed: %v", step.Name, err)
@@ -707,7 +715,11 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 			}
 			d.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
-			if step.OnError == models.ErrorStrategyFail {
+			if step.OnError == models.ErrorStrategyFail || step.OnError == models.ErrorStrategyFatal {
+				// For fatal errors, cancel all pending/running child jobs
+				if step.OnError == models.ErrorStrategyFatal {
+					d.jobManager.StopAllChildJobs(ctx, managerID)
+				}
 				return managerID, fmt.Errorf("step %s failed: %w", step.Name, err)
 			}
 

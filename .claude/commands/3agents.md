@@ -1,707 +1,187 @@
 ---
 name: 3agents
-description: Adversarial 4-agent loop (3 core + documentarian) - CORRECTNESS over SPEED. Steps are MANDATORY.
+description: Adversarial multi-agent loop - CORRECTNESS over SPEED
 ---
 
 Execute: $ARGUMENTS
 
-**Read first:** `.claude/skills/refactoring/SKILL.md`
-
 ## SETUP
-
-Create workdir from task description:
-```
-TASK_SLUG = slugify($ARGUMENTS)  # lowercase, hyphens, max 40 chars
-DATE = $(date +%Y-%m-%d)
-TIME = $(date +%H%M)
-WORKDIR = .claude/workdir/${DATE}-${TIME}-${TASK_SLUG}
-mkdir -p $WORKDIR
-```
-
-## CONTEXT MANAGEMENT
-
-**Claude Code conversations grow large. Compact aggressively to prevent failures.**
-
-### Compaction Rules
-- **MANDATORY compaction points** are marked with `⟲ COMPACT` throughout this workflow
-- Run `/compact` at each marked point - do NOT skip
-- If `/compact` fails: press Escape twice, move up, retry
-- If still failing: `/clear` and reload from `$WORKDIR` artifacts
-
-### Recovery Protocol
-If context is lost mid-task:
-1. Read `$WORKDIR/requirements.md` for requirements
-2. Read `$WORKDIR/architect-analysis.md` for approach
-3. Read latest `step_N_implementation.md` or `step_N_validation.md`
-4. Resume from current phase
-
-## AGENTS
-
-1. **ARCHITECT** - Assesses requirements, reads architecture docs, creates step documentation with clear acceptance criteria (STEPS ARE MANDATORY)
-2. **WORKER** - Implements steps according to step documentation, following skills and architecture
-3. **VALIDATOR** - Adversarial reviewer: validates against requirements, architecture, AND skills. Default: REJECT
-4. **DOCUMENTARIAN** - Updates `docs/architecture` after all steps complete to reflect new patterns, decisions, and configuration
-
-**MODEL CONFIGURATION:**
-```yaml
-ARCHITECT:
-  model: opus          # Use Claude Opus 4.5 for deep analysis and planning
-  thinking: extended   # Leverage extended thinking for architecture decisions
-  rationale: |
-    ARCHITECT requires deep reasoning for:
-    - Analyzing complex requirements
-    - Reviewing architecture docs and identifying patterns
-    - Breaking down tasks into well-defined steps
-    - Making architectural decisions with full context
-
-WORKER:
-  model: opus          # Use Opus for implementation quality
-  thinking: standard   # Standard thinking sufficient for implementation
-
-VALIDATOR:
-  model: opus          # Use Opus for thorough adversarial review
-  thinking: extended   # Extended thinking for finding edge cases and issues
-```
-
-**ADVERSARIAL RELATIONSHIPS:**
-```
-WORKER ←→ VALIDATOR    : Hostile opposition - VALIDATOR assumes bugs exist
-ARCHITECT → WORKER     : Clear requirements - WORKER must follow precisely
-ARCHITECT → VALIDATOR  : Requirements are LAW - VALIDATOR enforces compliance
-DOCUMENTARIAN ← ALL    : Documents decisions from all phases into architecture docs
+```bash
+WORKDIR=".claude/workdir/$(date +%Y-%m-%d-%H%M)-$(echo "$ARGUMENTS" | tr ' ' '-' | cut -c1-40)"
+mkdir -p "$WORKDIR"
 ```
 
 ## RULES
 
-### Core Principles
-- **CORRECTNESS over SPEED** - Take time to get it right
-- **ADVERSARIAL by default** - Challenge, don't agree
-- **Requirements are LAW** - No interpretation, no "good enough"
-- **Skills are enforceable** - Violations = automatic REJECT
-- **STEPS ARE MANDATORY** - Every task MUST have step documentation with validation against architecture and requirements. No exceptions.
-- **EXISTING PATTERNS ARE LAW** - New code MUST follow existing codebase patterns. No exceptions.
+### Absolutes
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ • CORRECTNESS over SPEED                                        │
+│ • Requirements are LAW - no interpretation                      │
+│ • EXISTING PATTERNS ARE LAW - match codebase style              │
+│ • BACKWARD COMPATIBILITY NOT REQUIRED - break if needed         │
+│ • CLEANUP IS MANDATORY - remove dead/redundant code             │
+│ • STEPS ARE MANDATORY - no implementation without step docs     │
+│ • SUMMARY IS MANDATORY - task incomplete without $WORKDIR/summary.md │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### Configuration Directory Rules
-**`./bin` is UNTRACKED (UAT environment):**
-- Changes CAN be made directly to `./bin` for testing/UAT purposes
-- **HOWEVER** - all configuration changes MUST be mirrored to:
-  - `./deployments/common` - Production-ready configuration
-  - `./test/config` - Test configuration
-- VALIDATOR must verify configuration parity between these directories
-- Any change to `./bin` without corresponding changes to deployments/test = **REJECT**
+### Skills (read before applicable work)
+| Skill | When | Path |
+|-------|------|------|
+| Refactoring | ALWAYS | `.claude/skills/refactoring/SKILL.md` |
+| Go | Go changes | `.claude/skills/go/SKILL.md` |
+| Frontend | UI changes | `.claude/skills/frontend/SKILL.md` |
+| Monitoring | UI tests | `.claude/skills/monitoring/SKILL.md` |
 
-### Skill Compliance (MANDATORY)
-- **Refactoring**: `.claude/skills/refactoring/SKILL.md` - ALWAYS applies
-- **Go**: `.claude/skills/go/SKILL.md` - for any Go code changes
-- **Frontend**: `.claude/skills/frontend/SKILL.md` - for any frontend changes
-- **Monitoring**: `.claude/skills/monitoring/SKILL.md` - for UI test changes
+### Config Parity
+Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 
-### Test Consistency Rules (MANDATORY FOR ALL TESTS)
-**Before writing ANY test code, you MUST:**
-1. **Analyze existing tests** in the target directory (`test/ui/`, `test/api/`, `internal/**/`)
-2. **Read the test architecture doc**: `doc/TEST_ARCHITECTURE.md`
-3. **Document findings** in step documentation before implementation
+## AGENTS
 
-**UI Tests (`test/ui/`) - Mandatory Patterns:**
-- MUST use `UITestContext` from `test/ui/uitest_context.go`
-- MUST use `chromedp` package for ALL browser automation (NEVER raw Chrome/puppeteer/playwright)
-- MUST call `defer utc.Cleanup()` immediately after context creation
-- MUST use `utc.Log()`, `utc.Screenshot()`, `utc.Navigate()` helpers
-- Reference implementation: `test/ui/job_core_test.go`
-
-**API Tests (`test/api/`) - Mandatory Patterns:**
-- MUST use `common.SetupTestEnvironment()` from `test/common/setup.go`
-- MUST use HTTP test helpers from `test/common/`
-- MUST follow existing authentication patterns
-- Reference implementation: `test/api/jobs_test.go`
-
-**Unit Tests (`internal/**/`) - Mandatory Patterns:**
-- MUST use Go standard testing + testify
-- MUST follow existing mock patterns in the package
-- MUST match naming convention: `{filename}_test.go`
-
-**AUTOMATIC REJECT for tests that:**
-- Use alternative browser automation (selenium, playwright, puppeteer)
-- Create new test infrastructure when existing infrastructure exists
-- Don't use established helper functions
-- Introduce new testing patterns without documented justification
-
-### Validation Rules
-- VALIDATOR must READ skill files, not rely on memory
-- VALIDATOR must verify EACH checklist item in applicable skills
-- VALIDATOR must trace requirements to code (with line numbers)
-- VALIDATOR must document architecture compliance with evidence
-- **Update skills** where patterns are missing or outdated
-
-### Prohibitions
-- NEVER modify tests to make code pass
-- NEVER skip skill compliance checks
-- NEVER approve without requirements traceability
-- NEVER iterate on assumptions - verify against docs
+| Agent | Role | Stance |
+|-------|------|--------|
+| ARCHITECT | Requirements → step docs | Thorough |
+| WORKER | Implements steps | Follow spec exactly |
+| VALIDATOR | Reviews against requirements/skills | **HOSTILE - default REJECT** |
+| FINAL VALIDATOR | Reviews ALL changes together | **HOSTILE - catches cross-step issues** |
+| DOCUMENTARIAN | Updates `docs/architecture` | Accurate |
 
 ## WORKFLOW
 
 ### PHASE 0: ARCHITECT
 
-**Purpose:** Assess requirements, review architecture, analyze existing patterns, create step-by-step implementation plan.
+1. Read: `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`, applicable skills
+2. Analyze existing patterns in target directories
+3. Extract requirements → `$WORKDIR/requirements.md`
+4. Create step docs → `$WORKDIR/step_N.md` for each step
 
-1. **Read architecture docs:**
-   - `docs/architecture/ARCHITECTURE.md`
-   - `docs/architecture/README.md`
-   - `doc/TEST_ARCHITECTURE.md` (for any test-related work)
-   - Relevant architecture docs for the task domain
-2. **Read applicable skills:**
-   - `.claude/skills/refactoring/SKILL.md`
-   - Domain-specific skills (go, frontend, monitoring)
-3. **Analyze existing patterns (MANDATORY):**
-   - Search for similar existing code in target directories
-   - For tests: Read 2-3 existing tests in same directory
-   - Document patterns found (imports, structure, helpers used)
-   - Identify reusable components and infrastructure
-4. **Extract ALL requirements** - explicit AND implicit
-5. **Write `$WORKDIR/requirements.md`:**
+**Step doc template (`$WORKDIR/step_N.md`):**
 ```markdown
-   ## Requirements
-   - [ ] REQ-1: <requirement>
-   - [ ] REQ-2: <requirement>
-   ...
-   ## Acceptance Criteria
-   - [ ] AC-1: <criterion>
-   ...
-```
-6. **Search codebase** for existing code to reuse
-7. **Challenge:** Does this NEED new code?
-8. **Create step documentation** - Break work into discrete steps:
-
-   **Write `$WORKDIR/step_1.md`:**
-```markdown
-   # Step 1: <step title>
-
-   ## Objective
-   <What this step accomplishes>
-
-   ## Requirements Addressed
-   - REQ-1: <requirement>
-   - REQ-2: <requirement>
-
-   ## Architecture Context
-   - Relevant patterns from docs/architecture
-   - Skills to apply
-
-   ## Implementation Approach
-   - Files to modify/create
-   - Specific changes needed
-   - Code patterns to follow
-
-   ## Acceptance Criteria
-   - [ ] AC-1: <specific, testable criterion>
-   - [ ] AC-2: <specific, testable criterion>
-
-   ## Build/Test Requirements
-   - Commands to run
-   - Expected outcomes
+# Step N: <title>
+## Deps: [none | step_1, step_2]  # REQUIRED - enables parallelization
+## Requirements: REQ-1, REQ-2
+## Approach: <files, changes, patterns>
+## Cleanup: <functions/code to remove>
+## Acceptance: AC-1, AC-2
 ```
 
-   Repeat for `step_2.md`, `step_3.md`, etc.
+5. Write `$WORKDIR/architect-analysis.md` (patterns, decisions, cleanup candidates)
 
-9. **Write `$WORKDIR/architect-analysis.md`:**
-```markdown
-   ## Overview
-   <High-level analysis>
-
-   ## Existing Patterns Analysis (MANDATORY)
-   ### Files Analyzed
-   - `<file1>`: <patterns observed>
-   - `<file2>`: <patterns observed>
-
-   ### Key Patterns to Follow
-   - Imports: <list standard imports>
-   - Test infrastructure: <helpers, contexts used>
-   - Assertions: <library and patterns>
-   - Browser automation: <chromedp patterns> (if UI tests)
-
-   ### Reusable Components Identified
-   - <component>: <how to use>
-
-   ## Steps Summary
-   1. Step 1: <title> - REQs: 1, 2
-   2. Step 2: <title> - REQs: 3
-   ...
-
-   ## Architecture Decisions
-   - <Decision and rationale>
-
-   ## Skill Updates Required
-   - <Skill path>: <proposed update reason>
-```
-
----
-### ⟲ COMPACT POINT: ARCHITECT COMPLETE
-
-**Run `/compact` now.** Artifacts are persisted in `$WORKDIR`:
-- `requirements.md` - All requirements
-- `architect-analysis.md` - Analysis and approach
-- `step_*.md` - Step documentation
-
-Context can be rebuilt from these files if needed.
+**⟲ COMPACT after ARCHITECT phase**
 
 ---
 
-### PHASE 1: WORKER
+### PHASE 1-3: IMPLEMENT (per step)
 
-**Purpose:** Implement ONE step at a time according to step documentation.
+**Execution modes:**
+- **Sequential:** Steps with dependencies execute in order
+- **Parallel:** Independent steps (Deps: none) can batch-execute
+```
+┌─────────────────────────────────────────────────────┐
+│ FOR EACH STEP (parallel if independent):           │
+│                                                    │
+│   WORKER: Implement → $WORKDIR/step_N_impl.md      │
+│      ↓                                             │
+│   VALIDATOR: Review → $WORKDIR/step_N_valid.md     │
+│      ↓                                             │
+│   PASS → next step    REJECT → iterate (max 5)    │
+└─────────────────────────────────────────────────────┘
+```
 
-For each step (starting with `step_1.md`):
+**WORKER must:**
+- Follow step doc exactly
+- Apply skills (EXTEND > MODIFY > CREATE)
+- Perform cleanup listed in step doc
+- Build must pass
 
-1. **Read the step documentation** (`$WORKDIR/step_N.md`)
-2. **Understand scope** - ONLY implement what's in this step
-3. **Apply refactoring skill** (EXTEND > MODIFY > CREATE)
-4. **Follow architecture patterns** specified in step doc
-5. **Run build - must pass**
-6. **Document work in `$WORKDIR/step_N_implementation.md`:**
+**VALIDATOR must:**
+- Default REJECT until proven correct
+- Verify requirements with code line references
+- Verify cleanup performed (no dead code left)
+- Check skill compliance (READ skill files, don't rely on memory)
+
+**VALIDATOR auto-REJECT:**
+- Build fails
+- Dead code left behind
+- Old function alongside replacement
+- Skill violations
+- Requirements not traceable to code
+
+**⟲ COMPACT after each step PASS or at iteration 3+**
+
+---
+
+### PHASE 4: FINAL VALIDATION (MANDATORY)
+
+**Purpose:** Catch cross-step issues, verify holistic correctness.
+```
+┌─────────────────────────────────────────────────────┐
+│ FINAL VALIDATOR reviews ALL changes together:      │
+│                                                    │
+│ • Re-read $WORKDIR/requirements.md                 │
+│ • Verify ALL requirements satisfied                │
+│ • Check for conflicts between steps                │
+│ • Verify no dead code across ALL changes           │
+│ • Verify consistent patterns across ALL changes    │
+│ • Full build + test pass                           │
+│                                                    │
+│ REJECT → Back to relevant step for fix             │
+│ PASS → PHASE 5                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Write `$WORKDIR/final_validation.md`:**
 ```markdown
-   # Step N Implementation
-
-   ## Files Changed
-   - `path/to/file.go`: <what changed>
-
-   ## Implementation Details
-   - <Key decisions made>
-   - <Patterns followed>
-
-   ## Acceptance Criteria Status
-   - [x] AC-1: <evidence>
-   - [x] AC-2: <evidence>
-
-   ## Build Status
-   - Command: `<build command>`
-   - Result: PASS
-
-   ## Ready for Validation
-```
-
-### PHASE 2: VALIDATOR
-
-**Purpose:** Adversarial review of completed step against requirements, architecture, and skills. **Default stance: REJECT until proven correct.**
-
-**CRITICAL:** The VALIDATOR must be hostile to the WORKER's implementation. Challenge every decision. Assume bugs exist until proven otherwise.
-
-For the current step:
-
-#### Step 2.1: Build Verification
-1. **Run build first** - FAIL = immediate REJECT (no exceptions)
-2. Run any tests specified in step documentation
-
-#### Step 2.2: Requirements Verification
-1. **Re-read `$WORKDIR/requirements.md`** - the original requirements
-2. **Cross-reference step requirements** from `$WORKDIR/step_N.md`
-3. **For EACH requirement addressed by this step:**
-   - Find the specific code that implements it
-   - Verify behavior matches requirement intent (not just letter)
-   - Challenge: Does implementation handle edge cases?
-
-#### Step 2.3: Architecture Compliance Check
-1. **Re-read architecture documents:**
-   - `docs/architecture/ARCHITECTURE.md`
-   - Any domain-specific architecture docs from architect-analysis.md
-2. **Verify against architecture patterns:**
-   - Does code follow established architectural boundaries?
-   - Are dependencies injected correctly?
-   - Does it use existing extension points?
-   - Challenge: Could this break existing functionality?
-
-#### Step 2.4: Skill Compliance Audit
-**Read and verify against EACH applicable skill:**
-
-**Refactoring Skill (`.claude/skills/refactoring/SKILL.md`):**
-- [ ] EXTEND > MODIFY > CREATE priority followed?
-- [ ] If new file created: Written justification exists?
-- [ ] Follows EXACT patterns from existing codebase?
-- [ ] Minimum viable change (not over-engineered)?
-- [ ] No parallel structures or duplicated logic?
-
-**Go Skill (`.claude/skills/go/SKILL.md`) - if Go code changed:**
-- [ ] Error handling: All errors wrapped with context (`%w`)?
-- [ ] Logging: Uses arbor, never fmt.Println/log.Printf?
-- [ ] DI: Constructor injection, no global state?
-- [ ] Handlers: Thin handlers, logic in services?
-- [ ] Context: ctx passed to all I/O operations?
-- [ ] Build: Used scripts, not `go build` directly?
-
-**Frontend Skill (`.claude/skills/frontend/SKILL.md`) - if frontend changed:**
-- [ ] Templates: Server-side Go templates only?
-- [ ] JS: Alpine.js only, no other frameworks?
-- [ ] CSS: Bulma only, no inline styles?
-- [ ] No direct DOM manipulation (use Alpine)?
-- [ ] WebSockets for real-time (not polling)?
-
-**Monitoring Skill (`.claude/skills/monitoring/SKILL.md`) - if UI tests changed:**
-- [ ] Uses UITestContext with defer Cleanup()?
-- [ ] Screenshots at key moments?
-- [ ] Structured logging with utc.Log()?
-- [ ] All chromedp errors checked?
-- [ ] No hardcoded waits without purpose?
-
-**Test Consistency Audit (MANDATORY for ANY test changes):**
-- [ ] Analyzed existing tests in same directory BEFORE implementation?
-- [ ] Uses EXACT same imports as existing tests?
-- [ ] Uses established test infrastructure (UITestContext for UI, common.SetupTestEnvironment for API)?
-- [ ] Browser automation uses ONLY chromedp (NO selenium/playwright/puppeteer)?
-- [ ] Assertions use testify (assert/require)?
-- [ ] Test structure matches existing tests in directory?
-- [ ] Helper functions reused (not reinvented)?
-- [ ] No new testing patterns introduced without documented justification?
-
-**AUTOMATIC REJECT triggers:**
-```
-- Using chrome package instead of chromedp
-- Creating new test helpers when existing ones cover the use case
-- Different assertion library than testify
-- Different test context pattern than UITestContext (for UI tests)
-- Missing defer utc.Cleanup() (for UI tests)
-```
-
-#### Step 2.5: Adversarial Challenges
-**VALIDATOR must ask these questions and find evidence:**
-1. What could break due to this change?
-2. Is there a simpler way to achieve the same result?
-3. Are there any hidden assumptions in the implementation?
-4. Would a new developer understand this code?
-5. Does this match how similar features are implemented elsewhere?
-
-#### Step 2.6: Write Validation Report
-**Write `$WORKDIR/step_N_validation.md`:**
-```markdown
-# Step N Validation
-
-## Build Status
-- Command: `<command>`
-- Result: PASS/FAIL
-
-## Requirements Traceability
-| REQ | Requirement Text | Code Location | Verified | Notes |
-|-----|------------------|---------------|----------|-------|
-| REQ-1 | <text> | `file.go:42` | ✓/✗ | <evidence or issue> |
-| REQ-2 | <text> | `file.go:78` | ✓/✗ | <evidence or issue> |
-
-## Acceptance Criteria
-- [x] AC-1: PASS - <concrete evidence with code reference>
-- [ ] AC-2: FAIL - <specific failure reason>
-
-## Architecture Compliance
-- Status: PASS/FAIL
-- Docs verified: <list of architecture docs checked>
-- Patterns followed: <specific patterns confirmed>
-- Violations: <any architectural violations found>
-
-## Skill Compliance Audit
-
-### Refactoring Skill
-- Status: PASS/FAIL
-- EXTEND > MODIFY > CREATE: <evidence>
-- Pattern compliance: <evidence>
-- Violations: <list any anti-creation violations>
-
-### Go/Frontend/Monitoring Skill (as applicable)
-- Status: PASS/FAIL
-- Checklist results: <reference completed checklist above>
-- Anti-patterns found: <list specific violations>
-
-## Adversarial Findings
-1. **Challenge:** <question asked>
-   - **Finding:** <what was discovered>
-   - **Action:** None required / MUST FIX
-
-## Issues Found (BLOCKING)
-1. <Issue description>
-   - Requirement violated: <REQ-N or AC-N>
-   - Expected: <what should be based on requirements/skills>
-   - Actual: <what the code does>
-   - Evidence: `<file:line>` - <code snippet>
-   - Fix required: <specific action WORKER must take>
-
+# Final Validation
+## Build: PASS/FAIL
+## All Requirements: [table with status]
+## Cross-step Issues: [none or list]
+## Cleanup Verified: ✓/✗
 ## Verdict: PASS/REJECT
-
-### If REJECT:
-WORKER must address ALL blocking issues before re-validation.
-Maximum iterations remaining: <5 - current_iteration>
-
-## Skill Updates Identified
-- <Skill path>: <pattern that should be documented>
 ```
 
 ---
-### ⟲ COMPACT POINT: STEP VALIDATED (PASS)
 
-**Run `/compact` after each step PASSES validation.**
+### PHASE 5: COMPLETE (MANDATORY)
 
-Recovery context for next step:
-- Current step: N (PASSED)
-- Next step: N+1
-- Read: `$WORKDIR/step_N+1.md`
-
----
-
-### PHASE 3: ITERATE (per step, max 5 iterations)
-
-**ADVERSARIAL ITERATION PROTOCOL:**
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    ITERATION LOOP (max 5 per step)                  │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  VALIDATOR REJECT                                                   │
-│       ↓                                                             │
-│  WORKER reads step_N_validation.md                                  │
-│       ↓                                                             │
-│  WORKER must address EVERY blocking issue (no partial fixes)        │
-│       ↓                                                             │
-│  WORKER updates step_N_implementation.md with:                      │
-│       - Iteration number                                            │
-│       - Each issue addressed with evidence                          │
-│       - Code changes made                                           │
-│       ↓                                                             │
-│  VALIDATOR re-reads requirements.md and step_N.md (fresh eyes)      │
-│       ↓                                                             │
-│  VALIDATOR performs FULL validation (not just checking fixes)       │
-│       ↓                                                             │
-│  PASS → Move to next step     REJECT → Loop (max 5)                 │
-│                                                                     │
-│  ⚠ ITERATION 5 REJECT = TASK FAILURE (escalate to architect)       │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-### ⟲ COMPACT POINT: ITERATION 3+ REJECT
-
-**Run `/compact` if iteration count reaches 3 or higher.**
-
-Multiple iterations accumulate significant context. Compact to prevent failure.
-
-Recovery context:
-- Current step: N
-- Iteration: <current>
-- Last validation: `$WORKDIR/step_N_validation.md`
-- Issues to fix: Listed in validation report
-
----
-
-**WORKER Iteration Response Template:**
-Update `$WORKDIR/step_N_implementation.md`:
+**MUST write `$WORKDIR/summary.md`:**
 ```markdown
-## Iteration <N> Response
-
-### Issues Addressed
-1. **Issue:** <issue from validation>
-   - **Root cause:** <why this happened>
-   - **Fix applied:** <what was changed>
-   - **Evidence:** `<file:line>` - <code snippet>
-   - **Verification:** <how to verify fix works>
-
-### Additional Changes
-- <any other changes made during fix>
-
-### Ready for Re-validation
+# Summary
+## Build: PASS
+## Requirements: [table - REQ | Status | Implemented In]
+## Steps: [table - Step | Iterations | Key Decisions]
+## Breaking Changes: [list]
+## Cleanup: [table - Type | Item | File | Reason]
+## Files Changed: [list]
 ```
 
-**VALIDATOR Re-validation Rules:**
-1. **Start fresh** - Re-read requirements and step docs (don't rely on memory)
-2. **Verify ALL previous issues fixed** - not just marked as fixed
-3. **Look for regression** - Did fixes break something else?
-4. **Look for NEW issues** - Fresh review may find issues missed before
-5. **Increase scrutiny each iteration** - If iteration 3+, be MORE critical
-
-**Escalation at Iteration 5:**
-If VALIDATOR rejects at iteration 5:
-1. **Write `$WORKDIR/step_N_escalation.md`:**
-```markdown
-   # Step N Escalation
-
-   ## Iteration History
-   - Iteration 1: <summary of issues>
-   - Iteration 2: <summary of issues>
-   ...
-
-   ## Persistent Issues
-   - <issues that keep reappearing>
-
-   ## Root Cause Analysis
-   - <why worker cannot satisfy requirements>
-
-   ## Recommendation
-   - [ ] Requirements unclear - needs ARCHITECT clarification
-   - [ ] Architecture issue - needs redesign
-   - [ ] Skill gap - pattern not documented
-   - [ ] Other: <explanation>
-```
-2. Return to ARCHITECT for reassessment
-
-**After each step PASS:**
-- WORKER proceeds to next step (`step_N+1.md`)
-- Iteration count resets to 0 for new step
-- If no more steps, proceed to PHASE 4
-
-### PHASE 4: COMPLETE
-
-1. **Final build verification** - must pass
-2. **Final requirements verification:**
-   - Re-read `$WORKDIR/requirements.md`
-   - Verify ALL requirements marked complete with evidence
-3. **Skill updates:**
-   - Review all `step_N_validation.md` for "Skill Updates Identified"
-   - Apply updates to `.claude/skills/*/SKILL.md` files
-4. **Write `$WORKDIR/summary.md`:**
-```markdown
-   # Task Summary
-
-   ## Final Build
-   - Command: `<build command>`
-   - Result: PASS
-
-   ## Requirements Traceability Matrix
-   | REQ | Requirement | Status | Implemented In | Validated In |
-   |-----|-------------|--------|----------------|--------------|
-   | REQ-1 | <text> | ✓ | step_1 | step_1_validation.md |
-   | REQ-2 | <text> | ✓ | step_2 | step_2_validation.md |
-
-   ## Acceptance Criteria Summary
-   | AC | Criterion | Status | Evidence |
-   |----|-----------|--------|----------|
-   | AC-1 | <text> | ✓ | `file.go:42` - <description> |
-
-   ## Steps Completed
-   | Step | Title | Iterations | Key Decisions |
-   |------|-------|------------|---------------|
-   | 1 | <title> | 2 | <decision made> |
-   | 2 | <title> | 1 | <decision made> |
-
-   ## Skill Compliance Summary
-   | Skill | Applied | Violations Fixed | Updates Made |
-   |-------|---------|------------------|--------------|
-   | Refactoring | ✓ | 0 | None |
-   | Go | ✓ | 1 (bare error) | Added error pattern |
-   | Frontend | N/A | - | - |
-   | Monitoring | N/A | - | - |
-
-   ## Architecture Compliance
-   - Docs verified: <list of architecture docs>
-   - Patterns followed: <key patterns>
-   - No violations
-
-   ## Files Changed
-   - `path/to/file.go`: <summary of changes>
-   - `path/to/file.html`: <summary of changes>
-
-   ## Skills Updated
-   - `.claude/skills/go/SKILL.md`: Added pattern for <X>
-   - (or "No updates required")
-```
-
----
-### ⟲ COMPACT POINT: IMPLEMENTATION COMPLETE
-
-**Run `/compact` before starting DOCUMENTARIAN phase.**
-
-All implementation artifacts are in `$WORKDIR`. Context needed for Phase 5:
-- `$WORKDIR/summary.md` - What was done
-- `$WORKDIR/architect-analysis.md` - Architecture decisions made
+**⟲ COMPACT after COMPLETE**
 
 ---
 
-### PHASE 5: ARCHITECTURE DOCUMENTATION
+### PHASE 6: DOCUMENTARIAN
 
-**Purpose:** Update `docs/architecture` to reflect any architectural decisions, patterns, or changes discovered during implementation.
+Update `docs/architecture/*.md` to reflect changes.
+Write `$WORKDIR/architecture-updates.md`.
 
-**Trigger:** Executes automatically after PHASE 4 (COMPLETE) finishes successfully.
-
-#### Step 5.1: Review Implementation Artifacts
-1. **Re-read all workdir artifacts:**
-   - `$WORKDIR/architect-analysis.md` - Original architecture decisions
-   - `$WORKDIR/step_*_implementation.md` - Implementation details
-   - `$WORKDIR/step_*_validation.md` - Validation findings
-   - `$WORKDIR/summary.md` - Final summary
-
-2. **Identify documentation updates needed:**
-   - New patterns introduced
-   - Architecture decisions made
-   - Integration points added
-   - Configuration changes
-
-#### Step 5.2: Update Architecture Documents
-1. **Review existing architecture docs:**
-   - `docs/architecture/ARCHITECTURE.md` - Main architecture document
-   - `docs/architecture/README.md` - Architecture overview
-   - Domain-specific docs (WORKERS.md, QUEUE_*.md, etc.)
-
-2. **For each significant change, update the appropriate doc:**
-   - Add new sections for new components/patterns
-   - Update existing sections if behavior changed
-   - Add cross-references between related sections
-   - Document configuration requirements (especially deployments/common and test/config)
-
-#### Step 5.3: Write Architecture Update Summary
-**Write `$WORKDIR/architecture-updates.md`:**
-```markdown
-# Architecture Documentation Updates
-
-## Documents Modified
-| Document | Section | Change Type | Description |
-|----------|---------|-------------|-------------|
-| ARCHITECTURE.md | <section> | Added/Updated | <description> |
-| WORKERS.md | <section> | Added/Updated | <description> |
-
-## New Patterns Documented
-- <Pattern name>: <Brief description>
-- <Pattern name>: <Brief description>
-
-## Configuration Documentation
-- `deployments/common`: <What was documented>
-- `test/config`: <What was documented>
-
-## Cross-References Added
-- <Doc A> ↔ <Doc B>: <Relationship documented>
-
-## Deferred Documentation
-- <Item>: <Reason deferred, e.g., "needs further discussion">
-```
-
-#### Step 5.4: Verification
-1. **Ensure consistency:**
-   - Architecture docs match actual implementation
-   - Configuration paths are accurate
-   - No contradictions between documents
-2. **Update timestamps/version notes** if the project uses them
-
----
-### ⟲ COMPACT POINT: TASK COMPLETE
-
-**Run `/compact` at task completion.**
-
-Prepares context for next task. All artifacts preserved in `$WORKDIR`.
+**⟲ COMPACT at task end**
 
 ---
 
-## COMPACTION SUMMARY
+## COMPACTION POINTS
 
-| Point | When | Why |
-|-------|------|-----|
-| After ARCHITECT | Phase 0 complete | Heavy doc reading done, artifacts saved |
-| After step PASS | Each step validated | Step context no longer needed |
-| Iteration 3+ | Multiple rejections | Accumulated iteration context |
-| Before DOCUMENTARIAN | Phase 4 complete | Implementation context can be reloaded |
-| Task complete | End of workflow | Clean slate for next task |
+| When | Action |
+|------|--------|
+| After ARCHITECT | `/compact` |
+| After step PASS | `/compact` |
+| Iteration 3+ | `/compact` |
+| After FINAL VALIDATION | `/compact` |
+| Task complete | `/compact` |
 
-**Emergency recovery:** If `/compact` fails at any point:
-1. Press Escape twice, retry
-2. If still failing: `/clear`
-3. Reload context from `$WORKDIR` artifacts
-4. State current phase and step in first message
+**Recovery:** Read `$WORKDIR/*.md` artifacts to resume.
 
 ## INVOKE
 ```
 /3agents Fix the step icon mismatch
-# → ./workdir/2024-12-17-fix-step-icon-mismatch/
-
-/3agents Add log line numbering
-# → ./workdir/2024-12-17-add-log-line-numbering/
 ```

@@ -378,7 +378,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 func TestAllWorkerTypes(t *testing.T) {
 	allTypes := AllWorkerTypes()
 
-	expectedCount := 17
+	expectedCount := 28
 	if len(allTypes) != expectedCount {
 		t.Errorf("AllWorkerTypes() returned %d types, expected %d", len(allTypes), expectedCount)
 	}
@@ -392,23 +392,34 @@ func TestAllWorkerTypes(t *testing.T) {
 
 	// Verify expected types are present
 	expectedTypes := map[WorkerType]bool{
-		WorkerTypeAgent:            true,
-		WorkerTypeCrawler:          true,
-		WorkerTypePlacesSearch:     true,
-		WorkerTypeWebSearch:        true,
-		WorkerTypeGitHubRepo:       true,
-		WorkerTypeGitHubActions:    true,
-		WorkerTypeGitHubGit:        true,
-		WorkerTypeTransform:        true,
-		WorkerTypeReindex:          true,
-		WorkerTypeLocalDir:         true,
-		WorkerTypeCodeMap:          true,
-		WorkerTypeSummary:          true,
-		WorkerTypeTestJobGenerator: true,
-		WorkerTypeAnalyzeBuild:     true,
-		WorkerTypeClassify:         true,
-		WorkerTypeDependencyGraph:  true,
-		WorkerTypeAggregateSummary: true,
+		WorkerTypeAgent:               true,
+		WorkerTypeCrawler:             true,
+		WorkerTypePlacesSearch:        true,
+		WorkerTypeWebSearch:           true,
+		WorkerTypeGitHubRepo:          true,
+		WorkerTypeGitHubActions:       true,
+		WorkerTypeGitHubGit:           true,
+		WorkerTypeTransform:           true,
+		WorkerTypeReindex:             true,
+		WorkerTypeLocalDir:            true,
+		WorkerTypeCodeMap:             true,
+		WorkerTypeSummary:             true,
+		WorkerTypeTestJobGenerator:    true,
+		WorkerTypeAnalyzeBuild:        true,
+		WorkerTypeClassify:            true,
+		WorkerTypeDependencyGraph:     true,
+		WorkerTypeAggregateSummary:    true,
+		WorkerTypeEmail:               true,
+		WorkerTypeASXAnnouncements:    true,
+		WorkerTypeASXIndexData:        true,
+		WorkerTypeASXDirectorInterest: true,
+		WorkerTypeASXStockCollector:   true,
+		WorkerTypeASXStockData:        true,
+		WorkerTypeMacroData:           true,
+		WorkerTypeCompetitorAnalysis:  true,
+		WorkerTypeEmailWatcher:        true,
+		WorkerTypeJobTemplate:         true,
+		WorkerTypeOrchestrator:        true,
 	}
 
 	for _, st := range allTypes {

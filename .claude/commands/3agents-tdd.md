@@ -13,7 +13,23 @@ Execute: $ARGUMENTS
 2. Must be *_test.go file or STOP
 ````
 
-## FUNDAMENTAL RULE
+## SETUP (MANDATORY - DO FIRST)
+
+**Create workdir BEFORE any other action:**
+````bash
+TEST_FILE="$ARGUMENTS"                          # e.g., test/ui/job_definition_test.go
+TEST_FILE="${TEST_FILE//\\//}"                  # normalize: replace \ with /
+TASK_SLUG=$(basename "$TEST_FILE" "_test.go")   # e.g., "job_definition"
+DATE=$(date +%Y-%m-%d)
+TIME=$(date +%H%M)
+WORKDIR=".claude/workdir/${DATE}-${TIME}-tdd-${TASK_SLUG}"
+mkdir -p "$WORKDIR"
+echo "Created workdir: $WORKDIR"
+````
+
+**STOP if workdir creation fails.**
+
+## FUNDAMENTAL RULES
 ````
 ┌─────────────────────────────────────────────────────────────────┐
 │ TESTS ARE IMMUTABLE LAW                                         │
@@ -24,8 +40,31 @@ Execute: $ARGUMENTS
 │                                                                  │
 │ Test expects X, code returns Y → FIX THE CODE                   │
 │                                                                  │
-│ Exception: If test is genuinely misaligned with requirements,   │
-│ document the issue and SUGGEST changes (do not apply)           │
+│ Exception: If test expects DEPRECATED/OLD behavior,             │
+│ document it as MISALIGNED and suggest TEST should change        │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ BACKWARD COMPATIBILITY IS NOT REQUIRED                          │
+│                                                                  │
+│ • New code defines the CORRECT behavior                         │
+│ • Old/deprecated behavior should NOT be preserved               │
+│ • NEVER add backward compatibility shims                        │
+│ • NEVER keep old APIs/types/functions for compatibility         │
+│ • If test expects deprecated behavior → TEST IS WRONG           │
+│                                                                  │
+│ If a test expects old behavior, the TEST needs updating,        │
+│ not the code. Document this as a misaligned test.               │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ ARTIFACTS ARE MANDATORY                                         │
+│                                                                  │
+│ • $WORKDIR/tdd_state.md - MUST create in Phase 2                │
+│ • $WORKDIR/test_issues.md - MUST create if tests misaligned     │
+│ • $WORKDIR/summary.md - MUST create in Phase 4 (ALWAYS)         │
+│                                                                  │
+│ Task is NOT complete without summary.md in workdir.             │
 └─────────────────────────────────────────────────────────────────┘
 ````
 
@@ -41,9 +80,9 @@ Execute: $ARGUMENTS
 
 ### Recovery Protocol
 If context is lost mid-iteration:
-1. Re-read the test file to extract requirements
-2. Check iteration count from git diff or file state
-3. Resume PHASE 3 loop
+1. Read `$WORKDIR/tdd_state.md` for current state
+2. Re-read the test file to extract requirements
+3. Resume PHASE 3 loop from recorded iteration
 
 ## WORKFLOW
 
@@ -56,24 +95,63 @@ If context is lost mid-iteration:
 
 ---
 
-### PHASE 1: UNDERSTAND
-1. Read test file - extract ALL test function names in order
-2. Read skills for applicable patterns:
-   - `.claude/skills/refactoring/SKILL.md` - Core patterns
-   - `.claude/skills/go/SKILL.md` - Go changes
-   - `.claude/skills/frontend/SKILL.md` - Frontend changes
-   - `.claude/skills/monitoring/SKILL.md` - UI tests (screenshots, monitoring, results)
-3. **For UI job tests** - validate against template: `test/ui/job_definition_general_test.go`
+### PHASE 1: SETUP & UNDERSTAND
+
+**Step 1.1: Create workdir (MANDATORY)**
+````bash
+mkdir -p "$WORKDIR"
+````
+Verify directory exists before continuing.
+
+**Step 1.2: Read test file**
+- Extract ALL test function names in order
+
+**Step 1.3: Read skills**
+- `.claude/skills/refactoring/SKILL.md` - Core patterns
+- `.claude/skills/go/SKILL.md` - Go changes
+- `.claude/skills/frontend/SKILL.md` - Frontend changes
+- `.claude/skills/monitoring/SKILL.md` - UI tests
+
+**Step 1.4: Read test architecture**
+- `docs/TEST_ARCHITECTURE.md`
+
+**Step 1.5: For UI job tests**
+- Validate against template: `test/ui/job_definition_general_test.go`
 
 ### PHASE 2: BUILD TEST LIST
 ````bash
 # Extract ALL test names from file IN ORDER
-TEST_LIST=$(grep "^func Test" {test_file} | sed 's/func \(Test[^(]*\).*/\1/')
-TEST_PKG=$(dirname {test_file})
+TEST_LIST=$(grep "^func Test" "$TEST_FILE" | sed 's/func \(Test[^(]*\).*/\1/')
+TEST_PKG=$(dirname "$TEST_FILE")
 
 # Store as ordered array
 TESTS=($TEST_LIST)
 echo "Found ${#TESTS[@]} tests to run sequentially"
+````
+
+**MUST write `$WORKDIR/tdd_state.md`:**
+````markdown
+# TDD State
+
+## Test File
+`{test_file}`
+
+## Test Package
+`{test_pkg}`
+
+## Workdir
+`{workdir}`
+
+## Tests (in order)
+1. TestFirst
+2. TestSecond
+3. TestThird
+...
+
+## Current State
+- Iteration: 0
+- Last failed test: N/A
+- Status: STARTING
 ````
 
 ### PHASE 3: SEQUENTIAL TEST LOOP (max 3 iterations)
@@ -88,56 +166,57 @@ ITERATION = 0
 │       go test -v -run "^${TEST}$" ./$TEST_PKG/...               │
 │                                                                 │
 │       if PASS → continue to next test                           │
-│       if FAIL → break loop, go to FIX                           │
+│       if FAIL → break loop, go to ANALYZE                       │
 │   done                                                          │
 │                                                                 │
-│   ALL PASSED → COMPLETE                                         │
+│   ALL PASSED → PHASE 4 (COMPLETE)                               │
 └─────────────────────────────────────────────────────────────────┘
             │
          FAILURE at test N
             │
             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ANALYZE FAILURE                                                 │
+│ ANALYZE FAILURE - CRITICAL DECISION POINT                       │
 │                                                                 │
 │ • Which test failed: ${TESTS[N]}                                │
 │ • Error message/stack trace                                     │
 │ • Expected vs Actual                                            │
 │                                                                 │
-│ DECISION:                                                       │
-│   Code bug? → FIX THE CODE                                      │
-│   Test misaligned? → DOCUMENT (suggest only, don't modify)      │
+│ ASK: Is the test expecting CURRENT or DEPRECATED behavior?      │
+│                                                                 │
+│ TEST EXPECTS CURRENT BEHAVIOR                                   │
+│ → Code has a bug → FIX THE CODE                                 │
+│                                                                 │
+│ TEST EXPECTS DEPRECATED/OLD BEHAVIOR                            │
+│ → TEST IS MISALIGNED → DOCUMENT (do not add compat!)            │
 └───────────┬─────────────────────────────────────────────────────┘
             │
             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ FIX (if code bug)                                               │
-│                                                                 │
-│ • Apply skills (EXTEND > MODIFY > CREATE)                       │
-│ • Follow Go/Frontend patterns                                   │
-│ • Run build - must pass                                         │
-│ • NO test file modifications                                    │
-└───────────┬─────────────────────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ OR DOCUMENT (if test misaligned)                                │
-│                                                                 │
-│ Write to: $WORKDIR/test_issues.md                               │
-│                                                                 │
-│ ## Test: {test_name}                                            │
-│ ### Issue                                                       │
-│ <why test is misaligned with requirements>                      │
-│ ### Suggested Fix                                               │
-│ <proposed test change - DO NOT APPLY>                           │
-│ ### Evidence                                                    │
-│ <requirements reference, code behavior>                         │
-│                                                                 │
-│ Then: SKIP this test for remaining iterations                   │
-└───────────┬─────────────────────────────────────────────────────┘
+     ┌──────┴──────┐
+     │             │
+  CODE BUG    TEST MISALIGNED
+     │             │
+     ▼             ▼
+┌─────────────┐ ┌─────────────────────────────────────────────────┐
+│ FIX CODE    │ │ DOCUMENT MISALIGNED TEST                        │
+│             │ │                                                 │
+│ • EXTEND >  │ │ MUST write to: $WORKDIR/test_issues.md          │
+│   MODIFY >  │ │                                                 │
+│   CREATE    │ │ • Why test is wrong (expects deprecated)        │
+│ • Build     │ │ • What test SHOULD expect (new behavior)        │
+│   must pass │ │ • Suggested test change                         │
+│             │ │                                                 │
+│ NEVER:      │ │ Then: SKIP this test, continue with next        │
+│ • Add compat│ │                                                 │
+│ • Keep old  │ │ DO NOT add backward compatibility!              │
+│   behavior  │ │                                                 │
+└─────────────┘ └─────────────────────────────────────────────────┘
             │
             ▼
        ITERATION++
+            │
+            ▼
+   UPDATE $WORKDIR/tdd_state.md
             │
             ▼
     ┌───────┴───────┐
@@ -145,62 +224,23 @@ ITERATION = 0
 ITERATION < 3    ITERATION = 3
     │               │
     ▼               ▼
- RESTART         STOP
- from test 1     Report status
+ RESTART         PHASE 4
+ from test 1     (COMPLETE)
 ````
 
-### Execution Script
-````bash
-#!/bin/bash
-TEST_FILE="{test_file}"
-TEST_PKG=$(dirname "$TEST_FILE")
-MAX_ITERATIONS=3
+**MUST update `$WORKDIR/tdd_state.md` after each iteration:**
+````markdown
+## Current State
+- Iteration: {n}
+- Last failed test: {test_name}
+- Status: IN_PROGRESS
 
-# Extract test names in order
-mapfile -t TESTS < <(grep "^func Test" "$TEST_FILE" | sed 's/func \(Test[^(]*\).*/\1/')
-
-echo "=== Sequential TDD Run ==="
-echo "File: $TEST_FILE"
-echo "Tests: ${#TESTS[@]}"
-echo "Max iterations: $MAX_ITERATIONS"
-echo ""
-
-for ((iteration=1; iteration<=MAX_ITERATIONS; iteration++)); do
-    echo "=== ITERATION $iteration ==="
-    all_passed=true
-    
-    for ((i=0; i<${#TESTS[@]}; i++)); do
-        test_name="${TESTS[$i]}"
-        echo "--- Running test $((i+1))/${#TESTS[@]}: $test_name ---"
-        
-        if go test -v -run "^${test_name}$" "./$TEST_PKG/..." 2>&1; then
-            echo "✓ PASS: $test_name"
-        else
-            echo "✗ FAIL: $test_name"
-            echo ""
-            echo ">>> FIX REQUIRED - then restart from test 1 <<<"
-            all_passed=false
-            break
-        fi
-    done
-    
-    if $all_passed; then
-        echo ""
-        echo "=== ALL TESTS PASSED ==="
-        exit 0
-    fi
-    
-    if [[ $iteration -lt $MAX_ITERATIONS ]]; then
-        echo ""
-        echo "Waiting for fix before iteration $((iteration+1))..."
-        # Claude applies fix here, then continues
-    fi
-done
-
-echo ""
-echo "=== MAX ITERATIONS REACHED ==="
-echo "Some tests still failing after $MAX_ITERATIONS attempts"
-exit 1
+## Iteration History
+### Iteration 1
+- Failed at: TestSecond
+- Error: <brief error>
+- Action: CODE_FIX / TEST_MISALIGNED
+- Details: <what was changed or documented>
 ````
 
 ---
@@ -208,34 +248,30 @@ exit 1
 
 **Run `/compact` when iteration count reaches 2.**
 
-Each fix attempt adds significant context. Compact before final iteration.
-
 Recovery context:
-- Test file: `{test_file}`
-- Iteration: 2
-- Failed test: Re-run sequential to find current failure
+- Read: `$WORKDIR/tdd_state.md`
 - Misaligned tests: Check `$WORKDIR/test_issues.md`
 
 ---
 
-### PHASE 4: COMPLETE
+### PHASE 4: COMPLETE (MANDATORY)
 
-**Success criteria:**
-- All tests pass in sequential order
+**This phase MUST execute. Task is incomplete without it.**
+
+**Step 4.1: Verify final state**
+- All tests pass in sequential order (or documented as misaligned)
 - No test files modified
 - Build passes
 
-**Partial success (iteration limit reached):**
-- Document passing tests
-- Document failing tests with analysis
-- Document misaligned tests in `$WORKDIR/test_issues.md`
-
-**Write `$WORKDIR/tdd_summary.md`:**
+**Step 4.2: MUST write `$WORKDIR/summary.md`:**
 ````markdown
 # TDD Summary
 
 ## Test File
 `{test_file}`
+
+## Workdir
+`{workdir}`
 
 ## Iterations
 - Total: {n}
@@ -247,13 +283,45 @@ Recovery context:
 | 1 | TestFirst | ✓ PASS | |
 | 2 | TestSecond | ✓ PASS | |
 | 3 | TestThird | ✗ FAIL | <reason> |
-| 4 | TestFourth | ⚠ MISALIGNED | See test_issues.md |
+| 4 | TestFourth | ⚠ MISALIGNED | Test expects deprecated behavior |
 
 ## Code Changes Made
-- `file.go`: <change description>
+| File | Change | Reason |
+|------|--------|--------|
+| `file.go` | Modified `funcName()` | Test expected different return |
+| `other.go` | Added error handling | Test checked error case |
 
-## Misaligned Tests (if any)
-See: `$WORKDIR/test_issues.md`
+## Breaking Changes Made
+| Change | Justification |
+|--------|---------------|
+| Changed `Foo()` signature | Test expects new parameter |
+| Removed `Bar()` | No longer needed, not tested |
+
+## Cleanup Performed
+| Type | Item | File | Reason |
+|------|------|------|--------|
+| Function removed | `oldHelper()` | util.go | Replaced by new impl |
+| Dead code deleted | unused branch | handler.go | Tests don't cover it |
+
+## Tests Requiring Updates (MISALIGNED)
+| Test | Issue | Suggested Change |
+|------|-------|------------------|
+| TestWorkerType | Expects deprecated value | Update expected value |
+
+See full details: `$WORKDIR/test_issues.md`
+
+## Final Build
+- Command: `./scripts/build.sh` or `go build ./...`
+- Result: PASS/FAIL
+
+## Action Required
+- [ ] Human review needed for misaligned tests listed above
+- [ ] Update tests to expect current behavior (not deprecated)
+````
+
+**Step 4.3: Verify summary was written**
+````bash
+ls -la "$WORKDIR/summary.md"
 ````
 
 ---
@@ -271,42 +339,63 @@ See: `$WORKDIR/test_issues.md`
 | Add `t.Skip()` | FAILURE |
 | Change expected values | FAILURE |
 | Weaken assertions | FAILURE |
+| **Add backward compatibility** | FAILURE |
+| **Keep deprecated types/APIs** | FAILURE |
+| **Skip writing summary.md** | FAILURE |
+
+## ALLOWED (explicitly permitted)
+
+| Action | Rationale |
+|--------|-----------|
+| Break existing APIs | New behavior is correct |
+| Change function signatures | If current design needs it |
+| Remove deprecated behavior | Old behavior should not exist |
+| Modify return values | Current implementation is truth |
+| Restructure code | Cleaner is better |
+| Delete dead code | Cleaner codebase |
+| Remove unused functions | If not tested with current behavior, not needed |
+| Document test as misaligned | Tests expecting deprecated behavior need updating |
 
 ## MISALIGNED TEST HANDLING
 
-When a test appears to be wrong (not the code):
+**When a test expects DEPRECATED/OLD behavior:**
 
 1. **DO NOT modify the test**
-2. **Document in `$WORKDIR/test_issues.md`:**
+2. **DO NOT add backward compatibility**
+3. **MUST document in `$WORKDIR/test_issues.md`:**
 ````markdown
-   ## TestFunctionName
-   
-   ### Issue Type
-   - [ ] Test expects wrong value
-   - [ ] Test logic doesn't match requirements
-   - [ ] Test has race condition
-   - [ ] Test setup is incorrect
-   - [ ] Other: <describe>
-   
-   ### Evidence
-   - Requirement says: <quote>
-   - Test expects: <value>
-   - Code correctly returns: <value>
-   
-   ### Suggested Test Change
+## TestFunctionName
+
+### Issue Type
+- [x] Test expects deprecated value/type/constant
+- [ ] Test expects removed API
+- [ ] Test expects legacy behavior
+
+### What Test Expects (DEPRECATED)
+- Test expects: `old_value`
+- This is deprecated because: <reason>
+
+### What Test SHOULD Expect (CURRENT)
+- Correct value: `new_value`
+- Why: <rationale for new behavior>
+
+### Suggested Test Change
 ```go
-   // Current (incorrect)
-   assert.Equal(t, "wrong", result)
-   
-   // Suggested (correct)
-   assert.Equal(t, "right", result)
+// Current (expects deprecated)
+assert.Equal(t, "old_value", result)
+
+// Should be (expects current)
+assert.Equal(t, "new_value", result)
 ```
-   
-   ### Action Required
-   Human review needed before test modification.
+
+### Action Required
+**Human must update test** to expect current behavior.
+DO NOT add backward compatibility to make old test pass.
 ````
-3. **Skip this test in subsequent iterations**
-4. **Continue with remaining tests**
+
+4. **Skip this test in subsequent iterations**
+5. **Continue with remaining tests**
+6. **Include in summary as "Tests Requiring Updates"**
 
 ## UI JOB TEST TEMPLATE
 
@@ -321,39 +410,26 @@ lastPeriodicScreenshot := time.Now()
 for {
     elapsed := time.Since(startTime)
 
-    // Progressive screenshots: 1s, 2s, 5s, 10s, 20s, 30s
     if screenshotIdx < len(screenshotTimes) &&
        int(elapsed.Seconds()) >= screenshotTimes[screenshotIdx] {
         utc.Screenshot(fmt.Sprintf("%s_%ds", prefix, screenshotTimes[screenshotIdx]))
         screenshotIdx++
     }
 
-    // After 30s: screenshot every 30 seconds
     if elapsed > 30*time.Second && time.Since(lastPeriodicScreenshot) >= 30*time.Second {
         utc.Screenshot(fmt.Sprintf("%s_%ds", prefix, int(elapsed.Seconds())))
         lastPeriodicScreenshot = time.Now()
     }
-    // ... monitoring loop
 }
 ````
 
 ### Job Status Assertion (REQUIRED)
 ````go
-// Assert EXPECTED terminal status (success OR failure depending on test intent)
 expectedStatus := "completed" // or "failed" for failure tests
 if currentStatus != expectedStatus {
     utc.Screenshot("unexpected_status")
     t.Fatalf("Expected status %s, got: %s", expectedStatus, currentStatus)
 }
-````
-
-### Job Config in Results (REQUIRED)
-````go
-// Log job configuration at start
-utc.Log("Job config: %+v", body)
-
-// Add to test results/artifacts
-utc.AddResult("job_config", body)
 ````
 
 ## COMPACTION SUMMARY
@@ -364,12 +440,21 @@ utc.AddResult("job_config", body)
 | Iteration 2 | During Phase 3 | Compact before final iteration |
 | Complete | Phase 4 | Clean slate for next task |
 
-**Emergency recovery:** If `/compact` fails:
-1. Press Escape twice, retry
-2. If still failing: `/clear`
-3. Restart with: `/test-iterate {test_file}`
+## WORKDIR ARTIFACTS (MANDATORY)
+
+| File | Purpose | When Created | Required |
+|------|---------|--------------|----------|
+| `tdd_state.md` | Current iteration state | Phase 2, updated each iteration | **YES** |
+| `test_issues.md` | Misaligned tests | Phase 3, when tests expect deprecated | If applicable |
+| `summary.md` | Final summary | Phase 4 | **YES - ALWAYS** |
+
+**Task is NOT complete until `summary.md` exists in workdir.**
 
 ## INVOKE
 ````
 /test-iterate test/ui/job_definition_test.go
+# → .claude/workdir/2024-12-17-1430-tdd-job_definition/
+#    ├── tdd_state.md      (created Phase 2)
+#    ├── test_issues.md    (if misaligned tests found)
+#    └── summary.md        (created Phase 4 - REQUIRED)
 ````

@@ -19,16 +19,28 @@ import (
 // =============================================================================
 // Worker Schema Integration Tests
 // =============================================================================
-// These tests verify each worker/tool produces consistent output:
-// - asx_stock_collector: Consolidated Yahoo Finance data (prices, technicals, analyst coverage, financials)
-// - asx_announcements: Fetches announcements with consistent structure
-// - asx_stock_data: [DEPRECATED] Use asx_stock_collector instead
-// - asx_analyst_coverage: [DEPRECATED] Use asx_stock_collector instead
-// - asx_historical_financials: [DEPRECATED] Use asx_stock_collector instead
-// - web_search: Searches web with AI-powered results
-// - summary: Generates analysis with JSON schema enforcement
+// Tests are ordered by data collection hierarchy (see docs/architecture/WORKER_DATA_OVERLAP.md):
+//
+// 1. FOUNDATION DATA
+//    - asx_stock_collector: Consolidated Yahoo Finance data (prices, technicals, analyst coverage, financials)
+//
+// 2. STRUCTURED DATA
+//    - asx_announcements: Official ASX announcements with price sensitivity flags
+//
+// 3. UNSTRUCTURED DATA
+//    - web_search: Web searches with AI-powered results
+//
+// 4. ANALYSIS LAYER
+//    - summary: Generates analysis with JSON schema enforcement
+//
+// 5. DEPRECATED WORKERS (retained for backward compatibility)
+//    - asx_stock_data: DEPRECATED - use asx_stock_collector instead
 //
 // Primary concern: CONSISTENCY of both tooling and final output
+// =============================================================================
+
+// =============================================================================
+// 1. FOUNDATION DATA - asx_stock_collector
 // =============================================================================
 
 // TestWorkerASXStockCollector tests the consolidated asx_stock_collector worker.
@@ -143,6 +155,554 @@ func TestWorkerASXStockCollector(t *testing.T) {
 
 	t.Log("PASS: asx_stock_collector worker produced consistent output across runs")
 }
+
+// =============================================================================
+// 2. STRUCTURED DATA - asx_announcements
+// =============================================================================
+
+// TestWorkerASXAnnouncements tests the asx_announcements worker produces consistent output
+// including the summary document with relevance classification and price impact analysis
+func TestWorkerASXAnnouncements(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	defID := fmt.Sprintf("test-asx-announcements-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "ASX Announcements Worker Test",
+		"description": "Test asx_announcements worker for consistent output with summary",
+		"type":        "asx_announcements",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-announcement"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-announcements",
+				"type": "asx_announcements",
+				"config": map[string]interface{}{
+					"asx_code": "BHP",
+					// Use worker default Y1 (12 months) for consistent output
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed asx_announcements job: %s", jobID)
+
+	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
+
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s", finalStatus)
+		return
+	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateASXAnnouncementsOutput(t, helper, "BHP")
+	validateASXAnnouncementsSummary(t, helper, "BHP")
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 1); err != nil {
+		t.Logf("Warning: failed to save summary output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed asx_announcements job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 2); err != nil {
+				t.Logf("Warning: failed to save summary output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: asx_announcements worker produced consistent output across runs")
+}
+
+// TestWorkerASXAnnouncementsMultiStock tests the asx_announcements worker with multiple stocks
+func TestWorkerASXAnnouncementsMultiStock(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	stocks := []string{"BHP", "CSL", "GNP", "EXR"}
+
+	for i, stock := range stocks {
+		t.Run(stock, func(t *testing.T) {
+			defID := fmt.Sprintf("test-asx-announcements-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
+
+			body := map[string]interface{}{
+				"id":          defID,
+				"name":        fmt.Sprintf("ASX Announcements Worker Test - %s", stock),
+				"description": "Test asx_announcements worker for multi-stock support",
+				"type":        "asx_announcements",
+				"enabled":     true,
+				"tags":        []string{"worker-test", "asx-announcement", "multi-stock"},
+				"steps": []map[string]interface{}{
+					{
+						"name": "fetch-announcements",
+						"type": "asx_announcements",
+						"config": map[string]interface{}{
+							"asx_code": stock,
+							// Use worker default Y1 (12 months) for consistent output
+						},
+					},
+				},
+			}
+
+			resp, err := helper.POST("/api/job-definitions", body)
+			require.NoError(t, err, "Failed to create job definition for %s", stock)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusCreated {
+				t.Skipf("Job definition creation failed for %s with status: %d", stock, resp.StatusCode)
+			}
+
+			defer func() {
+				delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+				if delResp != nil {
+					delResp.Body.Close()
+				}
+			}()
+
+			execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s", stock)
+			defer execResp.Body.Close()
+
+			if execResp.StatusCode != http.StatusAccepted {
+				t.Skipf("Job execution failed for %s with status: %d", stock, execResp.StatusCode)
+			}
+
+			var execResult map[string]interface{}
+			require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+			jobID := execResult["job_id"].(string)
+			t.Logf("Executed asx_announcements job for %s: %s", stock, jobID)
+
+			finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+			// Save job definition for first stock only
+			if i == 0 {
+				if err := saveJobDefinition(t, env, body); err != nil {
+					t.Logf("Warning: failed to save job definition: %v", err)
+				}
+			}
+
+			if finalStatus != "completed" {
+				t.Logf("INFO: Job for %s ended with status %s", stock, finalStatus)
+				return
+			}
+
+			// ===== RUN 1 =====
+			t.Logf("=== Run 1 for %s ===", stock)
+			validateASXAnnouncementsOutput(t, helper, stock)
+			validateASXAnnouncementsSummary(t, helper, stock)
+
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+1); err != nil {
+				t.Logf("Warning: failed to save output for %s run 1: %v", stock, err)
+			}
+			assertResultFilesExist(t, env, i*2+1)
+
+			// ===== RUN 2 =====
+			t.Logf("=== Run 2 for %s ===", stock)
+			execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+			require.NoError(t, err, "Failed to execute job for %s run 2", stock)
+			defer execResp2.Body.Close()
+
+			if execResp2.StatusCode == http.StatusAccepted {
+				var execResult2 map[string]interface{}
+				require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+				jobID2 := execResult2["job_id"].(string)
+				t.Logf("Executed asx_announcements job for %s run 2: %s", stock, jobID2)
+
+				finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
+				if finalStatus2 == "completed" {
+					if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+2); err != nil {
+						t.Logf("Warning: failed to save output for %s run 2: %v", stock, err)
+					}
+					assertResultFilesExist(t, env, i*2+2)
+				}
+			}
+
+			t.Logf("PASS: %s announcements processed with consistency check", stock)
+		})
+	}
+}
+
+// =============================================================================
+// 3. UNSTRUCTURED DATA - web_search
+// =============================================================================
+
+// TestWorkerWebSearch tests the web_search worker for consistent output
+func TestWorkerWebSearch(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	// Check if Gemini API key is available (web_search uses Gemini)
+	if !hasGeminiAPIKey(env) {
+		t.Skip("Skipping test - no valid google_gemini_api_key found")
+	}
+
+	defID := fmt.Sprintf("test-web-search-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "Web Search Worker Test",
+		"description": "Test web_search worker for consistent output",
+		"type":        "web_search",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "web-search"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "search",
+				"type": "web_search",
+				"config": map[string]interface{}{
+					"query":   "BHP Group financial results 2024",
+					"api_key": "{google_gemini_api_key}",
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed web_search job: %s", jobID)
+
+	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
+
+	// Save job definition
+	if err := saveJobDefinition(t, env, body); err != nil {
+		t.Logf("Warning: failed to save job definition: %v", err)
+	}
+
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s", finalStatus)
+		return
+	}
+
+	// ===== RUN 1 =====
+	t.Log("=== Run 1 ===")
+	validateWebSearchOutput(t, helper)
+
+	if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 1); err != nil {
+		t.Logf("Warning: failed to save worker output run 1: %v", err)
+	}
+	assertResultFilesExist(t, env, 1)
+
+	// ===== RUN 2 =====
+	t.Log("=== Run 2 ===")
+	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition for run 2")
+	defer execResp2.Body.Close()
+
+	if execResp2.StatusCode == http.StatusAccepted {
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		jobID2 := execResult2["job_id"].(string)
+		t.Logf("Executed web_search job run 2: %s", jobID2)
+
+		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
+		if finalStatus2 == "completed" {
+			if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 2); err != nil {
+				t.Logf("Warning: failed to save worker output run 2: %v", err)
+			}
+			assertResultFilesExist(t, env, 2)
+
+			// Compare consistency between runs
+			assertOutputStructureConsistency(t, env)
+		}
+	}
+
+	t.Log("PASS: web_search worker produced consistent output across runs")
+}
+
+// =============================================================================
+// 4. ANALYSIS LAYER - summary
+// =============================================================================
+
+// TestWorkerSummaryWithSchema tests the summary worker uses JSON schema for consistent output
+// This test executes the summary worker TWICE to verify output consistency and schema enforcement
+func TestWorkerSummaryWithSchema(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	// Check if Gemini API key is available
+	if !hasGeminiAPIKey(env) {
+		t.Skip("Skipping test - no valid google_gemini_api_key found")
+	}
+
+	// First, create some test documents to summarize
+	testDir, cleanup := createTestCodeDirectory(t)
+	defer cleanup()
+
+	// Step 1: Index files
+	indexDefID := fmt.Sprintf("index-for-schema-test-%d", time.Now().UnixNano())
+	indexBody := map[string]interface{}{
+		"id":      indexDefID,
+		"name":    "Index for Schema Test",
+		"type":    "local_dir",
+		"enabled": true,
+		"tags":    []string{"schema-test"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "index",
+				"type": "local_dir",
+				"config": map[string]interface{}{
+					"dir_path":           testDir,
+					"include_extensions": []string{".go", ".md"},
+					"max_files":          10,
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", indexBody)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Index job creation failed: %d", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + indexDefID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute index
+	execResp, err := helper.POST("/api/job-definitions/"+indexDefID+"/execute", nil)
+	require.NoError(t, err)
+	defer execResp.Body.Close()
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	indexJobID := execResult["job_id"].(string)
+
+	indexStatus := waitForJobCompletion(t, helper, indexJobID, 2*time.Minute)
+	require.Equal(t, "completed", indexStatus, "Index job should complete")
+
+	// Step 2: Create summary job WITH schema
+	// Define a test schema for code analysis
+	testSchema := map[string]interface{}{
+		"type":     "object",
+		"required": []string{"summary", "components", "recommendation"},
+		"properties": map[string]interface{}{
+			"summary": map[string]interface{}{
+				"type":        "string",
+				"description": "Brief summary of the codebase",
+			},
+			"components": map[string]interface{}{
+				"type":        "array",
+				"description": "List of main components",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
+			},
+			"recommendation": map[string]interface{}{
+				"type":        "string",
+				"description": "Code quality recommendation",
+				"enum":        []string{"EXCELLENT", "GOOD", "FAIR", "NEEDS_IMPROVEMENT"},
+			},
+		},
+	}
+
+	// Execute the summary job TWICE to verify consistency
+	const numRuns = 2
+	completedRuns := 0
+
+	for runNumber := 1; runNumber <= numRuns; runNumber++ {
+		t.Logf("=== Execution %d of %d ===", runNumber, numRuns)
+
+		// Create unique job definition for each run
+		summaryDefID := fmt.Sprintf("summary-schema-test-%d-run%d", time.Now().UnixNano(), runNumber)
+		outputTag := fmt.Sprintf("summary-output-run%d", runNumber)
+
+		summaryBody := map[string]interface{}{
+			"id":      summaryDefID,
+			"name":    fmt.Sprintf("Summary with Schema Test - Run %d", runNumber),
+			"type":    "summarizer",
+			"enabled": true,
+			"tags":    []string{"schema-test", "summary-output", outputTag},
+			"steps": []map[string]interface{}{
+				{
+					"name": "summarize",
+					"type": "summary",
+					"config": map[string]interface{}{
+						"prompt":        "Analyze the code and provide a structured assessment. Return JSON matching the schema.",
+						"filter_tags":   []string{"schema-test"},
+						"api_key":       "{google_gemini_api_key}",
+						"output_schema": testSchema,
+					},
+				},
+			},
+		}
+
+		// Save job definition on first run
+		if runNumber == 1 {
+			if err := saveJobDefinition(t, env, summaryBody); err != nil {
+				t.Logf("Warning: failed to save job definition: %v", err)
+			}
+		}
+
+		resp2, err := helper.POST("/api/job-definitions", summaryBody)
+		require.NoError(t, err)
+		defer resp2.Body.Close()
+
+		if resp2.StatusCode != http.StatusCreated {
+			t.Logf("Summary job creation failed for run %d: %d", runNumber, resp2.StatusCode)
+			continue
+		}
+
+		defer func(defID string) {
+			delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+			if delResp != nil {
+				delResp.Body.Close()
+			}
+		}(summaryDefID)
+
+		// Execute summary
+		execResp2, err := helper.POST("/api/job-definitions/"+summaryDefID+"/execute", nil)
+		require.NoError(t, err)
+		defer execResp2.Body.Close()
+
+		var execResult2 map[string]interface{}
+		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
+		summaryJobID := execResult2["job_id"].(string)
+		t.Logf("Executed summary job with schema (run %d): %s", runNumber, summaryJobID)
+
+		summaryStatus := waitForJobCompletion(t, helper, summaryJobID, 5*time.Minute)
+
+		if summaryStatus == "completed" {
+			completedRuns++
+
+			// Save worker output for this run
+			jsonPath, mdPath, err := saveWorkerOutput(t, env, helper, []string{"summary-output", outputTag}, runNumber)
+			if err != nil {
+				t.Logf("Warning: failed to save output for run %d: %v", runNumber, err)
+			} else {
+				t.Logf("Run %d outputs saved: JSON=%s, MD=%s", runNumber, jsonPath, mdPath)
+			}
+
+			// Assert result files exist for this run
+			assertResultFilesExist(t, env, runNumber)
+
+			// Validate the output contains schema-defined fields
+			validateSummarySchemaOutput(t, helper, []string{"summary", "components", "recommendation"})
+			t.Logf("PASS: Run %d - summary worker with schema produced structured output", runNumber)
+		} else {
+			t.Logf("INFO: Run %d - Summary job ended with status %s", runNumber, summaryStatus)
+		}
+	}
+
+	// Validate schema was logged in service.log
+	if checkSchemaInServiceLog(t, env, "output schema") {
+		t.Log("PASS: Schema usage was logged in service.log")
+	} else {
+		t.Log("INFO: Schema usage logging not found (may need SCHEMA_ENFORCEMENT marker)")
+	}
+
+	// Compare outputs for consistency if both runs completed
+	if completedRuns == numRuns {
+		t.Log("=== Comparing outputs for consistency ===")
+		validateOutputConsistency(t, env)
+		assertOutputStructureConsistency(t, env)
+	} else {
+		t.Logf("INFO: Only %d of %d runs completed, skipping consistency comparison", completedRuns, numRuns)
+	}
+}
+
+// =============================================================================
+// 5. DEPRECATED WORKERS (retained for backward compatibility)
+// =============================================================================
 
 // TestWorkerASXStockData tests the asx_stock_data worker produces consistent output
 // DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
@@ -456,764 +1016,6 @@ func TestWorkerASXStockDataMultiStock(t *testing.T) {
 	}
 }
 
-// TestWorkerASXAnnouncements tests the asx_announcements worker produces consistent output
-// including the summary document with relevance classification and price impact analysis
-func TestWorkerASXAnnouncements(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	defID := fmt.Sprintf("test-asx-announcements-%d", time.Now().UnixNano())
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "ASX Announcements Worker Test",
-		"description": "Test asx_announcements worker for consistent output with summary",
-		"type":        "asx_announcements",
-		"enabled":     true,
-		"tags":        []string{"worker-test", "asx-announcement"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "fetch-announcements",
-				"type": "asx_announcements",
-				"config": map[string]interface{}{
-					"asx_code": "BHP",
-					// Use worker default Y1 (12 months) for consistent output
-				},
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create job definition")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Job definition creation failed with status: %d", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition")
-	defer execResp.Body.Close()
-
-	if execResp.StatusCode != http.StatusAccepted {
-		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
-	}
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	jobID := execResult["job_id"].(string)
-	t.Logf("Executed asx_announcements job: %s", jobID)
-
-	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
-
-	// Save job definition
-	if err := saveJobDefinition(t, env, body); err != nil {
-		t.Logf("Warning: failed to save job definition: %v", err)
-	}
-
-	if finalStatus != "completed" {
-		t.Logf("INFO: Job ended with status %s", finalStatus)
-		return
-	}
-
-	// ===== RUN 1 =====
-	t.Log("=== Run 1 ===")
-	validateASXAnnouncementsOutput(t, helper, "BHP")
-	validateASXAnnouncementsSummary(t, helper, "BHP")
-
-	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 1); err != nil {
-		t.Logf("Warning: failed to save summary output run 1: %v", err)
-	}
-	assertResultFilesExist(t, env, 1)
-
-	// ===== RUN 2 =====
-	t.Log("=== Run 2 ===")
-	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition for run 2")
-	defer execResp2.Body.Close()
-
-	if execResp2.StatusCode == http.StatusAccepted {
-		var execResult2 map[string]interface{}
-		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-		jobID2 := execResult2["job_id"].(string)
-		t.Logf("Executed asx_announcements job run 2: %s", jobID2)
-
-		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
-		if finalStatus2 == "completed" {
-			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", "bhp"}, 2); err != nil {
-				t.Logf("Warning: failed to save summary output run 2: %v", err)
-			}
-			assertResultFilesExist(t, env, 2)
-
-			// Compare consistency between runs
-			assertOutputStructureConsistency(t, env)
-		}
-	}
-
-	t.Log("PASS: asx_announcements worker produced consistent output across runs")
-}
-
-// TestWorkerASXAnnouncementsMultiStock tests the asx_announcements worker with multiple stocks
-func TestWorkerASXAnnouncementsMultiStock(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	stocks := []string{"BHP", "CSL", "GNP", "EXR"}
-
-	for i, stock := range stocks {
-		t.Run(stock, func(t *testing.T) {
-			defID := fmt.Sprintf("test-asx-announcements-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
-
-			body := map[string]interface{}{
-				"id":          defID,
-				"name":        fmt.Sprintf("ASX Announcements Worker Test - %s", stock),
-				"description": "Test asx_announcements worker for multi-stock support",
-				"type":        "asx_announcements",
-				"enabled":     true,
-				"tags":        []string{"worker-test", "asx-announcement", "multi-stock"},
-				"steps": []map[string]interface{}{
-					{
-						"name": "fetch-announcements",
-						"type": "asx_announcements",
-						"config": map[string]interface{}{
-							"asx_code": stock,
-							// Use worker default Y1 (12 months) for consistent output
-						},
-					},
-				},
-			}
-
-			resp, err := helper.POST("/api/job-definitions", body)
-			require.NoError(t, err, "Failed to create job definition for %s", stock)
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusCreated {
-				t.Skipf("Job definition creation failed for %s with status: %d", stock, resp.StatusCode)
-			}
-
-			defer func() {
-				delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-				if delResp != nil {
-					delResp.Body.Close()
-				}
-			}()
-
-			execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-			require.NoError(t, err, "Failed to execute job for %s", stock)
-			defer execResp.Body.Close()
-
-			if execResp.StatusCode != http.StatusAccepted {
-				t.Skipf("Job execution failed for %s with status: %d", stock, execResp.StatusCode)
-			}
-
-			var execResult map[string]interface{}
-			require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-			jobID := execResult["job_id"].(string)
-			t.Logf("Executed asx_announcements job for %s: %s", stock, jobID)
-
-			finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
-
-			// Save job definition for first stock only
-			if i == 0 {
-				if err := saveJobDefinition(t, env, body); err != nil {
-					t.Logf("Warning: failed to save job definition: %v", err)
-				}
-			}
-
-			if finalStatus != "completed" {
-				t.Logf("INFO: Job for %s ended with status %s", stock, finalStatus)
-				return
-			}
-
-			// ===== RUN 1 =====
-			t.Logf("=== Run 1 for %s ===", stock)
-			validateASXAnnouncementsOutput(t, helper, stock)
-			validateASXAnnouncementsSummary(t, helper, stock)
-
-			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+1); err != nil {
-				t.Logf("Warning: failed to save output for %s run 1: %v", stock, err)
-			}
-			assertResultFilesExist(t, env, i*2+1)
-
-			// ===== RUN 2 =====
-			t.Logf("=== Run 2 for %s ===", stock)
-			execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-			require.NoError(t, err, "Failed to execute job for %s run 2", stock)
-			defer execResp2.Body.Close()
-
-			if execResp2.StatusCode == http.StatusAccepted {
-				var execResult2 map[string]interface{}
-				require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-				jobID2 := execResult2["job_id"].(string)
-				t.Logf("Executed asx_announcements job for %s run 2: %s", stock, jobID2)
-
-				finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
-				if finalStatus2 == "completed" {
-					if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-announcement-summary", strings.ToLower(stock)}, i*2+2); err != nil {
-						t.Logf("Warning: failed to save output for %s run 2: %v", stock, err)
-					}
-					assertResultFilesExist(t, env, i*2+2)
-				}
-			}
-
-			t.Logf("PASS: %s announcements processed with consistency check", stock)
-		})
-	}
-}
-
-// TestWorkerASXAnalystCoverage tests the asx_analyst_coverage worker produces consistent output
-// including analyst ratings, price targets, and recommendation distribution.
-// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
-// price data, analyst coverage, and historical financials in a single API call.
-// This test is retained for backward compatibility.
-func TestWorkerASXAnalystCoverage(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	defID := fmt.Sprintf("test-asx-analyst-coverage-%d", time.Now().UnixNano())
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "ASX Analyst Coverage Worker Test",
-		"description": "Test asx_analyst_coverage worker for consistent output",
-		"type":        "asx_analyst_coverage",
-		"enabled":     true,
-		"tags":        []string{"worker-test", "asx-analyst-coverage"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "fetch-analyst-coverage",
-				"type": "asx_analyst_coverage",
-				"config": map[string]interface{}{
-					"asx_code": "BHP", // Use BHP as a stable test stock
-				},
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create job definition")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Job definition creation failed with status: %d (may be API unavailable)", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	// Execute the job
-	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition")
-	defer execResp.Body.Close()
-
-	if execResp.StatusCode != http.StatusAccepted {
-		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
-	}
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	jobID := execResult["job_id"].(string)
-	t.Logf("Executed asx_analyst_coverage job: %s", jobID)
-
-	// Wait for completion
-	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
-
-	// Save job definition
-	if err := saveJobDefinition(t, env, body); err != nil {
-		t.Logf("Warning: failed to save job definition: %v", err)
-	}
-
-	// Verify completion (may fail if Yahoo Finance API is unavailable)
-	if finalStatus != "completed" {
-		t.Logf("INFO: Job ended with status %s (may be expected if Yahoo Finance API unavailable)", finalStatus)
-		return
-	}
-
-	// ===== RUN 1 =====
-	t.Log("=== Run 1 ===")
-	validateASXAnalystCoverageOutput(t, helper, "BHP")
-
-	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-analyst-coverage", "bhp"}, 1); err != nil {
-		t.Logf("Warning: failed to save worker output run 1: %v", err)
-	}
-	assertResultFilesExist(t, env, 1)
-
-	// ===== RUN 2 =====
-	t.Log("=== Run 2 ===")
-	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition for run 2")
-	defer execResp2.Body.Close()
-
-	if execResp2.StatusCode == http.StatusAccepted {
-		var execResult2 map[string]interface{}
-		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-		jobID2 := execResult2["job_id"].(string)
-		t.Logf("Executed asx_analyst_coverage job run 2: %s", jobID2)
-
-		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
-		if finalStatus2 == "completed" {
-			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-analyst-coverage", "bhp"}, 2); err != nil {
-				t.Logf("Warning: failed to save worker output run 2: %v", err)
-			}
-			assertResultFilesExist(t, env, 2)
-
-			// Compare consistency between runs
-			assertOutputStructureConsistency(t, env)
-		}
-	}
-
-	t.Log("PASS: asx_analyst_coverage worker produced consistent output across runs")
-}
-
-// TestWorkerASXHistoricalFinancials tests the asx_historical_financials worker produces consistent output
-// including revenue history, profit growth, and CAGR calculations.
-// DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
-// price data, analyst coverage, and historical financials in a single API call.
-// This test is retained for backward compatibility.
-func TestWorkerASXHistoricalFinancials(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	defID := fmt.Sprintf("test-asx-historical-financials-%d", time.Now().UnixNano())
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "ASX Historical Financials Worker Test",
-		"description": "Test asx_historical_financials worker for consistent output",
-		"type":        "asx_historical_financials",
-		"enabled":     true,
-		"tags":        []string{"worker-test", "asx-historical-financials"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "fetch-historical-financials",
-				"type": "asx_historical_financials",
-				"config": map[string]interface{}{
-					"asx_code": "BHP", // Use BHP as a stable test stock
-				},
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create job definition")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Job definition creation failed with status: %d (may be API unavailable)", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	// Execute the job
-	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition")
-	defer execResp.Body.Close()
-
-	if execResp.StatusCode != http.StatusAccepted {
-		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
-	}
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	jobID := execResult["job_id"].(string)
-	t.Logf("Executed asx_historical_financials job: %s", jobID)
-
-	// Wait for completion
-	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
-
-	// Save job definition
-	if err := saveJobDefinition(t, env, body); err != nil {
-		t.Logf("Warning: failed to save job definition: %v", err)
-	}
-
-	// Verify completion (may fail if Yahoo Finance API is unavailable)
-	if finalStatus != "completed" {
-		t.Logf("INFO: Job ended with status %s (may be expected if Yahoo Finance API unavailable)", finalStatus)
-		return
-	}
-
-	// ===== RUN 1 =====
-	t.Log("=== Run 1 ===")
-	validateASXHistoricalFinancialsOutput(t, helper, "BHP")
-
-	if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-historical-financials", "bhp"}, 1); err != nil {
-		t.Logf("Warning: failed to save worker output run 1: %v", err)
-	}
-	assertResultFilesExist(t, env, 1)
-
-	// ===== RUN 2 =====
-	t.Log("=== Run 2 ===")
-	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition for run 2")
-	defer execResp2.Body.Close()
-
-	if execResp2.StatusCode == http.StatusAccepted {
-		var execResult2 map[string]interface{}
-		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-		jobID2 := execResult2["job_id"].(string)
-		t.Logf("Executed asx_historical_financials job run 2: %s", jobID2)
-
-		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 2*time.Minute)
-		if finalStatus2 == "completed" {
-			if _, _, err := saveWorkerOutput(t, env, helper, []string{"asx-historical-financials", "bhp"}, 2); err != nil {
-				t.Logf("Warning: failed to save worker output run 2: %v", err)
-			}
-			assertResultFilesExist(t, env, 2)
-
-			// Compare consistency between runs
-			assertOutputStructureConsistency(t, env)
-		}
-	}
-
-	t.Log("PASS: asx_historical_financials worker produced consistent output across runs")
-}
-
-// TestWorkerSummaryWithSchema tests the summary worker uses JSON schema for consistent output
-// This test executes the summary worker TWICE to verify output consistency and schema enforcement
-func TestWorkerSummaryWithSchema(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	// Check if Gemini API key is available
-	if !hasGeminiAPIKey(env) {
-		t.Skip("Skipping test - no valid google_gemini_api_key found")
-	}
-
-	// First, create some test documents to summarize
-	testDir, cleanup := createTestCodeDirectory(t)
-	defer cleanup()
-
-	// Step 1: Index files
-	indexDefID := fmt.Sprintf("index-for-schema-test-%d", time.Now().UnixNano())
-	indexBody := map[string]interface{}{
-		"id":      indexDefID,
-		"name":    "Index for Schema Test",
-		"type":    "local_dir",
-		"enabled": true,
-		"tags":    []string{"schema-test"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "index",
-				"type": "local_dir",
-				"config": map[string]interface{}{
-					"dir_path":           testDir,
-					"include_extensions": []string{".go", ".md"},
-					"max_files":          10,
-				},
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", indexBody)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Index job creation failed: %d", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + indexDefID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	// Execute index
-	execResp, err := helper.POST("/api/job-definitions/"+indexDefID+"/execute", nil)
-	require.NoError(t, err)
-	defer execResp.Body.Close()
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	indexJobID := execResult["job_id"].(string)
-
-	indexStatus := waitForJobCompletion(t, helper, indexJobID, 2*time.Minute)
-	require.Equal(t, "completed", indexStatus, "Index job should complete")
-
-	// Step 2: Create summary job WITH schema
-	// Define a test schema for code analysis
-	testSchema := map[string]interface{}{
-		"type":     "object",
-		"required": []string{"summary", "components", "recommendation"},
-		"properties": map[string]interface{}{
-			"summary": map[string]interface{}{
-				"type":        "string",
-				"description": "Brief summary of the codebase",
-			},
-			"components": map[string]interface{}{
-				"type":        "array",
-				"description": "List of main components",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-			},
-			"recommendation": map[string]interface{}{
-				"type":        "string",
-				"description": "Code quality recommendation",
-				"enum":        []string{"EXCELLENT", "GOOD", "FAIR", "NEEDS_IMPROVEMENT"},
-			},
-		},
-	}
-
-	// Execute the summary job TWICE to verify consistency
-	const numRuns = 2
-	completedRuns := 0
-
-	for runNumber := 1; runNumber <= numRuns; runNumber++ {
-		t.Logf("=== Execution %d of %d ===", runNumber, numRuns)
-
-		// Create unique job definition for each run
-		summaryDefID := fmt.Sprintf("summary-schema-test-%d-run%d", time.Now().UnixNano(), runNumber)
-		outputTag := fmt.Sprintf("summary-output-run%d", runNumber)
-
-		summaryBody := map[string]interface{}{
-			"id":      summaryDefID,
-			"name":    fmt.Sprintf("Summary with Schema Test - Run %d", runNumber),
-			"type":    "summarizer",
-			"enabled": true,
-			"tags":    []string{"schema-test", "summary-output", outputTag},
-			"steps": []map[string]interface{}{
-				{
-					"name": "summarize",
-					"type": "summary",
-					"config": map[string]interface{}{
-						"prompt":        "Analyze the code and provide a structured assessment. Return JSON matching the schema.",
-						"filter_tags":   []string{"schema-test"},
-						"api_key":       "{google_gemini_api_key}",
-						"output_schema": testSchema,
-					},
-				},
-			},
-		}
-
-		// Save job definition on first run
-		if runNumber == 1 {
-			if err := saveJobDefinition(t, env, summaryBody); err != nil {
-				t.Logf("Warning: failed to save job definition: %v", err)
-			}
-		}
-
-		resp2, err := helper.POST("/api/job-definitions", summaryBody)
-		require.NoError(t, err)
-		defer resp2.Body.Close()
-
-		if resp2.StatusCode != http.StatusCreated {
-			t.Logf("Summary job creation failed for run %d: %d", runNumber, resp2.StatusCode)
-			continue
-		}
-
-		defer func(defID string) {
-			delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-			if delResp != nil {
-				delResp.Body.Close()
-			}
-		}(summaryDefID)
-
-		// Execute summary
-		execResp2, err := helper.POST("/api/job-definitions/"+summaryDefID+"/execute", nil)
-		require.NoError(t, err)
-		defer execResp2.Body.Close()
-
-		var execResult2 map[string]interface{}
-		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-		summaryJobID := execResult2["job_id"].(string)
-		t.Logf("Executed summary job with schema (run %d): %s", runNumber, summaryJobID)
-
-		summaryStatus := waitForJobCompletion(t, helper, summaryJobID, 5*time.Minute)
-
-		if summaryStatus == "completed" {
-			completedRuns++
-
-			// Save worker output for this run
-			jsonPath, mdPath, err := saveWorkerOutput(t, env, helper, []string{"summary-output", outputTag}, runNumber)
-			if err != nil {
-				t.Logf("Warning: failed to save output for run %d: %v", runNumber, err)
-			} else {
-				t.Logf("Run %d outputs saved: JSON=%s, MD=%s", runNumber, jsonPath, mdPath)
-			}
-
-			// Assert result files exist for this run
-			assertResultFilesExist(t, env, runNumber)
-
-			// Validate the output contains schema-defined fields
-			validateSummarySchemaOutput(t, helper, []string{"summary", "components", "recommendation"})
-			t.Logf("PASS: Run %d - summary worker with schema produced structured output", runNumber)
-		} else {
-			t.Logf("INFO: Run %d - Summary job ended with status %s", runNumber, summaryStatus)
-		}
-	}
-
-	// Validate schema was logged in service.log
-	if checkSchemaInServiceLog(t, env, "output schema") {
-		t.Log("PASS: Schema usage was logged in service.log")
-	} else {
-		t.Log("INFO: Schema usage logging not found (may need SCHEMA_ENFORCEMENT marker)")
-	}
-
-	// Compare outputs for consistency if both runs completed
-	if completedRuns == numRuns {
-		t.Log("=== Comparing outputs for consistency ===")
-		validateOutputConsistency(t, env)
-		assertOutputStructureConsistency(t, env)
-	} else {
-		t.Logf("INFO: Only %d of %d runs completed, skipping consistency comparison", completedRuns, numRuns)
-	}
-}
-
-// TestWorkerWebSearch tests the web_search worker for consistent output
-func TestWorkerWebSearch(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-
-	// Check if Gemini API key is available (web_search uses Gemini)
-	if !hasGeminiAPIKey(env) {
-		t.Skip("Skipping test - no valid google_gemini_api_key found")
-	}
-
-	defID := fmt.Sprintf("test-web-search-%d", time.Now().UnixNano())
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "Web Search Worker Test",
-		"description": "Test web_search worker for consistent output",
-		"type":        "web_search",
-		"enabled":     true,
-		"tags":        []string{"worker-test", "web-search"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "search",
-				"type": "web_search",
-				"config": map[string]interface{}{
-					"query":   "BHP Group financial results 2024",
-					"api_key": "{google_gemini_api_key}",
-				},
-			},
-		},
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create job definition")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Job definition creation failed with status: %d", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition")
-	defer execResp.Body.Close()
-
-	if execResp.StatusCode != http.StatusAccepted {
-		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
-	}
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	jobID := execResult["job_id"].(string)
-	t.Logf("Executed web_search job: %s", jobID)
-
-	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
-
-	// Save job definition
-	if err := saveJobDefinition(t, env, body); err != nil {
-		t.Logf("Warning: failed to save job definition: %v", err)
-	}
-
-	if finalStatus != "completed" {
-		t.Logf("INFO: Job ended with status %s", finalStatus)
-		return
-	}
-
-	// ===== RUN 1 =====
-	t.Log("=== Run 1 ===")
-	validateWebSearchOutput(t, helper)
-
-	if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 1); err != nil {
-		t.Logf("Warning: failed to save worker output run 1: %v", err)
-	}
-	assertResultFilesExist(t, env, 1)
-
-	// ===== RUN 2 =====
-	t.Log("=== Run 2 ===")
-	execResp2, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute job definition for run 2")
-	defer execResp2.Body.Close()
-
-	if execResp2.StatusCode == http.StatusAccepted {
-		var execResult2 map[string]interface{}
-		require.NoError(t, helper.ParseJSONResponse(execResp2, &execResult2))
-		jobID2 := execResult2["job_id"].(string)
-		t.Logf("Executed web_search job run 2: %s", jobID2)
-
-		finalStatus2 := waitForJobCompletion(t, helper, jobID2, 3*time.Minute)
-		if finalStatus2 == "completed" {
-			if _, _, err := saveWorkerOutput(t, env, helper, []string{"web-search"}, 2); err != nil {
-				t.Logf("Warning: failed to save worker output run 2: %v", err)
-			}
-			assertResultFilesExist(t, env, 2)
-
-			// Compare consistency between runs
-			assertOutputStructureConsistency(t, env)
-		}
-	}
-
-	t.Log("PASS: web_search worker produced consistent output across runs")
-}
-
 // =============================================================================
 // Validation Helpers
 // =============================================================================
@@ -1469,201 +1271,6 @@ func validateASXAnnouncementsSummary(t *testing.T, helper *common.HTTPTestHelper
 		}
 	} else {
 		t.Log("INFO: No summary document found")
-	}
-}
-
-// validateASXAnalystCoverageOutput validates that asx_analyst_coverage produced consistent structure
-func validateASXAnalystCoverageOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
-	resp, err := helper.GET("/api/documents?tags=asx-analyst-coverage," + strings.ToLower(ticker))
-	if err != nil {
-		t.Logf("Warning: Failed to query documents: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Logf("Warning: Document query returned status %d", resp.StatusCode)
-		return
-	}
-
-	var result struct {
-		Documents []struct {
-			ID              string                 `json:"id"`
-			Title           string                 `json:"title"`
-			ContentMarkdown string                 `json:"content_markdown"`
-			Metadata        map[string]interface{} `json:"metadata"`
-		} `json:"documents"`
-		Total int `json:"total"`
-	}
-
-	if err := helper.ParseJSONResponse(resp, &result); err != nil {
-		t.Logf("Warning: Failed to parse response: %v", err)
-		return
-	}
-
-	t.Logf("Found %d asx-analyst-coverage documents for %s", result.Total, ticker)
-
-	if len(result.Documents) > 0 {
-		doc := result.Documents[0]
-		content := doc.ContentMarkdown
-
-		// Validate expected sections are present
-		expectedSections := []string{
-			"Analyst Summary",
-			"Price Targets",
-			"Recommendation Distribution",
-		}
-
-		for _, section := range expectedSections {
-			if strings.Contains(content, section) {
-				t.Logf("PASS: Found expected section '%s'", section)
-			} else {
-				t.Logf("INFO: Section '%s' not found in output", section)
-			}
-		}
-
-		// Validate numeric data patterns (price targets)
-		pricePattern := regexp.MustCompile(`\$\d+\.\d{2}`)
-		if pricePattern.MatchString(content) {
-			t.Log("PASS: Found price target data in expected format")
-		}
-
-		// Validate percentage patterns (upside potential)
-		percentPattern := regexp.MustCompile(`-?\d+\.?\d*%`)
-		if percentPattern.MatchString(content) {
-			t.Log("PASS: Found percentage data in expected format")
-		}
-
-		// Validate metadata has required fields
-		if doc.Metadata != nil {
-			requiredFields := []string{"analyst_count", "target_mean", "recommendation_key", "current_price"}
-			for _, field := range requiredFields {
-				if _, exists := doc.Metadata[field]; exists {
-					t.Logf("PASS: Metadata has field '%s'", field)
-				} else {
-					t.Logf("INFO: Metadata missing field '%s'", field)
-				}
-			}
-
-			// Validate recommendation distribution fields
-			distFields := []string{"strong_buy", "buy", "hold", "sell", "strong_sell"}
-			foundDist := 0
-			for _, field := range distFields {
-				if _, exists := doc.Metadata[field]; exists {
-					foundDist++
-				}
-			}
-			if foundDist > 0 {
-				t.Logf("PASS: Found %d recommendation distribution fields", foundDist)
-			}
-
-			// Check for upgrade/downgrade history
-			if udHistory, ok := doc.Metadata["upgrade_downgrades"].([]interface{}); ok {
-				t.Logf("PASS: Found %d upgrade/downgrade entries in metadata", len(udHistory))
-			}
-		}
-	} else {
-		t.Log("INFO: No analyst coverage document found")
-	}
-}
-
-// validateASXHistoricalFinancialsOutput validates that asx_historical_financials produced consistent structure
-func validateASXHistoricalFinancialsOutput(t *testing.T, helper *common.HTTPTestHelper, ticker string) {
-	resp, err := helper.GET("/api/documents?tags=asx-historical-financials," + strings.ToLower(ticker))
-	if err != nil {
-		t.Logf("Warning: Failed to query documents: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Logf("Warning: Document query returned status %d", resp.StatusCode)
-		return
-	}
-
-	var result struct {
-		Documents []struct {
-			ID              string                 `json:"id"`
-			Title           string                 `json:"title"`
-			ContentMarkdown string                 `json:"content_markdown"`
-			Metadata        map[string]interface{} `json:"metadata"`
-		} `json:"documents"`
-		Total int `json:"total"`
-	}
-
-	if err := helper.ParseJSONResponse(resp, &result); err != nil {
-		t.Logf("Warning: Failed to parse response: %v", err)
-		return
-	}
-
-	t.Logf("Found %d asx-historical-financials documents for %s", result.Total, ticker)
-
-	if len(result.Documents) > 0 {
-		doc := result.Documents[0]
-		content := doc.ContentMarkdown
-
-		// Validate expected sections are present
-		expectedSections := []string{
-			"Growth Summary",
-			"Annual Financial History",
-		}
-
-		for _, section := range expectedSections {
-			if strings.Contains(content, section) {
-				t.Logf("PASS: Found expected section '%s'", section)
-			} else {
-				t.Logf("INFO: Section '%s' not found in output", section)
-			}
-		}
-
-		// Validate table patterns (financial history tables)
-		if strings.Contains(content, "| FY End |") || strings.Contains(content, "| Revenue |") {
-			t.Log("PASS: Found financial history table in output")
-		}
-
-		// Validate percentage patterns (growth rates)
-		percentPattern := regexp.MustCompile(`-?\d+\.?\d*%`)
-		if percentPattern.MatchString(content) {
-			t.Log("PASS: Found growth percentage data in expected format")
-		}
-
-		// Validate metadata has required fields
-		if doc.Metadata != nil {
-			requiredFields := []string{"asx_code", "company_name", "revenue_growth_yoy", "annual_periods"}
-			for _, field := range requiredFields {
-				if _, exists := doc.Metadata[field]; exists {
-					t.Logf("PASS: Metadata has field '%s'", field)
-				} else {
-					t.Logf("INFO: Metadata missing field '%s'", field)
-				}
-			}
-
-			// Validate CAGR fields
-			cagrFields := []string{"revenue_cagr_3y", "revenue_cagr_5y"}
-			for _, field := range cagrFields {
-				if val, exists := doc.Metadata[field]; exists {
-					t.Logf("PASS: Found %s: %.1f%%", field, val)
-				}
-			}
-
-			// Check for annual_data array
-			if annualData, ok := doc.Metadata["annual_data"].([]interface{}); ok {
-				t.Logf("PASS: Found %d annual data periods in metadata", len(annualData))
-				if len(annualData) > 0 {
-					// Validate first period has required fields
-					if firstPeriod, ok := annualData[0].(map[string]interface{}); ok {
-						periodFields := []string{"end_date", "total_revenue", "net_income"}
-						for _, field := range periodFields {
-							if _, exists := firstPeriod[field]; exists {
-								t.Logf("PASS: Annual period has field '%s'", field)
-							}
-						}
-					}
-				}
-			}
-		}
-	} else {
-		t.Log("INFO: No historical financials document found")
 	}
 }
 

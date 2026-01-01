@@ -12,10 +12,8 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Orchestrator Worker](#orchestrator-worker)
   - [Analyze Build Worker](#analyze-build-worker)
   - [ASX Announcements Worker](#asx-announcements-worker)
-  - [ASX Stock Data Worker](#asx-stock-data-worker) (DEPRECATED)
-  - [ASX Analyst Coverage Worker](#asx-analyst-coverage-worker) (DEPRECATED)
-  - [ASX Historical Financials Worker](#asx-historical-financials-worker) (DEPRECATED)
-  - [ASX Stock Collector Worker](#asx-stock-collector-worker) (RECOMMENDED)
+  - [ASX Stock Data Worker](#asx-stock-data-worker) (Index benchmarks)
+  - [ASX Stock Collector Worker](#asx-stock-collector-worker) (RECOMMENDED for stocks)
   - [Competitor Analysis Worker](#competitor-analysis-worker)
   - [Classify Worker](#classify-worker)
   - [Code Map Worker](#code-map-worker)
@@ -273,7 +271,7 @@ The orchestrator supports both Gemini and Claude models. Use `model_preference` 
 |-------|------|----------|-------------|
 | `name` | string | Yes | Tool identifier for LLM to reference |
 | `description` | string | Yes | Human-readable description of tool capability |
-| `worker` | string | Yes | Worker type to invoke (e.g., `asx_stock_data`, `summary`) |
+| `worker` | string | Yes | Worker type to invoke (e.g., `asx_stock_collector`, `summary`) |
 | `template` | string | No | Template name if worker is `job_template` |
 
 #### Data Structures
@@ -307,7 +305,7 @@ type ReviewResult struct {
 #### Outputs
 
 - Creates planning document with reasoning steps
-- Executes tools via existing workers (asx_stock_data, summary, web_search, etc.)
+- Executes tools via existing workers (asx_stock_collector, asx_index_data, summary, web_search, etc.)
 - Creates final result document with execution summary
 - Logs each phase's progress and decisions
 
@@ -357,7 +355,7 @@ type = "orchestrator"
 description = "AI-powered planning and execution"
 goal = "Analyze all stocks in the variables list and generate recommendations"
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock data", worker = "asx_stock_data" },
+    { name = "fetch_stock_data", description = "Fetch ASX stock data", worker = "asx_stock_collector" },
     { name = "run_analysis", description = "Generate summary analysis", worker = "summary" },
     { name = "search_web", description = "Search the web", worker = "web_search" }
 ]
@@ -398,7 +396,7 @@ perform stock analysis, and generate portfolio-level insights.
 thinking_level = "HIGH"
 model_preference = "opus"  # Use Claude Opus for deep reasoning
 available_tools = [
-    { name = "fetch_stock_data", description = "Fetch ASX stock prices", worker = "asx_stock_data" },
+    { name = "fetch_stock_data", description = "Fetch ASX stock prices", worker = "asx_stock_collector" },
     { name = "fetch_announcements", description = "Fetch ASX announcements", worker = "asx_announcements" },
     { name = "search_web", description = "Search financial news", worker = "web_search" },
     { name = "analyze_summary", description = "Generate LLM analysis", worker = "summary" },
@@ -532,13 +530,13 @@ No additional configuration required. The worker fetches announcements from the 
 
 #### Price Impact Analysis
 
-For price impact analysis, the worker first attempts to retrieve historical price data from an existing `asx_stock_data` document (stored in document metadata as `historical_prices`). If no document exists, it falls back to fetching directly from Yahoo Finance.
+For price impact analysis, the worker first attempts to retrieve historical price data from an existing `asx_stock_collector` document (stored in document metadata as `historical_prices`). If no document exists, it falls back to fetching directly from Yahoo Finance.
 
-**Best Practice**: Run `asx_stock_data` before `asx_announcements` for the same stock to ensure consistent price data and avoid duplicate API calls.
+**Best Practice**: Run `asx_stock_collector` before `asx_announcements` for the same stock to ensure consistent price data and avoid duplicate API calls.
 
 ```toml
 [step.fetch_stock_data]
-type = "asx_stock_data"
+type = "asx_stock_collector"
 asx_code = "GNP"
 
 [step.fetch_announcements]
@@ -563,13 +561,11 @@ output_tags = ["asx-gnp-search", "gnp"]
 
 ---
 
-### ASX Stock Data Worker
+### ASX Index Data Worker
 
-> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
+**File**: `asx_index_data_worker.go`
 
-**File**: `asx_stock_data_worker.go`
-
-**Purpose**: Fetches real-time and historical stock data from the ASX. Uses Markit Digital API for fundamentals and Yahoo Finance for OHLCV data. Provides accurate price data and calculates technical indicators for analysis summaries.
+**Purpose**: Fetches real-time and historical data for ASX indices (XJO, XSO). Used primarily for benchmark comparison in portfolio analysis. For individual stock data, use `asx_stock_collector` instead.
 
 **Interfaces**: DefinitionWorker
 
@@ -580,147 +576,29 @@ output_tags = ["asx-gnp-search", "gnp"]
 **Step Config**:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `asx_code` | string | Yes | ASX company code (e.g., "BHP", "CBA") or index code (e.g., "XJO", "XSO") |
-| `period` | string | No | Historical data period (default: "Y2" = 2 years). Options: M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y2 (2 years), Y5 (5 years) |
+| `asx_code` | string | Yes | ASX index code (e.g., "XJO" for ASX 200, "XSO" for Small Ords) |
+| `period` | string | No | Historical data period (default: "Y2"). Options: M1, M3, M6, Y1, Y2, Y5 |
 | `output_tags` | []string | No | Additional tags to apply to output documents |
 | `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
 | `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
 
-**Period Options**:
-| Value | Description | Use Case |
-|-------|-------------|----------|
-| M1 | Last 1 month | Short-term technical analysis |
-| M3 | Last 3 months | Quarterly performance |
-| M6 | Last 6 months | Half-year trends |
-| Y1 | Last 1 year | Annual analysis |
-| Y2 | Last 2 years | Medium-term performance (default) |
-| Y5 | Last 5 years | Long-term CAGR, growth trajectory |
-
 #### Outputs
 
-- Document with comprehensive stock data including:
-  - Current price, bid/ask, price change
+- Document with index data including:
+  - Current value, change, change %
   - Day range, 52-week range
-  - Volume and average volume
-  - Market cap, P/E ratio, EPS, dividend yield
-  - Historical OHLCV data (up to 500 trading days for Y2)
-  - 6-month ASCII price chart for quick visualization
-  - Technical indicators: SMA20, SMA50, SMA200, RSI14
-  - Support/resistance levels
-  - Trend signal (bullish/bearish/neutral)
-- Metadata includes `historical_prices` array for downstream workers (e.g., `asx_announcements`)
-- Tags: `["asx-stock-data", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
-
-#### Configuration
-
-No additional configuration required. Fetches data from public APIs.
+  - Historical OHLCV data
+  - Technical indicators: SMA20, SMA50, SMA200
+- Tags: `["asx-index", "{index_code}", "date:YYYY-MM-DD", "benchmark", ...output_tags]`
 
 #### Example Job Definition
 
 ```toml
-[step.fetch_stock_data]
-type = "asx_stock_data"
-description = "Fetch real-time stock data for CBA"
-asx_code = "CBA"
-output_tags = ["banking-sector", "portfolio"]
-```
-
----
-
-### ASX Analyst Coverage Worker
-
-> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
-
-**File**: `asx_analyst_coverage_worker.go`
-
-**Purpose**: Fetches analyst coverage, broker ratings, and price targets from Yahoo Finance. Provides structured output including analyst count, consensus recommendations, price target ranges, upside potential, and recent upgrade/downgrade history.
-
-**Interfaces**: DefinitionWorker
-
-**Job Type**: N/A (inline execution only)
-
-#### Inputs
-
-**Step Config**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
-| `output_tags` | []string | No | Additional tags to apply to output documents |
-| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
-| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
-
-#### Outputs
-
-- Document with comprehensive analyst coverage data including:
-  - Analyst count (number of analysts covering the stock)
-  - Consensus rating (buy/hold/sell) and rating score (1-5 scale)
-  - Price targets: mean, median, high, low
-  - Upside potential (percentage to mean target)
-  - Recommendation distribution (Strong Buy, Buy, Hold, Sell, Strong Sell counts)
-  - Recent upgrade/downgrade history (last 10 actions)
-- Tags: `["asx-analyst-coverage", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
-- Metadata includes structured data for downstream workers
-
-#### Configuration
-
-No additional configuration required. Fetches data from Yahoo Finance API.
-
-#### Example Job Definition
-
-```toml
-[step.fetch_analyst_coverage]
-type = "asx_analyst_coverage"
-description = "Fetch analyst coverage for CBA"
-asx_code = "CBA"
-output_tags = ["banking-sector", "portfolio"]
-```
-
----
-
-### ASX Historical Financials Worker
-
-> **DEPRECATED**: Use `asx_stock_collector` instead. This worker is kept for backward compatibility.
-
-**File**: `asx_historical_financials_worker.go`
-
-**Purpose**: Fetches historical financial data from Yahoo Finance including revenue, profit, margins, cash flow, and growth rates. Provides structured output with annual and quarterly financial statements for multi-year analysis.
-
-**Interfaces**: DefinitionWorker
-
-**Job Type**: N/A (inline execution only)
-
-#### Inputs
-
-**Step Config**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
-| `output_tags` | []string | No | Additional tags to apply to output documents |
-| `cache_hours` | int | No | Hours to cache data before refresh (default: 24) |
-| `force_refresh` | bool | No | Force data refresh ignoring cache (default: false) |
-
-#### Outputs
-
-- Document with comprehensive financial history including:
-  - Growth Summary: Revenue YoY growth, Profit YoY growth, 3Y and 5Y Revenue CAGR
-  - Annual Financial History: Revenue, Net Income, Gross/Net Margins, Assets, Equity per year
-  - Cash Flow Summary: Operating cash flow, Free cash flow, EBITDA per year
-  - Quarterly Performance: Recent quarters with YoY revenue growth
-- Tags: `["asx-historical-financials", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
-- Metadata includes structured arrays for downstream workers
-
-#### Configuration
-
-No additional configuration required. Fetches data from Yahoo Finance API.
-
-#### Example Job Definition
-
-```toml
-[step.fetch_historical_financials]
-type = "asx_historical_financials"
-description = "Fetch historical financials for CBA"
-asx_code = "CBA"
-output_tags = ["banking-sector", "portfolio"]
+[step.fetch_index_data]
+type = "asx_index_data"
+description = "Fetch ASX 200 index data for benchmark"
+asx_code = "XJO"
+output_tags = ["benchmark"]
 ```
 
 ---
@@ -729,7 +607,7 @@ output_tags = ["banking-sector", "portfolio"]
 
 **File**: `asx_stock_collector_worker.go`
 
-**Purpose**: Consolidated Yahoo Finance data collector. Fetches price data, analyst coverage, and historical financials in a **single API call**. This is the recommended replacement for the deprecated `asx_stock_data`, `asx_analyst_coverage`, and `asx_historical_financials` workers.
+**Purpose**: Consolidated Yahoo Finance data collector. Fetches price data, analyst coverage, and historical financials in a **single API call**. This is the recommended worker for individual stock analysis.
 
 **Interfaces**: DefinitionWorker
 
@@ -779,32 +657,6 @@ description = "Fetch comprehensive stock data for CBA"
 asx_code = "CBA"
 period = "Y2"
 output_tags = ["banking-sector", "portfolio"]
-```
-
-#### Migration from Deprecated Workers
-
-Replace separate calls to `asx_stock_data`, `asx_analyst_coverage`, and `asx_historical_financials` with a single `asx_stock_collector` call:
-
-**Before (3 API calls)**:
-```toml
-[step.fetch_price]
-type = "asx_stock_data"
-asx_code = "CBA"
-
-[step.fetch_analysts]
-type = "asx_analyst_coverage"
-asx_code = "CBA"
-
-[step.fetch_financials]
-type = "asx_historical_financials"
-asx_code = "CBA"
-```
-
-**After (1 API call)**:
-```toml
-[step.fetch_stock_data]
-type = "asx_stock_collector"
-asx_code = "CBA"
 ```
 
 ---
@@ -1054,7 +906,7 @@ filter_tags = ["devops-candidate"]
 
 **File**: `email_worker.go`
 
-**Purpose**: Sends email notifications with job results. Used as a step in job definitions to email results/summaries to users.
+**Purpose**: Sends email notifications with job results. Used as a step in job definitions to email results/summaries to users. Supports automatic error detection and error reporting when previous steps fail.
 
 **Interfaces**: DefinitionWorker
 
@@ -1071,12 +923,28 @@ filter_tags = ["devops-candidate"]
 | `body_html` | string | No | HTML email body |
 | `body_from_document` | string | No | Document ID to use as email body (markdown auto-converted to HTML) |
 | `body_from_tag` | string | No | Get latest document with tag as email body (markdown auto-converted to HTML) |
+| `on_error_subject` | string | No | Alternative subject when error detected |
+| `include_logs_on_error` | bool | No | Include step logs in error email (default: true) |
+
+#### Error Reporting
+
+The email worker automatically detects job failures and switches to error reporting mode:
+
+1. **Error Detection**: Checks parent job's `step_stats` for failed steps
+2. **Trigger Conditions**:
+   - Previous steps have status "failed" or "error"
+   - Email body is empty (no data scenario)
+3. **Error Mode Behavior**:
+   - Uses `on_error_subject` if configured, otherwise appends " - Error Occurred" to subject
+   - Generates error body with failed steps, error messages, and step logs
+   - Logs a warning about sending error notification
 
 #### Outputs
 
 - Sends email to specified recipient (HTML formatted with professional styling)
 - Markdown content is automatically converted to styled HTML with headings, lists, code blocks, tables
 - Logs success/failure to job logs
+- In error mode: Includes relevant step logs (last 30 entries)
 
 #### Prerequisites
 
@@ -1093,6 +961,23 @@ description = "Send job results via email"
 to = "team@example.com"
 subject = "Daily Report Complete"
 body = "The daily report job has completed successfully."
+```
+
+#### Example with Error Reporting
+
+```toml
+[step.email_report]
+type = "email"
+description = "Email consolidated report"
+depends = "analyze"
+on_error = "fail"
+to = "team@example.com"
+subject = "Daily Analysis Report"
+body_from_tag = "report"
+
+# Error reporting configuration
+on_error_subject = "Daily Analysis - An Error Occurred"
+include_logs_on_error = true
 ```
 
 ---
@@ -1775,6 +1660,34 @@ search:
   case_sensitive_max_cap: 500         # Max results cap
 ```
 
+### Error Strategy Configuration
+
+All job definition steps support error handling via the `on_error` field:
+
+| Strategy | Description |
+|----------|-------------|
+| `continue` | Log error and continue to next step (default) |
+| `fail` | Stop job execution immediately |
+| `retry` | Retry step with exponential backoff |
+| `fatal` | Stop job immediately AND cancel all pending/running child jobs |
+
+**Example**:
+```toml
+[step.fetch_data]
+type = "asx_stock_collector"
+on_error = "fatal"  # Stop everything if data fetch fails
+asx_code = "CBA"
+
+[step.analyze]
+type = "orchestrator"
+on_error = "continue"  # Continue even if analysis has issues
+depends = "fetch_data"
+```
+
+**Fatal vs Fail**:
+- `fail`: Stops the current job execution but does not affect already-running child jobs
+- `fatal`: Stops execution AND actively cancels all pending/running child jobs in the hierarchy
+
 ---
 
 ## Worker Classification
@@ -1851,10 +1764,8 @@ search:
 
 **Data Source Workers**:
 - ASX Announcements Worker
-- ASX Stock Data Worker (DEPRECATED)
-- ASX Analyst Coverage Worker (DEPRECATED)
-- ASX Historical Financials Worker (DEPRECATED)
-- ASX Stock Collector Worker (RECOMMENDED - replaces 3 workers above)
+- ASX Stock Data Worker (Index benchmarks)
+- ASX Stock Collector Worker (RECOMMENDED for stocks)
 - Crawler Worker
 - GitHub Git Worker
 - GitHub Log Worker

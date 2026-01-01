@@ -1,11 +1,11 @@
 # Go Skill for Quaero
 
-**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` before any code changes.
+**Prerequisite:** Read `.claude/skills/refactoring/SKILL.md` first.
 
 ## Project Context
 - **Language:** Go 1.25+
 - **Storage:** BadgerDB (embedded key-value store)
-- **Logging:** github.com/ternarybob/arbor (structured logging)
+- **Logging:** github.com/ternarybob/arbor
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
 - **LLM:** Google ADK with Gemini models
 
@@ -27,17 +27,15 @@ internal/
 
 ### Error Handling
 ```go
-// Always wrap errors with context
 if err != nil {
     return fmt.Errorf("failed to process %s: %w", id, err)
 }
 ```
 
-### Logging (arbor)
+### Logging (arbor only)
 ```go
 logger.Info("message", "key", value)
 logger.Error("failed", "error", err)
-// NEVER: fmt.Println() or log.Printf()
 ```
 
 ### Constructor Injection
@@ -45,18 +43,13 @@ logger.Error("failed", "error", err)
 func NewService(dep interfaces.Dependency) *Service {
     return &Service{dep: dep}
 }
-// NEVER: global state or service locators
 ```
 
-### Handler Pattern
+### Thin Handlers
 ```go
-type Handler struct {
-    service interfaces.Service
-    logger  *arbor.Logger
-}
-
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-    // Thin handler - delegate to service
+    result, err := h.service.DoWork(r.Context(), id)
+    // Minimal logic - delegate to service
 }
 ```
 
@@ -69,21 +62,25 @@ var db *badger.DB
 panic(err)
 
 // ❌ Missing context
-func DoWork() error { }  // needs ctx
+func DoWork() error { }
 
 // ❌ Bare errors
-return err  // needs context
+return err
 
 // ❌ fmt/log for logging
 fmt.Println("debug")
 
 // ❌ Business logic in handlers
-func (h *Handler) Create(w, r) {
-    // 50 lines of logic - WRONG
-}
+// 50+ lines in handler = WRONG
 
 // ❌ Direct go build
-go build ./cmd/quaero  // Use scripts/
+go build ./cmd/quaero
+
+// ❌ Dead code left behind
+func oldHelper() { }  // Remove if replaced!
+
+// ❌ Unused imports
+import "unused/pkg"  // Clean up!
 ```
 
 ## Build & Test
@@ -107,3 +104,5 @@ go test ./internal/...   # Unit tests
 5. Interface-based DI - depend on interfaces
 6. Constructor injection - all deps via `NewXxx()`
 7. Thin handlers - logic in services
+8. **Remove dead code** - don't leave old functions
+9. **Clean imports** - remove unused packages
