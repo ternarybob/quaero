@@ -27,12 +27,55 @@ type NavexaPerformanceWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	debugEnabled    bool
 }
 
 // Compile-time assertion
 var _ interfaces.DefinitionWorker = (*NavexaPerformanceWorker)(nil)
 
-// NavexaPerformance represents portfolio performance from the Navexa API
+// NavexaTotalReturn represents the TotalReturnViewModel from Navexa API
+type NavexaTotalReturn struct {
+	TotalValue          float64 `json:"totalValue"`
+	TotalReturnValue    float64 `json:"totalReturnValue"`
+	TotalReturnPercent  float64 `json:"totalReturnPercent"`
+	CapitalGainValue    float64 `json:"capitalGainValue"`
+	CapitalGainPercent  float64 `json:"capitalGainPercent"`
+	DividendReturnValue float64 `json:"dividendReturnValue"`
+	DividendReturnPct   float64 `json:"dividendReturnPercent"`
+	CurrencyGainValue   float64 `json:"currencyGainValue"`
+	CurrencyGainPercent float64 `json:"currencyGainPercent"`
+	IsAnnualized        bool    `json:"isAnnualized"`
+}
+
+// NavexaPerformanceRaw is the raw API response structure matching Navexa's PortfolioPerformanceViewModel
+type NavexaPerformanceRaw struct {
+	PortfolioID      int                           `json:"portfolioId"`
+	PortfolioName    string                        `json:"portfolioName"`
+	BaseCurrencyCode string                        `json:"baseCurrencyCode"`
+	TotalValue       float64                       `json:"totalValue"`
+	TotalReturn      NavexaTotalReturn             `json:"totalReturn"`
+	GeneratedDate    string                        `json:"generatedDate"`
+	Holdings         []NavexaHoldingPerformanceRaw `json:"holdings"`
+	HasHoldings      bool                          `json:"hasHoldings"`
+}
+
+// NavexaHoldingPerformanceRaw matches HoldingSummaryPerformanceViewModel
+type NavexaHoldingPerformanceRaw struct {
+	Symbol         string            `json:"symbol"`
+	Name           string            `json:"name"`
+	Exchange       string            `json:"exchange"`
+	DisplayExch    string            `json:"displayExchange"`
+	Quantity       float64           `json:"quantity"`
+	TotalQuantity  float64           `json:"totalQuantity"`
+	CurrentPrice   float64           `json:"currentPrice"`
+	PercentChange  float64           `json:"percentChange"`
+	CurrencyCode   string            `json:"currencyCode"`
+	HoldingWeight  float64           `json:"holdingWeight"`
+	TotalReturn    NavexaTotalReturn `json:"totalReturn"`
+	GroupedByValue string            `json:"groupedByValue"`
+}
+
+// NavexaPerformance represents portfolio performance (normalized for internal use)
 type NavexaPerformance struct {
 	PortfolioID      int                        `json:"portfolioId"`
 	PortfolioName    string                     `json:"portfolioName"`
@@ -48,7 +91,7 @@ type NavexaPerformance struct {
 	GeneratedAt      string                     `json:"generatedAt"`
 }
 
-// NavexaHoldingPerformance represents individual holding performance
+// NavexaHoldingPerformance represents individual holding performance (normalized)
 type NavexaHoldingPerformance struct {
 	Symbol        string  `json:"symbol"`
 	Name          string  `json:"name"`
@@ -71,6 +114,7 @@ func NewNavexaPerformanceWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *NavexaPerformanceWorker {
 	return &NavexaPerformanceWorker{
 		documentStorage: documentStorage,
@@ -80,6 +124,7 @@ func NewNavexaPerformanceWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		debugEnabled: debugEnabled,
 	}
 }
 
@@ -387,12 +432,109 @@ func (w *NavexaPerformanceWorker) fetchPerformance(ctx context.Context, apiKey s
 		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
-	var performance NavexaPerformance
-	if err := json.NewDecoder(resp.Body).Decode(&performance); err != nil {
+	// Parse raw response matching Navexa API structure
+	var raw NavexaPerformanceRaw
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &performance, nil
+	// Normalize holdings from raw API response
+	holdings := make([]NavexaHoldingPerformance, len(raw.Holdings))
+	for i, h := range raw.Holdings {
+		// Calculate cost basis from total value and return
+		costBasis := h.TotalReturn.TotalValue - h.TotalReturn.TotalReturnValue
+
+		holdings[i] = NavexaHoldingPerformance{
+			Symbol:        h.Symbol,
+			Name:          h.Name,
+			Exchange:      h.Exchange,
+			CurrentValue:  h.TotalReturn.TotalValue,
+			CostBasis:     costBasis,
+			Return:        h.TotalReturn.TotalReturnValue,
+			ReturnPercent: h.TotalReturn.TotalReturnPercent,
+			Weight:        h.HoldingWeight,
+			CapitalGains:  h.TotalReturn.CapitalGainValue,
+			Dividends:     h.TotalReturn.DividendReturnValue,
+			CurrencyGains: h.TotalReturn.CurrencyGainValue,
+			Units:         h.TotalQuantity,
+			AvgCost:       0, // Not directly available in API response
+		}
+	}
+
+	// Calculate total cost basis from total value and return
+	totalCostBasis := raw.TotalReturn.TotalValue - raw.TotalReturn.TotalReturnValue
+
+	// Normalize to NavexaPerformance
+	performance := &NavexaPerformance{
+		PortfolioID:      raw.PortfolioID,
+		PortfolioName:    raw.PortfolioName,
+		BaseCurrencyCode: raw.BaseCurrencyCode,
+		Holdings:         holdings,
+		TotalValue:       raw.TotalReturn.TotalValue,
+		TotalCostBasis:   totalCostBasis,
+		TotalReturn:      raw.TotalReturn.TotalReturnValue,
+		TotalReturnPct:   raw.TotalReturn.TotalReturnPercent,
+		CapitalGains:     raw.TotalReturn.CapitalGainValue,
+		Dividends:        raw.TotalReturn.DividendReturnValue,
+		CurrencyGains:    raw.TotalReturn.CurrencyGainValue,
+		GeneratedAt:      raw.GeneratedDate,
+	}
+
+	return performance, nil
+}
+
+// formatMoney formats a float as currency with comma thousands separators
+func formatMoney(val float64) string {
+	neg := val < 0
+	if neg {
+		val = -val
+	}
+
+	// Format with 2 decimal places
+	str := fmt.Sprintf("%.2f", val)
+	parts := strings.Split(str, ".")
+
+	// Add commas to integer part
+	intPart := parts[0]
+	var result strings.Builder
+	for i, c := range intPart {
+		if i > 0 && (len(intPart)-i)%3 == 0 {
+			result.WriteRune(',')
+		}
+		result.WriteRune(c)
+	}
+
+	formatted := "$" + result.String() + "." + parts[1]
+	if neg {
+		formatted = "-" + formatted
+	}
+	return formatted
+}
+
+// formatMoneyInt formats a float as currency with no decimals
+func formatMoneyInt(val float64) string {
+	neg := val < 0
+	if neg {
+		val = -val
+	}
+
+	// Format with 0 decimal places
+	intPart := fmt.Sprintf("%.0f", val)
+
+	// Add commas
+	var result strings.Builder
+	for i, c := range intPart {
+		if i > 0 && (len(intPart)-i)%3 == 0 {
+			result.WriteRune(',')
+		}
+		result.WriteRune(c)
+	}
+
+	formatted := "$" + result.String()
+	if neg {
+		formatted = "-" + formatted
+	}
+	return formatted
 }
 
 // generateMarkdown creates a markdown document from the performance data
@@ -409,13 +551,13 @@ func (w *NavexaPerformanceWorker) generateMarkdown(perf *NavexaPerformance, port
 	sb.WriteString("## Portfolio Summary\n\n")
 	sb.WriteString("| Metric | Value |\n")
 	sb.WriteString("|--------|------:|\n")
-	sb.WriteString(fmt.Sprintf("| Total Value | $%,.2f |\n", perf.TotalValue))
-	sb.WriteString(fmt.Sprintf("| Cost Basis | $%,.2f |\n", perf.TotalCostBasis))
-	sb.WriteString(fmt.Sprintf("| Total Return | $%,.2f |\n", perf.TotalReturn))
+	sb.WriteString(fmt.Sprintf("| Total Value | %s |\n", formatMoney(perf.TotalValue)))
+	sb.WriteString(fmt.Sprintf("| Cost Basis | %s |\n", formatMoney(perf.TotalCostBasis)))
+	sb.WriteString(fmt.Sprintf("| Total Return | %s |\n", formatMoney(perf.TotalReturn)))
 	sb.WriteString(fmt.Sprintf("| Return %% | %.2f%% |\n", perf.TotalReturnPct))
-	sb.WriteString(fmt.Sprintf("| Capital Gains | $%,.2f |\n", perf.CapitalGains))
-	sb.WriteString(fmt.Sprintf("| Dividends | $%,.2f |\n", perf.Dividends))
-	sb.WriteString(fmt.Sprintf("| Currency Gains | $%,.2f |\n", perf.CurrencyGains))
+	sb.WriteString(fmt.Sprintf("| Capital Gains | %s |\n", formatMoney(perf.CapitalGains)))
+	sb.WriteString(fmt.Sprintf("| Dividends | %s |\n", formatMoney(perf.Dividends)))
+	sb.WriteString(fmt.Sprintf("| Currency Gains | %s |\n", formatMoney(perf.CurrencyGains)))
 
 	if len(perf.Holdings) == 0 {
 		sb.WriteString("\nNo holding performance data available.\n")
@@ -437,8 +579,9 @@ func (w *NavexaPerformanceWorker) generateMarkdown(perf *NavexaPerformance, port
 			name = name[:22] + "..."
 		}
 
-		sb.WriteString(fmt.Sprintf("| %s | %s | $%,.0f | $%,.0f | $%,.0f | %.1f%% | %.1f%% |\n",
-			symbol, name, h.CurrentValue, h.CostBasis, h.Return, h.ReturnPercent, h.Weight))
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %.1f%% | %.1f%% |\n",
+			symbol, name, formatMoneyInt(h.CurrentValue), formatMoneyInt(h.CostBasis),
+			formatMoneyInt(h.Return), h.ReturnPercent, h.Weight))
 	}
 
 	// Top/Bottom performers

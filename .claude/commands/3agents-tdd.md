@@ -324,6 +324,27 @@ See full details: `$WORKDIR/test_issues.md`
 ls -la "$WORKDIR/summary.md"
 ````
 
+**Step 4.4: Copy TDD workdir to test results (if applicable)**
+
+If the test creates a results directory (e.g., orchestrator/worker integration tests),
+copy the entire TDD workdir to that results directory for archival:
+
+````bash
+# Tests that create results dirs will have them in test/results/api/
+# Find the most recent results directory for this test
+RESULTS_DIR=$(ls -td test/results/api/*${TASK_SLUG}* 2>/dev/null | head -1)
+
+if [ -n "$RESULTS_DIR" ] && [ -d "$RESULTS_DIR" ]; then
+    # Copy entire TDD workdir to results
+    TDD_DEST="$RESULTS_DIR/tdd-workdir"
+    cp -r "$WORKDIR" "$TDD_DEST"
+    echo "Copied TDD workdir to: $TDD_DEST"
+fi
+````
+
+The `common.CopyTDDSummary()` function in Go tests will also copy `summary.md` automatically,
+but the full workdir copy above includes all artifacts (tdd_state.md, test_issues.md, etc.).
+
 ---
 ### ⟲ COMPACT POINT: TASK COMPLETE
 
@@ -449,6 +470,13 @@ if currentStatus != expectedStatus {
 | `summary.md` | Final summary | Phase 4 | **YES - ALWAYS** |
 
 **Task is NOT complete until `summary.md` exists in workdir.**
+
+## RESULTS INTEGRATION
+
+When running tests that produce results directories (e.g., `test/results/api/orchestrator-*`):
+- The TDD workdir is copied to `{results_dir}/tdd-workdir/` in Phase 4.4
+- Go tests call `common.CopyTDDSummary()` which copies: `summary.md`, `tdd_state.md`, `test_issues.md`
+- This provides complete traceability from test results back to TDD session
 
 ## INVOKE
 ````

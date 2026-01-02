@@ -1,0 +1,172 @@
+# Portfolio Assessment - Orchestrator Goal Template
+# =========================================================================
+# Modular template for portfolio-level analysis.
+# Runs AFTER stock-analysis-goal to provide portfolio mix assessment.
+#
+# PREREQUISITES:
+# - stock-analysis step must run first
+# - Documents tagged with ['stock-analysis'] must exist
+# - Optionally, Navexa performance documents for P/L data
+#
+# PROVIDES:
+# - Portfolio concentration analysis
+# - Diversification scoring
+# - Sector/industry breakdown
+# - Dual-horizon portfolio recommendations (Trader vs Super Fund)
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "Portfolio-level analysis with concentration and diversification assessment"
+
+id = "portfolio-assessment-goal"
+name = "Portfolio Assessment Goal Template"
+type = "orchestrator_template"
+description = "Portfolio-level analysis with concentration and diversification assessment"
+
+[template]
+thinking_level = "HIGH"
+model_preference = "auto"
+output_tags = ["portfolio-review"]
+
+goal = """
+Perform portfolio-level assessment using stock analysis and performance data.
+
+=== INPUT REQUIREMENTS ===
+
+This template requires PRIOR data collection:
+1. Documents tagged ['stock-analysis'] - from stock-analysis-goal
+2. Documents tagged ['asx-stock-data'] - individual stock data
+3. OPTIONAL: Documents tagged ['navexa-performance'] - P/L data from Navexa
+
+=== PHASE 1: GATHER DATA ===
+
+1. STOCK ANALYSIS:
+   - Retrieve documents tagged with ['stock-analysis']
+   - Extract: quality grades, recommendations, groupings
+
+2. PERFORMANCE DATA (if available):
+   - Retrieve documents tagged with ['navexa-performance']
+   - Extract: P/L, returns, cost basis, current values
+
+3. STOCK DATA:
+   - Retrieve documents tagged with ['asx-stock-data']
+   - Extract: sectors, industries, market caps
+
+=== PHASE 2: PORTFOLIO MIX ANALYSIS ===
+
+4. CONCENTRATION ANALYSIS:
+   - Calculate weight of each holding (by value or equal weight)
+   - Flag any holding > 15% of portfolio (concentration risk)
+   - Flag any holding > 25% as critical concentration
+
+5. SECTOR DIVERSIFICATION:
+   - Group holdings by sector/industry
+   - Calculate sector weights
+   - Score diversification (1-10):
+     * 1-3: Poor (>60% in one sector)
+     * 4-6: Moderate (40-60% in top sector)
+     * 7-10: Good (<40% in any single sector)
+
+6. QUALITY DISTRIBUTION:
+   - Count holdings by quality grade (A/B/C/D/F)
+   - Calculate quality-weighted portfolio score
+   - Flag if >20% in D/F quality stocks
+
+7. PORTFOLIO GROUPINGS:
+   - Organize by portfolio field if provided
+   - Show sub-portfolio breakdowns
+
+=== PHASE 3: DUAL-HORIZON PORTFOLIO ASSESSMENT ===
+
+8. TRADER PORTFOLIO VIEW (1-12 weeks):
+   Focus: Short-term momentum, tactical opportunities
+
+   CURRENT STATE:
+   - Holdings with positive momentum (RSI, moving average crossovers)
+   - Near-term catalysts (earnings, announcements)
+   - Technical breakout candidates
+
+   RECOMMENDED ACTIONS:
+   - Top 3 holdings to ADD (momentum plays)
+   - Holdings to TRIM (profit-taking candidates)
+   - Position sizing suggestions
+
+   RISK ASSESSMENT:
+   - Volatility exposure
+   - Correlation risk (stocks moving together)
+
+9. SUPER FUND PORTFOLIO VIEW (6 months - 2 years):
+   Focus: Long-term quality, sustainable growth, retirement suitability
+
+   CURRENT STATE:
+   - Quality distribution (need majority A/B)
+   - Dividend income potential
+   - Growth trajectory of holdings
+
+   RECOMMENDED ACTIONS:
+   - Holdings to ACCUMULATE (Quality A/B underweight)
+   - Holdings to REDUCE (Quality D/F, overweight)
+   - Rebalancing to target weights
+
+   COMPLIANCE NOTES:
+   - Diversification adequacy for SMSF
+   - Single-asset concentration warnings
+   - Arm's length requirement considerations
+
+=== PHASE 4: SYNTHESIS ===
+
+10. GENERATE ASSESSMENT using analyze_summary:
+    - Include all portfolio metrics
+    - Provide actionable recommendations
+    - Tag output with ['portfolio-review']
+
+FINAL OUTPUT MUST INCLUDE:
+
+1. PORTFOLIO SUMMARY:
+   - Total holdings count
+   - Portfolio groupings breakdown
+   - Overall quality score
+
+2. CONCENTRATION TABLE:
+   Holding | Weight | Sector | Quality | Status
+   (Flag if >15% weight)
+
+3. SECTOR BREAKDOWN:
+   Sector | Holdings Count | Weight | Avg Quality
+
+4. QUALITY DISTRIBUTION:
+   Quality | Count | % of Portfolio
+
+5. TRADER PORTFOLIO ASSESSMENT (1-12 weeks):
+   - Current positioning score (1-10)
+   - Top momentum plays
+   - Tactical actions
+
+6. SUPER FUND PORTFOLIO ASSESSMENT (6m - 2 years):
+   - SMSF suitability score (1-10)
+   - Quality concentration
+   - Long-term accumulation targets
+
+7. PRIORITY ACTIONS:
+   - Immediate (this week)
+   - Short-term (1-4 weeks)
+   - Medium-term (1-6 months)
+
+8. RISK ALERTS:
+   - Concentration warnings
+   - Quality concerns
+   - Diversification gaps
+"""
+
+available_tools = [
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents. REQUIRED: prompt (string), filter_tags (array). OPTIONAL: thinking_level (LOW/HIGH). Use HIGH for portfolio analysis. Filter by ['stock-analysis'], ['asx-stock-data'], ['navexa-performance'].", worker = "summary" },
+]
+
+output_schema_ref = "portfolio-review.schema.json"

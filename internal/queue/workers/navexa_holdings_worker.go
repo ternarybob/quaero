@@ -26,6 +26,7 @@ type NavexaHoldingsWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	debugEnabled    bool
 }
 
 // Compile-time assertion
@@ -57,6 +58,7 @@ func NewNavexaHoldingsWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *NavexaHoldingsWorker {
 	return &NavexaHoldingsWorker{
 		documentStorage: documentStorage,
@@ -66,6 +68,7 @@ func NewNavexaHoldingsWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		debugEnabled: debugEnabled,
 	}
 }
 

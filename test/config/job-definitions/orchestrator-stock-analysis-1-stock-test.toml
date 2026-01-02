@@ -1,0 +1,65 @@
+# Orchestrator Test: Stock Analysis Goal - 1 Stock
+# =========================================================================
+# Tests the stock-analysis-goal template with a single ticker.
+# This is a minimal test to verify the template works correctly.
+#
+# TEMPLATE: job-templates/stock-analysis-goal.toml
+# OUTPUT TAG: stock-analysis
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "Integration test for stock-analysis-goal template with 1 stock"
+
+id = "orchestrator-stock-analysis-1-stock-test"
+name = "Test: Stock Analysis Goal (1 Stock)"
+type = "orchestrator"
+description = "Integration test for stock-analysis-goal template with 1 stock"
+tags = ["test", "orchestrator", "stock-analysis"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Test Configuration - Single Stock
+# =========================================================================
+
+[config]
+variables = [
+    { ticker = "ASX:GNP", portfolio = "test" },
+]
+
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+]
+
+# =========================================================================
+# Stock Analysis Step
+# =========================================================================
+
+[step.stock_analysis]
+type = "orchestrator"
+description = "Analyze single stock using stock-analysis-goal template"
+on_error = "fail"
+goal_template = "stock-analysis-goal"
+
+# =========================================================================
+# Email Step
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email stock analysis report"
+depends = "stock_analysis"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Analysis Test - 1 Stock"
+body_from_tag = "stock-analysis"

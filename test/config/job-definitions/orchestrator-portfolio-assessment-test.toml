@@ -1,0 +1,88 @@
+# Orchestrator Test: Portfolio Assessment Goal
+# =========================================================================
+# Tests the portfolio-assessment-goal template.
+# Requires stock-analysis to run first (dependencies).
+#
+# WORKFLOW:
+# 1. Stock Analysis (produces stock-analysis documents)
+# 2. Portfolio Assessment (uses stock-analysis documents)
+#
+# TEMPLATES:
+# - stock-analysis-goal.toml (prerequisite)
+# - portfolio-assessment-goal.toml (main test target)
+#
+# OUTPUT TAG: portfolio-review
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "Integration test for portfolio-assessment-goal template"
+
+id = "orchestrator-portfolio-assessment-test"
+name = "Test: Portfolio Assessment Goal"
+type = "orchestrator"
+description = "Integration test for portfolio-assessment-goal template"
+tags = ["test", "orchestrator", "portfolio-assessment"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Test Configuration - Multi-Portfolio
+# =========================================================================
+
+[config]
+variables = [
+    # Trading Portfolio
+    { ticker = "ASX:GNP", portfolio = "trading" },
+    { ticker = "ASX:SKS", portfolio = "trading" },
+    # SMSF Portfolio
+    { ticker = "ASX:WEB", portfolio = "smsf" },
+    { ticker = "ASX:BCN", portfolio = "smsf" },
+]
+
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+]
+
+# =========================================================================
+# Step 1: Stock Analysis (prerequisite)
+# =========================================================================
+
+[step.stock_analysis]
+type = "orchestrator"
+description = "Analyze individual stocks (prerequisite for portfolio assessment)"
+on_error = "fail"
+goal_template = "stock-analysis-goal"
+
+# =========================================================================
+# Step 2: Portfolio Assessment (main test target)
+# =========================================================================
+
+[step.portfolio_assessment]
+type = "orchestrator"
+description = "Portfolio-level analysis using portfolio-assessment-goal template"
+depends = "stock_analysis"
+on_error = "fail"
+goal_template = "portfolio-assessment-goal"
+
+# =========================================================================
+# Email Step
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email portfolio assessment report"
+depends = "portfolio_assessment"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Portfolio Assessment Test"
+body_from_tag = "portfolio-review"

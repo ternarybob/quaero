@@ -13,16 +13,6 @@
 # Expected variable keys: ticker, name, industry
 # =========================================================================
 
-# =========================================================================
-# META
-# =========================================================================
-[meta]
-author = "Claude Code"
-version = "1.0"
-created = "2026-01-02"
-updated = "2026-01-02"
-purpose = "High-conviction purchase analysis with adversarial review and ranking"
-
 id = "asx-purchase-conviction-goal"
 name = "ASX Purchase Conviction Goal Template"
 type = "orchestrator_template"

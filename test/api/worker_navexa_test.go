@@ -200,6 +200,9 @@ func saveNavexaWorkerOutput(t *testing.T, helper *common.HTTPTestHelper, results
 
 // TestWorkerNavexaPortfolios tests the navexa_portfolios worker
 func TestWorkerNavexaPortfolios(t *testing.T) {
+	// Initialize timing data
+	timingData := common.NewTestTimingData(t.Name())
+
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -207,7 +210,8 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	defer env.Cleanup()
 
 	helper := env.NewHTTPTestHelper(t)
-	resultsDir := env.GetResultsDir()
+	resultsDir := common.GetTestResultsDir("worker", t.Name())
+	common.EnsureResultsDir(t, resultsDir)
 
 	var testLog []string
 	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestWorkerNavexaPortfolios", time.Now().Format(time.RFC3339)))
@@ -226,11 +230,13 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	testLog = append(testLog, fmt.Sprintf("[%s] Using base URL: %s", time.Now().Format(time.RFC3339), baseURL))
 
 	// Step 1: Validate direct API call works
+	stepStart := time.Now()
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Validating direct Navexa API call", time.Now().Format(time.RFC3339)))
 	portfolios, err := fetchAndValidateNavexaAPI(t, resultsDir, baseURL, apiKey)
 	require.NoError(t, err, "Direct Navexa API call must succeed")
 	require.NotNil(t, portfolios, "Navexa API must return valid JSON array")
 	testLog = append(testLog, fmt.Sprintf("[%s] Direct API call succeeded: %d portfolios", time.Now().Format(time.RFC3339), len(portfolios)))
+	timingData.AddStepTiming("navexa_api_call", time.Since(stepStart).Seconds())
 
 	// Step 2: Run worker job
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Creating job definition", time.Now().Format(time.RFC3339)))
@@ -273,6 +279,7 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	}()
 
 	// Execute job
+	stepStart = time.Now()
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 3: Executing job", time.Now().Format(time.RFC3339)))
 	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
 	require.NoError(t, err, "Failed to execute job")
@@ -285,10 +292,13 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
 	t.Logf("Executed navexa_portfolios job: %s", jobID)
+	timingData.AddStepTiming("job_trigger", time.Since(stepStart).Seconds())
 
 	// Wait for completion
+	stepStart = time.Now()
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 4: Waiting for job completion", time.Now().Format(time.RFC3339)))
 	finalStatus := waitForJobCompletion(t, helper, jobID, 3*time.Minute)
+	timingData.AddStepTiming("job_execution", time.Since(stepStart).Seconds())
 
 	// CRITICAL: Job MUST complete successfully
 	testLog = append(testLog, fmt.Sprintf("[%s] Job final status: %s", time.Now().Format(time.RFC3339), finalStatus))
@@ -312,12 +322,23 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaPortfolios completed successfully", time.Now().Format(time.RFC3339)))
 
 	writeTestLog(t, resultsDir, testLog)
+
+	// Complete timing and save
+	timingData.Complete()
+	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Copy TDD summary if running from /3agents-tdd
+	common.CopyTDDSummary(t, resultsDir)
+
 	t.Log("PASS: TestWorkerNavexaPortfolios completed successfully")
 }
 
 // TestWorkerNavexaHoldings tests the navexa_holdings worker
 // This test fetches portfolios first to get a valid portfolio ID
 func TestWorkerNavexaHoldings(t *testing.T) {
+	// Initialize timing data
+	timingData := common.NewTestTimingData(t.Name())
+
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -325,7 +346,8 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	defer env.Cleanup()
 
 	helper := env.NewHTTPTestHelper(t)
-	resultsDir := env.GetResultsDir()
+	resultsDir := common.GetTestResultsDir("worker", t.Name())
+	common.EnsureResultsDir(t, resultsDir)
 
 	var testLog []string
 	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestWorkerNavexaHoldings", time.Now().Format(time.RFC3339)))
@@ -342,10 +364,12 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	baseURL := getNavexaBaseURL(t, helper)
 
 	// First, get portfolios directly from API to get a valid portfolio ID
+	stepStart := time.Now()
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Fetching portfolios from Navexa API", time.Now().Format(time.RFC3339)))
 	portfolios, err := fetchAndValidateNavexaAPI(t, resultsDir, baseURL, apiKey)
 	require.NoError(t, err, "Failed to fetch portfolios from Navexa API")
 	require.NotEmpty(t, portfolios, "Must have at least one portfolio to test holdings")
+	timingData.AddStepTiming("fetch_portfolios", time.Since(stepStart).Seconds())
 
 	firstPortfolio := portfolios[0]
 	portfolioID := int(firstPortfolio["id"].(float64))
@@ -394,6 +418,7 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 		}
 	}()
 
+	stepStart = time.Now()
 	execResp, err := helper.POST("/api/job-definitions/"+holdingsDefID+"/execute", nil)
 	require.NoError(t, err)
 	defer execResp.Body.Close()
@@ -406,6 +431,7 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	t.Logf("Executed navexa_holdings job: %s", jobID)
 
 	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+	timingData.AddStepTiming("job_execution", time.Since(stepStart).Seconds())
 	testLog = append(testLog, fmt.Sprintf("[%s] Job final status: %s", time.Now().Format(time.RFC3339), finalStatus))
 	require.Equal(t, "completed", finalStatus, "Holdings job must complete successfully - got status: %s", finalStatus)
 
@@ -426,12 +452,23 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaHoldings completed successfully", time.Now().Format(time.RFC3339)))
 
 	writeTestLog(t, resultsDir, testLog)
+
+	// Complete timing and save
+	timingData.Complete()
+	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Copy TDD summary if running from /3agents-tdd
+	common.CopyTDDSummary(t, resultsDir)
+
 	t.Log("PASS: TestWorkerNavexaHoldings completed successfully")
 }
 
 // TestWorkerNavexaPerformance tests the navexa_performance worker
 // This test fetches portfolios first to get a valid portfolio ID
 func TestWorkerNavexaPerformance(t *testing.T) {
+	// Initialize timing data
+	timingData := common.NewTestTimingData(t.Name())
+
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -439,7 +476,8 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	defer env.Cleanup()
 
 	helper := env.NewHTTPTestHelper(t)
-	resultsDir := env.GetResultsDir()
+	resultsDir := common.GetTestResultsDir("worker", t.Name())
+	common.EnsureResultsDir(t, resultsDir)
 
 	var testLog []string
 	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestWorkerNavexaPerformance", time.Now().Format(time.RFC3339)))
@@ -456,10 +494,12 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	baseURL := getNavexaBaseURL(t, helper)
 
 	// First, get portfolios directly from API
+	stepStart := time.Now()
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Fetching portfolios from Navexa API", time.Now().Format(time.RFC3339)))
 	portfolios, err := fetchAndValidateNavexaAPI(t, resultsDir, baseURL, apiKey)
 	require.NoError(t, err, "Failed to fetch portfolios from Navexa API")
 	require.NotEmpty(t, portfolios, "Must have at least one portfolio to test performance")
+	timingData.AddStepTiming("fetch_portfolios", time.Since(stepStart).Seconds())
 
 	firstPortfolio := portfolios[0]
 	portfolioID := int(firstPortfolio["id"].(float64))
@@ -508,6 +548,7 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 		}
 	}()
 
+	stepStart = time.Now()
 	execResp, err := helper.POST("/api/job-definitions/"+perfDefID+"/execute", nil)
 	require.NoError(t, err)
 	defer execResp.Body.Close()
@@ -520,6 +561,7 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	t.Logf("Executed navexa_performance job: %s", jobID)
 
 	finalStatus := waitForJobCompletion(t, helper, jobID, 2*time.Minute)
+	timingData.AddStepTiming("job_execution", time.Since(stepStart).Seconds())
 	testLog = append(testLog, fmt.Sprintf("[%s] Job final status: %s", time.Now().Format(time.RFC3339), finalStatus))
 	require.Equal(t, "completed", finalStatus, "Performance job must complete successfully - got status: %s", finalStatus)
 
@@ -536,9 +578,36 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	require.NoError(t, helper.ParseJSONResponse(perfDocResp, &perfDocResult))
 	require.NotEmpty(t, perfDocResult.Documents, "Worker must create document with navexa-performance tag")
 
+	// Validate markdown content has real data (not formatting bugs or all zeros)
+	perfDoc := perfDocResult.Documents[0]
+	markdown, ok := perfDoc["content_markdown"].(string)
+	require.True(t, ok, "Document must have content_markdown field")
+	require.NotEmpty(t, markdown, "content_markdown must not be empty")
+
+	// Assert no formatting bugs like "$%!,(float64=0).2f"
+	require.NotContains(t, markdown, "%!", "Markdown must not contain Go format errors")
+	require.NotContains(t, markdown, "float64", "Markdown must not contain raw type names")
+
+	// Assert portfolio summary contains real non-zero values
+	require.Contains(t, markdown, "Total Value", "Markdown must have Total Value row")
+	require.Regexp(t, `Total Value \| \$[1-9][0-9,]*`, markdown, "Total Value must be a non-zero dollar amount")
+	require.Regexp(t, `Cost Basis \| \$[1-9][0-9,]*`, markdown, "Cost Basis must be a non-zero dollar amount")
+
+	// Assert holdings have real values (at least one holding with value > $0)
+	require.Regexp(t, `\| [A-Z]+ \| .+ \| \$[1-9][0-9,]* \|`, markdown, "At least one holding must have non-zero value")
+
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with navexa-performance tag", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Markdown contains real non-zero values (no formatting bugs)", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaPerformance completed successfully", time.Now().Format(time.RFC3339)))
 
 	writeTestLog(t, resultsDir, testLog)
+
+	// Complete timing and save
+	timingData.Complete()
+	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Copy TDD summary if running from /3agents-tdd
+	common.CopyTDDSummary(t, resultsDir)
+
 	t.Log("PASS: TestWorkerNavexaPerformance completed successfully")
 }

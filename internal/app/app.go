@@ -808,6 +808,7 @@ func (a *App) initServices() error {
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(asxAnnouncementsWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxAnnouncementsWorker.GetType().String()).Msg("ASX Announcements worker registered")
@@ -836,6 +837,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(asxStockCollectorWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", asxStockCollectorWorker.GetType().String()).Msg("ASX Stock Collector worker registered")
@@ -859,6 +861,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		jobMgr,
 		a.Logger,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(competitorAnalysisWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", competitorAnalysisWorker.GetType().String()).Msg("Competitor Analysis worker registered")
@@ -869,6 +872,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaPortfoliosWorker)
 	a.Logger.Debug().Str("step_type", navexaPortfoliosWorker.GetType().String()).Msg("Navexa Portfolios worker registered")
@@ -879,6 +883,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaHoldingsWorker)
 	a.Logger.Debug().Str("step_type", navexaHoldingsWorker.GetType().String()).Msg("Navexa Holdings worker registered")
@@ -889,6 +894,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaPerformanceWorker)
 	a.Logger.Debug().Str("step_type", navexaPerformanceWorker.GetType().String()).Msg("Navexa Performance worker registered")
@@ -903,6 +909,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		a.ProviderFactory,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")

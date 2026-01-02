@@ -1,0 +1,67 @@
+# Orchestrator Test: Stock Analysis Goal - 3 Stocks
+# =========================================================================
+# Tests the stock-analysis-goal template with multiple tickers.
+# Validates multi-stock handling and parallel data collection.
+#
+# TEMPLATE: job-templates/stock-analysis-goal.toml
+# OUTPUT TAG: stock-analysis
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "Integration test for stock-analysis-goal template with 3 stocks"
+
+id = "orchestrator-stock-analysis-3-stocks-test"
+name = "Test: Stock Analysis Goal (3 Stocks)"
+type = "orchestrator"
+description = "Integration test for stock-analysis-goal template with 3 stocks"
+tags = ["test", "orchestrator", "stock-analysis"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# Test Configuration - Three Stocks
+# =========================================================================
+
+[config]
+variables = [
+    { ticker = "ASX:GNP", portfolio = "trading" },
+    { ticker = "ASX:SKS", portfolio = "trading" },
+    { ticker = "ASX:WEB", portfolio = "smsf" },
+]
+
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+]
+
+# =========================================================================
+# Stock Analysis Step
+# =========================================================================
+
+[step.stock_analysis]
+type = "orchestrator"
+description = "Analyze multiple stocks using stock-analysis-goal template"
+on_error = "fail"
+goal_template = "stock-analysis-goal"
+
+# =========================================================================
+# Email Step
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email stock analysis report"
+depends = "stock_analysis"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Analysis Test - 3 Stocks"
+body_from_tag = "stock-analysis"

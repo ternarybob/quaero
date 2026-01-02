@@ -1,0 +1,149 @@
+# Stock Analysis - Orchestrator Goal Template
+# =========================================================================
+# Modular template for analyzing stocks from ANY source:
+# - User-defined variables (tickers array)
+# - Navexa portfolio holdings (via documents)
+# - Both combined (unique merge)
+#
+# This template focuses ONLY on individual stock analysis.
+# For portfolio-level assessment, use portfolio-assessment-goal.toml
+#
+# INPUT SOURCES:
+# 1. config.variables[] - array of { ticker, portfolio? }
+# 2. Documents tagged with ['navexa-holdings'] - from navexa_holdings worker
+#
+# If both sources exist, they are merged (unique tickers).
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "Modular stock analysis template for individual tickers from any source"
+
+id = "stock-analysis-goal"
+name = "Stock Analysis Goal Template"
+type = "orchestrator_template"
+description = "Modular stock analysis for individual tickers from any source"
+
+[template]
+thinking_level = "HIGH"
+model_preference = "auto"
+output_tags = ["stock-analysis"]
+
+goal = """
+Analyze stocks from all available sources (variables and/or Navexa documents).
+
+=== INPUT PROCESSING ===
+
+GATHER TICKERS FROM ALL SOURCES:
+
+1. VARIABLES (if provided):
+   - Look for config.variables[] array
+   - Each entry has: ticker (required), portfolio (optional, default "default")
+   - Example: { ticker = "ASX:GNP", portfolio = "trading" }
+
+2. NAVEXA HOLDINGS DOCUMENTS (if available):
+   - Look for documents tagged with ['navexa-holdings']
+   - Extract ASX-listed tickers from holdings
+   - Use portfolio_name from document as the portfolio grouping
+
+3. MERGE & DEDUPLICATE:
+   - Combine tickers from both sources
+   - Remove duplicates (same ticker)
+   - Track portfolio grouping for each ticker
+
+=== PHASE 1: DATA COLLECTION (for EACH unique ticker) ===
+
+1. COMPREHENSIVE STOCK DATA:
+   - Use fetch_stock_data with period: Y2 for 2-year historical data
+   - Captures: prices, technicals, analyst coverage, financials
+   - Creates document tagged with ['asx-stock-data', '<ticker>']
+
+2. ANNOUNCEMENTS:
+   - Use fetch_announcements with period: M6 for 6-month announcements
+   - Captures: FY/HY results, trading updates, material contracts
+   - Creates document tagged with ['asx-announcement', '<ticker>']
+
+3. BENCHMARK DATA:
+   - Fetch ASX 200 (XJO) for market comparison using fetch_index_data
+
+4. NEWS (optional): Use search_web sparingly for sentiment
+
+=== PHASE 2: ANALYSIS (for EACH stock) ===
+
+5. COMPANY QUALITY ASSESSMENT:
+   - Revenue trajectory (growing/stable/declining)
+   - Profit trajectory (NPAT/margin trends)
+   - Quality Grade: A (excellent) / B (good) / C (average) / D (weak) / F (speculative)
+   - Reasoning: 2-3 sentences explaining the grade
+
+6. TECHNICAL ANALYSIS:
+   - Current price vs SMA20/50/200
+   - RSI14 position (overbought/neutral/oversold)
+   - Support and resistance levels
+   - Recent price momentum
+
+7. ANALYST CONSENSUS:
+   - Broker ratings distribution (Buy/Hold/Sell)
+   - Price target analysis (current vs targets)
+   - Recent upgrades/downgrades
+
+8. ANNOUNCEMENT SIGNAL:NOISE RATIO:
+   - HIGH: Material financial data, major contracts
+   - MEDIUM: Operational updates, board changes
+   - LOW: Generic PR, routine notices
+
+9. DUAL RECOMMENDATIONS:
+
+   TRADER VIEW (1-12 weeks):
+   - Focus: Technical momentum, short-term catalysts
+   - Action: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
+   - Conviction: 1-10
+
+   SUPER VIEW (6 months - 2 years):
+   - Focus: Company quality, long-term value
+   - Action: ACCUMULATE / HOLD / REDUCE / AVOID
+   - Conviction: 1-10
+   - Quality A/B only for ACCUMULATE recommendation
+
+=== PHASE 3: SYNTHESIS ===
+
+10. GROUP BY PORTFOLIO:
+    - Organize stocks by their portfolio grouping
+    - Default grouping is "default" if not specified
+
+FINAL OUTPUT MUST INCLUDE:
+
+1. STOCK ANALYSIS TABLE (grouped by portfolio):
+   Portfolio | Ticker | Name | Quality | Trader Rec | Conv | Super Rec | Conv
+
+2. INDIVIDUAL STOCK REPORTS:
+   For each stock: Price, technicals, quality reasoning, recommendations
+
+3. TOP PICKS:
+   - TRADER WATCHLIST: Best short-term opportunities
+   - SUPER ACCUMULATE: Quality A/B long-term holds
+
+4. RISK ALERTS:
+   - Quality D/F warnings
+   - Stocks at technical extremes
+   - High concentration in one sector
+
+If data is missing for any stock:
+- Note explicitly and continue with available data
+"""
+
+available_tools = [
+    { name = "fetch_stock_data", description = "Fetch comprehensive ASX stock data including prices, technicals, analyst coverage, and historical financials. Creates document tagged with ['asx-stock-data', '<ticker>']. REQUIRED: asx_code (string). OPTIONAL: period (M1/M3/M6/Y1/Y2/Y5, default Y2).", worker = "asx_stock_collector" },
+    { name = "fetch_announcements", description = "Fetch official ASX company announcements. Creates document tagged with ['asx-announcement', '<ticker>']. REQUIRED: asx_code (string). OPTIONAL: period (D1/W1/M1/M3/M6/Y1, default M6).", worker = "asx_announcements" },
+    { name = "fetch_index_data", description = "Fetch ASX index data for benchmarks. Creates document tagged with ['asx-index', '<code>']. REQUIRED: asx_code (string) - e.g. 'XJO'.", worker = "asx_index_data" },
+    { name = "search_web", description = "Search web for financial news. Creates document tagged with ['web-search']. REQUIRED: query (string).", worker = "web_search" },
+    { name = "analyze_summary", description = "Generate LLM-based analysis from documents. REQUIRED: prompt (string), filter_tags (array). OPTIONAL: thinking_level (LOW/HIGH).", worker = "summary" },
+]
+
+output_schema_ref = "stock-report.schema.json"

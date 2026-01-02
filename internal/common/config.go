@@ -36,6 +36,7 @@ type Config struct {
 	Gemini          GeminiConfig       `toml:"gemini"`
 	Claude          ClaudeConfig       `toml:"claude"`
 	LLM             LLMConfig          `toml:"llm"`
+	Workers         WorkersConfig      `toml:"workers"`
 }
 
 type ServerConfig struct {
@@ -201,6 +202,11 @@ type LLMConfig struct {
 	DefaultProvider LLMProvider `toml:"default_provider"` // Default provider: "gemini" or "claude" (default: "gemini")
 }
 
+// WorkersConfig contains configuration for worker behavior
+type WorkersConfig struct {
+	Debug bool `toml:"debug"` // Enable worker debug metadata (timing, API calls, AI sources)
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -329,6 +335,9 @@ func NewDefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			DefaultProvider: LLMProviderGemini, // Default to Gemini for backward compatibility
+		},
+		Workers: WorkersConfig{
+			Debug: false, // Disabled by default - zero overhead in production
 		},
 	}
 }
@@ -685,6 +694,13 @@ func applyEnvOverrides(config *Config) {
 	// LLM provider configuration
 	if provider := os.Getenv("QUAERO_LLM_DEFAULT_PROVIDER"); provider != "" {
 		config.LLM.DefaultProvider = LLMProvider(provider)
+	}
+
+	// Workers configuration
+	if debug := os.Getenv("QUAERO_WORKERS_DEBUG"); debug != "" {
+		if d, err := strconv.ParseBool(debug); err == nil {
+			config.Workers.Debug = d
+		}
 	}
 
 	// Auth configuration

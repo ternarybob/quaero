@@ -92,6 +92,7 @@ type ASXStockCollectorWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	debugEnabled    bool
 }
 
 // Compile-time assertion
@@ -480,6 +481,7 @@ func NewASXStockCollectorWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *ASXStockCollectorWorker {
 	return &ASXStockCollectorWorker{
 		documentStorage: documentStorage,
@@ -489,6 +491,7 @@ func NewASXStockCollectorWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		debugEnabled: debugEnabled,
 	}
 }
 
@@ -678,6 +681,10 @@ type docInfo struct {
 
 // processTicker processes a single ticker and returns document info
 func (w *ASXStockCollectorWorker) processTicker(ctx context.Context, ticker common.Ticker, period string, cacheHours int, forceRefresh bool, jobDef *models.JobDefinition, stepID string, outputTags []string) (*docInfo, error) {
+	// Initialize debug tracking
+	debug := NewWorkerDebug("asx_stock_collector", w.debugEnabled)
+	debug.SetTicker(ticker.String())
+
 	sourceType := "asx_stock_collector"
 	sourceID := ticker.SourceID("stock_collector")
 
@@ -717,13 +724,18 @@ func (w *ASXStockCollectorWorker) processTicker(ctx context.Context, ticker comm
 	}
 
 	// Fetch all data using EODHD symbol format
+	debug.StartPhase("api_fetch")
 	stockData, err := w.fetchComprehensiveData(ctx, ticker, period)
+	debug.EndPhase("api_fetch")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stock data: %w", err)
 	}
 
 	// Create and save document
-	doc := w.createDocument(ctx, stockData, ticker, jobDef, stepID, outputTags)
+	debug.StartPhase("json_generation")
+	doc := w.createDocument(ctx, stockData, ticker, jobDef, stepID, outputTags, debug)
+	debug.EndPhase("json_generation")
+
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
 		return nil, fmt.Errorf("failed to save stock data: %w", err)
 	}
@@ -1452,7 +1464,7 @@ func (w *ASXStockCollectorWorker) calculatePeriodPerformance(data *StockCollecto
 }
 
 // createDocument creates a document from stock collector data
-func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *StockCollectorData, ticker common.Ticker, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *StockCollectorData, ticker common.Ticker, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
 	var content strings.Builder
 
 	content.WriteString(fmt.Sprintf("# %s Comprehensive Stock Data - %s\n\n", ticker.String(), data.CompanyName))
@@ -1702,6 +1714,18 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 	}
 	if len(data.PeriodPerformance) > 0 {
 		metadata["period_performance"] = data.PeriodPerformance
+	}
+
+	// Add worker debug metadata if enabled
+	if debug != nil {
+		debug.Complete()
+		if debugMeta := debug.ToMetadata(); debugMeta != nil {
+			metadata["worker_debug"] = debugMeta
+		}
+		// Append debug markdown to output
+		if debugMd := debug.ToMarkdown(); debugMd != "" {
+			content.WriteString(debugMd)
+		}
 	}
 
 	now := time.Now()

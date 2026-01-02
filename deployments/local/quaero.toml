@@ -286,3 +286,25 @@ extensions = [".md"]      # File extensions to scan (markdown by default)
 # [websocket.throttle_intervals]
 # crawl_progress = "1s"   # Uncomment to override default
 # job_spawn = "500ms"     # Uncomment to override default
+
+# =============================================================================
+# Workers Configuration
+# =============================================================================
+# Configure worker behavior for debugging and performance analysis.
+#
+# Debug Mode:
+# When enabled, workers collect timing metadata for each execution:
+# - API call timing (external service calls)
+# - JSON generation timing (data transformation)
+# - Markdown conversion timing (output formatting)
+# - AI source info (model used, token counts)
+# - Total worker execution time
+#
+# This metadata is added to document metadata as "worker_debug" and
+# aggregated in summary documents as "worker_debug_aggregate".
+#
+# Defaults: debug=false (no overhead in production)
+# Env var: QUAERO_WORKERS_DEBUG
+
+# [workers]
+# debug = false  # Enable worker debug metadata (timing, API calls, AI sources)

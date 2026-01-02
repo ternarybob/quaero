@@ -23,7 +23,7 @@ import (
 // Navexa Orchestrator Integration Test
 // =============================================================================
 // Tests the complete Navexa portfolio analysis workflow:
-// 1. Load navexa-portfolio-daily-orchestrated.toml
+// 1. Load stock-analysis-navexa.toml
 // 2. Execute orchestrator with goal template
 // 3. Verify email content is actual analysis (not placeholder)
 //
@@ -50,14 +50,14 @@ func TestNavexaOrchestratorIntegration(t *testing.T) {
 	}
 
 	// Step 1: Load the orchestrated job definition
-	t.Log("Step 1: Loading job definition navexa-portfolio-daily-orchestrated.toml")
-	err = env.LoadTestJobDefinitions("../config/job-definitions/navexa-portfolio-daily-orchestrated.toml")
+	t.Log("Step 1: Loading job definition stock-analysis-navexa.toml")
+	err = env.LoadTestJobDefinitions("../config/job-definitions/stock-analysis-navexa.toml")
 	if err != nil {
 		t.Skipf("Failed to load Navexa job definition: %v", err)
 	}
 
 	// Verify the definition was loaded
-	defResp, err := helper.GET("/api/job-definitions/navexa-portfolio-daily-orchestrated")
+	defResp, err := helper.GET("/api/job-definitions/stock-analysis-navexa")
 	if err != nil || defResp.StatusCode != http.StatusOK {
 		t.Skip("Navexa job definition not loaded - skipping test")
 	}
@@ -65,7 +65,7 @@ func TestNavexaOrchestratorIntegration(t *testing.T) {
 
 	// Step 2: Trigger the job
 	t.Log("Step 2: Triggering orchestrated job")
-	execResp, err := helper.POST("/api/job-definitions/navexa-portfolio-daily-orchestrated/execute", nil)
+	execResp, err := helper.POST("/api/job-definitions/stock-analysis-navexa/execute", nil)
 	require.NoError(t, err)
 	defer execResp.Body.Close()
 
@@ -105,8 +105,8 @@ func TestNavexaOrchestratorIntegration(t *testing.T) {
 
 // validateNavexaOutput validates the Navexa orchestrator output document
 func validateNavexaOutput(t *testing.T, helper *common.HTTPTestHelper) {
-	// Find document by tag
-	searchResp, err := helper.GET("/api/documents?tags=navexa-portfolio-review&limit=1")
+	// Find document by tag (new modular template uses portfolio-review tag)
+	searchResp, err := helper.GET("/api/documents?tags=portfolio-review&limit=1")
 	require.NoError(t, err)
 	defer searchResp.Body.Close()
 
@@ -118,7 +118,7 @@ func validateNavexaOutput(t *testing.T, helper *common.HTTPTestHelper) {
 	require.NoError(t, helper.ParseJSONResponse(searchResp, &searchResult))
 
 	if len(searchResult.Documents) == 0 {
-		t.Log("INFO: No navexa-portfolio-review document found (may be expected if job had errors)")
+		t.Log("INFO: No portfolio-review document found (may be expected if job had errors)")
 		return
 	}
 

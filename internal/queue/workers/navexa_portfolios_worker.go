@@ -33,6 +33,7 @@ type NavexaPortfoliosWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	debugEnabled    bool
 }
 
 // Compile-time assertion
@@ -52,6 +53,7 @@ func NewNavexaPortfoliosWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *NavexaPortfoliosWorker {
 	return &NavexaPortfoliosWorker{
 		documentStorage: documentStorage,
@@ -61,6 +63,7 @@ func NewNavexaPortfoliosWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		debugEnabled: debugEnabled,
 	}
 }
 

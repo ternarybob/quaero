@@ -1,0 +1,131 @@
+# Stock Analysis - Navexa Portfolio Source
+# =========================================================================
+# Uses stock-analysis-goal template with tickers from Navexa portfolios.
+# Includes portfolio-assessment for portfolio-level P/L and mix review.
+#
+# WORKFLOW:
+# 1. Fetch portfolios from Navexa API
+# 2. Fetch holdings for selected portfolios
+# 3. Fetch performance (P/L) for selected portfolios
+# 4. Run stock-analysis-goal (uses holdings documents)
+# 5. Run portfolio-assessment-goal (uses stock analysis + performance)
+#
+# VARIABLE: portfolio_names - list of portfolio names to analyze
+# =========================================================================
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-02"
+updated = "2026-01-02"
+purpose = "AI-powered stock analysis using Navexa portfolio holdings"
+
+id = "stock-analysis-navexa"
+name = "Stock Analysis (Navexa Portfolios)"
+type = "orchestrator"
+description = "AI-powered stock analysis using Navexa portfolio holdings"
+tags = ["stocks", "analysis", "navexa", "portfolio", "orchestrator"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# User Configuration
+# =========================================================================
+
+[config]
+# Portfolio names to analyze (from Navexa)
+# Leave empty [] to analyze ALL portfolios
+portfolio_names = ["SMSF"]
+
+# Benchmark for comparison
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+]
+
+# =========================================================================
+# Step 1: Fetch Navexa Portfolios
+# =========================================================================
+
+[step.fetch_portfolios]
+type = "navexa_portfolios"
+description = "Discover all Navexa portfolios"
+on_error = "fail"
+
+# =========================================================================
+# Step 2: Fetch Holdings for Each Portfolio
+# =========================================================================
+
+[step.fetch_holdings]
+type = "navexa_holdings"
+description = "Fetch holdings from selected portfolios"
+depends = "fetch_portfolios"
+on_error = "continue"
+
+# Filter by portfolio_names from config (or all if empty)
+# Creates documents tagged with ['navexa-holdings', '<portfolio_name>']
+
+# =========================================================================
+# Step 3: Fetch Performance for Each Portfolio
+# =========================================================================
+
+[step.fetch_performance]
+type = "navexa_performance"
+description = "Fetch P/L performance from selected portfolios"
+depends = "fetch_portfolios"
+on_error = "continue"
+
+# Creates documents tagged with ['navexa-performance', '<portfolio_name>']
+# Includes: total value, cost basis, P/L, capital gains, dividends
+
+# =========================================================================
+# Step 4: Stock Analysis
+# =========================================================================
+
+[step.stock_analysis]
+type = "orchestrator"
+description = "Analyze individual stocks from Navexa holdings"
+depends = "fetch_holdings"
+on_error = "continue"
+goal_template = "stock-analysis-goal"
+
+# This template will:
+# - Read documents tagged ['navexa-holdings']
+# - Extract ASX tickers from holdings
+# - Use portfolio_name as the portfolio grouping
+# - Analyze each unique ticker
+
+# =========================================================================
+# Step 5: Portfolio Assessment
+# =========================================================================
+
+[step.portfolio_assessment]
+type = "orchestrator"
+description = "Portfolio-level analysis with P/L"
+depends = ["stock_analysis", "fetch_performance"]
+on_error = "continue"
+goal_template = "portfolio-assessment-goal"
+
+# This template will:
+# - Use stock analysis results
+# - Use Navexa performance for accurate P/L
+# - Provide concentration and diversification analysis
+# - Give dual-horizon recommendations (Trader vs Super)
+
+# =========================================================================
+# Step 6: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email portfolio analysis report"
+depends = "portfolio_assessment"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Navexa Portfolio Analysis - AI-Powered Report"
+body_from_tag = "portfolio-review"

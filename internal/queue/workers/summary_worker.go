@@ -34,6 +34,7 @@ type SummaryWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	providerFactory *llm.ProviderFactory
+	debugEnabled    bool
 }
 
 // Compile-time assertion: SummaryWorker implements DefinitionWorker interface
@@ -48,6 +49,7 @@ func NewSummaryWorker(
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	providerFactory *llm.ProviderFactory,
+	debugEnabled bool,
 ) *SummaryWorker {
 	return &SummaryWorker{
 		searchService:   searchService,
@@ -57,6 +59,7 @@ func NewSummaryWorker(
 		logger:          logger,
 		jobMgr:          jobMgr,
 		providerFactory: providerFactory,
+		debugEnabled:    debugEnabled,
 	}
 }
 
@@ -1284,6 +1287,23 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 		metadata["output_validation"] = validationMeta
 	}
 
+	// Aggregate worker debug metadata from source documents (if debug enabled)
+	var debugAggregate map[string]interface{}
+	if w.debugEnabled {
+		debugAggregate = w.aggregateWorkerDebug(documents)
+		if debugAggregate != nil {
+			metadata["worker_debug_aggregate"] = debugAggregate
+		}
+	}
+
+	// Append debug aggregate markdown to content
+	finalContent := summaryContent
+	if w.debugEnabled && debugAggregate != nil {
+		if debugMd := w.workerDebugAggregateToMarkdown(debugAggregate); debugMd != "" {
+			finalContent = summaryContent + debugMd
+		}
+	}
+
 	now := time.Now()
 	title := "Summary"
 	if jobDef != nil && jobDef.Name != "" {
@@ -1295,7 +1315,7 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 		SourceType:      "summary",
 		SourceID:        parentJobID,
 		Title:           title,
-		ContentMarkdown: summaryContent,
+		ContentMarkdown: finalContent,
 		DetailLevel:     models.DetailLevelFull,
 		Metadata:        metadata,
 		Tags:            tags,
@@ -1305,6 +1325,199 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 	}
 
 	return doc, nil
+}
+
+// aggregateWorkerDebug collects and aggregates worker debug metadata from source documents
+func (w *SummaryWorker) aggregateWorkerDebug(documents []*models.Document) map[string]interface{} {
+	if !w.debugEnabled || len(documents) == 0 {
+		return nil
+	}
+
+	var workerInstances []map[string]interface{}
+	var totalDurationMs int64
+	apiEndpointsCount := 0
+	aiSources := make(map[string]map[string]interface{}) // key: provider:model
+
+	for _, doc := range documents {
+		if doc.Metadata == nil {
+			continue
+		}
+
+		// Extract worker_debug from each document
+		debugRaw, ok := doc.Metadata["worker_debug"]
+		if !ok {
+			continue
+		}
+
+		debugMeta, ok := debugRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Build worker instance entry
+		instance := map[string]interface{}{
+			"worker_type": debugMeta["worker_type"],
+		}
+
+		if ticker, ok := debugMeta["ticker"].(string); ok && ticker != "" {
+			instance["ticker"] = ticker
+		}
+
+		if timing, ok := debugMeta["timing"].(map[string]interface{}); ok {
+			instance["timing"] = timing
+			if totalMs, ok := timing["total_ms"].(int64); ok {
+				totalDurationMs += totalMs
+			} else if totalMsFloat, ok := timing["total_ms"].(float64); ok {
+				totalDurationMs += int64(totalMsFloat)
+			}
+		}
+
+		workerInstances = append(workerInstances, instance)
+
+		// Count API endpoints
+		if endpoints, ok := debugMeta["api_endpoints"].([]map[string]interface{}); ok {
+			apiEndpointsCount += len(endpoints)
+		} else if endpointsRaw, ok := debugMeta["api_endpoints"].([]interface{}); ok {
+			apiEndpointsCount += len(endpointsRaw)
+		}
+
+		// Aggregate AI sources
+		if aiSource, ok := debugMeta["ai_source"].(map[string]interface{}); ok {
+			provider, _ := aiSource["provider"].(string)
+			model, _ := aiSource["model"].(string)
+			key := provider + ":" + model
+
+			if existing, ok := aiSources[key]; ok {
+				// Add tokens
+				if inputTokens, ok := aiSource["input_tokens"].(int); ok {
+					if existingInput, ok := existing["input_tokens"].(int); ok {
+						existing["input_tokens"] = existingInput + inputTokens
+					}
+				}
+				if outputTokens, ok := aiSource["output_tokens"].(int); ok {
+					if existingOutput, ok := existing["output_tokens"].(int); ok {
+						existing["output_tokens"] = existingOutput + outputTokens
+					}
+				}
+			} else {
+				aiSources[key] = map[string]interface{}{
+					"provider":      provider,
+					"model":         model,
+					"input_tokens":  aiSource["input_tokens"],
+					"output_tokens": aiSource["output_tokens"],
+				}
+			}
+		}
+	}
+
+	if len(workerInstances) == 0 {
+		return nil
+	}
+
+	result := map[string]interface{}{
+		"total_duration_ms":     totalDurationMs,
+		"worker_instances":      workerInstances,
+		"api_endpoints_called":  apiEndpointsCount,
+		"source_document_count": len(documents),
+	}
+
+	// Convert AI sources map to slice
+	if len(aiSources) > 0 {
+		aiSourcesList := make([]map[string]interface{}, 0, len(aiSources))
+		for _, source := range aiSources {
+			aiSourcesList = append(aiSourcesList, source)
+		}
+		result["ai_sources"] = aiSourcesList
+	}
+
+	return result
+}
+
+// workerDebugAggregateToMarkdown converts aggregated debug metadata to a markdown section
+func (w *SummaryWorker) workerDebugAggregateToMarkdown(aggregate map[string]interface{}) string {
+	if aggregate == nil || !w.debugEnabled {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n---\n")
+	sb.WriteString("## Worker Debug Aggregate\n\n")
+
+	// Summary stats
+	if totalMs, ok := aggregate["total_duration_ms"].(int64); ok {
+		sb.WriteString(fmt.Sprintf("**Total Duration**: %dms\n", totalMs))
+	}
+	if sourceCount, ok := aggregate["source_document_count"].(int); ok {
+		sb.WriteString(fmt.Sprintf("**Source Documents**: %d\n", sourceCount))
+	}
+	if apiCount, ok := aggregate["api_endpoints_called"].(int); ok {
+		sb.WriteString(fmt.Sprintf("**API Endpoints Called**: %d\n", apiCount))
+	}
+	sb.WriteString("\n")
+
+	// Worker instances breakdown
+	if instances, ok := aggregate["worker_instances"].([]map[string]interface{}); ok && len(instances) > 0 {
+		sb.WriteString("### Worker Instances\n\n")
+		sb.WriteString("| Worker Type | Ticker | Total (ms) | API Fetch (ms) | JSON Gen (ms) |\n")
+		sb.WriteString("|-------------|--------|------------|----------------|---------------|\n")
+		for _, instance := range instances {
+			workerType, _ := instance["worker_type"].(string)
+			ticker, _ := instance["ticker"].(string)
+			if ticker == "" {
+				ticker = "-"
+			}
+
+			totalMs := int64(0)
+			apiFetchMs := int64(0)
+			jsonGenMs := int64(0)
+
+			if timing, ok := instance["timing"].(map[string]interface{}); ok {
+				if t, ok := timing["total_ms"].(int64); ok {
+					totalMs = t
+				} else if t, ok := timing["total_ms"].(float64); ok {
+					totalMs = int64(t)
+				}
+				if t, ok := timing["api_fetch_ms"].(int64); ok {
+					apiFetchMs = t
+				} else if t, ok := timing["api_fetch_ms"].(float64); ok {
+					apiFetchMs = int64(t)
+				}
+				if t, ok := timing["json_generation_ms"].(int64); ok {
+					jsonGenMs = t
+				} else if t, ok := timing["json_generation_ms"].(float64); ok {
+					jsonGenMs = int64(t)
+				}
+			}
+
+			sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d |\n",
+				workerType, ticker, totalMs, apiFetchMs, jsonGenMs))
+		}
+		sb.WriteString("\n")
+	}
+
+	// AI sources
+	if aiSources, ok := aggregate["ai_sources"].([]map[string]interface{}); ok && len(aiSources) > 0 {
+		sb.WriteString("### AI Sources\n\n")
+		sb.WriteString("| Provider | Model | Input Tokens | Output Tokens |\n")
+		sb.WriteString("|----------|-------|--------------|---------------|\n")
+		for _, source := range aiSources {
+			provider, _ := source["provider"].(string)
+			model, _ := source["model"].(string)
+			inputTokens := 0
+			outputTokens := 0
+			if it, ok := source["input_tokens"].(int); ok {
+				inputTokens = it
+			}
+			if ot, ok := source["output_tokens"].(int); ok {
+				outputTokens = ot
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d |\n",
+				provider, model, inputTokens, outputTokens))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }
 
 // logJobEvent logs a job event for real-time UI display using the unified logging system

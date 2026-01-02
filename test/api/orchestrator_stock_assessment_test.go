@@ -1,11 +1,14 @@
 // Package api contains API integration tests for the Quaero service.
 //
-// IMPORTANT: Orchestrator tests require extended timeout due to LLM operations:
+// IMPORTANT: Stock analysis orchestrator tests require extended timeout due to LLM operations:
 //
-//	go test -timeout 15m -run TestOrchestratorIntegration ./test/api/...
+//	go test -timeout 15m -run TestOrchestratorStockAnalysisGoal ./test/api/...
 //
 // The default Go test timeout (10 minutes) is insufficient for these tests.
 // Individual tests use 15-minute timeouts for job completion with error monitoring.
+//
+// Template tested: job-templates/stock-analysis-goal.toml
+// Output tag: stock-analysis
 package api
 
 import (
@@ -38,64 +41,38 @@ type orchestratorTestCase struct {
 	expectMacroData        bool     // Whether to validate macro-data documents exist
 }
 
-// TestOrchestratorIntegration_FullWorkflow tests the complete orchestrator workflow
+// TestOrchestratorStockAnalysisGoal tests the stock-analysis-goal template
 // with different stock configurations:
 // 1. SingleStock - Tests with 1 stock to verify basic functionality
-// 2. MultipleStocks - Tests with 2+ stocks to verify multi-stock handling
+// 2. MultipleStocks - Tests with 3 stocks to verify multi-stock handling
+//
+// Template tested: job-templates/stock-analysis-goal.toml
+// Output tag: stock-analysis
 //
 // Each scenario validates:
 // - Job executes without errors
-// - Email content is NOT a placeholder
-// - Email content is NOT the AI prompt
-// - Email content contains actual stock analysis
-func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
+// - Output content is NOT a placeholder
+// - Output content is NOT the AI prompt
+// - Output content contains actual stock analysis
+func TestOrchestratorStockAnalysisGoal(t *testing.T) {
 	testCases := []orchestratorTestCase{
 		{
 			name:            "SingleStock",
-			jobDefFile:      "asx-stocks-1-stock-test.toml",
-			jobDefID:        "asx-stocks-1-stock-test",
+			jobDefFile:      "orchestrator-stock-analysis-1-stock-test.toml",
+			jobDefID:        "orchestrator-stock-analysis-1-stock-test",
 			expectedTickers: []string{"GNP"},
-			outputTag:       "stock-recommendation",
+			outputTag:       "stock-analysis",
 			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
 		},
 		{
-			name:            "TwoStocks",
-			jobDefFile:      "asx-stocks-daily-orchestrated.toml",
-			jobDefID:        "asx-stocks-daily-orchestrated",
-			expectedTickers: []string{"GNP", "SKS"},
-			outputTag:       "stock-recommendation",
-			schemaFile:      "stock-report.schema.json",
-			expectedIndices: []string{"XJO"},
-		},
-		{
-			name:            "ThreeStocks",
-			jobDefFile:      "asx-stocks-3-stocks-test.toml",
-			jobDefID:        "asx-stocks-3-stocks-test",
+			name:            "MultipleStocks",
+			jobDefFile:      "orchestrator-stock-analysis-3-stocks-test.toml",
+			jobDefID:        "orchestrator-stock-analysis-3-stocks-test",
 			expectedTickers: []string{"GNP", "SKS", "WEB"},
-			outputTag:       "stock-recommendation",
+			outputTag:       "stock-analysis",
 			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
-		},
-		{
-			name:            "SMSFPortfolio",
-			jobDefFile:      "smsf-portfolio-daily-orchestrated.toml",
-			jobDefID:        "smsf-portfolio-daily-orchestrated",
-			expectedTickers: []string{"GNP", "SKS"},
-			outputTag:       "smsf-portfolio-review",
-			schemaFile:      "portfolio-review.schema.json",
-			expectedIndices: []string{"XJO", "XSO"},
-		},
-		{
-			name:                   "ConvictionAnalysis",
-			jobDefFile:             "asx-purchase-conviction-test.toml",
-			jobDefID:               "asx-purchase-conviction-test",
-			expectedTickers:        []string{"GNP", "SKS", "WES", "AMS", "AV1", "CSL", "KYP", "PNC", "SDF", "SGI", "VBTC", "VGB", "VNT"},
-			outputTag:              "purchase-recommendation",
-			schemaFile:             "purchase-conviction.schema.json",
-			expectedIndices:        []string{"XJO"},
-			expectDirectorInterest: true,
-			expectMacroData:        true,
 		},
 	}
 
@@ -108,6 +85,9 @@ func TestOrchestratorIntegration_FullWorkflow(t *testing.T) {
 
 // runOrchestratorTest executes a single orchestrator test scenario
 func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
+	// Initialize timing data
+	timingData := common.NewTestTimingData(t.Name())
+
 	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
@@ -115,24 +95,30 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	helper := env.NewHTTPTestHelperWithTimeout(t, 15*time.Minute)
 
 	// Step 1: Load the orchestrated job definition
+	stepStart := time.Now()
 	t.Logf("Step 1: Loading job definition %s", tc.jobDefFile)
 	err = env.LoadTestJobDefinitions("../config/job-definitions/" + tc.jobDefFile)
 	require.NoError(t, err, "Failed to load orchestrated job definition")
+	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
 
 	// Step 2: Trigger the job
+	stepStart = time.Now()
 	t.Log("Step 2: Triggering orchestrated job")
 	jobID := executeJobDefinition(t, helper, tc.jobDefID)
 	require.NotEmpty(t, jobID, "Job execution should return job ID")
 	t.Logf("Triggered job ID: %s", jobID)
+	timingData.AddStepTiming("trigger_job", time.Since(stepStart).Seconds())
 
 	// Cleanup job after test
 	defer deleteJob(t, helper, jobID)
 
 	// Step 3: Wait for job completion with error monitoring (15 minute timeout for LLM operations)
 	// This monitors for ERROR logs during execution and fails fast if errors are detected
+	stepStart = time.Now()
 	t.Log("Step 3: Waiting for job completion with error monitoring (timeout: 15 minutes)")
 	finalStatus, errorLogs := waitForJobCompletionWithMonitoring(t, helper, jobID, 15*time.Minute)
 	t.Logf("Job completed with status: %s", finalStatus)
+	timingData.AddStepTiming("wait_for_completion", time.Since(stepStart).Seconds())
 
 	// Step 4: Handle error logs if any were found
 	if len(errorLogs) > 0 {
@@ -176,12 +162,14 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 	}
 
 	// Step 6: Get the email/output document
+	// Find the actual stock analysis document (filter out orchestrator-execution-log)
 	t.Logf("Step 6: Retrieving output document with tag '%s'", tc.outputTag)
 	docs := getDocumentsByTag(t, helper, tc.outputTag)
 	require.Greater(t, len(docs), 0, "Should have at least one document with '%s' tag", tc.outputTag)
 
-	// Get the most recent document (first in list, sorted by created desc)
-	outputDoc := docs[0]
+	// Filter out orchestrator-execution-log documents to get the actual analysis output
+	outputDoc := findOutputDocument(t, docs)
+	require.NotNil(t, outputDoc, "Should find a valid output document (not orchestrator-execution-log)")
 	docID, _ := outputDoc["id"].(string)
 	t.Logf("Found output document: %s", docID)
 
@@ -192,13 +180,26 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 
 	// Step 7: Save test output and logs to results directory for verification
 	t.Log("Step 7: Saving test output, config, schema, and JSON to results directory")
-	saveTestOutput(t, tc.name, jobID, content, env.GetResultsDir())
-	saveOrchestratorJobConfig(t, env.GetResultsDir(), tc.jobDefFile)
-	saveSchemaFile(t, env.GetResultsDir(), tc.schemaFile)
-	saveDocumentMetadata(t, env.GetResultsDir(), metadata)
+	resultsDir := saveTestOutput(t, tc.name, jobID, content, env.GetResultsDir())
+	saveOrchestratorJobConfig(t, resultsDir, tc.jobDefFile)
+	saveSchemaFile(t, resultsDir, tc.schemaFile)
+	saveDocumentMetadata(t, resultsDir, metadata)
 
 	// Validate email content
 	validateEmailContent(t, content, tc.expectedTickers, tc.schemaFile)
+
+	// Get child job timings and add to timing data
+	childTimings := logChildJobTimings(t, helper, jobID)
+	for _, wt := range childTimings {
+		timingData.WorkerTimings = append(timingData.WorkerTimings, wt)
+	}
+
+	// Complete timing and save
+	timingData.Complete()
+	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Copy TDD summary if running from /3agents-tdd
+	common.CopyTDDSummary(t, resultsDir)
 
 	t.Log("SUCCESS: Orchestrator integration test completed successfully")
 }
@@ -848,8 +849,6 @@ func waitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHel
 		if jobStatus == "completed" || jobStatus == "failed" || jobStatus == "cancelled" {
 			elapsed := time.Since(startTime)
 			t.Logf("Job %s reached terminal state: %s (elapsed: %s)", jobID, jobStatus, formatTestDuration(elapsed))
-			// Log child job timings
-			logChildJobTimings(t, helper, jobID)
 			// Final error check on completion
 			errorLogs = getJobErrorLogs(t, helper, jobID)
 			return jobStatus, errorLogs
@@ -896,12 +895,12 @@ func formatTestDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%ds", minutes, seconds)
 }
 
-// logChildJobTimings logs timing information for all child jobs
-func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID string) {
+// logChildJobTimings logs timing information for all child jobs and returns timing data
+func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID string) []common.WorkerTiming {
 	childJobs := getChildJobs(t, helper, parentJobID)
 	if len(childJobs) == 0 {
 		t.Log("No child jobs found for timing analysis")
-		return
+		return nil
 	}
 
 	t.Log("=== Child Job Timing Summary ===")
@@ -909,6 +908,7 @@ func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID
 	// Group by worker type for summary
 	workerTimings := make(map[string][]time.Duration)
 	var totalDuration time.Duration
+	var timingData []common.WorkerTiming
 
 	for _, job := range childJobs {
 		jobID, _ := job["id"].(string)
@@ -918,8 +918,10 @@ func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID
 
 		// Parse duration from job stats if available
 		var duration time.Duration
+		var durationSeconds float64
 		if stats, ok := job["stats"].(map[string]interface{}); ok {
 			if durationSec, ok := stats["duration_seconds"].(float64); ok {
+				durationSeconds = durationSec
 				duration = time.Duration(durationSec * float64(time.Second))
 			}
 		}
@@ -931,6 +933,7 @@ func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID
 					if completedAtStr, ok := job["completed_at"].(string); ok {
 						if completedAt, err := time.Parse(time.RFC3339, completedAtStr); err == nil {
 							duration = completedAt.Sub(startedAt)
+							durationSeconds = duration.Seconds()
 						}
 					}
 				}
@@ -941,6 +944,16 @@ func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID
 			workerTimings[workerType] = append(workerTimings[workerType], duration)
 			totalDuration += duration
 			t.Logf("  %s (%s): %s [%s] - %s", name, workerType, formatTestDuration(duration), status, jobID[:8])
+
+			// Add to timing data
+			timingData = append(timingData, common.WorkerTiming{
+				Name:              name,
+				WorkerType:        workerType,
+				DurationFormatted: formatTestDuration(duration),
+				DurationSeconds:   durationSeconds,
+				Status:            status,
+				JobID:             jobID,
+			})
 		} else {
 			t.Logf("  %s (%s): duration unknown [%s] - %s", name, workerType, status, jobID[:8])
 		}
@@ -959,6 +972,8 @@ func logChildJobTimings(t *testing.T, helper *common.HTTPTestHelper, parentJobID
 		}
 		t.Logf("--- Total child job time: %s (may overlap if parallel) ---", formatTestDuration(totalDuration))
 	}
+
+	return timingData
 }
 
 // assertChildJobsFailedOrStopped verifies that all child jobs are in failed/stopped state
@@ -1123,54 +1138,114 @@ func validateMacroDataFetched(t *testing.T, helper *common.HTTPTestHelper) {
 }
 
 // saveTestOutput saves the generated output and logs to:
-// test/results/api/orchestrator-YYYYMMDD-HHMMSS/TestName/output.md + service.log + test.log
+// test/results/api/orchestrator-YYYYMMDD-HHMMSS-TestName/output.md + service.log + test.log
 // This allows manual inspection of test outputs and historical tracking of analysis quality.
-func saveTestOutput(t *testing.T, testName string, jobID string, content string, envResultsDir string) {
-	timestamp := time.Now().Format("20060102-150405")
-	fullTestName := t.Name() // Gets full path like "TestOrchestratorIntegration_FullWorkflow/SingleStock"
-
-	// Save to structured directory: test/results/api/orchestrator-TIMESTAMP/TestName/output.md
-	structuredDir := filepath.Join("..", "results", "api", fmt.Sprintf("orchestrator-%s", timestamp), fullTestName)
+// Returns the structured directory path for use by timing and TDD summary functions.
+func saveTestOutput(t *testing.T, testName string, jobID string, content string, envResultsDir string) string {
+	// Use common.GetTestResultsDir for identifiable directory naming
+	structuredDir := common.GetTestResultsDir("orchestrator", t.Name())
 	if err := os.MkdirAll(structuredDir, 0755); err != nil {
 		t.Logf("Warning: Failed to create structured results directory: %v", err)
-	} else {
-		// Save output.md
-		structuredPath := filepath.Join(structuredDir, "output.md")
-		if err := os.WriteFile(structuredPath, []byte(content), 0644); err != nil {
-			t.Logf("Warning: Failed to write structured output file: %v", err)
-		} else {
-			t.Logf("Saved structured output to: %s (%d bytes)", structuredPath, len(content))
-		}
-
-		// Copy service.log from environment results directory
-		serviceLogSrc := filepath.Join(envResultsDir, "service.log")
-		if serviceLogContent, err := os.ReadFile(serviceLogSrc); err == nil {
-			serviceLogDst := filepath.Join(structuredDir, "service.log")
-			if err := os.WriteFile(serviceLogDst, serviceLogContent, 0644); err != nil {
-				t.Logf("Warning: Failed to copy service.log: %v", err)
-			} else {
-				t.Logf("Copied service.log to: %s (%d bytes)", serviceLogDst, len(serviceLogContent))
-			}
-		} else {
-			t.Logf("Warning: Could not read service.log from %s: %v", serviceLogSrc, err)
-		}
-
-		// Copy test.log from environment results directory
-		testLogSrc := filepath.Join(envResultsDir, "test.log")
-		if testLogContent, err := os.ReadFile(testLogSrc); err == nil {
-			testLogDst := filepath.Join(structuredDir, "test.log")
-			if err := os.WriteFile(testLogDst, testLogContent, 0644); err != nil {
-				t.Logf("Warning: Failed to copy test.log: %v", err)
-			} else {
-				t.Logf("Copied test.log to: %s (%d bytes)", testLogDst, len(testLogContent))
-			}
-		} else {
-			t.Logf("Warning: Could not read test.log from %s: %v", testLogSrc, err)
-		}
+		return ""
 	}
+
+	// Save output.md
+	structuredPath := filepath.Join(structuredDir, "output.md")
+	if err := os.WriteFile(structuredPath, []byte(content), 0644); err != nil {
+		t.Logf("Warning: Failed to write structured output file: %v", err)
+	} else {
+		t.Logf("Saved structured output to: %s (%d bytes)", structuredPath, len(content))
+	}
+
+	// Copy service.log from environment results directory
+	serviceLogSrc := filepath.Join(envResultsDir, "service.log")
+	if serviceLogContent, err := os.ReadFile(serviceLogSrc); err == nil {
+		serviceLogDst := filepath.Join(structuredDir, "service.log")
+		if err := os.WriteFile(serviceLogDst, serviceLogContent, 0644); err != nil {
+			t.Logf("Warning: Failed to copy service.log: %v", err)
+		} else {
+			t.Logf("Copied service.log to: %s (%d bytes)", serviceLogDst, len(serviceLogContent))
+		}
+	} else {
+		t.Logf("Warning: Could not read service.log from %s: %v", serviceLogSrc, err)
+	}
+
+	// Copy test.log from environment results directory
+	testLogSrc := filepath.Join(envResultsDir, "test.log")
+	if testLogContent, err := os.ReadFile(testLogSrc); err == nil {
+		testLogDst := filepath.Join(structuredDir, "test.log")
+		if err := os.WriteFile(testLogDst, testLogContent, 0644); err != nil {
+			t.Logf("Warning: Failed to copy test.log: %v", err)
+		} else {
+			t.Logf("Copied test.log to: %s (%d bytes)", testLogDst, len(testLogContent))
+		}
+	} else {
+		t.Logf("Warning: Could not read test.log from %s: %v", testLogSrc, err)
+	}
+
+	return structuredDir
 }
 
-// getDocumentContentAndMetadata retrieves both the content and metadata of a document by ID
+// findOutputDocument finds the actual output document from a list of tagged documents.
+// It filters out orchestrator-execution-log documents which are internal execution summaries.
+// The actual output is typically from a summary worker with the "summary" source type.
+func findOutputDocument(t *testing.T, docs []map[string]interface{}) map[string]interface{} {
+	for _, doc := range docs {
+		// Check if document has "orchestrator-execution-log" tag - skip these
+		tags, ok := doc["tags"].([]interface{})
+		if ok {
+			isExecutionLog := false
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok && tagStr == "orchestrator-execution-log" {
+					isExecutionLog = true
+					break
+				}
+			}
+			if isExecutionLog {
+				docID, _ := doc["id"].(string)
+				t.Logf("Skipping orchestrator-execution-log document: %s", docID)
+				continue
+			}
+		}
+
+		// Check source_type - prefer "summary" type documents
+		sourceType, _ := doc["source_type"].(string)
+		if sourceType == "summary" {
+			docID, _ := doc["id"].(string)
+			t.Logf("Found summary output document: %s (source_type: %s)", docID, sourceType)
+			return doc
+		}
+	}
+
+	// If no summary document found, return first non-execution-log document
+	for _, doc := range docs {
+		tags, ok := doc["tags"].([]interface{})
+		if ok {
+			isExecutionLog := false
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok && tagStr == "orchestrator-execution-log" {
+					isExecutionLog = true
+					break
+				}
+			}
+			if !isExecutionLog {
+				docID, _ := doc["id"].(string)
+				t.Logf("Found output document: %s (fallback - first non-execution-log)", docID)
+				return doc
+			}
+		} else {
+			// No tags at all - return this document
+			docID, _ := doc["id"].(string)
+			t.Logf("Found output document: %s (no tags)", docID)
+			return doc
+		}
+	}
+
+	return nil
+}
+
+// getDocumentContentAndMetadata retrieves both the content and full document data of a document by ID.
+// Returns the content string and the full document response (for saving as output.json).
 func getDocumentContentAndMetadata(t *testing.T, helper *common.HTTPTestHelper, docID string) (string, map[string]interface{}) {
 	resp, err := helper.GET(fmt.Sprintf("/api/documents/%s", docID))
 	if err != nil {
@@ -1206,13 +1281,18 @@ func getDocumentContentAndMetadata(t *testing.T, helper *common.HTTPTestHelper, 
 		}
 	}
 
-	// Extract metadata
-	var metadata map[string]interface{}
-	if m, ok := result["metadata"].(map[string]interface{}); ok {
-		metadata = m
+	// Return the full document (without content to avoid duplication in output.json)
+	// Remove large content fields to keep output.json manageable
+	docCopy := make(map[string]interface{})
+	for k, v := range result {
+		// Skip content fields that are already saved in output.md
+		if k == "content" || k == "content_markdown" || k == "body" || k == "text" {
+			continue
+		}
+		docCopy[k] = v
 	}
 
-	return content, metadata
+	return content, docCopy
 }
 
 // saveOrchestratorJobConfig saves the job definition TOML file to the results directory
@@ -1261,15 +1341,16 @@ func saveSchemaFile(t *testing.T, resultsDir string, schemaFile string) {
 	t.Logf("Saved schema to: %s (%d bytes)", destPath, len(content))
 }
 
-// saveDocumentMetadata saves the document metadata as JSON to the results directory
-func saveDocumentMetadata(t *testing.T, resultsDir string, metadata map[string]interface{}) {
-	if resultsDir == "" || metadata == nil {
+// saveDocumentMetadata saves the document data (excluding content) as JSON to the results directory.
+// This includes document ID, tags, source_type, metadata, timestamps, etc.
+func saveDocumentMetadata(t *testing.T, resultsDir string, docData map[string]interface{}) {
+	if resultsDir == "" || docData == nil {
 		return
 	}
 
-	jsonData, err := json.MarshalIndent(metadata, "", "  ")
+	jsonData, err := json.MarshalIndent(docData, "", "  ")
 	if err != nil {
-		t.Logf("Warning: Failed to marshal metadata: %v", err)
+		t.Logf("Warning: Failed to marshal document data: %v", err)
 		return
 	}
 
@@ -1279,5 +1360,5 @@ func saveDocumentMetadata(t *testing.T, resultsDir string, metadata map[string]i
 		return
 	}
 
-	t.Logf("Saved document metadata to: %s (%d bytes)", destPath, len(jsonData))
+	t.Logf("Saved document data to: %s (%d bytes)", destPath, len(jsonData))
 }

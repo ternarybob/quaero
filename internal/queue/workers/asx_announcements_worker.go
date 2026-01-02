@@ -33,6 +33,7 @@ type ASXAnnouncementsWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	debugEnabled    bool
 }
 
 // Compile-time assertion: ASXAnnouncementsWorker implements DefinitionWorker interface
@@ -123,6 +124,7 @@ func NewASXAnnouncementsWorker(
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *ASXAnnouncementsWorker {
 	return &ASXAnnouncementsWorker{
 		documentStorage: documentStorage,
@@ -131,6 +133,7 @@ func NewASXAnnouncementsWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		debugEnabled: debugEnabled,
 	}
 }
 
@@ -219,6 +222,10 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 	limit, _ := initResult.Metadata["limit"].(int)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
+	// Initialize debug tracking
+	debug := NewWorkerDebug("asx_announcements", w.debugEnabled)
+	debug.SetTicker(fmt.Sprintf("ASX:%s", asxCode))
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("step_name", step.Name).
@@ -233,6 +240,7 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 	}
 
 	// Fetch announcements
+	debug.StartPhase("api_fetch")
 	announcements, err := w.fetchAnnouncements(ctx, asxCode, period, limit)
 	if err != nil {
 		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch ASX announcements")
@@ -241,6 +249,8 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 		}
 		return "", fmt.Errorf("failed to fetch ASX announcements: %w", err)
 	}
+
+	debug.EndPhase("api_fetch")
 
 	if len(announcements) == 0 {
 		w.logger.Warn().Str("asx_code", asxCode).Msg("No announcements found")
@@ -271,15 +281,19 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 	}
 
 	// Fetch historical price data for price impact analysis
+	debug.StartPhase("api_fetch") // Accumulates with earlier API fetch
 	var priceData []OHLCV
 	priceData, err = w.fetchHistoricalPrices(ctx, asxCode, period)
+	debug.EndPhase("api_fetch")
 	if err != nil {
 		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch price data for impact analysis")
 		// Continue without price data - analysis will be incomplete but still useful
 	}
 
 	// Analyze ALL announcements for classification and price impact
+	debug.StartPhase("computation")
 	analyses := w.analyzeAnnouncements(ctx, announcements, asxCode, priceData)
+	debug.EndPhase("computation")
 
 	// Build lookup map for quick relevance checking
 	analysisMap := make(map[string]AnnouncementAnalysis)
@@ -340,7 +354,7 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 		Msg("ASX announcements analyzed and filtered")
 
 	// Create and save summary document (contains ALL announcements)
-	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, &jobDef, stepID, outputTags)
+	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, &jobDef, stepID, outputTags, debug)
 	if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
 		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to save summary document")
 	} else {
@@ -1368,7 +1382,7 @@ func (w *ASXAnnouncementsWorker) calculatePriceImpact(announcementDate time.Time
 }
 
 // createSummaryDocument creates a summary document with all analyzed announcements
-func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
 	var content strings.Builder
 
 	// Header
@@ -1620,6 +1634,18 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 			"low_count":    lowCount,
 			"noise_count":  noiseCount,
 		},
+	}
+
+	// Add worker debug metadata if enabled
+	if debug != nil {
+		debug.Complete()
+		if debugMeta := debug.ToMetadata(); debugMeta != nil {
+			metadata["worker_debug"] = debugMeta
+		}
+		// Append debug markdown to output
+		if debugMd := debug.ToMarkdown(); debugMd != "" {
+			content.WriteString(debugMd)
+		}
 	}
 
 	now := time.Now()

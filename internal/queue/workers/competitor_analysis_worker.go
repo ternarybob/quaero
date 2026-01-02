@@ -41,9 +41,10 @@ func NewCompetitorAnalysisWorker(
 	kvStorage interfaces.KeyValueStorage,
 	jobMgr *queue.Manager,
 	logger arbor.ILogger,
+	debugEnabled bool,
 ) *CompetitorAnalysisWorker {
 	// Create embedded stock collector worker for fetching competitor data
-	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, kvStorage, logger, jobMgr)
+	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
 
 	return &CompetitorAnalysisWorker{
 		documentStorage:      documentStorage,
