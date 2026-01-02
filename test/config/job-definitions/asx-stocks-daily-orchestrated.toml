@@ -25,17 +25,17 @@ auto_start = false
 # =========================================================================
 
 [config]
-# Stocks to analyze - add/remove as needed
-# Available variable keys: ticker, name, industry
+# Stocks to analyze using exchange-qualified tickers (ASX:XXX format)
+# NOTE: name and industry are now automatically fetched from EODHD
 variables = [
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
-    { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure" },
-    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
-    { ticker = "WES", name = "Wesfarmers", industry = "retail" },
-    { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
-    { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
-    { ticker = "CSL", name = "CSL Limited", industry = "healthcare" },
-    { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:SKS" },
+    # { ticker = "ASX:CBA" },
+    { ticker = "ASX:WES" },
+    { ticker = "ASX:EXR" },
+    { ticker = "ASX:SRL" },
+    { ticker = "ASX:CSL" },
+    { ticker = "ASX:ROC" },
 ]
 
 # Benchmark indices for comparison

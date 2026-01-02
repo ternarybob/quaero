@@ -140,6 +140,157 @@ type WorkerInitResult struct {
 	ContentHash string
 }
 
+// WorkerResult contains structured output from worker execution.
+// Workers that create documents should populate this and store it in job metadata
+// under the key "worker_result" for test validation and monitoring.
+//
+// Example usage in worker:
+//
+//	result := &interfaces.WorkerResult{
+//	    DocumentsCreated: 1,
+//	    DocumentIDs:      []string{doc.ID},
+//	    Tags:             doc.Tags,
+//	}
+//	jobMgr.UpdateJobMetadata(ctx, stepID, map[string]interface{}{
+//	    "worker_result": result.ToMap(),
+//	})
+type WorkerResult struct {
+	// DocumentsCreated is the count of documents created by this worker
+	DocumentsCreated int `json:"documents_created"`
+	// DocumentIDs is the list of document IDs created
+	DocumentIDs []string `json:"document_ids"`
+	// Tags is the list of tags applied to created documents
+	Tags []string `json:"tags"`
+	// SourceType is the document source type (e.g., "asx_stock_collector")
+	SourceType string `json:"source_type,omitempty"`
+	// SourceIDs is the list of source IDs for created documents
+	SourceIDs []string `json:"source_ids,omitempty"`
+	// Errors contains any errors encountered during execution
+	Errors []string `json:"errors,omitempty"`
+	// ByTicker contains per-ticker results when processing multiple tickers.
+	// Key is the exchange-qualified ticker (e.g., "ASX:GNP").
+	ByTicker map[string]*TickerResult `json:"by_ticker,omitempty"`
+}
+
+// TickerResult contains results for a single ticker when processing multiple tickers.
+type TickerResult struct {
+	DocumentsCreated int      `json:"documents_created"`
+	DocumentIDs      []string `json:"document_ids"`
+	Tags             []string `json:"tags"`
+}
+
+// ToMap converts WorkerResult to a map for storage in job metadata
+func (r *WorkerResult) ToMap() map[string]interface{} {
+	result := map[string]interface{}{
+		"documents_created": r.DocumentsCreated,
+		"document_ids":      r.DocumentIDs,
+		"tags":              r.Tags,
+		"source_type":       r.SourceType,
+		"source_ids":        r.SourceIDs,
+		"errors":            r.Errors,
+	}
+
+	// Include by_ticker if present
+	if len(r.ByTicker) > 0 {
+		byTickerMap := make(map[string]interface{})
+		for ticker, tickerResult := range r.ByTicker {
+			byTickerMap[ticker] = map[string]interface{}{
+				"documents_created": tickerResult.DocumentsCreated,
+				"document_ids":      tickerResult.DocumentIDs,
+				"tags":              tickerResult.Tags,
+			}
+		}
+		result["by_ticker"] = byTickerMap
+	}
+
+	return result
+}
+
+// WorkerResultFromMap creates a WorkerResult from a map (for reading from job metadata)
+func WorkerResultFromMap(m map[string]interface{}) *WorkerResult {
+	result := &WorkerResult{}
+
+	if v, ok := m["documents_created"].(float64); ok {
+		result.DocumentsCreated = int(v)
+	} else if v, ok := m["documents_created"].(int); ok {
+		result.DocumentsCreated = v
+	}
+
+	if v, ok := m["document_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.DocumentIDs = append(result.DocumentIDs, s)
+			}
+		}
+	} else if v, ok := m["document_ids"].([]string); ok {
+		result.DocumentIDs = v
+	}
+
+	if v, ok := m["tags"].([]interface{}); ok {
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				result.Tags = append(result.Tags, s)
+			}
+		}
+	} else if v, ok := m["tags"].([]string); ok {
+		result.Tags = v
+	}
+
+	if v, ok := m["source_type"].(string); ok {
+		result.SourceType = v
+	}
+
+	if v, ok := m["source_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.SourceIDs = append(result.SourceIDs, s)
+			}
+		}
+	} else if v, ok := m["source_ids"].([]string); ok {
+		result.SourceIDs = v
+	}
+
+	if v, ok := m["errors"].([]interface{}); ok {
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				result.Errors = append(result.Errors, s)
+			}
+		}
+	} else if v, ok := m["errors"].([]string); ok {
+		result.Errors = v
+	}
+
+	// Parse by_ticker if present
+	if byTicker, ok := m["by_ticker"].(map[string]interface{}); ok {
+		result.ByTicker = make(map[string]*TickerResult)
+		for ticker, tickerData := range byTicker {
+			if tickerMap, ok := tickerData.(map[string]interface{}); ok {
+				tr := &TickerResult{}
+				if v, ok := tickerMap["documents_created"].(float64); ok {
+					tr.DocumentsCreated = int(v)
+				}
+				if v, ok := tickerMap["document_ids"].([]interface{}); ok {
+					for _, id := range v {
+						if s, ok := id.(string); ok {
+							tr.DocumentIDs = append(tr.DocumentIDs, s)
+						}
+					}
+				}
+				if v, ok := tickerMap["tags"].([]interface{}); ok {
+					for _, tag := range v {
+						if s, ok := tag.(string); ok {
+							tr.Tags = append(tr.Tags, s)
+						}
+					}
+				}
+				result.ByTicker[ticker] = tr
+			}
+		}
+	}
+
+	return result
+}
+
 // DefinitionWorker is the interface for workers that handle job definition steps.
 // Each DefinitionWorker handles a specific WorkerType and provides type-safe routing.
 // When a job definition is executed, the manager routes each step to its corresponding

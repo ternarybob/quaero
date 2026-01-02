@@ -55,6 +55,9 @@ const (
 	JobDefinitionTypeNavexaPortfolios    JobDefinitionType = "navexa_portfolios"     // Fetch all Navexa portfolios for the user
 	JobDefinitionTypeNavexaHoldings      JobDefinitionType = "navexa_holdings"       // Fetch holdings for a Navexa portfolio
 	JobDefinitionTypeNavexaPerformance   JobDefinitionType = "navexa_performance"    // Fetch P/L performance for a Navexa portfolio
+	JobDefinitionTypeSignalComputer      JobDefinitionType = "signal_computer"       // Computes PBAS, VLI, Regime signals from stock data
+	JobDefinitionTypePortfolioRollup     JobDefinitionType = "portfolio_rollup"      // Aggregates ticker signals into portfolio-level analysis
+	JobDefinitionTypeAIAssessor          JobDefinitionType = "ai_assessor"           // AI-powered assessment of signals and portfolio
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -75,7 +78,8 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXIndexData, JobDefinitionTypeASXAnnouncements,
 		JobDefinitionTypeASXStockCollector, JobDefinitionTypeASXStockData, JobDefinitionTypeASXDirectorInterest,
 		JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis,
-		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance:
+		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
+		JobDefinitionTypeSignalComputer, JobDefinitionTypePortfolioRollup, JobDefinitionTypeAIAssessor:
 		return true
 	default:
 		return false

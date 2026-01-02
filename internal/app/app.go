@@ -997,6 +997,37 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(testJobGeneratorWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", testJobGeneratorWorker.GetType().String()).Str("job_type", testJobGeneratorWorker.GetWorkerType()).Msg("Test Job Generator worker registered")
 
+	// Register Signal Computer worker (computes PBAS, VLI, Regime signals from stock data)
+	signalComputerWorker := workers.NewSignalComputerWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(signalComputerWorker)
+	a.Logger.Debug().Str("step_type", signalComputerWorker.GetType().String()).Msg("Signal Computer worker registered")
+
+	// Register Portfolio Rollup worker (aggregates ticker signals into portfolio-level metrics)
+	portfolioRollupWorker := workers.NewPortfolioRollupWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(portfolioRollupWorker)
+	a.Logger.Debug().Str("step_type", portfolioRollupWorker.GetType().String()).Msg("Portfolio Rollup worker registered")
+
+	// Register AI Assessor worker (AI-powered stock assessment with validation)
+	aiAssessorWorker := workers.NewAIAssessorWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		a.LLMService,
+	)
+	a.StepManager.RegisterWorker(aiAssessorWorker)
+	a.Logger.Debug().Str("step_type", aiAssessorWorker.GetType().String()).Msg("AI Assessor worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize JobDispatcher (mechanical job execution coordinator)

@@ -58,6 +58,11 @@ const (
 
 	// AI-powered cognitive orchestration workers
 	WorkerTypeOrchestrator WorkerType = "orchestrator" // AI agent that dynamically plans and executes steps using LLM reasoning
+
+	// Signal computation workers
+	WorkerTypeSignalComputer  WorkerType = "signal_computer"  // Computes PBAS, VLI, Regime signals from stock data
+	WorkerTypePortfolioRollup WorkerType = "portfolio_rollup" // Aggregates ticker signals into portfolio-level analysis
+	WorkerTypeAIAssessor      WorkerType = "ai_assessor"      // AI-powered assessment of signals and portfolio
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -71,7 +76,8 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeASXIndexData, WorkerTypeASXDirectorInterest, WorkerTypeASXStockCollector,
 		WorkerTypeASXStockData, WorkerTypeMacroData, WorkerTypeCompetitorAnalysis,
 		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
-		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
+		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
+		WorkerTypeSignalComputer, WorkerTypePortfolioRollup, WorkerTypeAIAssessor:
 		return true
 	}
 	return false
@@ -116,5 +122,8 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,
 		WorkerTypeOrchestrator,
+		WorkerTypeSignalComputer,
+		WorkerTypePortfolioRollup,
+		WorkerTypeAIAssessor,
 	}
 }

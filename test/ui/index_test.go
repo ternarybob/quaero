@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -65,7 +64,7 @@ func cleanupAllResources(w io.Writer) {
 
 // verifyServiceConnectivity checks if the service is accessible
 func verifyServiceConnectivity() error {
-	baseURL := test.MustGetTestServerURL()
+	baseURL := common.MustGetTestServerURL()
 
 	// Test 1: HTTP health check
 	client := &http.Client{Timeout: 5 * time.Second}

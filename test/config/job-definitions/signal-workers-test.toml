@@ -1,0 +1,45 @@
+# Signal Workers Integration Test
+# Tests signal computation pipeline: stock collector -> signal computer
+#
+# This job definition uses exchange-qualified tickers (ASX:XXX format)
+# for all ticker data collection and processing.
+
+id = "signal-workers-test"
+name = "Signal Workers Integration Test"
+type = "sequential"
+description = "Tests ASX stock data collection and signal computation pipeline"
+tags = ["test", "signals", "asx"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+[config]
+# Cache disabled for testing
+cache_type = "none"
+
+# Test stocks using exchange-qualified format
+# - ASX:GNP - GenusPlus Group Ltd (infrastructure)
+# - ASX:BCN - Beacon Minerals (mining)
+# - ASX:MYG - Mayfield Childcare (services)
+tickers = ["ASX:GNP", "ASX:BCN", "ASX:MYG"]
+
+# Step 1: Collect stock data for each ticker
+[[steps]]
+name = "collect_stock_data"
+type = "asx_stock_collector"
+description = "Fetch comprehensive stock data from EODHD"
+[steps.config]
+ticker = "{ticker}"
+period = "Y2"
+output_tags = ["test-signals"]
+
+# Step 2: Compute signals from collected data
+[[steps]]
+name = "compute_signals"
+type = "signal_computer"
+depends = "collect_stock_data"
+description = "Compute PBAS, VLI, Regime, and other signals"
+[steps.config]
+tickers = ["ASX:GNP", "ASX:BCN", "ASX:MYG"]
+output_tags = ["test-signals"]

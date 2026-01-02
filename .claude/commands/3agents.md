@@ -38,12 +38,91 @@ mkdir -p "$WORKDIR"
 │ • STEPS ARE MANDATORY - no implementation without step docs     │
 │ • SUMMARY IS MANDATORY - task incomplete without $WORKDIR/summary.md │
 │ • NO STOPPING - execute all phases without user prompts         │
-│ • CODEBASE RULES in AGENTS.md - read before any code changes    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## QUAERO CODEBASE RULES
+
+### OS Detection (MANDATORY before any shell command)
+
+| Indicator | OS | Shell |
+|-----------|-----|-------|
+| `C:\...` or `D:\...` | Windows | PowerShell |
+| `/home/...` or `/Users/...` | Unix/Linux/macOS | Bash |
+| `/mnt/c/...` | WSL | Bash (but `powershell.exe` for Go) |
+
+### Build & Test
+
+| OS | Build | Test |
+|----|-------|------|
+| Windows | `.\scripts\build.ps1` | `go test -v ./test/...` |
+| Linux/macOS | `./scripts/build.sh` | `go test -v ./test/...` |
+| WSL | `powershell.exe -Command "cd C:\path; .\scripts\build.ps1"` | `powershell.exe -Command "cd C:\path; go test -v ./test/..."` |
+
+### Architecture
+
+```
+cmd/quaero/           → Entry point, CLI
+internal/app/         → DI & orchestration (composition root)
+internal/server/      → HTTP server & routing
+internal/handlers/    → HTTP/WebSocket handlers
+internal/services/    → Business logic (stateful, WITH receivers)
+internal/common/      → Utilities (stateless, NO receivers)
+internal/jobs/
+  ├── manager/        → StepManager implementations
+  ├── worker/         → JobWorker implementations
+  └── monitor/        → JobMonitor implementations
+internal/storage/     → BadgerDB persistence
+internal/interfaces/  → All interface definitions
+```
+
+### Architecture Docs (read before applicable work)
+
+| Doc | Path |
+|-----|------|
+| Manager/Worker | `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` |
+| Test | `docs/TEST_ARCHITECTURE.md` |
+
+### Go Rules
+
+**Logging (github.com/ternarybob/arbor):**
+```go
+logger.Info().Str("field", value).Msg("Message")
+logger.Error().Err(err).Msg("Error occurred")
+```
+
+**Error handling:**
+```go
+if err != nil {
+    return fmt.Errorf("context: %w", err)
+}
+```
+
+**Structure:**
+- `internal/common/` — Stateless functions ONLY (no receivers)
+- `internal/services/` — Stateful services (WITH receivers)
+
+### Forbidden
+
+```go
+fmt.Println("message")           // ❌ Use logger
+log.Printf("message")            // ❌ Use logger
+_ = someFunction()               // ❌ Handle all errors
+// TODO: fix later               // ❌ No deferred TODOs
+func (c *Config) Method() {}     // ❌ No receivers in common/
+```
+
 ### Config Parity
+
 Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
+
+### Frontend
+
+Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
+
+---
 
 ## AGENTS
 
@@ -55,11 +134,13 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 | FINAL VALIDATOR | Reviews ALL changes together | **HOSTILE - catches cross-step issues** |
 | DOCUMENTARIAN | Updates `docs/architecture` | Accurate |
 
+---
+
 ## WORKFLOW
 
 ### PHASE 0: ARCHITECT
 
-1. Read: `AGENTS.md`, `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`
+1. Read: `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`
 2. Analyze existing patterns in target directories
 3. Extract requirements → `$WORKDIR/requirements.md`
 4. Create step docs → `$WORKDIR/step_N.md` for each step
@@ -84,9 +165,6 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 
 ### PHASE 1-3: IMPLEMENT (per step)
 
-**Execution modes:**
-- **Sequential:** Steps with dependencies execute in order
-- **Parallel:** Independent steps (Deps: none) can batch-execute
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ FOR EACH STEP (parallel if independent):                        │
@@ -103,7 +181,7 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 
 **WORKER must:**
 - Follow step doc exactly
-- Apply AGENTS.md rules (logging, error handling, structure)
+- Apply codebase rules (logging, error handling, structure)
 - Perform cleanup listed in step doc
 - Build must pass
 
@@ -111,13 +189,13 @@ Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
 - Default REJECT until proven correct
 - Verify requirements with code line references
 - Verify cleanup performed (no dead code left)
-- Check AGENTS.md compliance
+- Check codebase rule compliance
 
 **VALIDATOR auto-REJECT:**
 - Build fails
 - Dead code left behind
 - Old function alongside replacement
-- AGENTS.md violations
+- Codebase rule violations
 - Requirements not traceable to code
 
 **⟲ COMPACT after each step PASS or at iteration 3+**
@@ -199,6 +277,8 @@ Write `$WORKDIR/architecture-updates.md`.
 | Task complete | `/compact` |
 
 **Recovery:** Read `$WORKDIR/*.md` artifacts to resume.
+
+---
 
 ## FORBIDDEN PHRASES
 ```

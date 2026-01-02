@@ -25,6 +25,58 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
+// parseTicker parses a ticker from config, supporting both legacy ("GNP") and
+// exchange-qualified ("ASX:GNP") formats.
+func parseTicker(config map[string]interface{}) common.Ticker {
+	// Try ticker first (new format), then asx_code (legacy)
+	if ticker, ok := config["ticker"].(string); ok && ticker != "" {
+		return common.ParseTicker(ticker)
+	}
+	if asxCode, ok := config["asx_code"].(string); ok && asxCode != "" {
+		return common.ParseTicker(asxCode)
+	}
+	return common.Ticker{}
+}
+
+// collectTickers collects all tickers from config, supporting both single and multiple formats.
+// Supports: ticker, asx_code (single) and tickers, asx_codes (array).
+func collectTickers(config map[string]interface{}) []common.Ticker {
+	var tickers []common.Ticker
+	seen := make(map[string]bool)
+
+	addTicker := func(t common.Ticker) {
+		if t.Code != "" && !seen[t.String()] {
+			seen[t.String()] = true
+			tickers = append(tickers, t)
+		}
+	}
+
+	// Single ticker (legacy)
+	if t := parseTicker(config); t.Code != "" {
+		addTicker(t)
+	}
+
+	// Array of tickers
+	if tickerArray, ok := config["tickers"].([]interface{}); ok {
+		for _, v := range tickerArray {
+			if s, ok := v.(string); ok && s != "" {
+				addTicker(common.ParseTicker(s))
+			}
+		}
+	}
+
+	// Array of asx_codes (legacy)
+	if codeArray, ok := config["asx_codes"].([]interface{}); ok {
+		for _, v := range codeArray {
+			if s, ok := v.(string); ok && s != "" {
+				addTicker(common.ParseTicker(s))
+			}
+		}
+	}
+
+	return tickers
+}
+
 // EODHD API configuration
 const (
 	eodhdAPIBaseURL   = "https://eodhd.com/api"
@@ -452,11 +504,11 @@ func (w *ASXStockCollectorWorker) Init(ctx context.Context, step models.JobStep,
 		return nil, fmt.Errorf("step config is required for asx_stock_collector")
 	}
 
-	asxCode, ok := stepConfig["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return nil, fmt.Errorf("asx_code is required in step config")
+	// Collect tickers - supports both single and multiple formats
+	tickers := collectTickers(stepConfig)
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config")
 	}
-	asxCode = strings.ToUpper(asxCode)
 
 	// Period for historical data (default Y2 = 24 months)
 	period := "Y2"
@@ -467,27 +519,32 @@ func (w *ASXStockCollectorWorker) Init(ctx context.Context, step models.JobStep,
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Str("asx_code", asxCode).
+		Int("ticker_count", len(tickers)).
 		Str("period", period).
 		Msg("ASX stock collector worker initialized")
 
-	return &interfaces.WorkerInitResult{
-		WorkItems: []interfaces.WorkItem{
-			{
-				ID:   asxCode,
-				Name: fmt.Sprintf("Fetch ASX:%s comprehensive stock data", asxCode),
-				Type: "asx_stock_collector",
-				Config: map[string]interface{}{
-					"asx_code": asxCode,
-					"period":   period,
-				},
+	// Create work items for each ticker
+	workItems := make([]interfaces.WorkItem, len(tickers))
+	for i, ticker := range tickers {
+		workItems[i] = interfaces.WorkItem{
+			ID:   ticker.Code,
+			Name: fmt.Sprintf("Fetch %s comprehensive stock data", ticker.String()),
+			Type: "asx_stock_collector",
+			Config: map[string]interface{}{
+				"ticker":   ticker.String(),
+				"asx_code": ticker.Code,
+				"period":   period,
 			},
-		},
-		TotalCount:           1,
+		}
+	}
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(tickers),
 		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"asx_code":    asxCode,
+			"tickers":     tickers,
 			"period":      period,
 			"step_config": stepConfig,
 		},
@@ -513,7 +570,8 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 		}
 	}
 
-	asxCode, _ := initResult.Metadata["asx_code"].(string)
+	// Get tickers from metadata
+	tickers, _ := initResult.Metadata["tickers"].([]common.Ticker)
 	period, _ := initResult.Metadata["period"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
@@ -525,49 +583,6 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 	forceRefresh := false
 	if fr, ok := stepConfig["force_refresh"].(bool); ok {
 		forceRefresh = fr
-	}
-
-	// Build source identifiers
-	sourceType := "asx_stock_collector"
-	sourceID := fmt.Sprintf("asx:%s:stock_collector", asxCode)
-
-	// Check for cached data before fetching
-	if !forceRefresh && cacheHours > 0 {
-		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
-		if err == nil && w.isCacheFresh(existingDoc, cacheHours) {
-			w.logger.Info().
-				Str("asx_code", asxCode).
-				Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
-				Int("cache_hours", cacheHours).
-				Msg("Using cached stock collector data")
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "info",
-					fmt.Sprintf("ASX:%s - Using cached data (last synced: %s)",
-						asxCode, existingDoc.LastSynced.Format("2006-01-02 15:04")))
-			}
-			return stepID, nil
-		}
-	}
-
-	w.logger.Info().
-		Str("phase", "run").
-		Str("step_name", step.Name).
-		Str("asx_code", asxCode).
-		Str("period", period).
-		Msg("Fetching ASX comprehensive stock data")
-
-	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetching ASX:%s comprehensive stock data (price, analyst, financials)", asxCode))
-	}
-
-	// Fetch all data in single API call
-	stockData, err := w.fetchComprehensiveData(ctx, asxCode, period)
-	if err != nil {
-		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch comprehensive stock data")
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to fetch stock data: %v", err))
-		}
-		return "", fmt.Errorf("failed to fetch stock data: %w", err)
 	}
 
 	// Extract output_tags
@@ -582,29 +597,158 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 		}
 	}
 
-	// Create and save document
-	doc := w.createDocument(ctx, stockData, asxCode, &jobDef, stepID, outputTags)
-	if err := w.documentStorage.SaveDocument(doc); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to save stock collector document")
-		return "", fmt.Errorf("failed to save stock data: %w", err)
+	processedCount := 0
+	errorCount := 0
+	var allDocIDs []string
+	var allTags []string
+	var allSourceIDs []string
+	var allErrors []string
+	tagsSeen := make(map[string]bool)
+	byTicker := make(map[string]*interfaces.TickerResult)
+
+	for _, ticker := range tickers {
+		docInfo, err := w.processTicker(ctx, ticker, period, cacheHours, forceRefresh, &jobDef, stepID, outputTags)
+		if err != nil {
+			errMsg := fmt.Sprintf("%s: %v", ticker.String(), err)
+			w.logger.Error().Err(err).Str("ticker", ticker.String()).Msg("Failed to fetch stock data")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("%s - Failed: %v", ticker.String(), err))
+			}
+			allErrors = append(allErrors, errMsg)
+			errorCount++
+			continue
+		}
+
+		// Collect document info
+		if docInfo != nil {
+			allDocIDs = append(allDocIDs, docInfo.ID)
+			allSourceIDs = append(allSourceIDs, docInfo.SourceID)
+			for _, tag := range docInfo.Tags {
+				if !tagsSeen[tag] {
+					tagsSeen[tag] = true
+					allTags = append(allTags, tag)
+				}
+			}
+
+			// Store per-ticker result
+			byTicker[ticker.String()] = &interfaces.TickerResult{
+				DocumentsCreated: 1,
+				DocumentIDs:      []string{docInfo.ID},
+				Tags:             docInfo.Tags,
+			}
+		}
+		processedCount++
 	}
 
 	w.logger.Info().
-		Str("asx_code", asxCode).
+		Int("processed", processedCount).
+		Int("errors", errorCount).
+		Int("documents", len(allDocIDs)).
+		Msg("Stock collector complete")
+
+	// Build WorkerResult for test validation
+	workerResult := &interfaces.WorkerResult{
+		DocumentsCreated: processedCount,
+		DocumentIDs:      allDocIDs,
+		Tags:             allTags,
+		SourceType:       "asx_stock_collector",
+		SourceIDs:        allSourceIDs,
+		Errors:           allErrors,
+		ByTicker:         byTicker,
+	}
+
+	if w.jobMgr != nil {
+		// Store WorkerResult in job metadata for test validation
+		if err := w.jobMgr.UpdateJobMetadata(ctx, stepID, map[string]interface{}{
+			"worker_result": workerResult.ToMap(),
+		}); err != nil {
+			w.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to update job metadata with worker result")
+		}
+	}
+
+	return stepID, nil
+}
+
+// docInfo holds document info for per-ticker results
+type docInfo struct {
+	ID       string
+	SourceID string
+	Tags     []string
+}
+
+// processTicker processes a single ticker and returns document info
+func (w *ASXStockCollectorWorker) processTicker(ctx context.Context, ticker common.Ticker, period string, cacheHours int, forceRefresh bool, jobDef *models.JobDefinition, stepID string, outputTags []string) (*docInfo, error) {
+	sourceType := "asx_stock_collector"
+	sourceID := ticker.SourceID("stock_collector")
+
+	// Check for cached data before fetching
+	if !forceRefresh && cacheHours > 0 {
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && w.isCacheFresh(existingDoc, cacheHours) {
+			w.logger.Info().
+				Str("ticker", ticker.String()).
+				Str("doc_id", existingDoc.ID).
+				Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+				Int("cache_hours", cacheHours).
+				Msg("Using cached stock collector data")
+
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("%s - Using cached data (last synced: %s)",
+						ticker.String(), existingDoc.LastSynced.Format("2006-01-02 15:04")))
+			}
+
+			return &docInfo{
+				ID:       existingDoc.ID,
+				SourceID: existingDoc.SourceID,
+				Tags:     existingDoc.Tags,
+			}, nil
+		}
+	}
+
+	w.logger.Info().
+		Str("phase", "run").
+		Str("ticker", ticker.String()).
+		Str("period", period).
+		Msg("Fetching comprehensive stock data")
+
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetching %s comprehensive stock data (price, analyst, financials)", ticker.String()))
+	}
+
+	// Fetch all data using EODHD symbol format
+	stockData, err := w.fetchComprehensiveData(ctx, ticker, period)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stock data: %w", err)
+	}
+
+	// Create and save document
+	doc := w.createDocument(ctx, stockData, ticker, jobDef, stepID, outputTags)
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		return nil, fmt.Errorf("failed to save stock data: %w", err)
+	}
+
+	w.logger.Info().
+		Str("ticker", ticker.String()).
+		Str("doc_id", doc.ID).
 		Float64("price", stockData.CurrentPrice).
 		Str("trend", stockData.TrendSignal).
 		Int("analysts", stockData.AnalystCount).
 		Float64("upside", stockData.UpsidePotential).
-		Msg("ASX comprehensive stock data processed")
+		Msg("Comprehensive stock data processed and saved")
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("ASX:%s - Price: $%.2f, Trend: %s, Analysts: %d, Target: $%.2f (%.1f%% upside)",
-				asxCode, stockData.CurrentPrice, stockData.TrendSignal,
+			fmt.Sprintf("%s - Price: $%.2f, Trend: %s, Analysts: %d, Target: $%.2f (%.1f%% upside)",
+				ticker.String(), stockData.CurrentPrice, stockData.TrendSignal,
 				stockData.AnalystCount, stockData.TargetMean, stockData.UpsidePotential))
 	}
 
-	return stepID, nil
+	return &docInfo{
+		ID:       doc.ID,
+		SourceID: doc.SourceID,
+		Tags:     doc.Tags,
+	}, nil
 }
 
 // ReturnsChildJobs returns false
@@ -617,9 +761,10 @@ func (w *ASXStockCollectorWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("asx_stock_collector step requires config")
 	}
-	asxCode, ok := step.Config["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return fmt.Errorf("asx_stock_collector step requires 'asx_code' in config")
+	// Must have either ticker/asx_code (single) or tickers/asx_codes (multiple)
+	tickers := collectTickers(step.Config)
+	if len(tickers) == 0 {
+		return fmt.Errorf("asx_stock_collector step requires 'ticker', 'asx_code', 'tickers', or 'asx_codes' in config")
 	}
 	return nil
 }
@@ -654,28 +799,28 @@ func (w *ASXStockCollectorWorker) makeRequest(ctx context.Context, url string) (
 }
 
 // fetchComprehensiveData fetches all stock data from EODHD API
-func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, asxCode, period string) (*StockCollectorData, error) {
+func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, ticker common.Ticker, period string) (*StockCollectorData, error) {
 	data := &StockCollectorData{
-		Symbol:      asxCode,
-		AsxCode:     asxCode,
+		Symbol:      ticker.String(),
+		AsxCode:     ticker.Code,
 		LastUpdated: time.Now(),
 	}
 
 	apiKey := w.getEODHDAPIKey(ctx)
 	if apiKey == "" {
 		w.logger.Error().
-			Str("asx_code", asxCode).
+			Str("ticker", ticker.String()).
 			Str("key_name", eodhdAPIKeyEnvVar).
 			Msg("EODHD API key not found - stock data will be empty")
 		return nil, fmt.Errorf("EODHD API key '%s' not configured in KV store", eodhdAPIKeyEnvVar)
 	}
 
-	// EODHD uses .AU for ASX stocks
-	eodhdSymbol := strings.ToUpper(asxCode) + ".AU"
+	// Use ticker's EODHD symbol format (e.g., "GNP.AU" for ASX:GNP)
+	eodhdSymbol := ticker.EODHDSymbol()
 
 	// STEP 1: Fetch fundamentals (includes most data)
 	if err := w.fetchEODHDFundamentals(ctx, apiKey, eodhdSymbol, data); err != nil {
-		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch EODHD fundamentals")
+		w.logger.Warn().Err(err).Str("ticker", ticker.String()).Msg("Failed to fetch EODHD fundamentals")
 		// Continue anyway - we'll try to get historical prices
 	}
 
@@ -696,7 +841,7 @@ func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, as
 	}
 
 	w.logger.Info().
-		Str("asx_code", asxCode).
+		Str("ticker", ticker.String()).
 		Float64("price", data.CurrentPrice).
 		Str("source", "eodhd").
 		Msg("Fetched comprehensive stock data from EODHD")
@@ -1307,10 +1452,10 @@ func (w *ASXStockCollectorWorker) calculatePeriodPerformance(data *StockCollecto
 }
 
 // createDocument creates a document from stock collector data
-func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *StockCollectorData, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *StockCollectorData, ticker common.Ticker, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	var content strings.Builder
 
-	content.WriteString(fmt.Sprintf("# ASX:%s Comprehensive Stock Data - %s\n\n", asxCode, data.CompanyName))
+	content.WriteString(fmt.Sprintf("# %s Comprehensive Stock Data - %s\n\n", ticker.String(), data.CompanyName))
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
 	content.WriteString(fmt.Sprintf("**Currency**: %s\n", data.Currency))
 	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeASXStockCollector))
@@ -1452,8 +1597,8 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 		content.WriteString("\n")
 	}
 
-	// Build tags
-	tags := []string{"asx-stock-data", strings.ToLower(asxCode)}
+	// Build tags - include both exchange-qualified ticker and just the code for backwards compatibility
+	tags := []string{"asx-stock-data", strings.ToLower(ticker.Code), strings.ToLower(ticker.String())}
 	tags = append(tags, fmt.Sprintf("date:%s", time.Now().Format("2006-01-02")))
 
 	if jobDef != nil && len(jobDef.Tags) > 0 {
@@ -1469,7 +1614,9 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 
 	// Build metadata - full structured data
 	metadata := map[string]interface{}{
-		"asx_code":            asxCode,
+		"ticker":              ticker.String(),
+		"asx_code":            ticker.Code, // Keep for backwards compatibility
+		"exchange":            ticker.Exchange,
 		"company_name":        data.CompanyName,
 		"currency":            data.Currency,
 		"current_price":       data.CurrentPrice,
@@ -1561,9 +1708,9 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
 		SourceType:      "asx_stock_collector",
-		SourceID:        fmt.Sprintf("asx:%s:stock_collector", asxCode),
-		URL:             fmt.Sprintf("https://eodhd.com/financial-summary/%s.AU", asxCode),
-		Title:           fmt.Sprintf("ASX:%s Comprehensive Stock Data", asxCode),
+		SourceID:        ticker.SourceID("stock_collector"),
+		URL:             fmt.Sprintf("https://eodhd.com/financial-summary/%s", ticker.EODHDSymbol()),
+		Title:           fmt.Sprintf("%s Comprehensive Stock Data", ticker.String()),
 		ContentMarkdown: content.String(),
 		DetailLevel:     models.DetailLevelFull,
 		Metadata:        metadata,

@@ -156,6 +156,368 @@ func TestWorkerASXStockCollector(t *testing.T) {
 	t.Log("PASS: asx_stock_collector worker produced consistent output across runs")
 }
 
+// TestWorkerASXStockCollectorMultiStock tests the asx_stock_collector worker with multiple stocks.
+// This test validates that multi-ticker processing produces the same output format as single-ticker.
+func TestWorkerASXStockCollectorMultiStock(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	resultsDir := env.GetResultsDir()
+
+	// Test with 3 stocks to verify by_ticker output
+	testStocks := []string{"ASX:BHP", "ASX:CSL", "ASX:GNP"}
+	testCodes := []string{"BHP", "CSL", "GNP"}
+
+	// Create job definition that uses asx_stock_collector worker with multiple tickers
+	defID := fmt.Sprintf("test-asx-stock-collector-multi-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "ASX Stock Collector Multi-Stock Test",
+		"description": "Test asx_stock_collector worker with multiple stocks and by_ticker output",
+		"type":        "asx_stock_collector",
+		"enabled":     true,
+		"tags":        []string{"worker-test", "asx-stock-collector", "multi-stock"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "fetch-stock-data",
+				"type": "asx_stock_collector",
+				"config": map[string]interface{}{
+					"tickers": testStocks, // Multiple tickers
+					"period":  "Y1",       // 12 months for faster test
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Job definition creation failed with status: %d (may need ASX market hours)", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute the job
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute job definition")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Executed asx_stock_collector multi-stock job: %s", jobID)
+
+	// Wait for completion with extended timeout for multiple stocks
+	finalStatus := waitForJobCompletion(t, helper, jobID, 5*time.Minute)
+
+	// Verify completion
+	if finalStatus != "completed" {
+		t.Logf("INFO: Job ended with status %s (may be expected outside market hours)", finalStatus)
+		return
+	}
+
+	// Get the WorkerResult to validate by_ticker format
+	workerResult := getASXStockCollectorWorkerResult(t, helper, jobID)
+	if workerResult != nil {
+		// Validate by_ticker field exists and contains all test stocks
+		require.NotNil(t, workerResult.ByTicker, "WorkerResult must have by_ticker field for multi-stock processing")
+		require.Equal(t, len(testStocks), len(workerResult.ByTicker),
+			"by_ticker should have entries for all %d stocks", len(testStocks))
+
+		// Validate each stock has correct per-ticker result
+		for _, stock := range testStocks {
+			tickerResult, exists := workerResult.ByTicker[stock]
+			require.True(t, exists, "by_ticker must contain entry for %s", stock)
+			require.NotNil(t, tickerResult, "TickerResult for %s must not be nil", stock)
+			assert.Equal(t, 1, tickerResult.DocumentsCreated,
+				"Each stock should have exactly 1 document created, got %d for %s",
+				tickerResult.DocumentsCreated, stock)
+			assert.Len(t, tickerResult.DocumentIDs, 1,
+				"Each stock should have exactly 1 document ID for %s", stock)
+			assert.NotEmpty(t, tickerResult.Tags,
+				"TickerResult for %s must have tags", stock)
+			t.Logf("by_ticker[%s]: docs=%d, ids=%v, tags=%v",
+				stock, tickerResult.DocumentsCreated, tickerResult.DocumentIDs, tickerResult.Tags)
+		}
+
+		// Validate totals match per-ticker sum
+		totalDocs := 0
+		for _, tr := range workerResult.ByTicker {
+			totalDocs += tr.DocumentsCreated
+		}
+		assert.Equal(t, workerResult.DocumentsCreated, totalDocs,
+			"Total documents_created (%d) should equal sum of per-ticker counts (%d)",
+			workerResult.DocumentsCreated, totalDocs)
+
+		// Save the WorkerResult with by_ticker for inspection
+		resultsDir := env.GetResultsDir()
+		if resultsDir != "" {
+			resultPath := filepath.Join(resultsDir, "worker_result.json")
+			if data, err := json.MarshalIndent(workerResult, "", "  "); err == nil {
+				os.WriteFile(resultPath, data, 0644)
+				t.Logf("Saved worker_result.json with by_ticker to: %s", resultPath)
+			}
+		}
+	} else {
+		t.Error("Failed to get asx_stock_collector WorkerResult from job metadata")
+	}
+
+	// Verify all stocks have documents created and save output per stock
+	for i, code := range testCodes {
+		subDir := filepath.Join(resultsDir, code)
+		os.MkdirAll(subDir, 0755)
+
+		// Save collector output (same as single-stock test)
+		saveASXStockCollectorOutputToDir(t, helper, subDir, code)
+		validateASXStockCollectorOutput(t, helper, code)
+
+		t.Logf("Validated and saved output for %s", testStocks[i])
+	}
+
+	t.Log("PASS: asx_stock_collector multi-stock worker produced by_ticker output")
+}
+
+// saveASXStockCollectorOutputToDir saves asx_stock_collector document output to a directory
+func saveASXStockCollectorOutputToDir(t *testing.T, helper *common.HTTPTestHelper, resultsDir, stock string) {
+	tags := []string{"asx-stock-data", strings.ToLower(stock)}
+	tagStr := strings.Join(tags, ",")
+
+	resp, err := helper.GET("/api/documents?tags=" + tagStr + "&limit=1")
+	if err != nil {
+		t.Logf("Failed to query collector documents: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Collector document query returned status %d", resp.StatusCode)
+		return
+	}
+
+	var result struct {
+		Documents []struct {
+			ID              string                 `json:"id"`
+			ContentMarkdown string                 `json:"content_markdown"`
+			Metadata        map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+	}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Failed to parse collector document response: %v", err)
+		return
+	}
+
+	if len(result.Documents) == 0 {
+		t.Logf("No collector documents found for %s with tags %v", stock, tags)
+		return
+	}
+
+	doc := result.Documents[0]
+
+	// Save markdown content
+	mdPath := filepath.Join(resultsDir, "output.md")
+	if err := os.WriteFile(mdPath, []byte(doc.ContentMarkdown), 0644); err != nil {
+		t.Logf("Failed to save collector markdown: %v", err)
+	} else {
+		t.Logf("Saved output.md to: %s", mdPath)
+	}
+
+	// Save metadata as JSON
+	jsonPath := filepath.Join(resultsDir, "output.json")
+	if data, err := json.MarshalIndent(doc.Metadata, "", "  "); err == nil {
+		if err := os.WriteFile(jsonPath, data, 0644); err != nil {
+			t.Logf("Failed to save collector JSON: %v", err)
+		} else {
+			t.Logf("Saved output.json to: %s", jsonPath)
+		}
+	}
+}
+
+// ASXStockCollectorWorkerResult mirrors the WorkerResult structure for test parsing
+type ASXStockCollectorWorkerResult struct {
+	DocumentsCreated int                              `json:"documents_created"`
+	DocumentIDs      []string                         `json:"document_ids"`
+	Tags             []string                         `json:"tags"`
+	SourceType       string                           `json:"source_type"`
+	SourceIDs        []string                         `json:"source_ids"`
+	Errors           []string                         `json:"errors"`
+	ByTicker         map[string]*ASXStockTickerResult `json:"by_ticker"`
+}
+
+// ASXStockTickerResult mirrors TickerResult for test parsing
+type ASXStockTickerResult struct {
+	DocumentsCreated int      `json:"documents_created"`
+	DocumentIDs      []string `json:"document_ids"`
+	Tags             []string `json:"tags"`
+}
+
+// getASXStockCollectorWorkerResult retrieves the WorkerResult from job metadata
+func getASXStockCollectorWorkerResult(t *testing.T, helper *common.HTTPTestHelper, jobID string) *ASXStockCollectorWorkerResult {
+	resp, err := helper.GET("/api/jobs/" + jobID)
+	if err != nil {
+		t.Logf("Failed to get job %s: %v", jobID, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Get job returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var job struct {
+		Type     string                 `json:"type"`
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := helper.ParseJSONResponse(resp, &job); err != nil {
+		t.Logf("Failed to parse job response: %v", err)
+		return nil
+	}
+
+	if job.Metadata == nil {
+		t.Logf("Job %s has no metadata", jobID)
+		return nil
+	}
+
+	// For manager job, find the fetch-stock-data step
+	if job.Type == "manager" {
+		stepJobIDs, ok := job.Metadata["step_job_ids"].(map[string]interface{})
+		if !ok || len(stepJobIDs) == 0 {
+			t.Logf("Manager job %s has no step_job_ids in metadata", jobID)
+			return nil
+		}
+
+		// Look for fetch-stock-data step
+		fetchStockJobID, ok := stepJobIDs["fetch-stock-data"].(string)
+		if !ok {
+			t.Logf("Manager job %s has no fetch-stock-data step in step_job_ids", jobID)
+			return nil
+		}
+
+		t.Logf("Querying fetch-stock-data step job %s", fetchStockJobID)
+		return getASXStockCollectorWorkerResultFromJob(t, helper, fetchStockJobID)
+	}
+
+	// Not a manager job, try to get worker_result directly
+	return getASXStockCollectorWorkerResultFromJob(t, helper, jobID)
+}
+
+// getASXStockCollectorWorkerResultFromJob gets WorkerResult from a specific job's metadata
+func getASXStockCollectorWorkerResultFromJob(t *testing.T, helper *common.HTTPTestHelper, jobID string) *ASXStockCollectorWorkerResult {
+	resp, err := helper.GET("/api/jobs/" + jobID)
+	if err != nil {
+		t.Logf("Failed to get job %s: %v", jobID, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Get job returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var job struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := helper.ParseJSONResponse(resp, &job); err != nil {
+		t.Logf("Failed to parse job response: %v", err)
+		return nil
+	}
+
+	if job.Metadata == nil {
+		t.Logf("Job %s has no metadata", jobID)
+		return nil
+	}
+
+	workerResultRaw, ok := job.Metadata["worker_result"].(map[string]interface{})
+	if !ok {
+		t.Logf("Job %s has no worker_result in metadata", jobID)
+		return nil
+	}
+
+	result := &ASXStockCollectorWorkerResult{}
+
+	if v, ok := workerResultRaw["documents_created"].(float64); ok {
+		result.DocumentsCreated = int(v)
+	}
+	if v, ok := workerResultRaw["document_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.DocumentIDs = append(result.DocumentIDs, s)
+			}
+		}
+	}
+	if v, ok := workerResultRaw["tags"].([]interface{}); ok {
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				result.Tags = append(result.Tags, s)
+			}
+		}
+	}
+	if v, ok := workerResultRaw["source_type"].(string); ok {
+		result.SourceType = v
+	}
+	if v, ok := workerResultRaw["source_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.SourceIDs = append(result.SourceIDs, s)
+			}
+		}
+	}
+	if v, ok := workerResultRaw["errors"].([]interface{}); ok {
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				result.Errors = append(result.Errors, s)
+			}
+		}
+	}
+
+	// Parse by_ticker if present
+	if byTicker, ok := workerResultRaw["by_ticker"].(map[string]interface{}); ok {
+		result.ByTicker = make(map[string]*ASXStockTickerResult)
+		for ticker, tickerData := range byTicker {
+			if tickerMap, ok := tickerData.(map[string]interface{}); ok {
+				tr := &ASXStockTickerResult{}
+				if v, ok := tickerMap["documents_created"].(float64); ok {
+					tr.DocumentsCreated = int(v)
+				}
+				if v, ok := tickerMap["document_ids"].([]interface{}); ok {
+					for _, id := range v {
+						if s, ok := id.(string); ok {
+							tr.DocumentIDs = append(tr.DocumentIDs, s)
+						}
+					}
+				}
+				if v, ok := tickerMap["tags"].([]interface{}); ok {
+					for _, tag := range v {
+						if s, ok := tag.(string); ok {
+							tr.Tags = append(tr.Tags, s)
+						}
+					}
+				}
+				result.ByTicker[ticker] = tr
+			}
+		}
+	}
+
+	return result
+}
+
 // =============================================================================
 // 2. STRUCTURED DATA - asx_announcements
 // =============================================================================
@@ -1882,27 +2244,6 @@ func containsKey(slice []string, key string) bool {
 // File Assertion Helpers for Output Validation
 // =============================================================================
 
-// assertFileExistsAndNotEmpty asserts that a file exists and has content
-func assertFileExistsAndNotEmpty(t *testing.T, path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			t.Errorf("File does not exist: %s", path)
-		} else {
-			t.Errorf("Failed to stat file %s: %v", path, err)
-		}
-		return false
-	}
-
-	if info.Size() == 0 {
-		t.Errorf("File is empty: %s", path)
-		return false
-	}
-
-	t.Logf("PASS: File exists and is not empty: %s (%d bytes)", path, info.Size())
-	return true
-}
-
 // assertResultFilesExist asserts that all expected result files exist for a given run
 func assertResultFilesExist(t *testing.T, env *common.TestEnvironment, runNumber int) {
 	resultsDir := env.GetResultsDir()
@@ -1912,23 +2253,23 @@ func assertResultFilesExist(t *testing.T, env *common.TestEnvironment, runNumber
 	}
 
 	// Check job_definition.json
-	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "job_definition.json"))
+	common.AssertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "job_definition.json"))
 
 	// Check primary output files
-	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "output.md"))
+	common.AssertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, "output.md"))
 
 	// Check numbered output files for this run
-	assertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber)))
+	common.AssertFileExistsAndNotEmpty(t, filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber)))
 
 	// JSON files are optional (may not exist if no metadata)
 	jsonPath := filepath.Join(resultsDir, "output.json")
 	if _, err := os.Stat(jsonPath); err == nil {
-		assertFileExistsAndNotEmpty(t, jsonPath)
+		common.AssertFileExistsAndNotEmpty(t, jsonPath)
 	}
 
 	numberedJSONPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
 	if _, err := os.Stat(numberedJSONPath); err == nil {
-		assertFileExistsAndNotEmpty(t, numberedJSONPath)
+		common.AssertFileExistsAndNotEmpty(t, numberedJSONPath)
 	}
 }
 
@@ -1942,7 +2283,7 @@ func assertSchemaFileExists(t *testing.T, env *common.TestEnvironment) {
 
 	schemaPath := filepath.Join(resultsDir, "schema.json")
 	if _, err := os.Stat(schemaPath); err == nil {
-		assertFileExistsAndNotEmpty(t, schemaPath)
+		common.AssertFileExistsAndNotEmpty(t, schemaPath)
 	} else {
 		t.Logf("INFO: Schema file not present at %s (may not be required for this worker)", schemaPath)
 	}

@@ -9,6 +9,7 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
 - [Workers](#workers)
   - [Agent Worker](#agent-worker)
   - [Aggregate Summary Worker](#aggregate-summary-worker)
+  - [AI Assessor Worker](#ai-assessor-worker)
   - [Orchestrator Worker](#orchestrator-worker)
   - [Analyze Build Worker](#analyze-build-worker)
   - [ASX Announcements Worker](#asx-announcements-worker)
@@ -25,6 +26,8 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [GitHub Repo Worker](#github-repo-worker)
   - [Local Dir Worker](#local-dir-worker)
   - [Places Worker](#places-worker)
+  - [Portfolio Rollup Worker](#portfolio-rollup-worker)
+  - [Signal Computer Worker](#signal-computer-worker)
   - [Summary Worker](#summary-worker)
   - [Test Job Generator Worker](#test-job-generator-worker)
   - [Web Search Worker](#web-search-worker)
@@ -185,6 +188,62 @@ type = "aggregate_summary"
 description = "Generate actionable DevOps summary and CI/CD guide"
 depends = "build_dependency_graph"
 filter_tags = ["devops-candidate"]
+```
+
+---
+
+### AI Assessor Worker
+
+**File**: `ai_assessor_worker.go`
+
+**Purpose**: Generates AI-powered stock assessments with validation. Uses LLM to create buy/sell/hold recommendations based on computed signals, validates the assessment reasoning, and stores results with validation metadata.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP") |
+| `signal_tag` | string | No | Tag to find signal document (default: `"signal-{asx_code}"`) |
+| `output_tags` | []string | No | Additional tags for output document |
+| `max_retries` | int | No | Maximum validation retries (default: 3) |
+
+#### Outputs
+
+- Creates assessment document with:
+  - Action recommendation: `accumulate`, `reduce`, `hold`, `watch`
+  - Confidence level: `high`, `medium`, `low`
+  - Reasoning with evidence points
+  - Validation status and warnings
+- Tags: `["ai-assessment", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- Metadata includes: `decision`, `reasoning`, `validation_result`, `signal_snapshot`
+
+#### Validation Rules
+
+The worker validates assessments against computed signals:
+1. **Evidence Requirements**: Minimum 3 evidence points, each with a number
+2. **Generic Phrase Detection**: Rejects phrases like "solid fundamentals"
+3. **Action Consistency**: Validates action against signals (e.g., no "accumulate" for cooked stocks)
+
+#### Configuration
+
+Requires LLM service to be available.
+
+#### Example Job Definition
+
+```toml
+[step.assess_stock]
+type = "ai_assessor"
+description = "Generate AI assessment for GNP"
+depends = "compute_signals"
+asx_code = "GNP"
+signal_tag = "signal-GNP"
+output_tags = ["portfolio-review"]
+max_retries = 3
 ```
 
 ---
@@ -1242,6 +1301,137 @@ search_type = "text_search"
 
 ---
 
+### Portfolio Rollup Worker
+
+**File**: `portfolio_rollup_worker.go`
+
+**Purpose**: Aggregates portfolio-level metrics from individual stock signals. Computes total value, P&L, sector allocations, and generates concentration alerts when position limits are exceeded.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `portfolio_id` | string | Yes | Unique portfolio identifier |
+| `holdings_tag` | string | No | Tag to find holdings documents (default: `"holding-{portfolio_id}"`) |
+| `signal_tag_prefix` | string | No | Prefix for signal documents (default: `"signal-"`) |
+| `output_tags` | []string | No | Additional tags for output document |
+
+#### Concentration Limits
+
+The worker checks against these default limits:
+| Limit | Threshold | Description |
+|-------|-----------|-------------|
+| Position | 8% | Single position exceeds 8% of portfolio |
+| Top 5 | 40% | Top 5 positions exceed 40% combined |
+| Sector | 30% | Single sector exceeds 30% of portfolio |
+
+#### Outputs
+
+- Creates rollup document with:
+  - Total portfolio value
+  - Total P&L (absolute and percentage)
+  - Per-holding allocations
+  - Sector allocations
+  - Concentration alerts
+  - Risk summary
+- Tags: `["portfolio-rollup", "{portfolio_id}", "date:YYYY-MM-DD", ...output_tags]`
+- Metadata includes: `total_value`, `total_pnl`, `allocations`, `alerts`
+
+#### Example Job Definition
+
+```toml
+[step.rollup_portfolio]
+type = "portfolio_rollup"
+description = "Aggregate portfolio metrics"
+depends = "compute_signals"
+portfolio_id = "smsf-main"
+holdings_tag = "holding-smsf"
+output_tags = ["daily-review"]
+```
+
+---
+
+### Signal Computer Worker
+
+**File**: `signal_computer_worker.go`
+
+**Purpose**: Computes stock signals (PBAS, VLI, Regime, Cooked, RS, Quality, JustifiedReturn) from raw stock data. Loads data from `asx_stock_collector` documents and stores computed signals.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `asx_code` | string | Yes | ASX company code (e.g., "GNP") |
+| `source_tag_prefix` | string | No | Prefix to find source data (default: `"asx-stock-data"`) |
+| `output_tags` | []string | No | Additional tags for output document |
+| `benchmark_returns` | map | No | Benchmark returns for RS calculation |
+
+#### Computed Signals
+
+Each signal includes:
+- **Description**: Static explanation of what the metric measures
+- **Comment**: AI-generated interpretation specific to the computed values
+
+| Signal | Description | Range |
+|--------|-------------|-------|
+| PBAS | Price-Business Alignment Score | 0.0 - 1.0 |
+| VLI | Volume Lead Indicator | -1.0 to 1.0 |
+| Regime | Market regime classification | 7 types |
+| Cooked | Manipulation risk detector | 0-5 triggers |
+| RS | Relative Strength vs benchmark | Percentile |
+| Quality | Business quality score | A-F rating |
+| JustifiedReturn | Expected return based on fundamentals | Percentage |
+
+#### Outputs
+
+- Creates signal document with all computed signals
+- Each signal section includes description text (italicized) and AI review comment (blockquote)
+- Tags: `["ticker-signals", "{asx_code}", "date:YYYY-MM-DD", ...output_tags]`
+- Metadata includes: `ticker`, `compute_timestamp`, `pbas`, `vli`, `regime`, `cooked`, `rs`, `quality`, `justified_return`, `risk_flags`
+
+#### Output Format
+
+```markdown
+## PBAS (Price-Business Alignment)
+
+*Measures alignment between business fundamentals and price action. Scores above 0.6 suggest underpricing; below 0.4 suggest overpricing.*
+
+**Score**: 0.63 (neutral)
+
+| Metric | Value |
+|--------|-------|
+| Business Momentum | +0.10 |
+| Price Momentum | +0.00 |
+| Divergence | +0.10 |
+
+> **AI Review**: Business and price momentum are broadly aligned. No significant mispricing detected.
+```
+
+#### Example Job Definition
+
+```toml
+[step.compute_signals]
+type = "signal_computer"
+description = "Compute signals for GNP"
+depends = "fetch_stock_data"
+asx_code = "GNP"
+source_tag_prefix = "asx-stock-data"
+output_tags = ["portfolio-analysis"]
+benchmark_returns = { "3m" = 5.0, "6m" = 10.0 }
+```
+
+---
+
 ### Summary Worker
 
 **File**: `summary_worker.go`
@@ -1756,6 +1946,7 @@ include_logs_on_error = true
 
 **Inline Processing** (Synchronous):
 - Aggregate Summary Worker - Single aggregation task
+- AI Assessor Worker - Generate AI assessments with validation
 - Analyze Build Worker - Process documents inline
 - ASX Announcements Worker - Fetch ASX company announcements
 - ASX Stock Data Worker - Fetch stock prices and indicators
@@ -1769,6 +1960,8 @@ include_logs_on_error = true
 - GitHub Log Worker - Process individual logs
 - GitHub Repo Worker - Process individual files
 - Places Worker - Single search execution
+- Portfolio Rollup Worker - Aggregate portfolio metrics
+- Signal Computer Worker - Compute stock signals
 - Summary Worker - Single summary generation
 - Web Search Worker - Single search execution
 
@@ -1778,6 +1971,7 @@ include_logs_on_error = true
 |--------|------------------|-----------|
 | Agent | Yes | Yes |
 | Aggregate Summary | Yes | No |
+| AI Assessor | Yes | No |
 | Analyze Build | Yes | No |
 | ASX Announcements | Yes | No |
 | ASX Stock Data | Yes | No |
@@ -1797,6 +1991,8 @@ include_logs_on_error = true
 | Local Dir | Yes | Yes |
 | Orchestrator | Yes | No |
 | Places | Yes | No |
+| Portfolio Rollup | Yes | No |
+| Signal Computer | Yes | No |
 | Summary | Yes | No |
 | Test Job Generator | Yes | Yes |
 | Web Search | Yes | No |
@@ -1806,6 +2002,7 @@ include_logs_on_error = true
 **AI/LLM Workers**:
 - Agent Worker
 - Aggregate Summary Worker
+- AI Assessor Worker
 - Analyze Build Worker
 - Classify Worker
 - Competitor Analysis Worker
@@ -1826,6 +2023,10 @@ include_logs_on_error = true
 
 **Enrichment Workers**:
 - Dependency Graph Worker
+
+**Signal/Analytics Workers**:
+- Portfolio Rollup Worker
+- Signal Computer Worker
 
 **Notification Workers**:
 - Email Worker

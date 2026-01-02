@@ -25,11 +25,12 @@ auto_start = false
 # =========================================================================
 
 [config]
-# Test with three stocks for multi-stock execution testing
+# Test with three stocks using exchange-qualified tickers
+# NOTE: name and industry are now fetched from EODHD company information
 variables = [
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
-    { ticker = "SKS", name = "SKS Technologies Group", industry = "technology-infrastructure" },
-    { ticker = "WEB", name = "Web Travel Group", industry = "travel" },
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:SKS" },
+    { ticker = "ASX:WEB" },
 ]
 
 # Benchmark indices for comparison

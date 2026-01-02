@@ -21,22 +21,24 @@ enabled = true
 auto_start = false
 
 # Global variables - inherited by all steps that use job_template
-# Available variable keys: ticker, name, industry
-# Variable references in templates: {stock:ticker}, {stock:name}, {stock:industry}
-# Modifiers: {stock:ticker_lower}, {stock:ticker_upper}
+# Available variable keys: ticker
+# Variable references in templates: {stock:ticker}
+# NOTE: name and industry are now fetched from EODHD company information
 [config]
 # Cache configuration - enables 24h rolling cache for all steps
 cache_type = "rolling_time"
 cache_hours = 24
 revisions = 1
 
+# Exchange-qualified tickers (ASX:XXX format)
+# Name and industry are automatically fetched from EODHD
 variables = [
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
-    # { ticker = "CBA", name = "Commonwealth Bank", industry = "banking" },
-    # { ticker = "WES", name = "Wesfarmers", industry = "retail" },
-    # { ticker = "EXR", name = "Elixir Energy", industry = "energy" },
-    # { ticker = "SRL", name = "Sunrise Energy Metals", industry = "mining" },
-    # { ticker = "ROC", name = "RocketBoots Limited", industry = "AI" },
+    { ticker = "ASX:GNP" },
+    # { ticker = "ASX:CBA" },
+    # { ticker = "ASX:WES" },
+    # { ticker = "ASX:EXR" },
+    # { ticker = "ASX:SRL" },
+    # { ticker = "ASX:ROC" },
 ]
 
 # Step 1: Collect stock data for each stock

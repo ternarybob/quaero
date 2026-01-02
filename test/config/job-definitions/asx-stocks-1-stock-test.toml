@@ -25,9 +25,10 @@ auto_start = false
 # =========================================================================
 
 [config]
-# Test with single stock for minimal execution time
+# Test with single stock using exchange-qualified ticker
+# NOTE: name and industry are now fetched from EODHD company information
 variables = [
-    { ticker = "GNP", name = "GenusPlus Group Ltd", industry = "infrastructure" },
+    { ticker = "ASX:GNP" },
 ]
 
 # Benchmark indices for comparison
