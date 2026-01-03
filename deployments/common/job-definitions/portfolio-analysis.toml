@@ -1,30 +1,42 @@
-# Orchestrator Test: Portfolio Assessment
+# Portfolio Analysis
 # =========================================================================
-# Tests the hybrid portfolio assessment workflow.
-# Full workflow: Data Collection → Stock Analysis → Portfolio Assessment
+# Analyzes stocks AS A PORTFOLIO - includes portfolio-level assessment.
+# Stocks are grouped by portfolio and evaluated for concentration,
+# diversification, and portfolio health.
 #
-# WORKFLOW (hybrid):
-# 1. Data Collection: StockDataCollectionWorker (deterministic)
-# 2. Stock Analysis: SummaryWorker with stock-analysis template
-# 3. Portfolio Assessment: SummaryWorker with portfolio-assessment template
+# For simple stock list analysis without portfolio grouping,
+# use stock-analysis-list.toml instead.
+#
+# WORKFLOW:
+# 1. Data Collection: Deterministic data fetching via StockDataCollectionWorker
+# 2. Stock Analysis: AI analysis using embedded stock-analysis template
+# 3. Portfolio Assessment: AI portfolio review using embedded portfolio-assessment template
+# 4. Email Report: Send portfolio assessment via email
+#
+# USE CASE: When you want to analyze stocks as part of a portfolio,
+# with concentration analysis, diversification scoring, and portfolio
+# recommendations.
+#
+# VARIABLES FORMAT:
+# - ticker: ASX code (required) - can be "GNP" or "ASX:GNP"
+# - portfolio: grouping name (optional, default "default")
 #
 # TEMPLATES (embedded):
 # - internal/templates/stock-analysis.toml (Step 2)
 # - internal/templates/portfolio-assessment.toml (Step 3)
-#
 # OUTPUT TAG: portfolio-review
 # =========================================================================
 
 # =========================================================================
 # Job Definition (MUST be at root level before any [section])
 # =========================================================================
-id = "orchestrator-portfolio-assessment-test"
-name = "Test: Portfolio Assessment"
+id = "portfolio-analysis"
+name = "Portfolio Analysis"
 type = "orchestrator"
-description = "Integration test for hybrid portfolio assessment workflow"
-tags = ["test", "orchestrator", "portfolio-assessment", "hybrid"]
+description = "AI-powered portfolio analysis with stock assessment and portfolio-level review"
+tags = ["stocks", "analysis", "portfolio", "hybrid"]
 schedule = ""
-timeout = "3h"
+timeout = "2h"
 enabled = true
 auto_start = false
 
@@ -33,25 +45,33 @@ auto_start = false
 # =========================================================================
 [meta]
 author = "Claude Code"
-version = "2.0"
+version = "3.0"
 created = "2026-01-02"
 updated = "2026-01-03"
-purpose = "Integration test for hybrid portfolio assessment workflow"
+purpose = "AI-powered portfolio analysis with hybrid workflow (deterministic data + AI analysis)"
 
 # =========================================================================
-# Test Configuration - Multi-Portfolio
+# User Configuration - Ticker List with Portfolio Grouping
 # =========================================================================
 
 [config]
+# Ticker list with portfolio grouping
+# Stocks are analyzed and GROUPED by portfolio
 variables = [
     # Trading Portfolio
     { ticker = "ASX:GNP", portfolio = "trading" },
-    { ticker = "ASX:SKS", portfolio = "trading" },
-    # SMSF Portfolio
-    { ticker = "ASX:WEB", portfolio = "smsf" },
-    { ticker = "ASX:BCN", portfolio = "smsf" },
+    { ticker = "ASX:BCN", portfolio = "trading" },
+    { ticker = "ASX:MYG", portfolio = "trading" },
+
+    # SMSF Portfolio (example - uncomment to add)
+    # { ticker = "ASX:WES", portfolio = "smsf" },
+    # { ticker = "ASX:WOW", portfolio = "smsf" },
+
+    # Ungrouped (uses default portfolio)
+    # { ticker = "ASX:XRO" },
 ]
 
+# Benchmark for comparison
 benchmarks = [
     { code = "XJO", name = "S&P/ASX 200" },
 ]
@@ -59,6 +79,8 @@ benchmarks = [
 # =========================================================================
 # Step 1: Data Collection (Deterministic)
 # =========================================================================
+# Collects stock data for all tickers using StockDataCollectionWorker
+# Creates documents tagged ['stock-data-collected', '<ticker>']
 
 [step.collect_data]
 type = "stock_data_collection"
@@ -68,6 +90,8 @@ on_error = "fail"
 # =========================================================================
 # Step 2: Stock Analysis (AI)
 # =========================================================================
+# Analyzes collected data using embedded stock-analysis template
+# Creates documents tagged ['stock-analysis']
 
 [step.analyze]
 type = "summary"
@@ -81,10 +105,12 @@ output_tags = ["stock-analysis"]
 # =========================================================================
 # Step 3: Portfolio Assessment (AI)
 # =========================================================================
+# Portfolio-level review using embedded portfolio-assessment template
+# Evaluates concentration, diversification, portfolio health
 
 [step.portfolio_assessment]
 type = "summary"
-description = "Portfolio-level analysis using portfolio-assessment template"
+description = "Portfolio-level analysis and recommendations"
 depends = "analyze"
 on_error = "fail"
 template = "portfolio-assessment"
@@ -92,15 +118,17 @@ filter_tags = ["stock-analysis"]
 output_tags = ["portfolio-review"]
 
 # =========================================================================
-# Email Step
+# Step 4: Email Report
 # =========================================================================
+# Sends portfolio review via email
+# Uses documents tagged with ['portfolio-review']
 
 [step.email_report]
 type = "email"
-description = "Email portfolio assessment report"
+description = "Email portfolio analysis report"
 depends = "portfolio_assessment"
 always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
-subject = "Portfolio Assessment Test"
+subject = "Portfolio Analysis - AI-Powered Report"
 body_from_tag = "portfolio-review"

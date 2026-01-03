@@ -131,7 +131,7 @@ func (w *SignalComputerWorker) CreateJobs(ctx context.Context, step models.JobSt
 	benchmarkReturns := w.loadBenchmarkReturns(ctx)
 	w.signalComputer.SetBenchmarkReturns(benchmarkReturns)
 
-	// Extract output_tags
+	// Extract output_tags (supports both []interface{} from TOML and []string from inline calls)
 	var outputTags []string
 	if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
 		for _, tag := range tags {
@@ -139,6 +139,8 @@ func (w *SignalComputerWorker) CreateJobs(ctx context.Context, step models.JobSt
 				outputTags = append(outputTags, tagStr)
 			}
 		}
+	} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+		outputTags = tags
 	}
 
 	processedCount := 0

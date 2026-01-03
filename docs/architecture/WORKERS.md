@@ -478,12 +478,12 @@ Orchestrator job definitions follow the standard job-definitions pattern:
 - `test/config/job-definitions/` - Test job definitions
 - `bin/job-definitions/` - UAT/development (untracked)
 
-Job templates (reusable components) are stored in:
-- `deployments/common/job-templates/` - Production templates
-- `test/config/job-templates/` - Test templates
-- `bin/job-templates/` - UAT/development (untracked)
+Prompt templates (for SummaryWorker) are stored in:
+- `internal/templates/` - Embedded default templates (built into binary)
+- `deployments/common/templates/` - User override templates
+- `bin/templates/` - Runtime templates directory
 
-All three locations should maintain configuration parity.
+Templates are resolved in order: user override → embedded default.
 
 ---
 
@@ -1648,7 +1648,7 @@ recursion_depth = 2
 
 **File**: `job_template_worker.go`
 
-**Purpose**: Executes job templates with variable substitution. Loads templates from `{exe}/job-templates/`, applies variable replacements using `{namespace:key}` syntax, and executes the resulting job definitions. Supports both sequential and parallel execution.
+**Purpose**: Executes job templates with variable substitution. Loads templates from `{exe}/templates/`, applies variable replacements using `{namespace:key}` syntax, and executes the resulting job definitions. Supports both sequential and parallel execution.
 
 **Interfaces**: DefinitionWorker
 
@@ -1722,7 +1722,7 @@ depends = "run_analysis"
 
 #### Configuration
 
-Templates must be located in `{exe}/job-templates/` directory as TOML files.
+Templates must be located in `{exe}/templates/` directory as TOML files.
 
 #### Example Job Definition
 
@@ -1903,9 +1903,18 @@ Steps can be configured to run even when their dependencies fail using the `alwa
 
 **Example - Email notification with error reporting**:
 ```toml
+[step.collect_data]
+type = "stock_data_collection"
+description = "Collect stock data for analysis"
+on_error = "continue"
+
 [step.analyze_stocks]
-type = "orchestrator"
-goal_template = "asx-stock-analysis-goal"
+type = "summary"
+description = "Analyze collected stock data"
+depends = "collect_data"
+template = "stock-analysis"  # Embedded template name
+filter_tags = ["stock-data-collected"]
+output_tags = ["stock-analysis"]
 on_error = "continue"
 
 [step.email_report]
@@ -1916,7 +1925,7 @@ always_run = true  # Run even if analyze_stocks fails
 on_error = "fail"
 to = "team@example.com"
 subject = "ASX Daily Stock Analysis"
-body_from_tag = "stock-recommendation"
+body_from_tag = "stock-analysis"
 
 # Error reporting configuration
 on_error_subject = "ASX Daily Analysis - An Error Occurred"

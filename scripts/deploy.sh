@@ -63,7 +63,7 @@ STAGING="$PROJECT_ROOT/deployments/docker/.docker-staging"
 
 # Clean and create staging
 rm -rf "$STAGING"
-mkdir -p "$STAGING/config" "$STAGING/job-definitions" "$STAGING/job-templates" "$STAGING/docs"
+mkdir -p "$STAGING/config" "$STAGING/job-definitions" "$STAGING/templates" "$STAGING/docs"
 
 # Stage configs
 echo -e "\033[0;90m  Staging configuration...\033[0m"
@@ -89,10 +89,10 @@ echo -e "\033[0;90m  Staging job-definitions...\033[0m"
 [ -d "$COMMON_CONFIG/job-definitions" ] && cp "$COMMON_CONFIG/job-definitions"/*.toml "$STAGING/job-definitions/" 2>/dev/null || true
 [ -d "$DOCKER_CONFIG/job-definitions" ] && cp "$DOCKER_CONFIG/job-definitions"/*.toml "$STAGING/job-definitions/" 2>/dev/null || true
 
-# Stage job-templates
-echo -e "\033[0;90m  Staging job-templates...\033[0m"
-[ -d "$COMMON_CONFIG/job-templates" ] && cp "$COMMON_CONFIG/job-templates"/*.toml "$STAGING/job-templates/" 2>/dev/null || true
-[ -d "$DOCKER_CONFIG/job-templates" ] && cp "$DOCKER_CONFIG/job-templates"/*.toml "$STAGING/job-templates/" 2>/dev/null || true
+# Stage templates
+echo -e "\033[0;90m  Staging templates...\033[0m"
+[ -d "$COMMON_CONFIG/templates" ] && cp "$COMMON_CONFIG/templates"/*.toml "$STAGING/templates/" 2>/dev/null || true
+[ -d "$DOCKER_CONFIG/templates" ] && cp "$DOCKER_CONFIG/templates"/*.toml "$STAGING/templates/" 2>/dev/null || true
 
 # Stage docs
 echo -e "\033[0;90m  Staging documentation...\033[0m"

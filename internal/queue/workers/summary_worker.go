@@ -21,11 +21,17 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/schemas"
 	"github.com/ternarybob/quaero/internal/services/llm"
+	"github.com/ternarybob/quaero/internal/templates"
 )
 
 // SummaryWorker handles corpus summary generation from tagged documents.
 // This worker executes synchronously (no child jobs) and creates a single
 // summary document from all documents matching the filter criteria.
+//
+// Template support:
+// - template: Name of prompt template to load (e.g., "stock-analysis")
+// - If template specified, loads prompt and schema from templates package
+// - Template resolution: user override (templatesDir) → embedded default
 type SummaryWorker struct {
 	searchService   interfaces.SearchService
 	documentStorage interfaces.DocumentStorage
@@ -35,6 +41,10 @@ type SummaryWorker struct {
 	jobMgr          *queue.Manager
 	providerFactory *llm.ProviderFactory
 	debugEnabled    bool
+	templatesDir    string // Directory for user template overrides
+
+	// LLM timing for current execution (reset per CreateJobs call)
+	currentLLMTiming *WorkerDebugInfo
 }
 
 // Compile-time assertion: SummaryWorker implements DefinitionWorker interface
@@ -50,6 +60,7 @@ func NewSummaryWorker(
 	jobMgr *queue.Manager,
 	providerFactory *llm.ProviderFactory,
 	debugEnabled bool,
+	templatesDir string,
 ) *SummaryWorker {
 	return &SummaryWorker{
 		searchService:   searchService,
@@ -60,6 +71,7 @@ func NewSummaryWorker(
 		jobMgr:          jobMgr,
 		providerFactory: providerFactory,
 		debugEnabled:    debugEnabled,
+		templatesDir:    templatesDir,
 	}
 }
 
@@ -94,6 +106,58 @@ func (w *SummaryWorker) loadSchemaFromFile(schemaRef string) (map[string]interfa
 	return schema, nil
 }
 
+// resolvePromptAndSchema resolves prompt and schema from template or inline config.
+// Resolution order:
+// 1. If "template" specified → load from templates (user override → embedded)
+// 2. If "prompt" specified → use inline prompt
+// 3. Template takes precedence over inline prompt
+func (w *SummaryWorker) resolvePromptAndSchema(stepConfig map[string]interface{}) (string, string, error) {
+	// Check for template reference
+	if templateName, ok := stepConfig["template"].(string); ok && templateName != "" {
+		tmpl, err := templates.GetTemplate(templateName, w.templatesDir)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to load template '%s': %w", templateName, err)
+		}
+
+		if tmpl.Type != templates.TemplateTypePrompt {
+			return "", "", fmt.Errorf("template '%s' is type '%s', expected 'prompt'", templateName, tmpl.Type)
+		}
+
+		prompt := tmpl.Prompt
+		schemaRef := tmpl.SchemaRef
+
+		// Allow inline schema_ref to override template schema
+		if override, ok := stepConfig["schema_ref"].(string); ok && override != "" {
+			schemaRef = override
+		}
+		// Also check output_schema_ref for backward compatibility
+		if override, ok := stepConfig["output_schema_ref"].(string); ok && override != "" {
+			schemaRef = override
+		}
+
+		w.logger.Info().
+			Str("template", templateName).
+			Str("schema_ref", schemaRef).
+			Msg("Loaded prompt from template")
+
+		return prompt, schemaRef, nil
+	}
+
+	// Fall back to inline prompt
+	prompt, ok := stepConfig["prompt"].(string)
+	if !ok || prompt == "" {
+		return "", "", fmt.Errorf("either 'template' or 'prompt' is required in step config")
+	}
+
+	// Get schema ref from config
+	schemaRef, _ := stepConfig["schema_ref"].(string)
+	if schemaRef == "" {
+		schemaRef, _ = stepConfig["output_schema_ref"].(string)
+	}
+
+	return prompt, schemaRef, nil
+}
+
 // Init performs the initialization/setup phase for a summary step.
 // This is where we:
 //   - Extract and validate configuration (prompt, filter_tags, model)
@@ -108,10 +172,10 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		return nil, fmt.Errorf("step config is required for summary")
 	}
 
-	// Extract prompt (required) - natural language instruction for the summary
-	prompt, ok := stepConfig["prompt"].(string)
-	if !ok || prompt == "" {
-		return nil, fmt.Errorf("prompt is required in step config")
+	// Resolve prompt and schema from template or inline config
+	prompt, schemaRef, err := w.resolvePromptAndSchema(stepConfig)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract filter_tags (required) - documents to include in summary
@@ -281,7 +345,7 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 
 	// Extract output_schema (optional - JSON schema for structured output)
 	// When provided, the LLM MUST return JSON matching this schema
-	// Can be specified inline or via schema_ref (reference to external file)
+	// Can be specified inline, via schema_ref (config), or from template
 	var outputSchema map[string]interface{}
 	if schema, ok := stepConfig["output_schema"].(map[string]interface{}); ok && len(schema) > 0 {
 		outputSchema = schema
@@ -289,8 +353,8 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			Str("phase", "init").
 			Str("step_name", step.Name).
 			Msg("Output schema configured for structured JSON generation (inline)")
-	} else if schemaRef, ok := stepConfig["schema_ref"].(string); ok && schemaRef != "" {
-		// Load external schema from file
+	} else if schemaRef != "" {
+		// schemaRef was resolved from template or config by resolvePromptAndSchema
 		schema, err := w.loadSchemaFromFile(schemaRef)
 		if err != nil {
 			w.logger.Warn().
@@ -417,6 +481,11 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	// Generate summary using provider factory
 	// Pass jobDef to include portfolio config variables in the prompt context
 
+	// Initialize LLM timing for this execution (reset from previous runs)
+	if w.debugEnabled {
+		w.currentLLMTiming = NewWorkerDebug("summary_llm", true)
+	}
+
 	// INITIAL DRAFT GENERATION
 	currentPrompt := prompt
 	var summaryContent string
@@ -431,7 +500,14 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 
 	// If no critique configured, just run once
 	if maxIterations <= 0 || critiquePrompt == "" {
+		if w.currentLLMTiming != nil {
+			w.currentLLMTiming.StartPhase("ai_generation")
+		}
 		summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef, outputSchema)
+		if w.currentLLMTiming != nil {
+			w.currentLLMTiming.EndPhase("ai_generation")
+			w.currentLLMTiming.Complete()
+		}
 		if err != nil {
 			w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed")
 			w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -445,6 +521,11 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 			Int("max_iterations", maxIterations).
 			Msg("Starting iterative summary generation with critique")
 
+		// Start overall LLM timing for iterative mode
+		if w.currentLLMTiming != nil {
+			w.currentLLMTiming.StartPhase("ai_generation")
+		}
+
 		for i := 0; i <= maxIterations; i++ {
 			iterationLabel := fmt.Sprintf("Iteration %d/%d", i+1, maxIterations+1)
 			w.logJobEvent(ctx, stepID, step.Name, "info",
@@ -454,6 +535,10 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 			summaryContent, err = w.generateSummary(ctx, currentPrompt, documents, stepID, thinkingLevel, model, &jobDef, outputSchema)
 			if err != nil {
 				w.logger.Error().Err(err).Str("step_name", step.Name).Msg("Summary generation failed in loop")
+				if w.currentLLMTiming != nil {
+					w.currentLLMTiming.EndPhase("ai_generation")
+					w.currentLLMTiming.Complete()
+				}
 				return "", fmt.Errorf("summary generation failed (iter %d): %w", i, err)
 			}
 
@@ -493,6 +578,12 @@ The following is a critique of your previous draft. You must address EVERY issue
 
 ---
 `, prompt, critique)
+		}
+
+		// End LLM timing for iterative mode
+		if w.currentLLMTiming != nil {
+			w.currentLLMTiming.EndPhase("ai_generation")
+			w.currentLLMTiming.Complete()
 		}
 	}
 
@@ -614,10 +705,12 @@ func (w *SummaryWorker) ValidateConfig(step models.JobStep) error {
 		return fmt.Errorf("summary step requires config")
 	}
 
-	// Validate required prompt field
-	prompt, ok := step.Config["prompt"].(string)
-	if !ok || prompt == "" {
-		return fmt.Errorf("summary step requires 'prompt' in config")
+	// Validate that either 'template' or 'prompt' is specified
+	templateName, hasTemplate := step.Config["template"].(string)
+	prompt, hasPrompt := step.Config["prompt"].(string)
+
+	if (!hasTemplate || templateName == "") && (!hasPrompt || prompt == "") {
+		return fmt.Errorf("summary step requires either 'template' or 'prompt' in config")
 	}
 
 	// Validate required filter_tags field
@@ -1410,8 +1503,35 @@ func (w *SummaryWorker) aggregateWorkerDebug(documents []*models.Document) map[s
 		}
 	}
 
+	// Add summary worker's own LLM timing to worker instances
+	if w.currentLLMTiming != nil && w.currentLLMTiming.IsEnabled() {
+		summaryDebugMeta := w.currentLLMTiming.ToMetadata()
+		if summaryDebugMeta != nil {
+			summaryInstance := map[string]interface{}{
+				"worker_type": "summary_llm",
+			}
+			if timing, ok := summaryDebugMeta["timing"].(map[string]interface{}); ok {
+				summaryInstance["timing"] = timing
+				if totalMs, ok := timing["total_ms"].(int64); ok {
+					totalDurationMs += totalMs
+				}
+			}
+			workerInstances = append(workerInstances, summaryInstance)
+		}
+	}
+
 	if len(workerInstances) == 0 {
 		return nil
+	}
+
+	// Collect source document info for the aggregate
+	sourceDocuments := make([]map[string]interface{}, 0, len(documents))
+	for _, doc := range documents {
+		sourceDocuments = append(sourceDocuments, map[string]interface{}{
+			"id":          doc.ID,
+			"title":       doc.Title,
+			"source_type": doc.SourceType,
+		})
 	}
 
 	result := map[string]interface{}{
@@ -1419,6 +1539,7 @@ func (w *SummaryWorker) aggregateWorkerDebug(documents []*models.Document) map[s
 		"worker_instances":      workerInstances,
 		"api_endpoints_called":  apiEndpointsCount,
 		"source_document_count": len(documents),
+		"source_documents":      sourceDocuments,
 	}
 
 	// Convert AI sources map to slice
@@ -1458,8 +1579,8 @@ func (w *SummaryWorker) workerDebugAggregateToMarkdown(aggregate map[string]inte
 	// Worker instances breakdown
 	if instances, ok := aggregate["worker_instances"].([]map[string]interface{}); ok && len(instances) > 0 {
 		sb.WriteString("### Worker Instances\n\n")
-		sb.WriteString("| Worker Type | Ticker | Total (ms) | API Fetch (ms) | JSON Gen (ms) |\n")
-		sb.WriteString("|-------------|--------|------------|----------------|---------------|\n")
+		sb.WriteString("| Worker Type | Ticker | Total (ms) | API Fetch (ms) | Markdown Gen (ms) | LLM Gen (ms) |\n")
+		sb.WriteString("|-------------|--------|------------|----------------|-------------------|---------------|\n")
 		for _, instance := range instances {
 			workerType, _ := instance["worker_type"].(string)
 			ticker, _ := instance["ticker"].(string)
@@ -1470,6 +1591,8 @@ func (w *SummaryWorker) workerDebugAggregateToMarkdown(aggregate map[string]inte
 			totalMs := int64(0)
 			apiFetchMs := int64(0)
 			jsonGenMs := int64(0)
+			markdownMs := int64(0)
+			aiGenMs := int64(0)
 
 			if timing, ok := instance["timing"].(map[string]interface{}); ok {
 				if t, ok := timing["total_ms"].(int64); ok {
@@ -1487,10 +1610,26 @@ func (w *SummaryWorker) workerDebugAggregateToMarkdown(aggregate map[string]inte
 				} else if t, ok := timing["json_generation_ms"].(float64); ok {
 					jsonGenMs = int64(t)
 				}
+				if t, ok := timing["markdown_conversion_ms"].(int64); ok {
+					markdownMs = t
+				} else if t, ok := timing["markdown_conversion_ms"].(float64); ok {
+					markdownMs = int64(t)
+				}
+				if t, ok := timing["ai_generation_ms"].(int64); ok {
+					aiGenMs = t
+				} else if t, ok := timing["ai_generation_ms"].(float64); ok {
+					aiGenMs = int64(t)
+				}
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d |\n",
-				workerType, ticker, totalMs, apiFetchMs, jsonGenMs))
+			// Use markdown_conversion_ms if present, otherwise fall back to json_generation_ms
+			markdownGenMs := markdownMs
+			if markdownGenMs == 0 {
+				markdownGenMs = jsonGenMs
+			}
+
+			sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %d |\n",
+				workerType, ticker, totalMs, apiFetchMs, markdownGenMs, aiGenMs))
 		}
 		sb.WriteString("\n")
 	}
@@ -1513,6 +1652,25 @@ func (w *SummaryWorker) workerDebugAggregateToMarkdown(aggregate map[string]inte
 			}
 			sb.WriteString(fmt.Sprintf("| %s | %s | %d | %d |\n",
 				provider, model, inputTokens, outputTokens))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Source documents list
+	if sourceDocs, ok := aggregate["source_documents"].([]map[string]interface{}); ok && len(sourceDocs) > 0 {
+		sb.WriteString("### Source Documents\n\n")
+		sb.WriteString("| Document ID | Title | Source Type |\n")
+		sb.WriteString("|-------------|-------|-------------|\n")
+		for _, doc := range sourceDocs {
+			id, _ := doc["id"].(string)
+			title, _ := doc["title"].(string)
+			sourceType, _ := doc["source_type"].(string)
+			// Truncate ID for display
+			shortID := id
+			if len(id) > 20 {
+				shortID = id[:20] + "..."
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", shortID, title, sourceType))
 		}
 		sb.WriteString("\n")
 	}
@@ -1684,6 +1842,15 @@ func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
 	var md strings.Builder
 
 	// Handle stock analysis output format
+	// Check for single stock object (ticker at root level) - stock-analysis.schema.json format
+	if _, hasTicker := data["ticker"]; hasTicker {
+		md.WriteString("# Stock Analysis Report\n\n")
+		md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
+		w.formatStockToMarkdown(&md, data)
+		return md.String(), nil
+	}
+
+	// Handle stocks array format
 	if stocks, ok := data["stocks"].([]interface{}); ok {
 		md.WriteString("# Stock Analysis Report\n\n")
 		md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
@@ -2132,12 +2299,162 @@ func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
 		md.WriteString("\n")
 	}
 
-	// If we didn't generate any meaningful content, return an error
+	// If we didn't generate any meaningful content, use generic JSON to markdown conversion
 	if md.Len() == 0 {
-		return "", fmt.Errorf("no recognizable structure in JSON response")
+		md.WriteString("# Analysis Summary\n\n")
+		md.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format("January 2, 2006")))
+		formatGenericJSONToMarkdown(&md, data, 0)
 	}
 
 	return md.String(), nil
+}
+
+// formatStockToMarkdown formats a single stock object to markdown
+// This handles the stock-analysis.schema.json format where ticker is at root level
+func (w *SummaryWorker) formatStockToMarkdown(md *strings.Builder, stock map[string]interface{}) {
+	ticker := getStringVal(stock, "ticker", "Unknown")
+	name := getStringVal(stock, "name", "Unknown")
+
+	md.WriteString(fmt.Sprintf("## ASX: %s (%s)\n\n", ticker, name))
+
+	// Industry
+	if industry := getStringVal(stock, "industry", ""); industry != "" {
+		md.WriteString(fmt.Sprintf("**Industry:** %s\n\n", industry))
+	}
+
+	// Stock data summary
+	if summary := getStringVal(stock, "stock_data_summary", ""); summary != "" {
+		md.WriteString(fmt.Sprintf("### Stock Data\n%s\n\n", summary))
+	}
+
+	// Technical analysis
+	if techAnalysis, ok := stock["technical_analysis"].(map[string]interface{}); ok {
+		md.WriteString("### Technical Analysis\n")
+		if techSummary := getStringVal(techAnalysis, "summary", ""); techSummary != "" {
+			md.WriteString(fmt.Sprintf("%s\n\n", techSummary))
+		}
+
+		// Technical metrics table
+		md.WriteString("| Metric | Value |\n")
+		md.WriteString("|--------|-------|\n")
+		if sma20 := getFloatVal(techAnalysis, "sma_20", 0); sma20 > 0 {
+			md.WriteString(fmt.Sprintf("| SMA 20 | $%.2f |\n", sma20))
+		}
+		if sma50 := getFloatVal(techAnalysis, "sma_50", 0); sma50 > 0 {
+			md.WriteString(fmt.Sprintf("| SMA 50 | $%.2f |\n", sma50))
+		}
+		if sma200 := getFloatVal(techAnalysis, "sma_200", 0); sma200 > 0 {
+			md.WriteString(fmt.Sprintf("| SMA 200 | $%.2f |\n", sma200))
+		}
+		if rsi := getFloatVal(techAnalysis, "rsi_14", 0); rsi > 0 {
+			md.WriteString(fmt.Sprintf("| RSI (14) | %.1f |\n", rsi))
+		}
+		if support := getFloatVal(techAnalysis, "support_level", 0); support > 0 {
+			md.WriteString(fmt.Sprintf("| Support | $%.2f |\n", support))
+		}
+		if resistance := getFloatVal(techAnalysis, "resistance_level", 0); resistance > 0 {
+			md.WriteString(fmt.Sprintf("| Resistance | $%.2f |\n", resistance))
+		}
+		if shortTrend := getStringVal(techAnalysis, "short_term_trend", ""); shortTrend != "" {
+			md.WriteString(fmt.Sprintf("| Short-term Trend | %s |\n", shortTrend))
+		}
+		if longTrend := getStringVal(techAnalysis, "long_term_trend", ""); longTrend != "" {
+			md.WriteString(fmt.Sprintf("| Long-term Trend | %s |\n", longTrend))
+		}
+		md.WriteString("\n")
+	}
+
+	// Announcement analysis
+	if announcements := getStringVal(stock, "announcement_analysis", ""); announcements != "" {
+		md.WriteString(fmt.Sprintf("### Announcement Analysis\n%s\n\n", announcements))
+	}
+
+	// Price event analysis
+	if priceEvents := getStringVal(stock, "price_event_analysis", ""); priceEvents != "" {
+		md.WriteString(fmt.Sprintf("### Price Event Analysis\n%s\n\n", priceEvents))
+	}
+
+	// 5-year performance
+	if fiveYear := getStringVal(stock, "five_year_performance", ""); fiveYear != "" {
+		md.WriteString(fmt.Sprintf("### 5-Year Performance\n%s\n\n", fiveYear))
+	}
+
+	// Quality rating
+	qualityRating := getStringVal(stock, "quality_rating", "")
+	qualityReasoning := getStringVal(stock, "quality_reasoning", "")
+	if qualityRating != "" {
+		md.WriteString(fmt.Sprintf("### Quality Assessment\n**Rating:** %s\n\n", qualityRating))
+		if qualityReasoning != "" {
+			md.WriteString(fmt.Sprintf("%s\n\n", qualityReasoning))
+		}
+	}
+
+	// Signal-noise ratio
+	if snr := getStringVal(stock, "signal_noise_ratio", ""); snr != "" {
+		md.WriteString(fmt.Sprintf("**Signal-to-Noise Ratio:** %s\n\n", snr))
+	}
+
+	// 5-year CAGR
+	if cagr := getFloatVal(stock, "five_year_cagr", 0); cagr != 0 {
+		md.WriteString(fmt.Sprintf("**5-Year CAGR:** %.1f%%\n\n", cagr*100))
+	}
+
+	// Key metrics table
+	currentPrice := getFloatVal(stock, "current_price", 0)
+	marketCap := getStringVal(stock, "market_cap", "")
+	peRatio := getFloatVal(stock, "pe_ratio", 0)
+	eps := getFloatVal(stock, "eps", 0)
+	divYield := getFloatVal(stock, "dividend_yield", 0)
+
+	if currentPrice > 0 || marketCap != "" {
+		md.WriteString("### Key Metrics\n")
+		md.WriteString("| Metric | Value |\n")
+		md.WriteString("|--------|-------|\n")
+		if currentPrice > 0 {
+			md.WriteString(fmt.Sprintf("| Current Price | $%.2f |\n", currentPrice))
+		}
+		if marketCap != "" {
+			md.WriteString(fmt.Sprintf("| Market Cap | %s |\n", marketCap))
+		}
+		if peRatio > 0 {
+			md.WriteString(fmt.Sprintf("| P/E Ratio | %.1f |\n", peRatio))
+		}
+		if eps != 0 {
+			md.WriteString(fmt.Sprintf("| EPS | $%.2f |\n", eps))
+		}
+		if divYield > 0 {
+			md.WriteString(fmt.Sprintf("| Dividend Yield | %.2f%% |\n", divYield*100))
+		}
+		md.WriteString("\n")
+	}
+
+	// Trader recommendation
+	if traderRec, ok := stock["trader_recommendation"].(map[string]interface{}); ok {
+		md.WriteString("### Trader Recommendation (1-6 week horizon)\n")
+		action := getStringVal(traderRec, "action", "N/A")
+		conviction := getFloatVal(traderRec, "conviction", 0)
+		triggers := getStringVal(traderRec, "triggers", "")
+
+		md.WriteString(fmt.Sprintf("**Action:** %s | **Conviction:** %.0f/10\n\n", action, conviction))
+		if triggers != "" {
+			md.WriteString(fmt.Sprintf("**Key Triggers:** %s\n\n", triggers))
+		}
+	}
+
+	// Super recommendation
+	if superRec, ok := stock["super_recommendation"].(map[string]interface{}); ok {
+		md.WriteString("### Super Recommendation (6-12+ month horizon)\n")
+		action := getStringVal(superRec, "action", "N/A")
+		conviction := getFloatVal(superRec, "conviction", 0)
+		rationale := getStringVal(superRec, "rationale", "")
+
+		md.WriteString(fmt.Sprintf("**Action:** %s | **Conviction:** %.0f/10\n\n", action, conviction))
+		if rationale != "" {
+			md.WriteString(fmt.Sprintf("**Rationale:** %s\n\n", rationale))
+		}
+	}
+
+	md.WriteString("---\n\n")
 }
 
 // getStringVal extracts a string value from a map with a default fallback
@@ -2163,4 +2480,130 @@ func getFloatVal(m map[string]interface{}, key string, defaultVal float64) float
 		}
 	}
 	return defaultVal
+}
+
+// formatGenericJSONToMarkdown recursively formats any JSON structure to markdown
+// This is used as a fallback when no specific format handler matches
+func formatGenericJSONToMarkdown(md *strings.Builder, data interface{}, depth int) {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Sort keys for consistent output
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		// Process in order: prioritize certain keys
+		orderedKeys := orderMarkdownKeys(keys)
+		for _, key := range orderedKeys {
+			val := v[key]
+			formatKeyAsMarkdownHeader(md, key, depth)
+			formatGenericJSONToMarkdown(md, val, depth+1)
+		}
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				md.WriteString(fmt.Sprintf("- %s\n", s))
+			} else if m, ok := item.(map[string]interface{}); ok {
+				// For objects in arrays, indent and format
+				formatGenericJSONToMarkdown(md, m, depth)
+				md.WriteString("\n")
+			} else {
+				md.WriteString(fmt.Sprintf("- %v\n", item))
+			}
+		}
+		md.WriteString("\n")
+	case string:
+		md.WriteString(fmt.Sprintf("%s\n\n", v))
+	case float64:
+		md.WriteString(fmt.Sprintf("%.2f\n\n", v))
+	case int:
+		md.WriteString(fmt.Sprintf("%d\n\n", v))
+	case bool:
+		md.WriteString(fmt.Sprintf("%v\n\n", v))
+	case nil:
+		md.WriteString("N/A\n\n")
+	}
+}
+
+// formatKeyAsMarkdownHeader formats a JSON key as a markdown header based on depth
+func formatKeyAsMarkdownHeader(md *strings.Builder, key string, depth int) {
+	title := formatKeyToTitle(key)
+
+	switch depth {
+	case 0:
+		md.WriteString(fmt.Sprintf("## %s\n\n", title))
+	case 1:
+		md.WriteString(fmt.Sprintf("### %s\n\n", title))
+	default:
+		md.WriteString(fmt.Sprintf("**%s:** ", title))
+	}
+}
+
+// formatKeyToTitle converts snake_case or camelCase to Title Case
+func formatKeyToTitle(key string) string {
+	// Replace underscores with spaces
+	result := strings.ReplaceAll(key, "_", " ")
+
+	// Insert space before capital letters (for camelCase)
+	var titled strings.Builder
+	for i, r := range result {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			// Check if previous char was lowercase
+			prev := rune(result[i-1])
+			if prev >= 'a' && prev <= 'z' {
+				titled.WriteRune(' ')
+			}
+		}
+		titled.WriteRune(r)
+	}
+
+	// Title case each word
+	words := strings.Fields(titled.String())
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(string(word[0])) + strings.ToLower(word[1:])
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// orderMarkdownKeys orders keys for consistent and logical markdown output
+// Priority: summary/title first, recommendation/conclusion last
+func orderMarkdownKeys(keys []string) []string {
+	priority := map[string]int{
+		"title":           -100,
+		"name":            -99,
+		"summary":         -98,
+		"overview":        -97,
+		"description":     -96,
+		"components":      0,
+		"details":         10,
+		"analysis":        20,
+		"recommendation":  90,
+		"recommendations": 91,
+		"conclusion":      95,
+		"warnings":        98,
+		"alerts":          99,
+	}
+
+	// Sort by priority, then alphabetically
+	result := make([]string, len(keys))
+	copy(result, keys)
+
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			pi := priority[strings.ToLower(result[i])]
+			pj := priority[strings.ToLower(result[j])]
+
+			// If both have same priority (or neither is in map), sort alphabetically
+			if pi == pj {
+				if result[i] > result[j] {
+					result[i], result[j] = result[j], result[i]
+				}
+			} else if pi > pj {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	return result
 }

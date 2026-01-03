@@ -799,6 +799,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.Config.Workers.Debug,
 	)
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
@@ -901,6 +902,7 @@ func (a *App) initServices() error {
 
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory
+	// Supports template-based prompts via internal/templates package
 	summaryWorker := workers.NewSummaryWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
@@ -910,6 +912,7 @@ func (a *App) initServices() error {
 		jobMgr,
 		a.ProviderFactory,
 		a.Config.Workers.Debug,
+		"./templates", // Templates directory for prompt templates
 	)
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
@@ -923,7 +926,6 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		a.ProviderFactory,
-		"./job-templates", // Templates directory for goal_template support
 	)
 	a.StepManager.RegisterWorker(orchestratorWorker)
 	orchestratorWorker.SetStepManager(a.StepManager) // Set after registration to avoid circular dependency
@@ -1035,6 +1037,19 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(aiAssessorWorker)
 	a.Logger.Debug().Str("step_type", aiAssessorWorker.GetType().String()).Msg("AI Assessor worker registered")
 
+	// Register StockDataCollection worker (deterministic data collection)
+	// Creates ASX workers internally for inline execution (no child jobs)
+	stockDataCollectionWorker := workers.NewStockDataCollectionWorker(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		a.Config.Workers.Debug,
+	)
+	a.StepManager.RegisterWorker(stockDataCollectionWorker)
+	a.Logger.Debug().Str("step_type", stockDataCollectionWorker.GetType().String()).Msg("Stock data collection worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize JobDispatcher (mechanical job execution coordinator)
@@ -1054,7 +1069,7 @@ func (a *App) initServices() error {
 		jobMgr,
 		a.EventService,
 		a.Logger,
-		"./job-templates", // Templates directory relative to executable
+		"./templates", // Templates directory relative to executable
 	)
 	a.StepManager.RegisterWorker(jobTemplateWorker)
 	a.Logger.Debug().Str("step_type", jobTemplateWorker.GetType().String()).Msg("Job template worker registered")

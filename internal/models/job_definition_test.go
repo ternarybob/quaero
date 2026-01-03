@@ -378,7 +378,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 func TestAllWorkerTypes(t *testing.T) {
 	allTypes := AllWorkerTypes()
 
-	expectedCount := 34
+	expectedCount := 35
 	if len(allTypes) != expectedCount {
 		t.Errorf("AllWorkerTypes() returned %d types, expected %d", len(allTypes), expectedCount)
 	}
@@ -426,6 +426,7 @@ func TestAllWorkerTypes(t *testing.T) {
 		WorkerTypeSignalComputer:      true,
 		WorkerTypePortfolioRollup:     true,
 		WorkerTypeAIAssessor:          true,
+		WorkerTypeStockDataCollection: true,
 	}
 
 	for _, st := range allTypes {

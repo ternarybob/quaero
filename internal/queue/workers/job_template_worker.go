@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
 // JobTemplateWorker - Executes job templates with variable substitution
-// Loads templates from {exe}/job-templates/, applies variable replacements,
+// Loads templates from {exe}/templates/, applies variable replacements,
 // and executes the resulting job definition.
 // -----------------------------------------------------------------------
 
@@ -33,7 +33,7 @@ type JobTemplateDispatcher interface {
 }
 
 // JobTemplateWorker executes job templates with variable substitution.
-// Templates are loaded from {exe}/job-templates/ directory.
+// Templates are loaded from {exe}/templates/ directory.
 // Variables use {variable:key} syntax where variable is from step config.
 type JobTemplateWorker struct {
 	jobDefStorage interfaces.JobDefinitionStorage

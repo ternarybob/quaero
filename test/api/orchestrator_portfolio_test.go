@@ -9,7 +9,6 @@
 package api
 
 import (
-	"net/http"
 	"testing"
 	"time"
 
@@ -20,10 +19,10 @@ import (
 // =============================================================================
 // Portfolio Assessment Integration Test
 // =============================================================================
-// Tests the portfolio-assessment-goal template with various configurations.
+// Tests the hybrid portfolio workflow with stock_data_collection and summary steps.
 //
-// Template tested: job-templates/portfolio-assessment-goal.toml
-// Prerequisite: job-templates/stock-analysis-goal.toml
+// Workflow: hybrid (stock_data_collection → summary → portfolio-assessment)
+// Templates: embedded in internal/templates/ (stock-analysis.toml, portfolio-assessment.toml)
 // Output tag: portfolio-review
 //
 // WORKFLOW:
@@ -37,7 +36,7 @@ import (
 // - Extended timeout: go test -timeout 20m
 // =============================================================================
 
-// TestOrchestratorPortfolioAssessmentGoal tests the portfolio-assessment-goal template
+// TestOrchestratorPortfolioAssessmentGoal tests the hybrid portfolio assessment workflow
 // which provides portfolio-level analysis including:
 // - Concentration analysis
 // - Diversification scoring
@@ -81,14 +80,8 @@ func runPortfolioAssessmentTest(t *testing.T, tc orchestratorTestCase) {
 	require.NoError(t, err, "Failed to load job definition")
 	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
 
-	// Step 2: Verify the goal template exists
-	t.Log("Step 2: Verifying portfolio-assessment-goal template exists")
-	templateResp, err := helper.GET("/api/job-templates/portfolio-assessment-goal")
-	require.NoError(t, err, "Failed to check template")
-	if templateResp.StatusCode != http.StatusOK {
-		t.Skip("portfolio-assessment-goal template not found - skipping test")
-	}
-	templateResp.Body.Close()
+	// Step 2: Verify embedded templates exist (portfolio-assessment is embedded)
+	// No API check needed - templates are embedded in binary
 
 	// Step 3: Trigger the job
 	stepStart = time.Now()

@@ -7,7 +7,7 @@
 // The default Go test timeout (10 minutes) is insufficient for these tests.
 // Individual tests use 15-minute timeouts for job completion with error monitoring.
 //
-// Template tested: job-templates/stock-analysis-goal.toml
+// Workflow: hybrid (stock_data_collection → summary with embedded template)
 // Output tag: stock-analysis
 package api
 
@@ -41,12 +41,12 @@ type orchestratorTestCase struct {
 	expectMacroData        bool     // Whether to validate macro-data documents exist
 }
 
-// TestOrchestratorStockAnalysisGoal tests the stock-analysis-goal template
+// TestOrchestratorStockAnalysisGoal tests the hybrid stock analysis workflow
 // with different stock configurations:
 // 1. SingleStock - Tests with 1 stock to verify basic functionality
 // 2. MultipleStocks - Tests with 3 stocks to verify multi-stock handling
 //
-// Template tested: job-templates/stock-analysis-goal.toml
+// Workflow: hybrid (stock_data_collection → summary with embedded template)
 // Output tag: stock-analysis
 //
 // Each scenario validates:

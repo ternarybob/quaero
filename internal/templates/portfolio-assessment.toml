@@ -1,0 +1,113 @@
+# Portfolio Assessment Prompt Template
+# Type: prompt (for SummaryWorker)
+#
+# This is the SINGLE SOURCE OF TRUTH for portfolio assessment prompts.
+# To customize, create deployments/common/templates/portfolio-assessment.toml
+
+type = "prompt"
+schema_ref = "portfolio-review.schema.json"
+
+prompt = """
+Generate a PORTFOLIO VIEW with portfolio-level assessment from the stock analysis data.
+
+=== PORTFOLIO OVERVIEW DASHBOARD ===
+
+1. TOP-LEVEL METRICS:
+   - Total portfolios analyzed
+   - Total holdings count
+   - Overall portfolio value (if available from P/L data)
+   - Overall quality score (weighted average of holdings)
+   - Diversification score (1-10)
+   - Risk level indicator (LOW/MEDIUM/HIGH)
+
+=== PORTFOLIO COMPOSITION BY GROUP ===
+
+2. FOR EACH PORTFOLIO GROUP:
+   Show holdings table:
+   | Ticker | Company | Price | Quality | Weight | Trader Rec | Super Rec |
+
+   Portfolio Health Metrics:
+   - Quality Score: X/10 (weighted by position size)
+   - Diversification: X/10
+   - Concentration Risk: [LOW/MEDIUM/HIGH]
+
+=== CONCENTRATION ANALYSIS ===
+
+3. POSITION SIZING:
+   - Calculate weight of each holding (by value or equal weight)
+   - Flag any holding > 15% of portfolio (concentration risk)
+   - Flag any holding > 25% as CRITICAL concentration
+
+=== SECTOR DIVERSIFICATION ===
+
+4. SECTOR BREAKDOWN:
+   - Group holdings by sector/industry
+   - Calculate sector weights
+   - Score diversification (1-10):
+     * 1-3: Poor (>60% in one sector)
+     * 4-6: Moderate (40-60% in top sector)
+     * 7-10: Good (<40% in any single sector)
+
+=== QUALITY DISTRIBUTION ===
+
+5. QUALITY ANALYSIS:
+   - Count holdings by quality grade (A/B/C/D/F)
+   - Quality-weighted portfolio score
+   - Flag if >20% in D/F quality stocks
+
+=== TRADER PORTFOLIO VIEW (1-12 weeks) ===
+
+6. SHORT-TERM ASSESSMENT:
+   Focus: Technical momentum, tactical opportunities
+
+   Current State:
+   - Holdings with positive momentum
+   - Near-term catalysts (earnings, announcements)
+   - Technical breakout candidates
+
+   Recommended Actions:
+   - Top 3 holdings to ADD (momentum plays)
+   - Holdings to TRIM (profit-taking candidates)
+   - Position sizing suggestions
+
+   Risk Assessment:
+   - Volatility exposure
+   - Correlation risk (stocks moving together)
+
+=== SUPER FUND PORTFOLIO VIEW (6m - 2 years) ===
+
+7. LONG-TERM ASSESSMENT:
+   Focus: Quality, sustainable growth, retirement suitability
+
+   Current State:
+   - Quality distribution (target: majority A/B)
+   - Dividend income potential
+   - Growth trajectory of holdings
+
+   Recommended Actions:
+   - Holdings to ACCUMULATE (Quality A/B underweight)
+   - Holdings to REDUCE (Quality D/F, overweight)
+   - Rebalancing to target weights
+
+   Compliance Notes:
+   - Diversification adequacy for SMSF
+   - Single-asset concentration warnings
+   - Arm's length requirement considerations
+
+=== PRIORITY ACTIONS ===
+
+8. ACTION LIST:
+   - Immediate (this week): Urgent adjustments
+   - Short-term (1-4 weeks): Near-term rebalancing
+   - Medium-term (1-6 months): Strategic positioning
+
+=== RISK ALERTS ===
+
+9. WARNING FLAGS:
+   - Concentration warnings (>15% single holding)
+   - Quality concerns (>20% in D/F stocks)
+   - Diversification gaps (>60% in one sector)
+   - Correlation risk (holdings move together)
+
+Output MUST match the portfolio-review.schema.json structure.
+"""

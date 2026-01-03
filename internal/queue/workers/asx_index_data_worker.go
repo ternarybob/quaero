@@ -371,7 +371,7 @@ func (w *ASXIndexDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 	// Calculate technical indicators
 	w.calculateTechnicals(stockData)
 
-	// Extract output_tags
+	// Extract output_tags (supports both []interface{} from TOML and []string from inline calls)
 	var outputTags []string
 	if stepConfig != nil {
 		if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -380,6 +380,8 @@ func (w *ASXIndexDataWorker) CreateJobs(ctx context.Context, step models.JobStep
 					outputTags = append(outputTags, tagStr)
 				}
 			}
+		} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+			outputTags = tags
 		}
 	}
 

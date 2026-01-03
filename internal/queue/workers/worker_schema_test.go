@@ -85,7 +85,7 @@ func TestSummaryWorker_SchemaInMetadata(t *testing.T) {
 	})).Return(testDocs, nil).Once()
 
 	// Create worker (no provider factory needed for Init test)
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 
 	// Step config with output_schema
 	step := models.JobStep{
@@ -154,7 +154,7 @@ func TestSummaryWorker_SchemaRefInMetadata(t *testing.T) {
 
 	mockSearch.On("Search", mock.Anything, "", mock.Anything).Return(testDocs, nil).Once()
 
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 
 	step := models.JobStep{
 		Name: "test_summary",
@@ -214,7 +214,7 @@ func TestSummaryWorker_NoSchemaWhenNotProvided(t *testing.T) {
 
 	mockSearch.On("Search", mock.Anything, "", mock.Anything).Return(testDocs, nil).Once()
 
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 
 	// Step config WITHOUT output_schema
 	step := models.JobStep{
@@ -326,7 +326,7 @@ func TestSchemaFlowFromConfigToMetadata(t *testing.T) {
 
 	mockSearch.On("Search", mock.Anything, "", mock.Anything).Return(testDocs, nil)
 
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 
 	// Test with a stock-report.schema.json-like structure
 	testSchema := map[string]interface{}{

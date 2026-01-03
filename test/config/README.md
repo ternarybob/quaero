@@ -15,7 +15,7 @@ test/config/
 │   ├── news-crawler.toml         # Example news crawler job
 │   ├── my-custom-crawler.toml    # Example custom crawler job
 │   └── test-agent-job.toml       # Test agent job (keyword extraction)
-├── job-templates/                # Job templates (copied to bin/job-templates/)
+├── templates/                    # Prompt templates (copied to bin/templates/)
 ├── schemas/                      # JSON schemas (copied to bin/schemas/)
 └── README.md                     # This file
 ```
@@ -31,7 +31,7 @@ During `SetupTestEnvironment()`, the following files are copied to the bin direc
 | `email.toml` | `bin/email.toml` | Email/SMTP settings |
 | `variables.toml` | `bin/variables.toml` | Variables and API keys (with .env injection) |
 | `job-definitions/` | `bin/job-definitions/` | Job definition files |
-| `job-templates/` | `bin/job-templates/` | Job template files |
+| `templates/` | `bin/templates/` | Prompt template files |
 | `schemas/` | `bin/schemas/` | JSON schema files |
 
 ## Configuration Approach

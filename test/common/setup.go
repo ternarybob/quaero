@@ -857,27 +857,27 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
-	// Copy job-templates directory to bin/job-templates (for job template worker)
-	jobTemplatesSourcePath, err := filepath.Abs("../config/job-templates")
+	// Copy templates directory to bin/templates (for job template worker)
+	templatesSourcePath, err := filepath.Abs("../config/templates")
 	if err != nil {
-		return fmt.Errorf("failed to resolve job-templates source path: %w", err)
+		return fmt.Errorf("failed to resolve templates source path: %w", err)
 	}
 
-	jobTemplatesDestPath := filepath.Join(binDir, "job-templates")
+	templatesDestPath := filepath.Join(binDir, "templates")
 
-	// Remove existing job-templates directory if it exists
-	if _, err := os.Stat(jobTemplatesDestPath); err == nil {
-		if err := os.RemoveAll(jobTemplatesDestPath); err != nil {
-			return fmt.Errorf("failed to remove existing job-templates directory: %w", err)
+	// Remove existing templates directory if it exists
+	if _, err := os.Stat(templatesDestPath); err == nil {
+		if err := os.RemoveAll(templatesDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing templates directory: %w", err)
 		}
 	}
 
-	// Copy job-templates directory
-	if err := env.copyDir(jobTemplatesSourcePath, jobTemplatesDestPath); err != nil {
-		return fmt.Errorf("failed to copy job-templates directory: %w", err)
+	// Copy templates directory
+	if err := env.copyDir(templatesSourcePath, templatesDestPath); err != nil {
+		return fmt.Errorf("failed to copy templates directory: %w", err)
 	}
 
-	fmt.Fprintf(env.LogFile, "Job templates copied from %s to: %s\n", jobTemplatesSourcePath, jobTemplatesDestPath)
+	fmt.Fprintf(env.LogFile, "Templates copied from %s to: %s\n", templatesSourcePath, templatesDestPath)
 
 	// Schemas are now embedded in the binary via internal/schemas/embed.go
 	// No need to copy external schema files - remove any stale schemas directory

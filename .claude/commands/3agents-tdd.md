@@ -1,6 +1,6 @@
 ---
 name: 3agents-tdd
-description: TDD enforcement - tests are IMMUTABLE, fix code until tests pass. Sequential execution with full restart on fix.
+description: TDD enforcement - tests are IMMUTABLE, fix code until tests pass. Sequential execution with full restart on fix. Output captured to files to prevent context overflow.
 ---
 
 Execute: $ARGUMENTS
@@ -66,6 +66,17 @@ echo "Created workdir: $WORKDIR"
 │                                                                  │
 │ Task is NOT complete without summary.md in workdir.             │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ OUTPUT CAPTURE IS MANDATORY                                     │
+│                                                                  │
+│ • ALL test output → $WORKDIR/test_*.log files                   │
+│ • Claude sees ONLY pass/fail + last 30 lines on failure         │
+│ • NEVER let full test output into context                       │
+│ • Reference log files by path, don't paste contents             │
+│                                                                  │
+│ This prevents context overflow during long-running tests.       │
+└─────────────────────────────────────────────────────────────────┘
 ````
 
 ## CONTEXT MANAGEMENT
@@ -84,6 +95,15 @@ If context is lost mid-iteration:
 2. Re-read the test file to extract requirements
 3. Resume PHASE 3 loop from recorded iteration
 
+### Output Limits (CRITICAL)
+| Output Type | Max Lines in Context | Action |
+|-------------|---------------------|--------|
+| Test stdout/stderr | 0 (captured to file) | Always redirect to $WORKDIR/*.log |
+| Error summary | 30 | Use `tail -30` on failure |
+| Stack traces | 20 | Extract key frames only |
+| File reads | 500 | Use grep/head/tail for large files |
+| Build output | 50 | Capture full to file, show summary |
+
 ## WORKFLOW
 
 ### PHASE 0: RESET CONTEXT
@@ -100,6 +120,7 @@ If context is lost mid-iteration:
 **Step 1.1: Create workdir (MANDATORY)**
 ````bash
 mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/logs"
 ````
 Verify directory exists before continuing.
 
@@ -152,9 +173,17 @@ echo "Found ${#TESTS[@]} tests to run sequentially"
 - Iteration: 0
 - Last failed test: N/A
 - Status: STARTING
+
+## Log Files
+- Test logs: $WORKDIR/logs/test_*.log
+- Build logs: $WORKDIR/logs/build_*.log
 ````
 
 ### PHASE 3: SEQUENTIAL TEST LOOP (max 3 iterations)
+
+**OUTPUT CAPTURE (MANDATORY)**
+All test output MUST go to file. Claude only sees pass/fail + brief error summary.
+
 ````
 ITERATION = 0
      │
@@ -163,24 +192,53 @@ ITERATION = 0
 │ START SEQUENTIAL RUN (iteration $ITERATION)                     │
 │                                                                 │
 │   for TEST in ${TESTS[@]}; do                                   │
-│       go test -v -run "^${TEST}$" ./$TEST_PKG/...               │
+│       TEST_LOG="$WORKDIR/logs/test_${TEST}_iter${ITERATION}.log"│
 │                                                                 │
-│       if PASS → continue to next test                           │
-│       if FAIL → break loop, go to ANALYZE                       │
+│       # CRITICAL: Capture ALL output to file                    │
+│       go test -v -timeout 20m \                                 │
+│           -run "^${TEST}$" ./$TEST_PKG/... \                    │
+│           > "$TEST_LOG" 2>&1                                    │
+│       RESULT=$?                                                 │
+│                                                                 │
+│       if [ $RESULT -eq 0 ]; then                                │
+│           echo "✓ PASS: ${TEST}"                                │
+│           continue                                              │
+│       fi                                                        │
+│                                                                 │
+│       # FAIL - show minimal context only                        │
+│       echo "✗ FAIL: ${TEST}"                                    │
+│       echo "Log: $TEST_LOG"                                     │
+│       echo "=== Last 30 lines ==="                              │
+│       tail -30 "$TEST_LOG"                                      │
+│       echo "=== End of summary ==="                             │
+│                                                                 │
+│       # Break for analysis                                      │
+│       FAILED_TEST=$TEST                                         │
+│       break                                                     │
 │   done                                                          │
 │                                                                 │
-│   ALL PASSED → PHASE 4 (COMPLETE)                               │
+│   if [ -z "$FAILED_TEST" ]; then                                │
+│       ALL PASSED → PHASE 4 (COMPLETE)                           │
+│   fi                                                            │
 └─────────────────────────────────────────────────────────────────┘
             │
          FAILURE at test N
             │
             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ANALYZE FAILURE - CRITICAL DECISION POINT                       │
+│ ANALYZE FAILURE - FROM LOG FILE                                 │
 │                                                                 │
-│ • Which test failed: ${TESTS[N]}                                │
-│ • Error message/stack trace                                     │
-│ • Expected vs Actual                                            │
+│ Read error details from $TEST_LOG file:                         │
+│                                                                 │
+│   # Extract assertion failure (grep for key patterns)           │
+│   grep -A5 "FAIL\|Error\|assert\|expected\|got:" "$TEST_LOG" \  │
+│       | head -20                                                │
+│                                                                 │
+│ DO NOT paste entire log into context!                           │
+│ Extract only:                                                   │
+│   • Test name that failed                                       │
+│   • Assertion that failed (expected vs actual)                  │
+│   • File:line of failure                                        │
 │                                                                 │
 │ ASK: Is the test expecting CURRENT or DEPRECATED behavior?      │
 │                                                                 │
@@ -206,10 +264,10 @@ ITERATION = 0
 │ • Build     │ │ • What test SHOULD expect (new behavior)        │
 │   must pass │ │ • Suggested test change                         │
 │             │ │                                                 │
-│ NEVER:      │ │ Then: SKIP this test, continue with next        │
-│ • Add compat│ │                                                 │
-│ • Keep old  │ │ DO NOT add backward compatibility!              │
-│   behavior  │ │                                                 │
+│ Build check:│ │ Then: SKIP this test, continue with next        │
+│ go build    │ │                                                 │
+│ ./... 2>&1  │ │ DO NOT add backward compatibility!              │
+│ | tail -20  │ │                                                 │
 └─────────────┘ └─────────────────────────────────────────────────┘
             │
             ▼
@@ -228,29 +286,71 @@ ITERATION < 3    ITERATION = 3
  from test 1     (COMPLETE)
 ````
 
+**Build verification with output capture:**
+````bash
+BUILD_LOG="$WORKDIR/logs/build_iter${ITERATION}.log"
+go build ./... > "$BUILD_LOG" 2>&1
+BUILD_RESULT=$?
+
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo "✗ BUILD FAILED"
+    echo "=== Last 20 lines ==="
+    tail -20 "$BUILD_LOG"
+else
+    echo "✓ BUILD PASSED"
+fi
+````
+
+**Error extraction helper (use instead of reading full log):**
+````bash
+# Extract just the failure info from test log
+extract_failure() {
+    local LOG_FILE=$1
+    echo "--- Failure Summary ---"
+    
+    # Get the FAIL line and context
+    grep -B2 -A10 "^--- FAIL:" "$LOG_FILE" | head -15
+    
+    # Get assertion errors
+    grep -A3 "Error:\|assert\|expected\|got:" "$LOG_FILE" | head -10
+    
+    echo "--- End Summary ---"
+    echo "Full log: $LOG_FILE"
+}
+````
+
 **MUST update `$WORKDIR/tdd_state.md` after each iteration:**
 ````markdown
 ## Current State
 - Iteration: {n}
 - Last failed test: {test_name}
 - Status: IN_PROGRESS
+- Log file: $WORKDIR/logs/test_{test_name}_iter{n}.log
 
 ## Iteration History
 ### Iteration 1
 - Failed at: TestSecond
-- Error: <brief error>
+- Log: $WORKDIR/logs/test_TestSecond_iter1.log
+- Error summary: <2-3 line description of failure>
 - Action: CODE_FIX / TEST_MISALIGNED
 - Details: <what was changed or documented>
 ````
 
 ---
-### ⟲ COMPACT POINT: ITERATION 2
+### ⟲ COMPACT POINT: AFTER EACH ITERATION
 
-**Run `/compact` when iteration count reaches 2.**
+**Run `/compact` after completing each iteration fix.**
+
+Include in compact summary:
+- Current iteration number
+- Tests passed so far
+- Current failure being addressed
+- Log file locations
 
 Recovery context:
 - Read: `$WORKDIR/tdd_state.md`
 - Misaligned tests: Check `$WORKDIR/test_issues.md`
+- Last error: `tail -30 $WORKDIR/logs/test_*_iter*.log | tail -1` (most recent)
 
 ---
 
@@ -259,9 +359,20 @@ Recovery context:
 **This phase MUST execute. Task is incomplete without it.**
 
 **Step 4.1: Verify final state**
-- All tests pass in sequential order (or documented as misaligned)
-- No test files modified
-- Build passes
+````bash
+# Run all tests one final time with output capture
+FINAL_LOG="$WORKDIR/logs/final_run.log"
+go test -v -timeout 30m ./$TEST_PKG/... > "$FINAL_LOG" 2>&1
+FINAL_RESULT=$?
+
+if [ $FINAL_RESULT -eq 0 ]; then
+    echo "✓ ALL TESTS PASSED"
+else
+    echo "✗ SOME TESTS FAILED"
+    echo "=== Failures ==="
+    grep "^--- FAIL:" "$FINAL_LOG"
+fi
+````
 
 **Step 4.2: MUST write `$WORKDIR/summary.md`:**
 ````markdown
@@ -278,12 +389,12 @@ Recovery context:
 - Final status: PASS/PARTIAL/FAIL
 
 ## Test Results (in order)
-| # | Test Name | Status | Notes |
-|---|-----------|--------|-------|
-| 1 | TestFirst | ✓ PASS | |
-| 2 | TestSecond | ✓ PASS | |
-| 3 | TestThird | ✗ FAIL | <reason> |
-| 4 | TestFourth | ⚠ MISALIGNED | Test expects deprecated behavior |
+| # | Test Name | Status | Log File |
+|---|-----------|--------|----------|
+| 1 | TestFirst | ✓ PASS | logs/test_TestFirst_iter0.log |
+| 2 | TestSecond | ✓ PASS | logs/test_TestSecond_iter1.log |
+| 3 | TestThird | ✗ FAIL | logs/test_TestThird_iter2.log |
+| 4 | TestFourth | ⚠ MISALIGNED | N/A |
 
 ## Code Changes Made
 | File | Change | Reason |
@@ -310,8 +421,16 @@ Recovery context:
 
 See full details: `$WORKDIR/test_issues.md`
 
+## Log Files
+| File | Purpose |
+|------|---------|
+| logs/test_*.log | Individual test run output |
+| logs/build_*.log | Build verification output |
+| logs/final_run.log | Final test suite run |
+
 ## Final Build
-- Command: `./scripts/build.sh` or `go build ./...`
+- Command: `go build ./...`
+- Log: `$WORKDIR/logs/build_final.log`
 - Result: PASS/FAIL
 
 ## Action Required
@@ -343,7 +462,7 @@ fi
 ````
 
 The `common.CopyTDDSummary()` function in Go tests will also copy `summary.md` automatically,
-but the full workdir copy above includes all artifacts (tdd_state.md, test_issues.md, etc.).
+but the full workdir copy above includes all artifacts (tdd_state.md, test_issues.md, logs/, etc.).
 
 ---
 ### ⟲ COMPACT POINT: TASK COMPLETE
@@ -363,6 +482,8 @@ but the full workdir copy above includes all artifacts (tdd_state.md, test_issue
 | **Add backward compatibility** | FAILURE |
 | **Keep deprecated types/APIs** | FAILURE |
 | **Skip writing summary.md** | FAILURE |
+| **Let full test output into context** | FAILURE |
+| **Paste log file contents (>30 lines)** | FAILURE |
 
 ## ALLOWED (explicitly permitted)
 
@@ -376,6 +497,7 @@ but the full workdir copy above includes all artifacts (tdd_state.md, test_issue
 | Delete dead code | Cleaner codebase |
 | Remove unused functions | If not tested with current behavior, not needed |
 | Document test as misaligned | Tests expecting deprecated behavior need updating |
+| Read log files with tail/head/grep | Bounded output extraction |
 
 ## MISALIGNED TEST HANDLING
 
@@ -458,7 +580,7 @@ if currentStatus != expectedStatus {
 | Point | When | Why |
 |-------|------|-----|
 | Start | Phase 0 | Maximum headroom for iterations |
-| Iteration 2 | During Phase 3 | Compact before final iteration |
+| After each iteration | During Phase 3 | Prevent accumulation |
 | Complete | Phase 4 | Clean slate for next task |
 
 ## WORKDIR ARTIFACTS (MANDATORY)
@@ -468,21 +590,55 @@ if currentStatus != expectedStatus {
 | `tdd_state.md` | Current iteration state | Phase 2, updated each iteration | **YES** |
 | `test_issues.md` | Misaligned tests | Phase 3, when tests expect deprecated | If applicable |
 | `summary.md` | Final summary | Phase 4 | **YES - ALWAYS** |
+| `logs/` | All captured output | Throughout | **YES** |
+| `logs/test_*.log` | Individual test runs | Phase 3 | **YES** |
+| `logs/build_*.log` | Build verifications | Phase 3 | **YES** |
+| `logs/final_run.log` | Final test suite | Phase 4 | **YES** |
 
 **Task is NOT complete until `summary.md` exists in workdir.**
+
+## OUTPUT CAPTURE QUICK REFERENCE
+
+````bash
+# CORRECT: Test output to file, summary to Claude
+go test -v -run "^${TEST}$" ./pkg/... > "$WORKDIR/logs/test.log" 2>&1
+tail -30 "$WORKDIR/logs/test.log"
+
+# CORRECT: Build output to file, summary to Claude  
+go build ./... > "$WORKDIR/logs/build.log" 2>&1
+tail -20 "$WORKDIR/logs/build.log"
+
+# CORRECT: Extract specific error from log
+grep -A5 "FAIL\|Error:" "$WORKDIR/logs/test.log" | head -15
+
+# WRONG: Direct output to Claude (will overflow context)
+go test -v -run "^${TEST}$" ./pkg/...
+
+# WRONG: Cat entire log file
+cat "$WORKDIR/logs/test.log"
+
+# WRONG: Read large sections of log
+tail -500 "$WORKDIR/logs/test.log"
+````
 
 ## RESULTS INTEGRATION
 
 When running tests that produce results directories (e.g., `test/results/api/orchestrator-*`):
 - The TDD workdir is copied to `{results_dir}/tdd-workdir/` in Phase 4.4
 - Go tests call `common.CopyTDDSummary()` which copies: `summary.md`, `tdd_state.md`, `test_issues.md`
+- Log files in `logs/` provide full debugging context without bloating Claude's context
 - This provides complete traceability from test results back to TDD session
 
 ## INVOKE
 ````
-/test-iterate test/ui/job_definition_test.go
+/3agents-tdd test/ui/job_definition_test.go
 # → .claude/workdir/2024-12-17-1430-tdd-job_definition/
 #    ├── tdd_state.md      (created Phase 2)
 #    ├── test_issues.md    (if misaligned tests found)
-#    └── summary.md        (created Phase 4 - REQUIRED)
+#    ├── summary.md        (created Phase 4 - REQUIRED)
+#    └── logs/
+#        ├── test_TestFirst_iter0.log
+#        ├── test_TestSecond_iter1.log
+#        ├── build_iter0.log
+#        └── final_run.log
 ````

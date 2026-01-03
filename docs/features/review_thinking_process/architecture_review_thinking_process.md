@@ -104,7 +104,7 @@ Instead of just free-text summaries, enforce outputs that map to a JSON schema o
 
 ### 4.3. Separating Config from Code
 *   **User Config**: `~/.quaero/config/user_portfolio.toml` (Private, simple key-value).
-*   **System Templates**: `deployments/common/job-templates/...` (Version controlled logic).
+*   **System Templates**: `deployments/common/templates/...` (Version controlled logic).
 *   **Injection**: The Job Runner injects User Config into System Templates at runtime.
 
 ## 5. Applicability to Non-Stock Domains

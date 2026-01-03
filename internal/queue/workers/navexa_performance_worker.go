@@ -257,13 +257,15 @@ func (w *NavexaPerformanceWorker) CreateJobs(ctx context.Context, step models.Jo
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
 	tags := []string{"navexa-performance", portfolioName, dateTag}
 
-	// Add output_tags from step config
+	// Add output_tags from step config (supports both []interface{} from TOML and []string from inline calls)
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
 		for _, tag := range outputTags {
 			if tagStr, ok := tag.(string); ok {
 				tags = append(tags, tagStr)
 			}
 		}
+	} else if outputTags, ok := stepConfig["output_tags"].([]string); ok {
+		tags = append(tags, outputTags...)
 	}
 
 	// Convert holdings performance to JSON-friendly format

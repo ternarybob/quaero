@@ -10,13 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -326,7 +323,6 @@ type OrchestratorWorker struct {
 	jobMgr          *queue.Manager
 	providerFactory *llm.ProviderFactory
 	stepManager     interfaces.StepManager
-	templatesDir    string // Directory containing goal templates
 }
 
 // Compile-time assertion: OrchestratorWorker implements DefinitionWorker interface
@@ -341,7 +337,6 @@ func NewOrchestratorWorker(
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	providerFactory *llm.ProviderFactory,
-	templatesDir string,
 ) *OrchestratorWorker {
 	return &OrchestratorWorker{
 		documentStorage: documentStorage,
@@ -351,7 +346,6 @@ func NewOrchestratorWorker(
 		logger:          logger,
 		jobMgr:          jobMgr,
 		providerFactory: providerFactory,
-		templatesDir:    templatesDir,
 	}
 }
 
@@ -364,17 +358,6 @@ func (w *OrchestratorWorker) SetStepManager(sm interfaces.StepManager) {
 // GetType returns WorkerTypeOrchestrator for the DefinitionWorker interface
 func (w *OrchestratorWorker) GetType() models.WorkerType {
 	return models.WorkerTypeOrchestrator
-}
-
-// GoalTemplateConfig holds configuration loaded from a goal template file
-type GoalTemplateConfig struct {
-	Goal            string
-	ThinkingLevel   string
-	ModelPreference string
-	OutputTags      []string
-	AvailableTools  []map[string]interface{}
-	OutputSchema    map[string]interface{} // JSON schema for structured LLM output
-	OutputSchemaRef string                 // Reference to external schema file (e.g., "stock-report.schema.json")
 }
 
 // loadSchemaFromFile loads a JSON schema from the embedded schemas.
@@ -486,168 +469,18 @@ func (w *OrchestratorWorker) resolveSchemaRefs(schema map[string]interface{}, vi
 	return nil
 }
 
-// loadGoalTemplate loads a goal template from the templates directory.
-// Template files are expected to have a [template] section containing:
-// - goal: The natural language goal for the orchestrator
-// - thinking_level: LLM reasoning depth (MINIMAL, LOW, MEDIUM, HIGH)
-// - model_preference: Model selection preference (auto, flash, pro, etc.)
-// - output_tags: Tags to apply to output documents
-// - available_tools: Array of tool definitions for the orchestrator
-// - output_schema_ref: Reference to external JSON schema file (e.g., "stock-report.schema.json")
-func (w *OrchestratorWorker) loadGoalTemplate(templateName string) (*GoalTemplateConfig, error) {
-	if w.templatesDir == "" {
-		return nil, fmt.Errorf("templates directory not configured")
-	}
-
-	// Build template file path - support both TOML and JSON templates
-	var templateFile string
-	var isJSON bool
-
-	// Try JSON first, then TOML
-	jsonFile := filepath.Join(w.templatesDir, templateName+".json")
-	tomlFile := filepath.Join(w.templatesDir, templateName+".toml")
-
-	if _, err := os.Stat(jsonFile); err == nil {
-		templateFile = jsonFile
-		isJSON = true
-	} else if _, err := os.Stat(tomlFile); err == nil {
-		templateFile = tomlFile
-		isJSON = false
-	} else {
-		return nil, fmt.Errorf("goal template file not found: %s (tried .json and .toml)", templateName)
-	}
-
-	// Read template content
-	templateContent, err := os.ReadFile(templateFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read goal template file: %w", err)
-	}
-
-	var config *GoalTemplateConfig
-
-	if isJSON {
-		// Parse JSON template
-		config, err = w.parseJSONTemplate(templateContent)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse JSON template: %w", err)
-		}
-	} else {
-		// Parse TOML template (legacy format)
-		config, err = w.parseTOMLTemplate(templateContent)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse TOML template: %w", err)
-		}
-	}
-
-	// If output_schema_ref is specified, load the external schema
-	if config.OutputSchemaRef != "" && len(config.OutputSchema) == 0 {
-		schema, err := w.loadSchemaFromFile(config.OutputSchemaRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load output schema '%s': %w", config.OutputSchemaRef, err)
-		}
-		config.OutputSchema = schema
-	}
-
-	if config.Goal == "" {
-		return nil, fmt.Errorf("goal template '%s' does not contain a goal", templateName)
-	}
-
-	hasSchema := config.OutputSchema != nil && len(config.OutputSchema) > 0
-	w.logger.Info().
-		Str("template", templateName).
-		Str("format", map[bool]string{true: "json", false: "toml"}[isJSON]).
-		Str("thinking_level", config.ThinkingLevel).
-		Str("model_preference", config.ModelPreference).
-		Int("output_tags", len(config.OutputTags)).
-		Int("available_tools", len(config.AvailableTools)).
-		Bool("has_output_schema", hasSchema).
-		Str("output_schema_ref", config.OutputSchemaRef).
-		Msg("Loaded goal template")
-
-	return config, nil
-}
-
-// parseTOMLTemplate parses a TOML-format goal template
-func (w *OrchestratorWorker) parseTOMLTemplate(content []byte) (*GoalTemplateConfig, error) {
-	type GoalTemplateFile struct {
-		Template struct {
-			Goal            string                   `toml:"goal"`
-			ThinkingLevel   string                   `toml:"thinking_level"`
-			ModelPreference string                   `toml:"model_preference"`
-			OutputTags      []string                 `toml:"output_tags"`
-			AvailableTools  []map[string]interface{} `toml:"available_tools"`
-			OutputSchema    map[string]interface{}   `toml:"output_schema"`     // Inline JSON schema (legacy)
-			OutputSchemaRef string                   `toml:"output_schema_ref"` // Reference to external schema file
-		} `toml:"template"`
-	}
-
-	var templateFile GoalTemplateFile
-	if err := toml.Unmarshal(content, &templateFile); err != nil {
-		return nil, err
-	}
-
-	return &GoalTemplateConfig{
-		Goal:            templateFile.Template.Goal,
-		ThinkingLevel:   templateFile.Template.ThinkingLevel,
-		ModelPreference: templateFile.Template.ModelPreference,
-		OutputTags:      templateFile.Template.OutputTags,
-		AvailableTools:  templateFile.Template.AvailableTools,
-		OutputSchema:    templateFile.Template.OutputSchema,
-		OutputSchemaRef: templateFile.Template.OutputSchemaRef,
-	}, nil
-}
-
-// parseJSONTemplate parses a JSON-format goal template
-func (w *OrchestratorWorker) parseJSONTemplate(content []byte) (*GoalTemplateConfig, error) {
-	type JSONTemplateFile struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Type        string `json:"type"`
-		Description string `json:"description"`
-		Template    struct {
-			Goal            string                   `json:"goal"`
-			ThinkingLevel   string                   `json:"thinking_level"`
-			ModelPreference string                   `json:"model_preference"`
-			OutputTags      []string                 `json:"output_tags"`
-			AvailableTools  []map[string]interface{} `json:"available_tools"`
-			OutputSchemaRef string                   `json:"output_schema_ref"` // Reference to external schema file
-		} `json:"template"`
-	}
-
-	var templateFile JSONTemplateFile
-	if err := json.Unmarshal(content, &templateFile); err != nil {
-		return nil, err
-	}
-
-	return &GoalTemplateConfig{
-		Goal:            templateFile.Template.Goal,
-		ThinkingLevel:   templateFile.Template.ThinkingLevel,
-		ModelPreference: templateFile.Template.ModelPreference,
-		OutputTags:      templateFile.Template.OutputTags,
-		AvailableTools:  templateFile.Template.AvailableTools,
-		OutputSchemaRef: templateFile.Template.OutputSchemaRef,
-	}, nil
-}
-
 // ValidateConfig validates step configuration before execution.
 // Checks for required fields and valid values.
-// Accepts either 'goal' (inline) or 'goal_template' (reference to template file).
 func (w *OrchestratorWorker) ValidateConfig(step models.JobStep) error {
 	config := step.Config
 	if config == nil {
 		return fmt.Errorf("step config is required for orchestrator")
 	}
 
-	// Validate goal: either 'goal' or 'goal_template' is required
+	// Validate goal is required
 	goal, hasGoal := config["goal"].(string)
-	goalTemplate, hasGoalTemplate := config["goal_template"].(string)
-
-	if hasGoal && strings.TrimSpace(goal) != "" {
-		// Inline goal - valid
-	} else if hasGoalTemplate && strings.TrimSpace(goalTemplate) != "" {
-		// Goal template reference - valid (will be loaded at Init time)
-	} else {
-		return fmt.Errorf("either 'goal' or 'goal_template' is required in orchestrator step config")
+	if !hasGoal || strings.TrimSpace(goal) == "" {
+		return fmt.Errorf("'goal' is required in orchestrator step config")
 	}
 
 	// Validate thinking_level if provided
@@ -688,15 +521,15 @@ func (w *OrchestratorWorker) ValidateConfig(step models.JobStep) error {
 // Init performs the initialization/setup phase for an orchestrator step.
 // This is where we:
 //   - Extract and validate configuration (goal, context, tools)
-//   - Load goal_template if specified (template provides goal, tools, thinking_level, etc.)
 //   - Prepare the context for LLM planning
 //   - Return metadata for CreateJobs
 //
 // The Init phase does NOT execute any planning - it only validates and prepares.
 //
-// Configuration priority:
-//   - goal_template: If specified, loads goal/tools/thinking_level/output_tags from template
-//   - Step config can override template values (e.g., step-level thinking_level wins)
+// Configuration:
+//   - goal: Required inline goal
+//   - available_tools: Tool definitions for orchestrator
+//   - thinking_level, model_preference, output_tags: Optional overrides
 //   - Variables and benchmarks come from job definition [config] section (user data)
 func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	config := step.Config
@@ -704,64 +537,30 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 		return nil, fmt.Errorf("step config is required for orchestrator")
 	}
 
-	var goal string
 	var availableTools []map[string]interface{}
 	var outputTags []string
 	var outputSchema map[string]interface{} // JSON schema for structured LLM output
 	thinkingLevel := ThinkingLevelMedium
 	modelPreference := "auto"
 
-	// Check for goal_template first
-	if goalTemplate, ok := config["goal_template"].(string); ok && strings.TrimSpace(goalTemplate) != "" {
-		// Load goal from template
-		templateConfig, err := w.loadGoalTemplate(goalTemplate)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load goal_template '%s': %w", goalTemplate, err)
-		}
-
-		// Apply template values as defaults
-		goal = templateConfig.Goal
-		availableTools = templateConfig.AvailableTools
-		outputTags = templateConfig.OutputTags
-		outputSchema = templateConfig.OutputSchema
-
-		if templateConfig.ThinkingLevel != "" {
-			thinkingLevel = ThinkingLevel(strings.ToUpper(templateConfig.ThinkingLevel))
-		}
-		if templateConfig.ModelPreference != "" {
-			modelPreference = templateConfig.ModelPreference
-		}
-
-		hasSchema := outputSchema != nil && len(outputSchema) > 0
-		w.logger.Info().
-			Str("goal_template", goalTemplate).
-			Int("tools_from_template", len(availableTools)).
-			Int("output_tags", len(outputTags)).
-			Bool("has_output_schema", hasSchema).
-			Msg("Loaded goal template")
+	// Extract goal (required)
+	goal, ok := config["goal"].(string)
+	if !ok || strings.TrimSpace(goal) == "" {
+		return nil, fmt.Errorf("'goal' is required in orchestrator step config")
 	}
 
-	// Step config can override template values
-	if inlineGoal, ok := config["goal"].(string); ok && strings.TrimSpace(inlineGoal) != "" {
-		goal = inlineGoal // Step-level goal overrides template
-	}
-	if goal == "" {
-		return nil, fmt.Errorf("either 'goal' or 'goal_template' is required in orchestrator step config")
-	}
-
-	// Extract thinking_level from step config (overrides template)
+	// Extract thinking_level from step config
 	if level, ok := config["thinking_level"].(string); ok {
 		thinkingLevel = ThinkingLevel(strings.ToUpper(level))
 	}
 
-	// Extract model_preference from step config (overrides template)
+	// Extract model_preference from step config
 	if pref, ok := config["model_preference"].(string); ok {
 		modelPreference = pref
 	}
 
-	// Extract output_tags from step config (overrides template)
+	// Extract output_tags from step config
 	if tags, ok := config["output_tags"].([]interface{}); ok {
-		outputTags = nil // Reset to step-level tags
 		for _, t := range tags {
 			if s, ok := t.(string); ok {
 				outputTags = append(outputTags, s)
@@ -771,9 +570,8 @@ func (w *OrchestratorWorker) Init(ctx context.Context, step models.JobStep, jobD
 		outputTags = tags
 	}
 
-	// Extract available_tools from step config (overrides template)
+	// Extract available_tools from step config
 	if tools, ok := config["available_tools"].([]interface{}); ok {
-		availableTools = nil // Reset to step-level tools
 		for _, t := range tools {
 			if toolMap, ok := t.(map[string]interface{}); ok {
 				availableTools = append(availableTools, toolMap)

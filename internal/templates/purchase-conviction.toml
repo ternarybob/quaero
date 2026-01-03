@@ -1,0 +1,120 @@
+# Purchase Conviction Prompt Template
+# Type: prompt (for SummaryWorker)
+#
+# This is the SINGLE SOURCE OF TRUTH for purchase conviction analysis.
+# To customize, create deployments/common/templates/purchase-conviction.toml
+
+type = "prompt"
+schema_ref = "purchase-conviction.schema.json"
+
+prompt = """
+Identify the BEST purchase opportunities from the provided stock data.
+This is a PURCHASE DECISION analysis - find stocks worth buying NOW.
+
+CRITICAL: Analyze ALL stocks in the data. Each requires individual analysis.
+
+=== PHASE 1: INDIVIDUAL DEEP DIVE ===
+
+For EACH stock:
+
+1. FUNDAMENTAL ANALYSIS:
+   - Market cap, P/E ratio, EPS
+   - Revenue trajectory and growth rates
+   - Profit margins and trends
+   - Upcoming catalysts (FY/HY results, contracts)
+   - Dividend history and yield
+
+2. TECHNICAL ANALYSIS:
+   - Current price vs SMA20/50/200
+   - RSI14 position (overbought/neutral/oversold)
+   - Support and resistance levels
+   - Distance from 52-week high/low
+   - Volume patterns and momentum
+
+3. RISK/REWARD ASSESSMENT:
+   - Upside potential to analyst price targets
+   - Downside risk to support levels
+   - Risk/reward ratio calculation
+
+=== PHASE 2: ADVERSARIAL "SHORT SELLER" ANALYSIS ===
+
+CRITICAL: For EACH stock, act as a hostile short seller.
+Your job is to find EVERY reason NOT to buy this stock.
+
+1. BEAR CASE (find at least 3 reasons):
+   - Why might this stock fall 20%+?
+   - What are management's blind spots?
+   - What macro risks threaten this business?
+   - What could cause earnings to disappoint?
+   - Is the current valuation justified?
+
+2. RED FLAGS (check carefully):
+   - Insider selling patterns (director trades)
+   - Declining margins or revenue
+   - High debt levels
+   - Competitive threats emerging
+   - Regulatory risks
+   - Customer concentration
+   - Accounting irregularities
+
+3. CONTRARIAN VIEW:
+   - Find one bearish analyst view
+   - Find one bullish analyst view
+   - Resolve which is better supported by data
+   - Document: "Bearish argues X, Bullish argues Y, data supports [view] because Z"
+
+4. SHORT SELLER VERDICT:
+   - If NO strong bear case found → STRONG BUY signal
+   - If compelling bear case → AVOID or reassess entry point
+   - Rate "Short Seller Confidence" 1-10 (higher = more reasons to short)
+
+=== PHASE 3: CONVICTION SCORING ===
+
+Calculate weighted score for EACH stock (total = 100 points):
+
+| Component    | Weight | Score | Weighted |
+|--------------|--------|-------|----------|
+| Fundamental  | 35%    | X/10  | X × 3.5  |
+| Technical    | 25%    | X/10  | X × 2.5  |
+| Risk         | 25%    | X/10  | X × 2.5  |
+| Insider      | 10%    | X/10  | X × 1.0  |
+| Macro        | 5%     | X/10  | X × 0.5  |
+| **TOTAL**    | 100%   |       | **X/100** |
+
+Component definitions:
+- Fundamental: Catalysts, growth quality, earnings sustainability
+- Technical: Entry point quality, trend strength, momentum
+- Risk: Inverted short seller score (low bear case = high score)
+- Insider: Director interest filings (buying = positive, selling = negative)
+- Macro: RBA rate impact, commodity correlation, sector tailwinds
+
+=== TIER ASSIGNMENT ===
+
+Based on conviction score:
+- TIER 1 (80-100): **BUY** - Strong conviction, immediate purchase candidate
+- TIER 2 (60-79): **BUY** - Good conviction, buy on weakness/pullback
+- TIER 3 (40-59): **HOLD** - Neutral, wait for better entry or catalyst
+- TIER 4 (<40): **AVOID** - Negative conviction, do not purchase
+
+=== OUTPUT FORMAT ===
+
+1. EXECUTIVE SUMMARY (2-3 sentences on top picks and market context)
+
+2. INDIVIDUAL STOCK ANALYSES (for EACH stock):
+   - Ticker and company name
+   - Fundamental analysis paragraph
+   - Technical analysis paragraph
+   - Short seller bear case paragraph
+   - Analyst resolution paragraph
+   - Conviction score: XX/100
+
+3. COMPARATIVE TABLE:
+   | Ticker | Fundamental (35) | Technical (25) | Risk (25) | Insider (10) | Macro (5) | Total | Tier |
+
+4. WARNINGS & RISKS:
+   - Tier 4 stocks with reasons
+   - Market-wide risks
+   - Correlation warnings
+
+Output MUST match purchase-conviction.schema.json structure.
+"""

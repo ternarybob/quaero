@@ -30,6 +30,7 @@ type WebSearchWorker struct {
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager // For unified job logging
+	debugEnabled    bool
 }
 
 // Compile-time assertion: WebSearchWorker implements DefinitionWorker interface
@@ -62,6 +63,7 @@ func NewWebSearchWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	debugEnabled bool,
 ) *WebSearchWorker {
 	return &WebSearchWorker{
 		documentStorage: documentStorage,
@@ -69,6 +71,7 @@ func NewWebSearchWorker(
 		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
+		debugEnabled:    debugEnabled,
 	}
 }
 
@@ -278,6 +281,9 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		}
 	}
 
+	// Create debug info if enabled
+	debug := NewWorkerDebug("web_search", w.debugEnabled)
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("originator", "worker").
@@ -309,8 +315,10 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	// Execute web search
+	// Execute web search with timing
+	debug.StartPhase("ai_generation")
 	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, model, stepID)
+	debug.EndPhase("ai_generation")
 	if err != nil {
 		w.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
 		w.logJobEvent(ctx, stepID, step.Name, "error",
@@ -318,8 +326,14 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("web search failed: %w", err)
 	}
 
+	// Record AI source info if results have it
+	debug.RecordAISource("gemini", model, 0, 0) // Token counts not available from search API
+
+	// Complete debug timing
+	debug.Complete()
+
 	// Create document from results (use stable sourceID for caching)
-	doc, err := w.createDocument(ctx, results, query, &jobDef, stepID, sourceID, stepConfig)
+	doc, err := w.createDocument(ctx, results, query, &jobDef, stepID, sourceID, stepConfig, debug)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -600,7 +614,7 @@ func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *g
 
 // createDocument creates a Document from the search results.
 // sourceID is a stable identifier based on the query hash (for caching).
-func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, sourceID string, stepConfig map[string]interface{}) (*models.Document, error) {
+func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string, sourceID string, stepConfig map[string]interface{}, debug *WorkerDebugInfo) (*models.Document, error) {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Web Search Results: %s\n\n", query))
@@ -645,6 +659,11 @@ func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearch
 			content.WriteString(fmt.Sprintf("- %s\n", err))
 		}
 		content.WriteString("\n")
+	}
+
+	// Append debug info to markdown if enabled
+	if debug != nil && debug.IsEnabled() {
+		content.WriteString(debug.ToMarkdown())
 	}
 
 	// Build tags
@@ -692,6 +711,11 @@ func (w *WebSearchWorker) createDocument(ctx context.Context, results *WebSearch
 	}
 	if len(results.Errors) > 0 {
 		metadata["errors"] = results.Errors
+	}
+
+	// Add worker debug metadata if enabled
+	if debug != nil && debug.IsEnabled() {
+		metadata["worker_debug"] = debug.ToMetadata()
 	}
 
 	now := time.Now()

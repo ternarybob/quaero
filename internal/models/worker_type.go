@@ -63,6 +63,9 @@ const (
 	WorkerTypeSignalComputer  WorkerType = "signal_computer"  // Computes PBAS, VLI, Regime signals from stock data
 	WorkerTypePortfolioRollup WorkerType = "portfolio_rollup" // Aggregates ticker signals into portfolio-level analysis
 	WorkerTypeAIAssessor      WorkerType = "ai_assessor"      // AI-powered assessment of signals and portfolio
+
+	// Data collection workers
+	WorkerTypeStockDataCollection WorkerType = "stock_data_collection" // Deterministic stock data collection for analysis
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -77,7 +80,8 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeASXStockData, WorkerTypeMacroData, WorkerTypeCompetitorAnalysis,
 		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
-		WorkerTypeSignalComputer, WorkerTypePortfolioRollup, WorkerTypeAIAssessor:
+		WorkerTypeSignalComputer, WorkerTypePortfolioRollup, WorkerTypeAIAssessor,
+		WorkerTypeStockDataCollection:
 		return true
 	}
 	return false
@@ -125,5 +129,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeSignalComputer,
 		WorkerTypePortfolioRollup,
 		WorkerTypeAIAssessor,
+		WorkerTypeStockDataCollection,
 	}
 }

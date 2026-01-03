@@ -246,7 +246,7 @@ func NewDefaultConfig() *Config {
 		},
 		Jobs: JobsConfig{
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
-			TemplatesDir:   "./job-templates",   // Default directory for job template files
+			TemplatesDir:   "./templates",       // Default directory for job template files
 		},
 		Docs: DocsConfig{
 			Dir:        "./docs",        // Default directory for documentation files

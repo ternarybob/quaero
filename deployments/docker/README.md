@@ -37,7 +37,7 @@ config/
 ├── variables.toml       # Variable definitions
 ├── variables/           # Additional variable files
 ├── job-definitions/     # Job definition TOML files
-└── job-templates/       # Job template TOML files
+└── templates/           # Template TOML files (user overrides)
 ```
 
 ### 3. Variable Substitution

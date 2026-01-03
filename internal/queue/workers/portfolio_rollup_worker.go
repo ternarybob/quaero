@@ -135,7 +135,7 @@ func (w *PortfolioRollupWorker) CreateJobs(ctx context.Context, step models.JobS
 	// Generate markdown
 	markdown := w.generateMarkdown(portfolio.Meta.Name, rollup)
 
-	// Extract output_tags
+	// Extract output_tags (supports both []interface{} from TOML and []string from inline calls)
 	var outputTags []string
 	if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
 		for _, tag := range tags {
@@ -143,6 +143,8 @@ func (w *PortfolioRollupWorker) CreateJobs(ctx context.Context, step models.JobS
 				outputTags = append(outputTags, tagStr)
 			}
 		}
+	} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+		outputTags = tags
 	}
 
 	// Build tags

@@ -588,7 +588,7 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 		forceRefresh = fr
 	}
 
-	// Extract output_tags
+	// Extract output_tags (supports both []interface{} from TOML and []string from inline calls)
 	var outputTags []string
 	if stepConfig != nil {
 		if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -597,6 +597,8 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 					outputTags = append(outputTags, tagStr)
 				}
 			}
+		} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+			outputTags = tags
 		}
 	}
 

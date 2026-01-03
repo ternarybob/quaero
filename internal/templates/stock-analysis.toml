@@ -1,0 +1,79 @@
+# Stock Analysis Prompt Template
+# Type: prompt (for SummaryWorker)
+#
+# This is the SINGLE SOURCE OF TRUTH for stock analysis prompts.
+# To customize, create deployments/common/templates/stock-analysis.toml
+
+type = "prompt"
+schema_ref = "stock-analysis.schema.json"
+
+prompt = """
+Analyze the collected stock data and provide comprehensive analysis for each stock.
+
+For EACH stock in the collected data:
+
+=== QUALITY ASSESSMENT ===
+
+1. COMPANY QUALITY (A/B/C/D/F):
+   - Revenue trajectory (growing/stable/declining)
+   - Profit trajectory (NPAT/margin trends)
+   - Quality reasoning (2-3 sentences explaining the grade)
+
+   Grading criteria:
+   - A: Excellent - Strong growth, healthy margins, clear competitive advantage
+   - B: Good - Solid fundamentals, stable or growing revenue
+   - C: Average - Mixed results, some concerns but viable
+   - D: Weak - Declining metrics, significant concerns
+   - F: Speculative - High risk, uncertain future
+
+=== TECHNICAL ANALYSIS ===
+
+2. PRICE ACTION:
+   - Current price vs SMA20/50/200
+   - RSI14 position (overbought >70 / neutral 30-70 / oversold <30)
+   - Support and resistance levels
+   - Recent price momentum (trend direction and strength)
+
+=== ANNOUNCEMENT ANALYSIS ===
+
+3. SIGNAL:NOISE RATIO:
+   - HIGH: Material financial data, major contracts, M&A activity
+   - MEDIUM: Operational updates, board changes, guidance
+   - LOW: Generic PR, routine notices, administrative filings
+
+=== DUAL RECOMMENDATIONS ===
+
+4. TRADER VIEW (1-12 week horizon):
+   Focus: Technical momentum, short-term catalysts, entry/exit timing
+
+   - Action: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
+   - Conviction: 1-10 (how confident in this recommendation)
+   - Key triggers: What would change this view
+
+5. SUPER VIEW (6 month - 2 year horizon):
+   Focus: Company quality, long-term value, retirement suitability
+
+   - Action: ACCUMULATE / HOLD / REDUCE / AVOID
+   - Conviction: 1-10
+   - Rationale: Long-term thesis
+
+   IMPORTANT: Only Quality A/B stocks should receive ACCUMULATE recommendation
+
+=== RISK ALERTS ===
+
+6. FLAG CONCERNS:
+   - Quality D/F stocks (high risk)
+   - Stocks at technical extremes (overbought/oversold)
+   - High sector concentration
+   - Recent negative announcements
+
+=== OUTPUT FORMAT ===
+
+Provide analysis for ALL stocks in the data. Include:
+1. Summary table with: Ticker | Name | Quality | Trader Rec | Conv | Super Rec | Conv
+2. Individual stock analysis sections
+3. Watchlists: Trader Momentum | Super Accumulate
+4. Alerts section
+
+Output MUST match the stock-analysis.schema.json structure.
+"""

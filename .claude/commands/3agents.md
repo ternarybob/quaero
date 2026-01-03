@@ -1,6 +1,6 @@
 ---
 name: 3agents
-description: Adversarial multi-agent loop - CORRECTNESS over SPEED
+description: Adversarial multi-agent loop - CORRECTNESS over SPEED. Output captured to files to prevent context overflow.
 ---
 
 Execute: $ARGUMENTS
@@ -23,6 +23,8 @@ Execute: $ARGUMENTS
 ```bash
 WORKDIR=".claude/workdir/$(date +%Y-%m-%d-%H%M)-$(echo "$ARGUMENTS" | tr ' ' '-' | cut -c1-40)"
 mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/logs"
+echo "Workdir: $WORKDIR"
 ```
 
 ## RULES
@@ -38,8 +40,34 @@ mkdir -p "$WORKDIR"
 │ • STEPS ARE MANDATORY - no implementation without step docs     │
 │ • SUMMARY IS MANDATORY - task incomplete without $WORKDIR/summary.md │
 │ • NO STOPPING - execute all phases without user prompts         │
+│ • OUTPUT CAPTURE IS MANDATORY - all command output to log files │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Output Capture (CRITICAL - prevents context overflow)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ OUTPUT CAPTURE IS MANDATORY                                     │
+│                                                                 │
+│ • ALL build output → $WORKDIR/logs/build_*.log                  │
+│ • ALL test output → $WORKDIR/logs/test_*.log                    │
+│ • ALL lint output → $WORKDIR/logs/lint_*.log                    │
+│ • Claude sees ONLY pass/fail + last 30 lines on failure         │
+│ • NEVER let full command output into context                    │
+│ • Reference log files by path, don't paste contents             │
+│                                                                 │
+│ This prevents context overflow during long-running operations.  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Output Limits
+| Output Type | Max Lines in Context | Action |
+|-------------|---------------------|--------|
+| Build stdout/stderr | 30 on failure, 0 on success | Redirect to $WORKDIR/logs/*.log |
+| Test stdout/stderr | 30 on failure, 0 on success | Redirect to $WORKDIR/logs/*.log |
+| Lint output | 20 | Redirect to $WORKDIR/logs/*.log |
+| File reads | 500 | Use grep/head/tail for large files |
+| Error extraction | 20 | Use grep to extract relevant lines |
 
 ---
 
@@ -53,13 +81,52 @@ mkdir -p "$WORKDIR"
 | `/home/...` or `/Users/...` | Unix/Linux/macOS | Bash |
 | `/mnt/c/...` | WSL | Bash (but `powershell.exe` for Go) |
 
-### Build & Test
+### Build & Test (WITH OUTPUT CAPTURE)
 
-| OS | Build | Test |
-|----|-------|------|
-| Windows | `.\scripts\build.ps1` | `go test -v ./test/...` |
-| Linux/macOS | `./scripts/build.sh` | `go test -v ./test/...` |
-| WSL | `powershell.exe -Command "cd C:\path; .\scripts\build.ps1"` | `powershell.exe -Command "cd C:\path; go test -v ./test/..."` |
+**Unix/Linux/macOS:**
+```bash
+# Build - capture to file
+BUILD_LOG="$WORKDIR/logs/build_step${STEP}.log"
+./scripts/build.sh > "$BUILD_LOG" 2>&1
+BUILD_RESULT=$?
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo "✗ BUILD FAILED"
+    tail -30 "$BUILD_LOG"
+else
+    echo "✓ BUILD PASSED"
+fi
+
+# Test - capture to file
+TEST_LOG="$WORKDIR/logs/test_step${STEP}.log"
+go test -v ./test/... > "$TEST_LOG" 2>&1
+TEST_RESULT=$?
+if [ $TEST_RESULT -ne 0 ]; then
+    echo "✗ TESTS FAILED"
+    tail -30 "$TEST_LOG"
+else
+    echo "✓ TESTS PASSED"
+fi
+```
+
+**Windows:**
+```powershell
+# Build - capture to file
+$BUILD_LOG = "$WORKDIR/logs/build_step${STEP}.log"
+.\scripts\build.ps1 > $BUILD_LOG 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "✗ BUILD FAILED"
+    Get-Content $BUILD_LOG -Tail 30
+} else {
+    Write-Host "✓ BUILD PASSED"
+}
+```
+
+**WSL:**
+```bash
+BUILD_LOG="$WORKDIR/logs/build_step${STEP}.log"
+powershell.exe -Command "cd C:\path; .\scripts\build.ps1" > "$BUILD_LOG" 2>&1
+# ... same pattern as Unix
+```
 
 ### Architecture
 
@@ -171,6 +238,8 @@ Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 │                                                                 │
 │   WORKER: Implement → $WORKDIR/step_N_impl.md                   │
 │      ↓                                                          │
+│   BUILD CHECK (output to $WORKDIR/logs/build_stepN_iterM.log)   │
+│      ↓                                                          │
 │   VALIDATOR: Review → $WORKDIR/step_N_valid.md                  │
 │      ↓                                                          │
 │   PASS → next step    REJECT → iterate (max 5)                  │
@@ -183,13 +252,47 @@ Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 - Follow step doc exactly
 - Apply codebase rules (logging, error handling, structure)
 - Perform cleanup listed in step doc
-- Build must pass
+- Build must pass (verified with output capture)
+
+**Build verification (MANDATORY with output capture):**
+```bash
+STEP=N
+ITER=M
+BUILD_LOG="$WORKDIR/logs/build_step${STEP}_iter${ITER}.log"
+
+# Run build with full capture
+./scripts/build.sh > "$BUILD_LOG" 2>&1
+BUILD_RESULT=$?
+
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo "✗ BUILD FAILED - Step $STEP Iteration $ITER"
+    echo "Log: $BUILD_LOG"
+    echo "=== Last 30 lines ==="
+    tail -30 "$BUILD_LOG"
+    echo "=== End ==="
+else
+    echo "✓ BUILD PASSED - Step $STEP Iteration $ITER"
+fi
+```
+
+**Error extraction helper:**
+```bash
+# Extract compilation errors from build log
+extract_build_errors() {
+    local LOG_FILE=$1
+    echo "--- Build Error Summary ---"
+    grep -E "error:|undefined:|cannot|invalid" "$LOG_FILE" | head -20
+    echo "--- End Summary ---"
+    echo "Full log: $LOG_FILE"
+}
+```
 
 **VALIDATOR must:**
 - Default REJECT until proven correct
 - Verify requirements with code line references
 - Verify cleanup performed (no dead code left)
 - Check codebase rule compliance
+- Verify build passed (check log exists and result)
 
 **VALIDATOR auto-REJECT:**
 - Build fails
@@ -198,7 +301,7 @@ Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 - Codebase rule violations
 - Requirements not traceable to code
 
-**⟲ COMPACT after each step PASS or at iteration 3+**
+**⟲ COMPACT after each step completion (PASS or max iterations)**
 
 **→ IMMEDIATELY proceed to next step or PHASE 4 (no confirmation)**
 
@@ -215,22 +318,48 @@ Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 │ • Check for conflicts between steps                             │
 │ • Verify no dead code across ALL changes                        │
 │ • Verify consistent patterns across ALL changes                 │
-│ • Full build + test pass                                        │
+│ • Full build + test pass (with output capture)                  │
 │                                                                 │
 │ REJECT → Back to relevant step for fix                          │
 │ PASS → PHASE 5                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Final build and test (with output capture):**
+```bash
+# Final build
+FINAL_BUILD_LOG="$WORKDIR/logs/build_final.log"
+./scripts/build.sh > "$FINAL_BUILD_LOG" 2>&1
+BUILD_OK=$?
+
+# Final test (if applicable)
+FINAL_TEST_LOG="$WORKDIR/logs/test_final.log"
+go test -v ./... > "$FINAL_TEST_LOG" 2>&1
+TEST_OK=$?
+
+if [ $BUILD_OK -eq 0 ] && [ $TEST_OK -eq 0 ]; then
+    echo "✓ FINAL BUILD AND TEST PASSED"
+else
+    echo "✗ FINAL VALIDATION FAILED"
+    [ $BUILD_OK -ne 0 ] && tail -30 "$FINAL_BUILD_LOG"
+    [ $TEST_OK -ne 0 ] && tail -30 "$FINAL_TEST_LOG"
+fi
+```
+
 **Write `$WORKDIR/final_validation.md`:**
 ```markdown
 # Final Validation
 ## Build: PASS/FAIL
+## Build Log: $WORKDIR/logs/build_final.log
+## Test: PASS/FAIL
+## Test Log: $WORKDIR/logs/test_final.log
 ## All Requirements: [table with status]
 ## Cross-step Issues: [none or list]
 ## Cleanup Verified: ✓/✗
 ## Verdict: PASS/REJECT
 ```
+
+**⟲ COMPACT after FINAL VALIDATION**
 
 **→ IMMEDIATELY proceed to PHASE 5 (no confirmation)**
 
@@ -247,6 +376,12 @@ Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 ## Breaking Changes: [list]
 ## Cleanup: [table - Type | Item | File | Reason]
 ## Files Changed: [list]
+## Log Files
+| File | Purpose |
+|------|---------|
+| logs/build_step*.log | Per-step build output |
+| logs/build_final.log | Final build verification |
+| logs/test_final.log | Final test run |
 ```
 
 **⟲ COMPACT after COMPLETE**
@@ -271,12 +406,72 @@ Write `$WORKDIR/architecture-updates.md`.
 | When | Action |
 |------|--------|
 | After ARCHITECT | `/compact` |
-| After step PASS | `/compact` |
-| Iteration 3+ | `/compact` |
+| After each step (PASS or max iter) | `/compact` |
+| Iteration 3+ within a step | `/compact` |
 | After FINAL VALIDATION | `/compact` |
+| After COMPLETE | `/compact` |
 | Task complete | `/compact` |
 
-**Recovery:** Read `$WORKDIR/*.md` artifacts to resume.
+**If `/compact` fails:**
+1. Press Escape twice, move up a few messages
+2. Retry `/compact`
+3. If still failing: `/clear` and restart from last completed phase
+4. Recovery: Read `$WORKDIR/*.md` artifacts to resume
+
+---
+
+## OUTPUT CAPTURE QUICK REFERENCE
+
+```bash
+# CORRECT: Build output to file, summary to Claude
+./scripts/build.sh > "$WORKDIR/logs/build.log" 2>&1
+if [ $? -ne 0 ]; then tail -30 "$WORKDIR/logs/build.log"; fi
+
+# CORRECT: Test output to file, summary to Claude
+go test -v ./... > "$WORKDIR/logs/test.log" 2>&1
+if [ $? -ne 0 ]; then tail -30 "$WORKDIR/logs/test.log"; fi
+
+# CORRECT: Extract specific errors from log
+grep -E "error:|FAIL" "$WORKDIR/logs/build.log" | head -20
+
+# CORRECT: Check test results
+grep "^--- FAIL:" "$WORKDIR/logs/test.log"
+
+# WRONG: Direct output to Claude (will overflow context)
+./scripts/build.sh
+go test -v ./...
+
+# WRONG: Cat entire log file
+cat "$WORKDIR/logs/build.log"
+
+# WRONG: Read large sections of log
+tail -500 "$WORKDIR/logs/test.log"
+```
+
+---
+
+## FORBIDDEN ACTIONS
+
+| Action | Result |
+|--------|--------|
+| Stop for user confirmation | VIOLATION |
+| Ask questions expecting response | VIOLATION |
+| Let full build/test output into context | VIOLATION |
+| Paste log file contents (>30 lines) | VIOLATION |
+| Cat entire log files | VIOLATION |
+| Run commands without output capture | VIOLATION |
+| Skip writing summary.md | VIOLATION |
+| Leave dead code | VIOLATION |
+
+## ALLOWED ACTIONS
+
+| Action | Rationale |
+|--------|-----------|
+| Break existing APIs | Backward compat not required |
+| Remove deprecated code | Cleanup is mandatory |
+| Read log files with tail/head/grep | Bounded output extraction |
+| Reference log paths without pasting | Preserves context |
+| Proceed without confirmation | Autonomous execution |
 
 ---
 
@@ -299,4 +494,44 @@ Write `$WORKDIR/architecture-updates.md`.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**This workflow runs AUTONOMOUSLY from start to finish.**
+---
+
+## WORKDIR ARTIFACTS
+
+| File | Purpose | When Created | Required |
+|------|---------|--------------|----------|
+| `requirements.md` | Extracted requirements | Phase 0 | **YES** |
+| `architect-analysis.md` | Patterns, decisions | Phase 0 | **YES** |
+| `step_N.md` | Step specifications | Phase 0 | **YES** |
+| `step_N_impl.md` | Implementation notes | Phase 1-3 | **YES** |
+| `step_N_valid.md` | Validation results | Phase 1-3 | **YES** |
+| `final_validation.md` | Final review | Phase 4 | **YES** |
+| `summary.md` | Final summary | Phase 5 | **YES** |
+| `architecture-updates.md` | Doc changes | Phase 6 | **YES** |
+| `logs/` | All command output | Throughout | **YES** |
+| `logs/build_*.log` | Build output | Phase 1-4 | **YES** |
+| `logs/test_*.log` | Test output | Phase 4 | If tests run |
+
+**Task is NOT complete until `summary.md` exists in workdir.**
+
+---
+
+## INVOKE
+```
+/3agents implement feature X for component Y
+# → .claude/workdir/2024-12-17-1430-implement-feature-X-for-componen/
+#    ├── requirements.md
+#    ├── architect-analysis.md
+#    ├── step_1.md, step_1_impl.md, step_1_valid.md
+#    ├── step_2.md, step_2_impl.md, step_2_valid.md
+#    ├── final_validation.md
+#    ├── summary.md
+#    ├── architecture-updates.md
+#    └── logs/
+#        ├── build_step1_iter1.log
+#        ├── build_step2_iter1.log
+#        ├── build_final.log
+#        └── test_final.log
+```
+
+**This workflow runs AUTONOMOUSLY from start to finish with all output captured to files.**

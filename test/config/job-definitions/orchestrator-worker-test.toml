@@ -1,26 +1,25 @@
-# Orchestrator Test: Stock Analysis - 3 Stocks
+# Orchestrator Worker Test
 # =========================================================================
-# Tests the hybrid stock analysis workflow with multiple tickers.
-# Validates multi-stock handling and parallel data collection.
-#
-# WORKFLOW (hybrid):
+# Integration test for hybrid orchestrator workflow with stock analysis.
+# Tests the full workflow:
 # 1. Data Collection: StockDataCollectionWorker (deterministic)
 # 2. Stock Analysis: SummaryWorker with stock-analysis template
 #
 # TEMPLATE: internal/templates/stock-analysis.toml (embedded)
 # OUTPUT TAG: stock-analysis
+# TICKER: ASX:GNP (known to have good data coverage)
 # =========================================================================
 
 # =========================================================================
 # Job Definition (MUST be at root level before any [section])
 # =========================================================================
-id = "orchestrator-stock-analysis-3-stocks-test"
-name = "Test: Stock Analysis (3 Stocks)"
+id = "orchestrator-worker-test"
+name = "Orchestrator Worker Test"
 type = "orchestrator"
-description = "Integration test for hybrid stock analysis workflow with 3 stocks"
+description = "API integration test for hybrid orchestrator workflow"
 tags = ["test", "orchestrator", "stock-analysis", "hybrid"]
 schedule = ""
-timeout = "2h"
+timeout = "30m"
 enabled = true
 auto_start = false
 
@@ -30,19 +29,17 @@ auto_start = false
 [meta]
 author = "Claude Code"
 version = "2.0"
-created = "2026-01-02"
+created = "2026-01-03"
 updated = "2026-01-03"
-purpose = "Integration test for hybrid stock analysis workflow with 3 stocks"
+purpose = "API integration test for hybrid orchestrator workflow"
 
 # =========================================================================
-# Test Configuration - Three Stocks
+# Test Configuration - Single Stock for Fast Testing
 # =========================================================================
 
 [config]
 variables = [
-    { ticker = "ASX:GNP", portfolio = "trading" },
-    { ticker = "ASX:SKS", portfolio = "trading" },
-    { ticker = "ASX:WEB", portfolio = "smsf" },
+    { ticker = "ASX:GNP", portfolio = "test" },
 ]
 
 benchmarks = [
@@ -55,7 +52,7 @@ benchmarks = [
 
 [step.collect_data]
 type = "stock_data_collection"
-description = "Collect stock data for multiple tickers"
+description = "Collect stock data for single ticker"
 on_error = "fail"
 
 # =========================================================================
@@ -70,17 +67,3 @@ on_error = "fail"
 template = "stock-analysis"
 filter_tags = ["stock-data-collected"]
 output_tags = ["stock-analysis"]
-
-# =========================================================================
-# Email Step
-# =========================================================================
-
-[step.email_report]
-type = "email"
-description = "Email stock analysis report"
-depends = "analyze"
-always_run = true
-on_error = "fail"
-to = "bobmcallan@gmail.com"
-subject = "Stock Analysis Test - 3 Stocks"
-body_from_tag = "stock-analysis"

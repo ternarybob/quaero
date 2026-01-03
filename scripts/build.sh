@@ -344,27 +344,27 @@ deploy_files() {
         done
     fi
 
-    # Deploy job-templates from common directory first, then local overrides
+    # Deploy templates from common directory first, then local overrides
     # Always override to ensure latest templates are deployed
-    mkdir -p "$bin_dir/job-templates"
+    mkdir -p "$bin_dir/templates"
 
     # Copy from common first (base layer) - always override
-    if [ -d "$common_config/job-templates" ]; then
-        for file in "$common_config/job-templates"/*.toml; do
+    if [ -d "$common_config/templates" ]; then
+        for file in "$common_config/templates"/*.toml; do
             if [ -f "$file" ]; then
                 local filename=$(basename "$file")
-                local dest_file="$bin_dir/job-templates/$filename"
+                local dest_file="$bin_dir/templates/$filename"
                 cp "$file" "$dest_file"
             fi
         done
     fi
 
     # Copy from local (deployment-specific) - always override (takes precedence over common)
-    if [ -d "$local_config/job-templates" ]; then
-        for file in "$local_config/job-templates"/*.toml; do
+    if [ -d "$local_config/templates" ]; then
+        for file in "$local_config/templates"/*.toml; do
             if [ -f "$file" ]; then
                 local filename=$(basename "$file")
-                local dest_file="$bin_dir/job-templates/$filename"
+                local dest_file="$bin_dir/templates/$filename"
                 cp "$file" "$dest_file"
             fi
         done

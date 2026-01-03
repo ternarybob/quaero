@@ -44,7 +44,7 @@ definitions_dir = "/app/job-definitions"
 # Job Templates Configuration
 # =============================================================================
 [job_templates]
-dir = "/app/job-templates"
+dir = "/app/templates"
 
 # =============================================================================
 # Documentation Configuration

@@ -69,7 +69,7 @@ $staging = "$projectRoot\deployments\docker\.docker-staging"
 if (Test-Path $staging) { Remove-Item -Path $staging -Recurse -Force }
 New-Item -ItemType Directory -Path "$staging\config" -Force | Out-Null
 New-Item -ItemType Directory -Path "$staging\job-definitions" -Force | Out-Null
-New-Item -ItemType Directory -Path "$staging\job-templates" -Force | Out-Null
+New-Item -ItemType Directory -Path "$staging\templates" -Force | Out-Null
 New-Item -ItemType Directory -Path "$staging\docs" -Force | Out-Null
 
 # Stage configs
@@ -98,12 +98,12 @@ if ($jobDefs) { $jobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-
 $dockerJobDefs = Get-ChildItem "$dockerConfig\job-definitions\*.toml" -ErrorAction SilentlyContinue
 if ($dockerJobDefs) { $dockerJobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" -Force } }
 
-# Stage job-templates
-Write-Host "  Staging job-templates..." -ForegroundColor Gray
-$jobTemplates = Get-ChildItem "$commonConfig\job-templates\*.toml" -ErrorAction SilentlyContinue
-if ($jobTemplates) { $jobTemplates | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" } }
-$dockerJobTemplates = Get-ChildItem "$dockerConfig\job-templates\*.toml" -ErrorAction SilentlyContinue
-if ($dockerJobTemplates) { $dockerJobTemplates | ForEach-Object { Copy-Item $_.FullName "$staging\job-templates\" -Force } }
+# Stage templates
+Write-Host "  Staging templates..." -ForegroundColor Gray
+$templates = Get-ChildItem "$commonConfig\templates\*.toml" -ErrorAction SilentlyContinue
+if ($templates) { $templates | ForEach-Object { Copy-Item $_.FullName "$staging\templates\" } }
+$dockerTemplates = Get-ChildItem "$dockerConfig\templates\*.toml" -ErrorAction SilentlyContinue
+if ($dockerTemplates) { $dockerTemplates | ForEach-Object { Copy-Item $_.FullName "$staging\templates\" -Force } }
 
 # Stage docs
 Write-Host "  Staging documentation..." -ForegroundColor Gray
@@ -118,8 +118,8 @@ if (-not (Get-ChildItem "$staging\config" -ErrorAction SilentlyContinue)) {
 if (-not (Get-ChildItem "$staging\job-definitions" -ErrorAction SilentlyContinue)) {
     New-Item "$staging\job-definitions\.gitkeep" -ItemType File -Force | Out-Null
 }
-if (-not (Get-ChildItem "$staging\job-templates" -ErrorAction SilentlyContinue)) {
-    New-Item "$staging\job-templates\.gitkeep" -ItemType File -Force | Out-Null
+if (-not (Get-ChildItem "$staging\templates" -ErrorAction SilentlyContinue)) {
+    New-Item "$staging\templates\.gitkeep" -ItemType File -Force | Out-Null
 }
 
 # Get version info

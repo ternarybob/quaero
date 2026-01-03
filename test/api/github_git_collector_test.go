@@ -55,8 +55,8 @@ func TestGitHubGitCollector_JobDefinitionExists(t *testing.T) {
 func TestGitHubGitCollector_TemplateExists(t *testing.T) {
 	// Check if template file exists in expected location
 	templatePaths := []string{
-		"job-templates/github-collection.toml",
-		"../bin/job-templates/github-collection.toml",
+		"templates/github-collection.toml",
+		"../bin/templates/github-collection.toml",
 	}
 
 	found := false
@@ -70,7 +70,7 @@ func TestGitHubGitCollector_TemplateExists(t *testing.T) {
 
 	// Also check via test environment config
 	if !found {
-		t.Log("Template not found in standard paths - may be in test/config/job-templates")
+		t.Log("Template not found in standard paths - may be in test/config/templates")
 	}
 
 	// Template existence is a file-level check, not an API check

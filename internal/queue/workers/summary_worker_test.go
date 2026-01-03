@@ -359,7 +359,7 @@ func TestSummaryWorker_Init(t *testing.T) {
 			// Setup mocks for this test
 			tt.setupMocks()
 
-			worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+			worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 			ctx := context.Background()
 
 			result, err := worker.Init(ctx, tt.step, tt.jobDef)
@@ -412,7 +412,7 @@ func TestSummaryWorker_InterfaceCompliance(t *testing.T) {
 // TestSummaryWorker_createDocument tests the createDocument method
 func TestSummaryWorker_createDocument(t *testing.T) {
 	logger := arbor.NewLogger()
-	worker := NewSummaryWorker(nil, nil, nil, nil, logger, nil, nil)
+	worker := NewSummaryWorker(nil, nil, nil, nil, logger, nil, nil, false, "")
 
 	// Test documents
 	docs := []*models.Document{
@@ -465,7 +465,7 @@ func TestSummaryWorker_createDocument(t *testing.T) {
 // TestSummaryWorker_createDocument_WithoutJobDef tests createDocument without job definition
 func TestSummaryWorker_createDocument_WithoutJobDef(t *testing.T) {
 	logger := arbor.NewLogger()
-	worker := NewSummaryWorker(nil, nil, nil, nil, logger, nil, nil)
+	worker := NewSummaryWorker(nil, nil, nil, nil, logger, nil, nil, false, "")
 
 	docs := []*models.Document{
 		{ID: "doc_1", Title: "file1.go"},
@@ -495,7 +495,7 @@ func TestNewSummaryWorker(t *testing.T) {
 	mockSearch := new(MockSearchService)
 	mockKV := new(MockKVStorage)
 
-	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil)
+	worker := NewSummaryWorker(mockSearch, nil, nil, mockKV, logger, nil, nil, false, "")
 
 	assert.NotNil(t, worker)
 	assert.Equal(t, mockSearch, worker.searchService)

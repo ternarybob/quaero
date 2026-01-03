@@ -152,7 +152,7 @@ func (w *AIAssessorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		Int("signals_loaded", len(tickerSignals)).
 		Msg("Loaded signals for assessment")
 
-	// Extract output_tags
+	// Extract output_tags (supports both []interface{} from TOML and []string from inline calls)
 	var outputTags []string
 	if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
 		for _, tag := range tags {
@@ -160,6 +160,8 @@ func (w *AIAssessorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 				outputTags = append(outputTags, tagStr)
 			}
 		}
+	} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+		outputTags = tags
 	}
 
 	// Process in batches
