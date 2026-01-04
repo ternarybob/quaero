@@ -2,104 +2,175 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "stock-report.schema.json",
   "title": "Stock Report Schema",
-  "description": "Combined schema for daily stock analysis report with multiple stocks",
+  "description": "Combined schema for daily stock analysis report with multiple stocks. Each stock includes full detailed analysis.",
   "type": "object",
-  "required": ["stocks", "summary_table", "watchlists", "definitions"],
+  "required": ["stocks"],
   "properties": {
     "stocks": {
       "type": "array",
-      "description": "Individual stock analyses",
-      "items": {
-        "$ref": "stock-analysis.schema.json"
-      }
-    },
-    "summary_table": {
-      "type": "array",
-      "description": "Summary table of all stocks",
+      "description": "Individual stock analyses with FULL details for each stock",
       "items": {
         "type": "object",
-        "required": ["ticker", "name", "quality", "trader_rec", "trader_conv", "super_rec", "super_conv", "signal_noise", "cagr"],
+        "required": ["ticker", "name", "quality_rating", "signal_noise_ratio", "trader_recommendation", "super_recommendation"],
         "properties": {
           "ticker": {
-            "type": "string"
+            "type": "string",
+            "description": "ASX stock ticker code (e.g., GNP, WES)"
           },
           "name": {
-            "type": "string"
-          },
-          "quality": {
             "type": "string",
-            "enum": ["A", "B", "C", "D", "F"]
+            "description": "Company full name"
           },
-          "trader_rec": {
+          "industry": {
             "type": "string",
-            "enum": ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+            "description": "Industry/sector classification"
           },
-          "trader_conv": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10
+          "current_price": {
+            "type": "number",
+            "description": "Current stock price in AUD"
           },
-          "super_rec": {
+          "market_cap": {
             "type": "string",
-            "enum": ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"]
+            "description": "Market capitalization (e.g., '$1.2B')"
           },
-          "super_conv": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10
+          "pe_ratio": {
+            "type": ["number", "null"],
+            "description": "Price-to-earnings ratio (null if negative earnings)"
           },
-          "signal_noise": {
+          "eps": {
+            "type": "number",
+            "description": "Earnings per share"
+          },
+          "dividend_yield": {
+            "type": ["number", "null"],
+            "description": "Dividend yield as decimal (e.g., 0.035 for 3.5%)"
+          },
+          "stock_data_summary": {
             "type": "string",
-            "enum": ["HIGH", "MEDIUM", "LOW"]
+            "description": "Summary of current price, market cap, P/E, EPS formatted as: 'Analysis Date: [date]. Current Price: $X.XX, Market Cap: $X.XXB, P/E Ratio: XX.XX, EPS: $X.XX.'"
           },
-          "cagr": {
+          "technical_analysis": {
+            "type": "object",
+            "description": "Technical analysis metrics",
+            "properties": {
+              "sma_20": {
+                "type": "number",
+                "description": "20-day simple moving average"
+              },
+              "sma_50": {
+                "type": "number",
+                "description": "50-day simple moving average"
+              },
+              "sma_200": {
+                "type": "number",
+                "description": "200-day simple moving average"
+              },
+              "rsi_14": {
+                "type": "number",
+                "description": "14-day RSI (0-100)"
+              },
+              "short_term_trend": {
+                "type": "string",
+                "enum": ["BULLISH", "BEARISH", "NEUTRAL"],
+                "description": "Short-term price trend"
+              },
+              "long_term_trend": {
+                "type": "string",
+                "enum": ["BULLISH", "BEARISH", "NEUTRAL"],
+                "description": "Long-term price trend"
+              },
+              "support_level": {
+                "type": "number",
+                "description": "Key support price level"
+              },
+              "resistance_level": {
+                "type": "number",
+                "description": "Key resistance price level"
+              },
+              "summary": {
+                "type": "string",
+                "description": "Technical analysis paragraph including SMA, RSI, trend assessment"
+              }
+            }
+          },
+          "announcement_analysis": {
             "type": "string",
-            "description": "5Y CAGR as percentage string (e.g., '15%')"
+            "description": "Analysis of recent announcements and their materiality"
+          },
+          "price_event_analysis": {
+            "type": "string",
+            "description": "Significant price movements and catalysts"
+          },
+          "five_year_performance": {
+            "type": "string",
+            "description": "5-year CAGR and performance analysis"
+          },
+          "five_year_cagr": {
+            "type": "number",
+            "description": "5-year compound annual growth rate as decimal (e.g., 0.15 for 15%)"
+          },
+          "quality_rating": {
+            "type": "string",
+            "enum": ["A", "B", "C", "D", "F"],
+            "description": "Company quality grade: A (excellent), B (good), C (average), D (weak), F (speculative)"
+          },
+          "quality_reasoning": {
+            "type": "string",
+            "description": "2-3 sentences explaining the quality rating with specific metrics"
+          },
+          "signal_noise_ratio": {
+            "type": "string",
+            "enum": ["HIGH", "MEDIUM", "LOW"],
+            "description": "Quality of company communications to ASX"
+          },
+          "signal_noise_reasoning": {
+            "type": "string",
+            "description": "1-2 sentence explanation of why the signal-to-noise ratio was assigned, citing specific announcements"
+          },
+          "trader_recommendation": {
+            "type": "object",
+            "description": "Short-term trading recommendation (1-6 week horizon)",
+            "required": ["action", "conviction"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"],
+                "description": "Trading action recommendation"
+              },
+              "conviction": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Conviction score 1-10"
+              },
+              "triggers": {
+                "type": "string",
+                "description": "Key triggers for the recommendation"
+              }
+            }
+          },
+          "super_recommendation": {
+            "type": "object",
+            "description": "Long-term investment recommendation (6-12+ month horizon)",
+            "required": ["action", "conviction"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["ACCUMULATE", "HOLD", "REDUCE", "AVOID"],
+                "description": "Long-term action recommendation"
+              },
+              "conviction": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Conviction score 1-10"
+              },
+              "rationale": {
+                "type": "string",
+                "description": "Rationale for long-term investors"
+              }
+            }
           }
-        }
-      }
-    },
-    "watchlists": {
-      "type": "object",
-      "description": "Categorized watchlists",
-      "properties": {
-        "trader_momentum": {
-          "type": "array",
-          "description": "Stocks with momentum for short-term trades",
-          "items": {
-            "type": "string",
-            "description": "Ticker code"
-          }
-        },
-        "super_accumulate": {
-          "type": "array",
-          "description": "Quality A/B stocks for long-term accumulation",
-          "items": {
-            "type": "string",
-            "description": "Ticker code"
-          }
-        }
-      }
-    },
-    "alerts": {
-      "type": "array",
-      "description": "Significant alerts and material announcements",
-      "items": {
-        "type": "string"
-      }
-    },
-    "definitions": {
-      "type": "object",
-      "description": "Definition of rating scales and metrics",
-      "properties": {
-        "quality_rating": {
-          "type": "string"
-        },
-        "signal_noise_ratio": {
-          "type": "string"
-        },
-        "cagr": {
-          "type": "string"
         }
       }
     }

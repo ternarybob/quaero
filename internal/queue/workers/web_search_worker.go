@@ -426,12 +426,16 @@ func (w *WebSearchWorker) executeWebSearch(ctx context.Context, client *genai.Cl
 	}
 
 	// Build system prompt for structured response
-	systemPrompt := fmt.Sprintf(`You are a research assistant. Search the web to answer the following query comprehensively.
+	// Include current date so AI knows temporal context for "latest", "current", "recent" queries
+	currentDate := time.Now().Format("January 2, 2006")
+	systemPrompt := fmt.Sprintf(`You are a research assistant. Today's date is %s.
+Search the web to answer the following query comprehensively.
 Provide detailed information with specific facts, data, and sources.
+When searching for "latest", "current", or "recent" information, prioritize results from %d onwards.
 Include all relevant URLs from your search.
 If there are related topics worth exploring, suggest %d follow-up questions.
 
-Query: %s`, breadth, query)
+Query: %s`, currentDate, time.Now().Year(), breadth, query)
 
 	// Execute initial search with timeout
 	searchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)

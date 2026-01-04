@@ -385,7 +385,7 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 		}
-		return "", fmt.Errorf(errMsg)
+		return "", fmt.Errorf("%s", errMsg)
 	}
 
 	// Dead-man check #2: Verify no worker failures
@@ -397,7 +397,7 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 		}
-		return "", fmt.Errorf(errMsg)
+		return "", fmt.Errorf("%s", errMsg)
 	}
 
 	// Log event for UI (success case only)

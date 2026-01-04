@@ -1,0 +1,95 @@
+# Orchestrator Test: Stock Analysis - List
+# =========================================================================
+# Tests the hybrid stock analysis workflow with multiple tickers as a list.
+# Replicates deployments/common/job-definitions/stock-analysis-list.toml
+#
+# WORKFLOW (hybrid):
+# 1. Data Collection: StockDataCollectionWorker (deterministic)
+# 2. Stock Analysis: SummaryWorker with stock-analysis template
+# 3. Email Report: Send stock analysis list via email
+#
+# TEMPLATE: internal/templates/stock-analysis.toml (embedded)
+# OUTPUT TAG: stock-analysis
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "orchestrator-stock-analysis-list-test"
+name = "Test: Stock Analysis (List)"
+type = "orchestrator"
+description = "Integration test for hybrid stock analysis workflow with list of stocks"
+tags = ["test", "orchestrator", "stock-analysis", "hybrid", "list"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-03"
+updated = "2026-01-03"
+purpose = "Integration test for stock-analysis-list.toml workflow"
+
+# =========================================================================
+# Test Configuration - Multiple Stocks (matches production config)
+# =========================================================================
+
+[config]
+# Ticker list - matches deployments/common/job-definitions/stock-analysis-list.toml
+# Stocks are analyzed as a list, NOT grouped by portfolio
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:BCN" },
+    { ticker = "ASX:MYG" },
+]
+
+# Benchmark for comparison
+benchmarks = [
+    { code = "XJO", name = "S&P/ASX 200" },
+]
+
+# =========================================================================
+# Step 1: Data Collection (Deterministic)
+# =========================================================================
+# Collects stock data for all tickers using StockDataCollectionWorker
+# Creates documents tagged ['stock-data-collected', '<ticker>']
+# This is deterministic - no LLM involved in data collection
+
+[step.collect_data]
+type = "stock_data_collection"
+description = "Collect stock data for all tickers"
+on_error = "fail"
+
+# =========================================================================
+# Step 2: Stock Analysis (AI)
+# =========================================================================
+# Analyzes collected data using embedded stock-analysis template
+# Creates documents tagged ['stock-analysis']
+
+[step.analyze]
+type = "summary"
+description = "Analyze collected stock data"
+depends = "collect_data"
+on_error = "fail"
+template = "stock-analysis"
+filter_tags = ["stock-data-collected"]
+output_tags = ["stock-analysis"]
+
+# =========================================================================
+# Step 3: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email stock analysis list"
+depends = "analyze"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Analysis Test - List"
+body_from_tag = "stock-analysis"

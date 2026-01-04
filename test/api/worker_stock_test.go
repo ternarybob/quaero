@@ -1266,8 +1266,10 @@ func TestWorkerASXStockData(t *testing.T) {
 // TestWorkerASXStockDataMultiStock tests the asx_stock_data worker with multiple stocks
 // DEPRECATED: This worker is deprecated. Use asx_stock_collector instead which combines
 // price data, analyst coverage, and historical financials in a single API call.
-// This test is retained for backward compatibility.
+// This test is skipped - use TestWorkerASXStockCollector instead.
 func TestWorkerASXStockDataMultiStock(t *testing.T) {
+	t.Skip("DEPRECATED: asx_stock_data worker replaced by asx_stock_collector. Use TestWorkerASXStockCollector instead.")
+
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
 		t.Skipf("Failed to setup test environment: %v", err)
@@ -1574,6 +1576,19 @@ func validateASXAnnouncementsSummary(t *testing.T, helper *common.HTTPTestHelper
 		assert.Contains(t, doc.ContentMarkdown, "# ASX Announcements Summary", "Should have summary header")
 		assert.Contains(t, doc.ContentMarkdown, "Relevance Distribution", "Should have relevance section")
 		assert.Contains(t, doc.ContentMarkdown, "| Date |", "Should have announcements table")
+
+		// Validate Signal-to-Noise Analysis sections are present
+		assert.Contains(t, doc.ContentMarkdown, "Signal-to-Noise Analysis", "Should have Signal-to-Noise Analysis section")
+
+		// Validate High Signal Summary table is present (if there are high signal announcements)
+		if strings.Contains(doc.ContentMarkdown, "### High Signal Announcements") {
+			// Verify the table structure
+			assert.Contains(t, doc.ContentMarkdown, "| Date | Headline | Price Change | Volume |",
+				"High Signal Announcements table should have proper headers")
+			t.Log("PASS: High Signal Announcements summary table is present")
+		} else {
+			t.Log("INFO: No High Signal Announcements table (may be expected if no high-signal items)")
+		}
 
 		t.Log("PASS: Summary document has expected markdown structure")
 

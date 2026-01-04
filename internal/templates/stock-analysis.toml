@@ -5,12 +5,14 @@
 # To customize, create deployments/common/templates/stock-analysis.toml
 
 type = "prompt"
-schema_ref = "stock-analysis.schema.json"
+schema_ref = "stock-report.schema.json"
 
 prompt = """
-Analyze the collected stock data and provide comprehensive analysis for each stock.
+Analyze the collected stock data and provide comprehensive analysis for ALL stocks.
 
-For EACH stock in the collected data:
+CRITICAL: You MUST analyze EVERY stock in the collected data. Sort stocks alphabetically by ticker.
+
+For EACH stock in the collected data (in alphabetical order by ticker):
 
 === QUALITY ASSESSMENT ===
 
@@ -41,6 +43,10 @@ For EACH stock in the collected data:
    - MEDIUM: Operational updates, board changes, guidance
    - LOW: Generic PR, routine notices, administrative filings
 
+   IMPORTANT: You MUST provide 1-2 sentences explaining WHY you assigned this rating.
+   Cite specific recent announcements that support your rating.
+   Example: "HIGH - Recent announcements include $50M contract win (Dec 15) and quarterly results with 25% revenue growth (Nov 30)."
+
 === DUAL RECOMMENDATIONS ===
 
 4. TRADER VIEW (1-12 week horizon):
@@ -69,11 +75,14 @@ For EACH stock in the collected data:
 
 === OUTPUT FORMAT ===
 
-Provide analysis for ALL stocks in the data. Include:
-1. Summary table with: Ticker | Name | Quality | Trader Rec | Conv | Super Rec | Conv
-2. Individual stock analysis sections
-3. Watchlists: Trader Momentum | Super Accumulate
-4. Alerts section
+CRITICAL: Provide analysis for ALL stocks in the data, sorted alphabetically by ticker.
 
-Output MUST match the stock-analysis.schema.json structure.
+Your response MUST include:
+1. "stocks" array: Complete analysis for EACH stock in alphabetical order
+2. "summary_table" array: Row for each stock with: ticker, name, quality, trader_rec, trader_conv, super_rec, super_conv, signal_noise, cagr
+3. "watchlists" object: trader_momentum and super_accumulate arrays (ticker codes only)
+4. "definitions" object: Brief definitions of quality_rating, signal_noise_ratio, and cagr
+5. "alerts" array: Any significant alerts (optional)
+
+Output MUST match the stock-report.schema.json structure with ALL stocks included.
 """

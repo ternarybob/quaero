@@ -74,6 +74,15 @@ func TestOrchestratorStockAnalysisGoal(t *testing.T) {
 			schemaFile:      "stock-report.schema.json",
 			expectedIndices: []string{"XJO"},
 		},
+		{
+			name:            "StockAnalysisList",
+			jobDefFile:      "orchestrator-stock-analysis-list-test.toml",
+			jobDefID:        "orchestrator-stock-analysis-list-test",
+			expectedTickers: []string{"GNP", "BCN", "MYG"},
+			outputTag:       "stock-analysis",
+			schemaFile:      "stock-report.schema.json",
+			expectedIndices: []string{"XJO"},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -81,6 +90,54 @@ func TestOrchestratorStockAnalysisGoal(t *testing.T) {
 			runOrchestratorTest(t, tc)
 		})
 	}
+}
+
+// =============================================================================
+// Announcement Signal Analysis Tests
+// =============================================================================
+
+// TestOrchestratorAnnouncementAnalysis tests the announcement signal-to-noise analysis workflow.
+// This validates the announcement-analysis template produces schema-compliant output that:
+// - Excludes noise items from output
+// - Includes source references (local/data/web)
+// - Contains signal-noise assessment metrics
+// - Is repeatable (same structure each time)
+//
+// Workflow: asx_announcements → summary with announcement-analysis template → email
+// Output tag: announcement-analysis
+func TestOrchestratorAnnouncementAnalysis(t *testing.T) {
+	tc := orchestratorTestCase{
+		name:            "AnnouncementSignalAnalysis",
+		jobDefFile:      "orchestrator-announcement-analysis-test.toml",
+		jobDefID:        "orchestrator-announcement-analysis-test",
+		expectedTickers: []string{"GNP"},
+		outputTag:       "announcement-analysis",
+		schemaFile:      "announcement-analysis.schema.json",
+	}
+
+	runOrchestratorTest(t, tc)
+}
+
+// TestOrchestratorAnnouncementAnalysisMultiStock tests the multi-stock announcement analysis workflow.
+// This validates the announcement-analysis-report template produces:
+// - Consolidated output with all stocks
+// - Stocks ordered alphabetically by ticker
+// - Per-stock signal-noise analysis
+// - Cross-stock summary
+//
+// Workflow: asx_announcements → summary with announcement-analysis-report template → email
+// Output tag: announcement-analysis-report
+func TestOrchestratorAnnouncementAnalysisMultiStock(t *testing.T) {
+	tc := orchestratorTestCase{
+		name:            "AnnouncementSignalAnalysisMultiStock",
+		jobDefFile:      "orchestrator-announcement-analysis-3-stocks-test.toml",
+		jobDefID:        "orchestrator-announcement-analysis-3-stocks-test",
+		expectedTickers: []string{"GNP", "SKS", "WEB"},
+		outputTag:       "announcement-analysis-report",
+		schemaFile:      "announcement-analysis-report.schema.json",
+	}
+
+	runOrchestratorTest(t, tc)
 }
 
 // runOrchestratorTest executes a single orchestrator test scenario
@@ -421,6 +478,10 @@ func validateSchemaComplianceByType(t *testing.T, content string, schemaFile str
 		validatePortfolioReviewSchema(t, content)
 	case "purchase-conviction.schema.json":
 		validatePurchaseConvictionSchema(t, content)
+	case "announcement-analysis.schema.json":
+		validateAnnouncementAnalysisSchema(t, content)
+	case "announcement-analysis-report.schema.json":
+		validateAnnouncementAnalysisReportSchema(t, content)
 	default:
 		// Fall back to generic validation
 		t.Logf("Using generic schema validation for: %s", schemaFile)
@@ -1361,4 +1422,259 @@ func saveDocumentMetadata(t *testing.T, resultsDir string, docData map[string]in
 	}
 
 	t.Logf("Saved document data to: %s (%d bytes)", destPath, len(jsonData))
+}
+
+// validateAnnouncementAnalysisSchema validates output against announcement-analysis.schema.json.
+// Required fields: ticker, analysis_date, executive_summary, signal_noise_assessment, high_signal_announcements
+func validateAnnouncementAnalysisSchema(t *testing.T, content string) {
+	t.Log("Validating announcement-analysis.schema.json compliance")
+	contentLower := strings.ToLower(content)
+
+	schemaScore := 0
+	totalFields := 5
+
+	// 1. Check for ticker
+	tickerPattern := regexp.MustCompile(`(?i)\bticker[:\s]+[A-Z]{2,5}\b`)
+	if tickerPattern.MatchString(content) || strings.Contains(content, "GNP") {
+		schemaScore++
+		t.Log("PASS: Found 'ticker' field")
+	} else {
+		t.Log("INFO: Ticker field not found in expected format")
+	}
+
+	// 2. Check for executive_summary indicators
+	summaryPatterns := []string{"executive summary", "executive_summary", "summary:"}
+	foundSummary := false
+	for _, pattern := range summaryPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundSummary = true
+			schemaScore++
+			t.Logf("PASS: Found 'executive_summary' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundSummary {
+		t.Log("INFO: Executive summary section not found")
+	}
+
+	// 3. Check for signal_noise_assessment indicators
+	signalNoisePatterns := []string{
+		"signal-noise", "signal_noise", "signal:noise", "signal to noise",
+		"noise ratio", "noise_ratio", "overall rating", "overall_rating",
+		"high signal count", "high_signal_count",
+	}
+	foundSignalNoise := false
+	for _, pattern := range signalNoisePatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundSignalNoise = true
+			schemaScore++
+			t.Logf("PASS: Found 'signal_noise_assessment' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundSignalNoise {
+		t.Log("INFO: Signal-noise assessment section not found")
+	}
+
+	// 4. Check for high_signal_announcements (noise should be EXCLUDED)
+	highSignalPatterns := []string{
+		"high signal", "high_signal", "significant announcement",
+		"material announcement", "high-signal",
+	}
+	foundHighSignal := false
+	for _, pattern := range highSignalPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundHighSignal = true
+			schemaScore++
+			t.Logf("PASS: Found 'high_signal_announcements' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundHighSignal {
+		t.Log("INFO: High signal announcements section not found")
+	}
+
+	// 5. Check for sources section (local/data/web)
+	sourcePatterns := []string{
+		"sources", "local:", "data:", "web:", "api sources",
+		"eodhd", "asx.com", "document_id", "document id",
+	}
+	foundSources := false
+	for _, pattern := range sourcePatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundSources = true
+			schemaScore++
+			t.Logf("PASS: Found 'sources' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundSources {
+		t.Log("INFO: Sources section not found")
+	}
+
+	t.Logf("Announcement Analysis Schema compliance: %d/%d required sections found", schemaScore, totalFields)
+
+	// 6. Verify noise exclusion (negative test - noise indicators should NOT be prominent)
+	noiseExclusionCheck := true
+	noiseOnlyPatterns := []string{
+		"change of registry", "cleansing notice", "duplicate announcement",
+	}
+	for _, pattern := range noiseOnlyPatterns {
+		if strings.Contains(contentLower, pattern) {
+			noiseExclusionCheck = false
+			t.Logf("INFO: Found potential noise content (may be in exclusion list): '%s'", pattern)
+		}
+	}
+	if noiseExclusionCheck {
+		t.Log("PASS: No obvious noise-only content found in output (noise properly excluded)")
+	}
+
+	// 7. Check for signal rating values (HIGH, MODERATE)
+	ratingPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)signal[_\s-]*rating[:\s]+(?:HIGH|MODERATE)`),
+		regexp.MustCompile(`\|\s*(?:HIGH|MODERATE)\s*\|`),
+		regexp.MustCompile(`(?i)\b(?:HIGH|MODERATE)\s+signal\b`),
+	}
+	foundRating := false
+	for _, pattern := range ratingPatterns {
+		if pattern.MatchString(content) {
+			foundRating = true
+			t.Log("PASS: Found signal rating values (HIGH/MODERATE)")
+			break
+		}
+	}
+	if !foundRating {
+		t.Log("INFO: Signal rating values not found in expected format")
+	}
+
+	// Assert at least 3 of 5 required sections are present
+	assert.GreaterOrEqual(t, schemaScore, 3,
+		"Announcement analysis should contain at least 3 of 5 required sections")
+}
+
+// validateAnnouncementAnalysisReportSchema validates output against announcement-analysis-report.schema.json.
+// Required fields: analysis_date, stocks array (ordered alphabetically by ticker)
+func validateAnnouncementAnalysisReportSchema(t *testing.T, content string) {
+	t.Log("Validating announcement-analysis-report.schema.json compliance")
+	contentLower := strings.ToLower(content)
+
+	schemaScore := 0
+	totalFields := 5
+
+	// 1. Check for analysis_date at report level
+	datePatterns := []string{"analysis_date", "analysis date"}
+	foundDate := false
+	for _, pattern := range datePatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundDate = true
+			schemaScore++
+			t.Log("PASS: Found 'analysis_date' field")
+			break
+		}
+	}
+	if !foundDate {
+		t.Log("INFO: Analysis date not found at report level")
+	}
+
+	// 2. Check for report_summary (cross-stock summary)
+	summaryPatterns := []string{"report summary", "report_summary", "cross-stock", "comparative"}
+	foundReportSummary := false
+	for _, pattern := range summaryPatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundReportSummary = true
+			schemaScore++
+			t.Logf("PASS: Found 'report_summary' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundReportSummary {
+		t.Log("INFO: Report summary section not found")
+	}
+
+	// 3. Check for stocks array (multiple ticker sections)
+	expectedTickers := []string{"GNP", "SKS", "WEB"}
+	tickersFound := 0
+	for _, ticker := range expectedTickers {
+		if strings.Contains(content, ticker) {
+			tickersFound++
+			t.Logf("PASS: Found ticker '%s' in output", ticker)
+		}
+	}
+	if tickersFound >= 2 {
+		schemaScore++
+		t.Logf("PASS: Found %d of %d expected tickers", tickersFound, len(expectedTickers))
+	} else {
+		t.Logf("INFO: Only found %d of %d expected tickers", tickersFound, len(expectedTickers))
+	}
+
+	// 4. Check for alphabetical ordering indicators
+	// Look for pattern where GNP appears before SKS, SKS before WEB
+	gnpIdx := strings.Index(content, "GNP")
+	sksIdx := strings.Index(content, "SKS")
+	webIdx := strings.Index(content, "WEB")
+
+	alphabeticallyOrdered := false
+	if gnpIdx != -1 && sksIdx != -1 && webIdx != -1 {
+		if gnpIdx < sksIdx && sksIdx < webIdx {
+			alphabeticallyOrdered = true
+			schemaScore++
+			t.Log("PASS: Tickers appear in alphabetical order (GNP < SKS < WEB)")
+		} else {
+			t.Logf("INFO: Tickers not in alphabetical order (GNP@%d, SKS@%d, WEB@%d)", gnpIdx, sksIdx, webIdx)
+		}
+	} else {
+		t.Log("INFO: Cannot verify alphabetical ordering - not all tickers found")
+	}
+
+	// 5. Check for per-stock signal-noise content
+	signalNoisePatterns := []string{
+		"signal-noise", "signal_noise", "signal:noise", "signal to noise",
+		"noise ratio", "noise_ratio", "overall rating", "overall_rating",
+	}
+	foundSignalNoise := false
+	for _, pattern := range signalNoisePatterns {
+		if strings.Contains(contentLower, pattern) {
+			foundSignalNoise = true
+			schemaScore++
+			t.Logf("PASS: Found per-stock 'signal_noise_assessment' indicator: '%s'", pattern)
+			break
+		}
+	}
+	if !foundSignalNoise {
+		t.Log("INFO: Signal-noise assessment section not found")
+	}
+
+	t.Logf("Announcement Analysis Report Schema compliance: %d/%d sections found", schemaScore, totalFields)
+
+	// Additional validation: Check noise exclusion
+	noiseOnlyPatterns := []string{
+		"change of registry", "cleansing notice", "duplicate announcement",
+	}
+	for _, pattern := range noiseOnlyPatterns {
+		if strings.Contains(contentLower, pattern) {
+			t.Logf("INFO: Found potential noise content: '%s'", pattern)
+		}
+	}
+
+	// Check for signal rating values across stocks
+	ratingPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)overall[_\s-]*rating[:\s]+(?:EXCELLENT|GOOD|AVERAGE|POOR)`),
+		regexp.MustCompile(`(?i)\b(?:HIGH|MODERATE)\s+signal\b`),
+	}
+	for _, pattern := range ratingPatterns {
+		if pattern.MatchString(content) {
+			t.Log("PASS: Found signal/overall rating values")
+			break
+		}
+	}
+
+	// Assert at least 3 of 5 required sections are present
+	assert.GreaterOrEqual(t, schemaScore, 3,
+		"Announcement analysis report should contain at least 3 of 5 required sections")
+
+	// Additional assertion for alphabetical ordering when all tickers present
+	if tickersFound == len(expectedTickers) {
+		assert.True(t, alphabeticallyOrdered,
+			"Stocks should be ordered alphabetically by ticker (GNP < SKS < WEB)")
+	}
 }

@@ -34,6 +34,8 @@ type EmailWorker struct {
 	searchService   interfaces.SearchService
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
+	serverHost      string
+	serverPort      int
 }
 
 // Compile-time assertion: EmailWorker implements DefinitionWorker interface
@@ -46,6 +48,8 @@ func NewEmailWorker(
 	searchService interfaces.SearchService,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	serverHost string,
+	serverPort int,
 ) *EmailWorker {
 	return &EmailWorker{
 		mailerService:   mailerService,
@@ -53,6 +57,8 @@ func NewEmailWorker(
 		searchService:   searchService,
 		logger:          logger,
 		jobMgr:          jobMgr,
+		serverHost:      serverHost,
+		serverPort:      serverPort,
 	}
 }
 
@@ -194,8 +200,8 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 
 	// Find and append source document links if we have a source document
 	if bodyResult.sourceDoc != nil {
-		// Get base URL from config or use default
-		baseURL := "http://localhost:8080"
+		// Get base URL from step config, or construct from server config
+		baseURL := fmt.Sprintf("http://%s:%d", w.serverHost, w.serverPort)
 		if configBaseURL, ok := stepConfig["base_url"].(string); ok && configBaseURL != "" {
 			baseURL = configBaseURL
 		}
@@ -1190,9 +1196,11 @@ func (w *EmailWorker) wrapInEmailTemplate(content string) string {
 
 // sourceDocInfo holds information about a source document for linking
 type sourceDocInfo struct {
-	ID         string
-	Title      string
-	SourceType string
+	ID             string
+	Title          string
+	SourceType     string
+	SourceCategory string // "local", "data", "web"
+	URL            string // External URL for data/web sources
 }
 
 // findSourceDocuments discovers related source documents based on the email body document's tags
@@ -1227,7 +1235,7 @@ func (w *EmailWorker) findSourceDocuments(ctx context.Context, sourceDoc *models
 		Msg("Finding source documents for email")
 
 	// Source document types to find for each ticker
-	sourceTypes := []string{"asx-stock-data", "stock-recommendation"}
+	sourceTypes := []string{"asx-stock-data", "stock-recommendation", "asx-announcement-summary"}
 
 	// For each ticker, find related source documents
 	for _, ticker := range tickerTags {
@@ -1246,11 +1254,36 @@ func (w *EmailWorker) findSourceDocuments(ctx context.Context, sourceDoc *models
 			if len(results) > 0 {
 				doc := results[0]
 				sources = append(sources, sourceDocInfo{
-					ID:         doc.ID,
-					Title:      fmt.Sprintf("ASX:%s %s", strings.ToUpper(ticker), sourceType),
-					SourceType: sourceType,
+					ID:             doc.ID,
+					Title:          fmt.Sprintf("ASX:%s %s", strings.ToUpper(ticker), sourceType),
+					SourceType:     sourceType,
+					SourceCategory: "local",
 				})
 				w.logger.Debug().Str("doc_id", doc.ID).Str("ticker", ticker).Str("source_type", sourceType).Msg("Found source document")
+
+				// Extract API endpoints from document metadata for data sources
+				if doc.Metadata != nil {
+					if debugMeta, ok := doc.Metadata["debug_metadata"].(map[string]interface{}); ok {
+						if endpoints, ok := debugMeta["api_endpoints"].([]interface{}); ok {
+							for _, ep := range endpoints {
+								if epMap, ok := ep.(map[string]interface{}); ok {
+									if endpoint, ok := epMap["endpoint"].(string); ok {
+										// Extract base domain from endpoint URL
+										domain := extractBaseDomain(endpoint)
+										if domain != "" {
+											sources = append(sources, sourceDocInfo{
+												Title:          domain,
+												SourceType:     "api",
+												SourceCategory: "data",
+												URL:            "https://" + domain,
+											})
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1258,66 +1291,210 @@ func (w *EmailWorker) findSourceDocuments(ctx context.Context, sourceDoc *models
 	// Also add the main body document itself
 	if sourceDoc.ID != "" {
 		sources = append(sources, sourceDocInfo{
-			ID:         sourceDoc.ID,
-			Title:      sourceDoc.Title,
-			SourceType: "portfolio-summary",
+			ID:             sourceDoc.ID,
+			Title:          sourceDoc.Title,
+			SourceType:     "portfolio-summary",
+			SourceCategory: "local",
 		})
 	}
+
+	// Find web search documents and extract their sources
+	for _, ticker := range tickerTags {
+		opts := interfaces.SearchOptions{
+			Tags:     []string{"web-search", ticker},
+			Limit:    5,
+			OrderBy:  "created_at",
+			OrderDir: "desc",
+		}
+		results, err := w.searchService.Search(ctx, "", opts)
+		if err != nil {
+			w.logger.Debug().Err(err).Str("ticker", ticker).Msg("Error searching for web search documents")
+			continue
+		}
+
+		for _, doc := range results {
+			// Extract web search sources from document metadata
+			if doc.Metadata != nil {
+				if webSources, ok := doc.Metadata["sources"].([]interface{}); ok {
+					for _, ws := range webSources {
+						if wsMap, ok := ws.(map[string]interface{}); ok {
+							url, _ := wsMap["url"].(string)
+							title, _ := wsMap["title"].(string)
+							if url != "" {
+								if title == "" {
+									title = extractBaseDomain(url)
+								}
+								sources = append(sources, sourceDocInfo{
+									Title:          title,
+									SourceType:     "web-search",
+									SourceCategory: "web",
+									URL:            url,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Deduplicate data and web sources
+	sources = deduplicateDataSources(sources)
 
 	return sources
 }
 
+// extractBaseDomain extracts the base domain from a URL
+func extractBaseDomain(urlStr string) string {
+	// Handle URLs with or without scheme
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "https://" + urlStr
+	}
+
+	// Find the host part
+	start := strings.Index(urlStr, "://")
+	if start == -1 {
+		return ""
+	}
+	rest := urlStr[start+3:]
+
+	// Find end of host (before path, query, or fragment)
+	end := len(rest)
+	for _, sep := range []string{"/", "?", "#"} {
+		if idx := strings.Index(rest, sep); idx != -1 && idx < end {
+			end = idx
+		}
+	}
+
+	host := rest[:end]
+
+	// Remove port if present
+	if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
+		host = host[:colonIdx]
+	}
+
+	return host
+}
+
+// deduplicateDataSources removes duplicate data/web sources by URL
+func deduplicateDataSources(sources []sourceDocInfo) []sourceDocInfo {
+	seen := make(map[string]bool)
+	result := make([]sourceDocInfo, 0, len(sources))
+
+	for _, src := range sources {
+		// Always keep local sources
+		if src.SourceCategory == "local" {
+			result = append(result, src)
+			continue
+		}
+
+		// Deduplicate data/web sources by URL or title
+		key := src.URL
+		if key == "" {
+			key = src.Title
+		}
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, src)
+		}
+	}
+
+	return result
+}
+
 // formatSourceLinksHTML creates an HTML section with clickable links to source documents
+// Sources are grouped by category: Local (Quaero documents), Data (API sources), Web (search results)
 func (w *EmailWorker) formatSourceLinksHTML(sources []sourceDocInfo, baseURL string) string {
 	if len(sources) == 0 {
 		return ""
 	}
 
-	var sb strings.Builder
-	sb.WriteString(`<div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">`)
-	sb.WriteString(`<h3 style="color: #666; font-size: 14px; margin-bottom: 12px;">📎 Source Documents</h3>`)
-	sb.WriteString(`<p style="font-size: 12px; color: #888; margin-bottom: 10px;">Click to view original data in Quaero:</p>`)
-	sb.WriteString(`<ul style="list-style: none; padding: 0; margin: 0;">`)
-
-	// Group sources by type
-	typeGroups := make(map[string][]sourceDocInfo)
-	typeOrder := []string{"asx-stock-data", "stock-recommendation", "portfolio-summary"}
+	// Group sources by category
+	categoryGroups := make(map[string][]sourceDocInfo)
 	for _, src := range sources {
-		typeGroups[src.SourceType] = append(typeGroups[src.SourceType], src)
+		cat := src.SourceCategory
+		if cat == "" {
+			cat = "local" // Default to local
+		}
+		categoryGroups[cat] = append(categoryGroups[cat], src)
 	}
 
-	for _, srcType := range typeOrder {
-		docs := typeGroups[srcType]
-		if len(docs) == 0 {
+	var sb strings.Builder
+	sb.WriteString(`<div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">`)
+	sb.WriteString(`<h3 style="color: #666; font-size: 14px; margin-bottom: 12px;">📎 Sources</h3>`)
+
+	// Category order and labels
+	categoryOrder := []struct {
+		key   string
+		label string
+		desc  string
+	}{
+		{"local", "📁 Local", "Quaero documents"},
+		{"data", "📊 Data", "External API sources"},
+		{"web", "🌐 Web", "Web search results"},
+	}
+
+	for _, cat := range categoryOrder {
+		srcs := categoryGroups[cat.key]
+		if len(srcs) == 0 {
 			continue
 		}
 
-		typeLabel := srcType
-		switch srcType {
-		case "asx-stock-data":
-			typeLabel = "Stock Data"
-		case "stock-recommendation":
-			typeLabel = "Analysis & Recommendations"
-		case "portfolio-summary":
-			typeLabel = "Portfolio Summary"
-		}
+		sb.WriteString(fmt.Sprintf(`<div style="margin-bottom: 12px;"><strong style="color: #444; font-size: 13px;">%s</strong>`, cat.label))
+		sb.WriteString(fmt.Sprintf(`<span style="color: #888; font-size: 11px; margin-left: 8px;">(%s)</span>`, cat.desc))
+		sb.WriteString(`<ul style="list-style: none; padding: 0; margin: 4px 0 0 0;">`)
 
-		sb.WriteString(fmt.Sprintf(`<li style="margin: 8px 0;"><strong style="color: #555;">%s:</strong> `, typeLabel))
-
-		for i, doc := range docs {
-			if i > 0 {
-				sb.WriteString(", ")
+		if cat.key == "local" {
+			// Group local sources by type for better organization
+			typeGroups := make(map[string][]sourceDocInfo)
+			typeOrder := []string{"asx-stock-data", "stock-recommendation", "asx-announcement-summary", "portfolio-summary"}
+			for _, src := range srcs {
+				typeGroups[src.SourceType] = append(typeGroups[src.SourceType], src)
 			}
-			// URL encode the document ID for safety
-			link := fmt.Sprintf("%s/documents?document_id=%s", baseURL, doc.ID)
-			sb.WriteString(fmt.Sprintf(`<a href="%s" style="color: #0066cc;">%s</a>`, link, doc.Title))
+
+			for _, srcType := range typeOrder {
+				docs := typeGroups[srcType]
+				if len(docs) == 0 {
+					continue
+				}
+
+				typeLabel := srcType
+				switch srcType {
+				case "asx-stock-data":
+					typeLabel = "Stock Data"
+				case "stock-recommendation":
+					typeLabel = "Analysis & Recommendations"
+				case "asx-announcement-summary":
+					typeLabel = "ASX Announcements"
+				case "portfolio-summary":
+					typeLabel = "Portfolio Summary"
+				}
+
+				sb.WriteString(fmt.Sprintf(`<li style="margin: 6px 0;"><span style="color: #555;">%s:</span> `, typeLabel))
+				for i, doc := range docs {
+					if i > 0 {
+						sb.WriteString(", ")
+					}
+					link := fmt.Sprintf("%s/documents?document_id=%s", baseURL, doc.ID)
+					sb.WriteString(fmt.Sprintf(`<a href="%s" style="color: #0066cc;">%s</a>`, link, doc.Title))
+				}
+				sb.WriteString(`</li>`)
+			}
+		} else {
+			// For data/web sources, just list them
+			for _, src := range srcs {
+				link := src.URL
+				if link == "" {
+					continue
+				}
+				sb.WriteString(fmt.Sprintf(`<li style="margin: 4px 0;"><a href="%s" style="color: #0066cc;">%s</a></li>`, link, src.Title))
+			}
 		}
-		sb.WriteString(`</li>`)
+
+		sb.WriteString(`</ul></div>`)
 	}
 
-	sb.WriteString(`</ul>`)
 	sb.WriteString(`</div>`)
-
 	return sb.String()
 }
 

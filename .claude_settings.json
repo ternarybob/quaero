@@ -1,0 +1,34 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(./**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Read(C:\\development\\quaero/**)",
+      "Write(C:\\development\\quaero/**)",
+      "Edit(C:\\development\\quaero/**)",
+      "Glob(C:\\development\\quaero/**)",
+      "Grep(C:\\development\\quaero/**)",
+      "Read(C:\\development\\quaero\\.auto-claude\\specs\\001-quaero-workers-refactoring-multi-exchange-support-/**)",
+      "Write(C:\\development\\quaero\\.auto-claude\\specs\\001-quaero-workers-refactoring-multi-exchange-support-/**)",
+      "Edit(C:\\development\\quaero\\.auto-claude\\specs\\001-quaero-workers-refactoring-multi-exchange-support-/**)",
+      "Bash(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__context7__resolve-library-id(*)",
+      "mcp__context7__get-library-docs(*)",
+      "mcp__graphiti-memory__search_nodes(*)",
+      "mcp__graphiti-memory__search_facts(*)",
+      "mcp__graphiti-memory__add_episode(*)",
+      "mcp__graphiti-memory__get_episodes(*)",
+      "mcp__graphiti-memory__get_entity_edge(*)"
+    ]
+  }
+}

@@ -1,0 +1,174 @@
+# Announcement Signal Analysis Template
+# Type: prompt (for SummaryWorker)
+#
+# Analyzes ASX announcements for signal-to-noise quality.
+# Excludes noise items from output, includes only significant announcements.
+# Produces repeatable, schema-compliant output for downstream consumption.
+
+type = "prompt"
+schema_ref = "announcement-analysis.schema.json"
+
+prompt = """
+Analyze the ASX announcement data for the stock and produce a comprehensive signal-to-noise analysis.
+
+CRITICAL REQUIREMENTS:
+1. Output MUST be absolutely repeatable - same input data should produce identical structure
+2. EXCLUDE all noise items from output - only include HIGH and MODERATE signal announcements
+3. Include source references for all data used
+4. Follow the schema exactly - no additional fields, no missing required fields
+
+=== INPUT DATA ANALYSIS ===
+
+Review the collected announcement data and identify:
+- Total announcement count
+- Date range covered (should be minimum 13 months)
+- Price-sensitive vs non-price-sensitive breakdown
+- Announcement types present
+
+=== SIGNAL-TO-NOISE CLASSIFICATION ===
+
+Classify EVERY announcement using these criteria:
+
+HIGH SIGNAL (include in output with full details):
+- Financial results (half-year, full-year, quarterly)
+- Earnings guidance (upgrades, downgrades, new guidance)
+- Major contracts or customer wins (>5% revenue impact)
+- M&A activity (acquisitions, divestments, takeover offers)
+- Capital raises or significant debt changes
+- Material litigation outcomes
+- CEO/CFO changes
+- Dividend declarations with changes from prior
+
+MODERATE SIGNAL (include in output with full details):
+- Operational updates with quantified metrics
+- Board changes (non-executive)
+- AGM results with notable resolutions
+- Trading updates between reporting periods
+- Industry-specific material events
+- Dividend declarations maintaining prior levels
+
+LOW SIGNAL (exclude from high_signal_announcements):
+- Routine administrative notices
+- Standard compliance filings (Appendix 4C without material news)
+- Director interest notices without unusual activity
+- Generic investor presentations (rehashing known info)
+- Routine trading halt/resumption without news
+
+NOISE (exclude completely from high_signal_announcements):
+- Change of registry/share address notices
+- Standard annual report lodgement (if results already announced)
+- Generic "response to ASX query" without new information
+- Duplicate announcements
+- Cleansing notices
+
+=== EXECUTIVE SUMMARY ===
+
+Generate a 2-4 paragraph executive summary that:
+1. Describes the company's overall announcement quality
+2. Highlights key material announcements in the period
+3. Notes any concerns (high noise ratio, poor price-sensitive accuracy)
+4. Provides context for investors reviewing the company
+
+=== SIGNAL-NOISE ASSESSMENT ===
+
+Calculate and provide:
+- overall_rating: EXCELLENT (noise_ratio < 0.3), GOOD (0.3-0.5), AVERAGE (0.5-0.7), POOR (> 0.7)
+- overall_rating_reasoning: 1-2 sentences explaining the rating
+- high_signal_count: Number of HIGH signal announcements
+- moderate_signal_count: Number of MODERATE signal announcements
+- low_signal_count: Number of LOW signal announcements
+- noise_count: Number of NOISE announcements
+- total_count: Total announcements analyzed
+- noise_ratio: noise_count / total_count (0.0 to 1.0)
+- price_sensitive_accuracy: Percentage of price-sensitive announcements with measurable market reaction
+
+=== HIGH SIGNAL ANNOUNCEMENTS ===
+
+For EACH high or moderate signal announcement, provide:
+- date: YYYY-MM-DD format
+- headline: Full announcement headline
+- type: ASX announcement type
+- signal_rating: "HIGH" or "MODERATE"
+- rationale: 1-2 sentences explaining why this is significant
+- price_sensitive: true/false
+- price_impact (if available):
+  - price_change_percent: Day-of price change
+  - volume_ratio: Volume vs 20-day average
+  - impact_signal: Brief description of market reaction
+- pdf_url: Link to ASX announcement (if available)
+- ai_analysis: 2-3 sentences analyzing significance and implications
+
+Sort by date descending (most recent first).
+
+=== ANOMALIES ===
+
+Flag announcements with unexpected market behavior:
+- NO_REACTION: Price-sensitive announcement with <1% move and normal volume
+- UNEXPECTED_REACTION: Non-price-sensitive with >3% move or 2x volume
+
+For each anomaly provide:
+- date, headline, anomaly_type
+- explanation: Why this might have occurred
+
+=== PRE-ANNOUNCEMENT MOVEMENTS ===
+
+For significant announcements, check for pre-announcement drift:
+- Calculate price change from T-5 to T-1 (before announcement)
+- Flag if drift >3% in direction of post-announcement move
+- Provide interpretation (coincidence, sector move, potential leakage)
+
+=== DIVIDEND ANNOUNCEMENTS ===
+
+List dividend-related announcements with:
+- date, headline
+- notes: Context about ex-date implications, DRP status, franking
+
+=== KEY THEMES ===
+
+Extract 3-7 key themes from the announcements:
+- Growth/expansion vs contraction
+- Capital management approach
+- Operational focus areas
+- Risk factors emerging
+
+=== SOURCES ===
+
+Document ALL sources used:
+
+Local (Quaero documents):
+- List each document used with title, type, and document_id
+- Types: "asx-announcement-summary", "stock-data"
+
+Data (API sources):
+- List APIs used: eodhd.com, asx.com.au
+- Include data_types retrieved
+
+Web (if any web searches performed):
+- List URLs with titles
+
+=== OUTPUT FORMAT ===
+
+Output MUST match announcement-analysis.schema.json exactly:
+
+{
+  "ticker": "XXX",
+  "company_name": "Full Company Name",
+  "analysis_date": "YYYY-MM-DD",
+  "analysis_period": "X months",
+  "executive_summary": "...",
+  "signal_noise_assessment": {...},
+  "high_signal_announcements": [...],
+  "anomalies": [...],
+  "pre_announcement_movements": [...],
+  "dividend_announcements": [...],
+  "key_themes": [...],
+  "sources": {
+    "local": [...],
+    "data": [...],
+    "web": [...]
+  }
+}
+
+CRITICAL: Do NOT include noise or low-signal announcements in high_signal_announcements array.
+The output must be deterministic - same inputs produce same structure every time.
+"""

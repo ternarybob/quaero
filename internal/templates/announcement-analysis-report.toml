@@ -1,0 +1,104 @@
+# Announcement Analysis Report Template (Multi-Stock)
+# Type: prompt (for SummaryWorker)
+#
+# Consolidates announcement signal-noise analyses for multiple stocks.
+# Output is ordered alphabetically by ticker.
+# Produces repeatable, schema-compliant multi-stock report.
+
+type = "prompt"
+schema_ref = "announcement-analysis-report.schema.json"
+
+prompt = """
+Consolidate the ASX announcement data for ALL stocks and produce a multi-stock announcement signal-noise analysis report.
+
+CRITICAL REQUIREMENTS:
+1. Output MUST list stocks ALPHABETICALLY by ticker code (e.g., GNP before SKS before WEB)
+2. Output MUST be absolutely repeatable - same input data produces identical structure
+3. EXCLUDE all noise items from output - only include HIGH and MODERATE signal announcements
+4. Include source references for all data used per stock
+5. Follow the schema exactly - no additional fields, no missing required fields
+
+=== REPORT STRUCTURE ===
+
+The output MUST contain:
+1. analysis_date: Today's date in YYYY-MM-DD format
+2. report_summary: 2-3 paragraph cross-stock summary
+3. stocks: Array of individual stock analyses, SORTED ALPHABETICALLY BY TICKER
+
+=== CROSS-STOCK SUMMARY ===
+
+Generate a report_summary that:
+1. Compares announcement quality across all stocks
+2. Highlights which companies have best/worst signal-to-noise ratios
+3. Identifies common themes across multiple companies
+4. Notes any concerning patterns (e.g., multiple companies with high noise)
+
+=== FOR EACH STOCK (alphabetically) ===
+
+For each stock in the collected data, generate a complete analysis following the single-stock announcement-analysis pattern:
+
+1. **Signal-to-Noise Classification**:
+   - HIGH SIGNAL: Financial results, earnings guidance, major contracts, M&A, capital raises, CEO/CFO changes
+   - MODERATE SIGNAL: Operational updates with metrics, board changes, AGM results, trading updates
+   - LOW SIGNAL: Routine notices, standard filings, generic presentations (exclude from output)
+   - NOISE: Registry changes, duplicate announcements, cleansing notices (exclude from output)
+
+2. **Executive Summary**: 2-4 paragraphs on company announcement quality
+
+3. **Signal-Noise Assessment**:
+   - overall_rating: EXCELLENT (<0.3 noise), GOOD (0.3-0.5), AVERAGE (0.5-0.7), POOR (>0.7)
+   - Counts for high/moderate/low/noise
+   - noise_ratio calculation
+
+4. **High Signal Announcements**: Full details for each HIGH or MODERATE announcement
+   - Sort by date descending (most recent first)
+   - Include rationale, price impact, AI analysis
+
+5. **Anomalies**: Unexpected market reactions
+
+6. **Pre-Announcement Movements**: Significant price drift before announcements
+
+7. **Dividend Announcements**: With context and notes
+
+8. **Key Themes**: 3-7 themes per stock
+
+9. **Sources**: Local documents, API sources, web sources
+
+=== ALPHABETICAL ORDERING ===
+
+CRITICAL: The stocks array MUST be sorted alphabetically by ticker.
+
+Example correct ordering:
+- BCN before GNP
+- GNP before SKS
+- SKS before WEB
+
+=== OUTPUT FORMAT ===
+
+Output MUST match announcement-analysis-report.schema.json exactly:
+
+{
+  "analysis_date": "YYYY-MM-DD",
+  "report_summary": "Cross-stock comparative summary...",
+  "stocks": [
+    {
+      "ticker": "AAA",  // First alphabetically
+      "company_name": "...",
+      "analysis_date": "YYYY-MM-DD",
+      ...
+    },
+    {
+      "ticker": "BBB",  // Second alphabetically
+      ...
+    },
+    {
+      "ticker": "ZZZ",  // Last alphabetically
+      ...
+    }
+  ]
+}
+
+CRITICAL: Do NOT include noise or low-signal announcements in any high_signal_announcements array.
+The output must be deterministic - same inputs produce same structure every time.
+Stocks MUST be alphabetically ordered by ticker - this is a hard requirement.
+"""

@@ -980,6 +980,8 @@ func (a *App) initServices() error {
 		a.SearchService,
 		a.Logger,
 		jobMgr,
+		a.Config.Server.Host,
+		a.Config.Server.Port,
 	)
 	a.StepManager.RegisterWorker(emailWorker)
 	a.Logger.Debug().Str("step_type", emailWorker.GetType().String()).Msg("Email worker registered")

@@ -1833,13 +1833,33 @@ Your task is to critique the following Draft Document based on the Rules provide
 // This function handles the output from schema-constrained LLM generation,
 // parsing the JSON and formatting it as a readable markdown document.
 func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
-	// Parse JSON
+	// Parse JSON - try direct parse first
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return "", fmt.Errorf("failed to parse JSON: %w", err)
+		// Try to repair truncated JSON
+		repairedJSON := repairTruncatedJSON(jsonStr)
+		if repairedJSON != jsonStr {
+			w.logger.Debug().
+				Int("original_length", len(jsonStr)).
+				Int("repaired_length", len(repairedJSON)).
+				Msg("Attempting to parse repaired JSON")
+
+			if err2 := json.Unmarshal([]byte(repairedJSON), &data); err2 != nil {
+				return "", fmt.Errorf("failed to parse JSON (also tried repair): %w", err)
+			}
+			w.logger.Info().Msg("Successfully parsed repaired truncated JSON")
+		} else {
+			return "", fmt.Errorf("failed to parse JSON: %w", err)
+		}
 	}
 
 	var md strings.Builder
+
+	// Handle announcement-analysis.schema.json format (must check before generic ticker check)
+	// Identified by having signal_noise_assessment field
+	if _, hasSignalNoise := data["signal_noise_assessment"]; hasSignalNoise {
+		return w.formatAnnouncementAnalysisToMarkdown(data)
+	}
 
 	// Handle stock analysis output format
 	// Check for single stock object (ticker at root level) - stock-analysis.schema.json format
@@ -1850,7 +1870,18 @@ func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
 		return md.String(), nil
 	}
 
-	// Handle stocks array format
+	// Handle announcement-analysis-report.schema.json format (multi-stock announcement analysis)
+	// Identified by having 'stocks' array where items have signal_noise_assessment
+	if stocks, ok := data["stocks"].([]interface{}); ok && len(stocks) > 0 {
+		// Check if first stock has signal_noise_assessment (announcement-analysis-report schema)
+		if firstStock, ok := stocks[0].(map[string]interface{}); ok {
+			if _, hasSignalNoise := firstStock["signal_noise_assessment"]; hasSignalNoise {
+				return w.formatAnnouncementAnalysisReportToMarkdown(data)
+			}
+		}
+	}
+
+	// Handle stocks array format (stock-analysis multi-stock format)
 	if stocks, ok := data["stocks"].([]interface{}); ok {
 		md.WriteString("# Stock Analysis Report\n\n")
 		md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", time.Now().Format("January 2, 2006")))
@@ -1875,6 +1906,43 @@ func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
 			// Stock data summary
 			if summary := getStringVal(stock, "stock_data_summary", ""); summary != "" {
 				md.WriteString(fmt.Sprintf("### Stock Data\n%s\n\n", summary))
+			}
+
+			// Technical analysis
+			if techAnalysis, ok := stock["technical_analysis"].(map[string]interface{}); ok {
+				md.WriteString("### Technical Analysis\n")
+				if techSummary := getStringVal(techAnalysis, "summary", ""); techSummary != "" {
+					md.WriteString(fmt.Sprintf("%s\n\n", techSummary))
+				}
+
+				// Technical metrics table
+				md.WriteString("| Metric | Value |\n")
+				md.WriteString("|--------|-------|\n")
+				if sma20 := getFloatVal(techAnalysis, "sma_20", 0); sma20 > 0 {
+					md.WriteString(fmt.Sprintf("| SMA 20 | $%.2f |\n", sma20))
+				}
+				if sma50 := getFloatVal(techAnalysis, "sma_50", 0); sma50 > 0 {
+					md.WriteString(fmt.Sprintf("| SMA 50 | $%.2f |\n", sma50))
+				}
+				if sma200 := getFloatVal(techAnalysis, "sma_200", 0); sma200 > 0 {
+					md.WriteString(fmt.Sprintf("| SMA 200 | $%.2f |\n", sma200))
+				}
+				if rsi := getFloatVal(techAnalysis, "rsi_14", 0); rsi > 0 {
+					md.WriteString(fmt.Sprintf("| RSI (14) | %.1f |\n", rsi))
+				}
+				if support := getFloatVal(techAnalysis, "support_level", 0); support > 0 {
+					md.WriteString(fmt.Sprintf("| Support | $%.2f |\n", support))
+				}
+				if resistance := getFloatVal(techAnalysis, "resistance_level", 0); resistance > 0 {
+					md.WriteString(fmt.Sprintf("| Resistance | $%.2f |\n", resistance))
+				}
+				if shortTrend := getStringVal(techAnalysis, "short_term_trend", ""); shortTrend != "" {
+					md.WriteString(fmt.Sprintf("| Short-term Trend | %s |\n", shortTrend))
+				}
+				if longTrend := getStringVal(techAnalysis, "long_term_trend", ""); longTrend != "" {
+					md.WriteString(fmt.Sprintf("| Long-term Trend | %s |\n", longTrend))
+				}
+				md.WriteString("\n")
 			}
 
 			// Announcement analysis
@@ -1905,11 +1973,43 @@ func (w *SummaryWorker) jsonToMarkdown(jsonStr string) (string, error) {
 			// Signal-noise ratio
 			if snr := getStringVal(stock, "signal_noise_ratio", ""); snr != "" {
 				md.WriteString(fmt.Sprintf("**Signal-to-Noise Ratio:** %s\n\n", snr))
+				if snrReasoning := getStringVal(stock, "signal_noise_reasoning", ""); snrReasoning != "" {
+					md.WriteString(fmt.Sprintf("%s\n\n", snrReasoning))
+				}
 			}
 
 			// 5-year CAGR
 			if cagr, ok := stock["five_year_cagr"].(float64); ok {
 				md.WriteString(fmt.Sprintf("**5-Year CAGR:** %.1f%%\n\n", cagr*100))
+			}
+
+			// Key metrics table
+			currentPrice := getFloatVal(stock, "current_price", 0)
+			marketCap := getStringVal(stock, "market_cap", "")
+			peRatio := getFloatVal(stock, "pe_ratio", 0)
+			eps := getFloatVal(stock, "eps", 0)
+			divYield := getFloatVal(stock, "dividend_yield", 0)
+
+			if currentPrice > 0 || marketCap != "" {
+				md.WriteString("### Key Metrics\n")
+				md.WriteString("| Metric | Value |\n")
+				md.WriteString("|--------|-------|\n")
+				if currentPrice > 0 {
+					md.WriteString(fmt.Sprintf("| Current Price | $%.2f |\n", currentPrice))
+				}
+				if marketCap != "" {
+					md.WriteString(fmt.Sprintf("| Market Cap | %s |\n", marketCap))
+				}
+				if peRatio > 0 {
+					md.WriteString(fmt.Sprintf("| P/E Ratio | %.1f |\n", peRatio))
+				}
+				if eps != 0 {
+					md.WriteString(fmt.Sprintf("| EPS | $%.2f |\n", eps))
+				}
+				if divYield > 0 {
+					md.WriteString(fmt.Sprintf("| Dividend Yield | %.2f%% |\n", divYield*100))
+				}
+				md.WriteString("\n")
 			}
 
 			// Trader recommendation
@@ -2392,6 +2492,9 @@ func (w *SummaryWorker) formatStockToMarkdown(md *strings.Builder, stock map[str
 	// Signal-noise ratio
 	if snr := getStringVal(stock, "signal_noise_ratio", ""); snr != "" {
 		md.WriteString(fmt.Sprintf("**Signal-to-Noise Ratio:** %s\n\n", snr))
+		if snrReasoning := getStringVal(stock, "signal_noise_reasoning", ""); snrReasoning != "" {
+			md.WriteString(fmt.Sprintf("%s\n\n", snrReasoning))
+		}
 	}
 
 	// 5-year CAGR
@@ -2457,6 +2560,516 @@ func (w *SummaryWorker) formatStockToMarkdown(md *strings.Builder, stock map[str
 	md.WriteString("---\n\n")
 }
 
+// formatAnnouncementAnalysisToMarkdown formats announcement-analysis.schema.json output to markdown
+func (w *SummaryWorker) formatAnnouncementAnalysisToMarkdown(data map[string]interface{}) (string, error) {
+	var md strings.Builder
+
+	ticker := getStringVal(data, "ticker", "Unknown")
+	companyName := getStringVal(data, "company_name", "Unknown Company")
+	analysisDate := getStringVal(data, "analysis_date", time.Now().Format("2006-01-02"))
+	analysisPeriod := getStringVal(data, "analysis_period", "")
+
+	// Header
+	md.WriteString(fmt.Sprintf("# Announcement Signal Analysis: %s (%s)\n\n", ticker, companyName))
+	md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n", analysisDate))
+	if analysisPeriod != "" {
+		md.WriteString(fmt.Sprintf("**Period Covered:** %s\n", analysisPeriod))
+	}
+	md.WriteString("\n---\n\n")
+
+	// Executive Summary
+	if execSummary := getStringVal(data, "executive_summary", ""); execSummary != "" {
+		md.WriteString("## Executive Summary\n\n")
+		md.WriteString(execSummary)
+		md.WriteString("\n\n---\n\n")
+	}
+
+	// Signal-Noise Assessment
+	if assessment, ok := data["signal_noise_assessment"].(map[string]interface{}); ok {
+		md.WriteString("## Signal-Noise Assessment\n\n")
+
+		overallRating := getStringVal(assessment, "overall_rating", "N/A")
+		md.WriteString(fmt.Sprintf("**Overall Rating:** %s\n\n", overallRating))
+
+		if reasoning := getStringVal(assessment, "overall_rating_reasoning", ""); reasoning != "" {
+			md.WriteString(fmt.Sprintf("%s\n\n", reasoning))
+		}
+
+		// Counts table
+		md.WriteString("### Announcement Breakdown\n\n")
+		md.WriteString("| Category | Count |\n")
+		md.WriteString("|----------|-------|\n")
+
+		if highCount := getFloatVal(assessment, "high_signal_count", -1); highCount >= 0 {
+			md.WriteString(fmt.Sprintf("| High Signal | %.0f |\n", highCount))
+		}
+		if modCount := getFloatVal(assessment, "moderate_signal_count", -1); modCount >= 0 {
+			md.WriteString(fmt.Sprintf("| Moderate Signal | %.0f |\n", modCount))
+		}
+		if lowCount := getFloatVal(assessment, "low_signal_count", -1); lowCount >= 0 {
+			md.WriteString(fmt.Sprintf("| Low Signal | %.0f |\n", lowCount))
+		}
+		if noiseCount := getFloatVal(assessment, "noise_count", -1); noiseCount >= 0 {
+			md.WriteString(fmt.Sprintf("| Noise | %.0f |\n", noiseCount))
+		}
+		if totalCount := getFloatVal(assessment, "total_count", -1); totalCount >= 0 {
+			md.WriteString(fmt.Sprintf("| **Total** | **%.0f** |\n", totalCount))
+		}
+		md.WriteString("\n")
+
+		if noiseRatio := getFloatVal(assessment, "noise_ratio", -1); noiseRatio >= 0 {
+			md.WriteString(fmt.Sprintf("**Noise Ratio:** %.1f%%\n\n", noiseRatio*100))
+		}
+		if accuracy := getFloatVal(assessment, "price_sensitive_accuracy", -1); accuracy >= 0 {
+			md.WriteString(fmt.Sprintf("**Price-Sensitive Accuracy:** %.1f%%\n\n", accuracy))
+		}
+
+		md.WriteString("---\n\n")
+	}
+
+	// High Signal Announcements
+	if announcements, ok := data["high_signal_announcements"].([]interface{}); ok && len(announcements) > 0 {
+		md.WriteString("## High Signal Announcements\n\n")
+
+		for i, annRaw := range announcements {
+			ann, ok := annRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			date := getStringVal(ann, "date", "N/A")
+			headline := getStringVal(ann, "headline", "Unknown")
+			signalRating := getStringVal(ann, "signal_rating", "N/A")
+			annType := getStringVal(ann, "type", "")
+			rationale := getStringVal(ann, "rationale", "")
+			aiAnalysis := getStringVal(ann, "ai_analysis", "")
+
+			md.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, headline))
+			md.WriteString(fmt.Sprintf("**Date:** %s | **Signal:** %s", date, signalRating))
+			if annType != "" {
+				md.WriteString(fmt.Sprintf(" | **Type:** %s", annType))
+			}
+
+			// Price sensitive flag
+			if priceSensitive, ok := ann["price_sensitive"].(bool); ok && priceSensitive {
+				md.WriteString(" | **Price Sensitive**")
+			}
+			md.WriteString("\n\n")
+
+			// Price impact
+			if impact, ok := ann["price_impact"].(map[string]interface{}); ok {
+				priceChange := getFloatVal(impact, "price_change_percent", 0)
+				volRatio := getFloatVal(impact, "volume_ratio", 0)
+				impactSignal := getStringVal(impact, "impact_signal", "")
+
+				if priceChange != 0 || volRatio > 0 {
+					md.WriteString("**Market Impact:** ")
+					parts := []string{}
+					if priceChange != 0 {
+						parts = append(parts, fmt.Sprintf("%.1f%% price change", priceChange))
+					}
+					if volRatio > 0 {
+						parts = append(parts, fmt.Sprintf("%.1fx volume", volRatio))
+					}
+					md.WriteString(strings.Join(parts, ", "))
+					if impactSignal != "" {
+						md.WriteString(fmt.Sprintf(" (%s)", impactSignal))
+					}
+					md.WriteString("\n\n")
+				}
+			}
+
+			if rationale != "" {
+				md.WriteString(fmt.Sprintf("**Rationale:** %s\n\n", rationale))
+			}
+
+			if aiAnalysis != "" {
+				md.WriteString(fmt.Sprintf("**AI Analysis:** %s\n\n", aiAnalysis))
+			}
+
+			// PDF link
+			if pdfURL := getStringVal(ann, "pdf_url", ""); pdfURL != "" {
+				md.WriteString(fmt.Sprintf("[View ASX Announcement PDF](%s)\n\n", pdfURL))
+			}
+		}
+
+		md.WriteString("---\n\n")
+	}
+
+	// Anomalies
+	if anomalies, ok := data["anomalies"].([]interface{}); ok && len(anomalies) > 0 {
+		md.WriteString("## Anomalies\n\n")
+		md.WriteString("*Announcements with unexpected market behavior*\n\n")
+
+		for _, anomRaw := range anomalies {
+			anom, ok := anomRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			date := getStringVal(anom, "date", "N/A")
+			headline := getStringVal(anom, "headline", "Unknown")
+			anomalyType := getStringVal(anom, "anomaly_type", "")
+			explanation := getStringVal(anom, "explanation", "")
+
+			md.WriteString(fmt.Sprintf("- **%s** (%s)", headline, date))
+			if anomalyType != "" {
+				md.WriteString(fmt.Sprintf(" - *%s*", anomalyType))
+			}
+			md.WriteString("\n")
+			if explanation != "" {
+				md.WriteString(fmt.Sprintf("  - %s\n", explanation))
+			}
+		}
+		md.WriteString("\n---\n\n")
+	}
+
+	// Pre-announcement movements
+	if movements, ok := data["pre_announcement_movements"].([]interface{}); ok && len(movements) > 0 {
+		md.WriteString("## Pre-Announcement Movements\n\n")
+		md.WriteString("*Potential information leakage indicators*\n\n")
+
+		for _, movRaw := range movements {
+			mov, ok := movRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			date := getStringVal(mov, "date", "N/A")
+			headline := getStringVal(mov, "headline", "Unknown")
+			preDrift := getFloatVal(mov, "pre_drift_percent", 0)
+			interpretation := getStringVal(mov, "interpretation", "")
+
+			md.WriteString(fmt.Sprintf("- **%s** (%s) - Pre-drift: %.1f%%\n", headline, date, preDrift))
+			if interpretation != "" {
+				md.WriteString(fmt.Sprintf("  - %s\n", interpretation))
+			}
+		}
+		md.WriteString("\n---\n\n")
+	}
+
+	// Dividend announcements
+	if dividends, ok := data["dividend_announcements"].([]interface{}); ok && len(dividends) > 0 {
+		md.WriteString("## Dividend Announcements\n\n")
+
+		for _, divRaw := range dividends {
+			div, ok := divRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			date := getStringVal(div, "date", "N/A")
+			headline := getStringVal(div, "headline", "Unknown")
+			notes := getStringVal(div, "notes", "")
+
+			md.WriteString(fmt.Sprintf("- **%s** (%s)\n", headline, date))
+			if notes != "" {
+				md.WriteString(fmt.Sprintf("  - %s\n", notes))
+			}
+		}
+		md.WriteString("\n---\n\n")
+	}
+
+	// Key Themes
+	if themes, ok := data["key_themes"].([]interface{}); ok && len(themes) > 0 {
+		md.WriteString("## Key Themes\n\n")
+		for _, theme := range themes {
+			if t, ok := theme.(string); ok {
+				md.WriteString(fmt.Sprintf("- %s\n", t))
+			}
+		}
+		md.WriteString("\n---\n\n")
+	}
+
+	// Sources
+	if sources, ok := data["sources"].(map[string]interface{}); ok {
+		md.WriteString("## Sources\n\n")
+
+		// Local documents
+		if local, ok := sources["local"].([]interface{}); ok && len(local) > 0 {
+			md.WriteString("### Local Documents\n")
+			for _, docRaw := range local {
+				doc, ok := docRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				title := getStringVal(doc, "title", "Unknown")
+				docType := getStringVal(doc, "type", "")
+				md.WriteString(fmt.Sprintf("- %s", title))
+				if docType != "" {
+					md.WriteString(fmt.Sprintf(" (%s)", docType))
+				}
+				md.WriteString("\n")
+			}
+			md.WriteString("\n")
+		}
+
+		// Data APIs
+		if dataAPIs, ok := sources["data"].([]interface{}); ok && len(dataAPIs) > 0 {
+			md.WriteString("### Data Sources\n")
+			for _, apiRaw := range dataAPIs {
+				api, ok := apiRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				name := getStringVal(api, "name", "Unknown")
+				url := getStringVal(api, "url", "")
+				if url != "" {
+					md.WriteString(fmt.Sprintf("- [%s](%s)\n", name, url))
+				} else {
+					md.WriteString(fmt.Sprintf("- %s\n", name))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		// Web sources
+		if web, ok := sources["web"].([]interface{}); ok && len(web) > 0 {
+			md.WriteString("### Web Sources\n")
+			for _, webRaw := range web {
+				webSrc, ok := webRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				title := getStringVal(webSrc, "title", "Unknown")
+				url := getStringVal(webSrc, "url", "")
+				if url != "" {
+					md.WriteString(fmt.Sprintf("- [%s](%s)\n", title, url))
+				} else {
+					md.WriteString(fmt.Sprintf("- %s\n", title))
+				}
+			}
+			md.WriteString("\n")
+		}
+	}
+
+	return md.String(), nil
+}
+
+// formatAnnouncementAnalysisReportToMarkdown formats announcement-analysis-report.schema.json output to markdown.
+// This handles multi-stock announcement analysis with stocks array.
+func (w *SummaryWorker) formatAnnouncementAnalysisReportToMarkdown(data map[string]interface{}) (string, error) {
+	var md strings.Builder
+
+	analysisDate := getStringVal(data, "analysis_date", time.Now().Format("2006-01-02"))
+	reportSummary := getStringVal(data, "report_summary", "")
+
+	// Header
+	md.WriteString("# Announcement Signal Analysis Report\n\n")
+	md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n\n", analysisDate))
+
+	// Report Summary (cross-stock insights)
+	if reportSummary != "" {
+		md.WriteString("## Report Summary\n\n")
+		md.WriteString(reportSummary)
+		md.WriteString("\n\n---\n\n")
+	}
+
+	// Process each stock in the array
+	stocks, ok := data["stocks"].([]interface{})
+	if !ok || len(stocks) == 0 {
+		md.WriteString("*No stocks analyzed*\n")
+		return md.String(), nil
+	}
+
+	for i, stockRaw := range stocks {
+		stock, ok := stockRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		ticker := getStringVal(stock, "ticker", "Unknown")
+		companyName := getStringVal(stock, "company_name", "")
+		stockAnalysisDate := getStringVal(stock, "analysis_date", analysisDate)
+		analysisPeriod := getStringVal(stock, "analysis_period", "")
+
+		// Stock Header
+		if companyName != "" {
+			md.WriteString(fmt.Sprintf("# %d. %s (%s)\n\n", i+1, ticker, companyName))
+		} else {
+			md.WriteString(fmt.Sprintf("# %d. %s\n\n", i+1, ticker))
+		}
+		md.WriteString(fmt.Sprintf("**Analysis Date:** %s\n", stockAnalysisDate))
+		if analysisPeriod != "" {
+			md.WriteString(fmt.Sprintf("**Period Covered:** %s\n", analysisPeriod))
+		}
+		md.WriteString("\n")
+
+		// Executive Summary
+		if execSummary := getStringVal(stock, "executive_summary", ""); execSummary != "" {
+			md.WriteString("## Executive Summary\n\n")
+			md.WriteString(execSummary)
+			md.WriteString("\n\n")
+		}
+
+		// Signal-Noise Assessment
+		if assessment, ok := stock["signal_noise_assessment"].(map[string]interface{}); ok {
+			md.WriteString("## Signal-Noise Assessment\n\n")
+
+			overallRating := getStringVal(assessment, "overall_rating", "N/A")
+			md.WriteString(fmt.Sprintf("**Overall Rating:** %s\n\n", overallRating))
+
+			if reasoning := getStringVal(assessment, "overall_rating_reasoning", ""); reasoning != "" {
+				md.WriteString(fmt.Sprintf("%s\n\n", reasoning))
+			}
+
+			// Counts table
+			md.WriteString("### Announcement Breakdown\n\n")
+			md.WriteString("| Category | Count |\n")
+			md.WriteString("|----------|-------|\n")
+
+			if highCount := getFloatVal(assessment, "high_signal_count", -1); highCount >= 0 {
+				md.WriteString(fmt.Sprintf("| High Signal | %.0f |\n", highCount))
+			}
+			if modCount := getFloatVal(assessment, "moderate_signal_count", -1); modCount >= 0 {
+				md.WriteString(fmt.Sprintf("| Moderate Signal | %.0f |\n", modCount))
+			}
+			if lowCount := getFloatVal(assessment, "low_signal_count", -1); lowCount >= 0 {
+				md.WriteString(fmt.Sprintf("| Low Signal | %.0f |\n", lowCount))
+			}
+			if noiseCount := getFloatVal(assessment, "noise_count", -1); noiseCount >= 0 {
+				md.WriteString(fmt.Sprintf("| Noise | %.0f |\n", noiseCount))
+			}
+			if totalCount := getFloatVal(assessment, "total_count", -1); totalCount >= 0 {
+				md.WriteString(fmt.Sprintf("| **Total** | **%.0f** |\n", totalCount))
+			}
+			md.WriteString("\n")
+
+			if noiseRatio := getFloatVal(assessment, "noise_ratio", -1); noiseRatio >= 0 {
+				md.WriteString(fmt.Sprintf("**Noise Ratio:** %.1f%%\n\n", noiseRatio*100))
+			}
+			if accuracy := getFloatVal(assessment, "price_sensitive_accuracy", -1); accuracy >= 0 {
+				md.WriteString(fmt.Sprintf("**Price-Sensitive Accuracy:** %.1f%%\n\n", accuracy))
+			}
+		}
+
+		// High Signal Announcements
+		if announcements, ok := stock["high_signal_announcements"].([]interface{}); ok && len(announcements) > 0 {
+			md.WriteString("## High Signal Announcements\n\n")
+
+			for j, annRaw := range announcements {
+				ann, ok := annRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				date := getStringVal(ann, "date", "N/A")
+				headline := getStringVal(ann, "headline", "Unknown")
+				signalRating := getStringVal(ann, "signal_rating", "N/A")
+				annType := getStringVal(ann, "type", "")
+				rationale := getStringVal(ann, "rationale", "")
+				aiAnalysis := getStringVal(ann, "ai_analysis", "")
+
+				md.WriteString(fmt.Sprintf("### %d. %s\n\n", j+1, headline))
+				md.WriteString(fmt.Sprintf("**Date:** %s | **Signal:** %s", date, signalRating))
+				if annType != "" {
+					md.WriteString(fmt.Sprintf(" | **Type:** %s", annType))
+				}
+
+				if priceSensitive, ok := ann["price_sensitive"].(bool); ok && priceSensitive {
+					md.WriteString(" | **Price Sensitive**")
+				}
+				md.WriteString("\n\n")
+
+				if impact, ok := ann["price_impact"].(map[string]interface{}); ok {
+					priceChange := getFloatVal(impact, "price_change_percent", 0)
+					volRatio := getFloatVal(impact, "volume_ratio", 0)
+					impactSignal := getStringVal(impact, "impact_signal", "")
+
+					if priceChange != 0 || volRatio > 0 {
+						md.WriteString("**Market Impact:** ")
+						parts := []string{}
+						if priceChange != 0 {
+							parts = append(parts, fmt.Sprintf("%.1f%% price change", priceChange))
+						}
+						if volRatio > 0 {
+							parts = append(parts, fmt.Sprintf("%.1fx volume", volRatio))
+						}
+						md.WriteString(strings.Join(parts, ", "))
+						if impactSignal != "" {
+							md.WriteString(fmt.Sprintf(" (%s)", impactSignal))
+						}
+						md.WriteString("\n\n")
+					}
+				}
+
+				if rationale != "" {
+					md.WriteString(fmt.Sprintf("**Rationale:** %s\n\n", rationale))
+				}
+
+				if aiAnalysis != "" {
+					md.WriteString(fmt.Sprintf("**AI Analysis:** %s\n\n", aiAnalysis))
+				}
+
+				if pdfURL := getStringVal(ann, "pdf_url", ""); pdfURL != "" {
+					md.WriteString(fmt.Sprintf("[View ASX Announcement PDF](%s)\n\n", pdfURL))
+				}
+			}
+		}
+
+		// Anomalies
+		if anomalies, ok := stock["anomalies"].([]interface{}); ok && len(anomalies) > 0 {
+			md.WriteString("## Anomalies\n\n")
+			for _, anomRaw := range anomalies {
+				anom, ok := anomRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				date := getStringVal(anom, "date", "N/A")
+				headline := getStringVal(anom, "headline", "Unknown")
+				anomalyType := getStringVal(anom, "anomaly_type", "")
+				explanation := getStringVal(anom, "explanation", "")
+
+				md.WriteString(fmt.Sprintf("- **%s** (%s)", headline, date))
+				if anomalyType != "" {
+					md.WriteString(fmt.Sprintf(" - *%s*", anomalyType))
+				}
+				md.WriteString("\n")
+				if explanation != "" {
+					md.WriteString(fmt.Sprintf("  - %s\n", explanation))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		// Pre-announcement movements
+		if movements, ok := stock["pre_announcement_movements"].([]interface{}); ok && len(movements) > 0 {
+			md.WriteString("## Pre-Announcement Movements\n\n")
+			for _, movRaw := range movements {
+				mov, ok := movRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				date := getStringVal(mov, "date", "N/A")
+				headline := getStringVal(mov, "headline", "Unknown")
+				preDrift := getFloatVal(mov, "pre_drift_percent", 0)
+				interpretation := getStringVal(mov, "interpretation", "")
+
+				md.WriteString(fmt.Sprintf("- **%s** (%s) - Pre-drift: %.1f%%\n", headline, date, preDrift))
+				if interpretation != "" {
+					md.WriteString(fmt.Sprintf("  - %s\n", interpretation))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		// Key Themes
+		if themes, ok := stock["key_themes"].([]interface{}); ok && len(themes) > 0 {
+			md.WriteString("## Key Themes\n\n")
+			for _, theme := range themes {
+				if t, ok := theme.(string); ok {
+					md.WriteString(fmt.Sprintf("- %s\n", t))
+				}
+			}
+			md.WriteString("\n")
+		}
+
+		md.WriteString("\n---\n\n")
+	}
+
+	return md.String(), nil
+}
+
 // getStringVal extracts a string value from a map with a default fallback
 func getStringVal(m map[string]interface{}, key, defaultVal string) string {
 	if val, ok := m[key]; ok {
@@ -2480,6 +3093,96 @@ func getFloatVal(m map[string]interface{}, key string, defaultVal float64) float
 		}
 	}
 	return defaultVal
+}
+
+// repairTruncatedJSON attempts to fix JSON that was truncated mid-stream.
+// This handles cases where LLM output was cut off before completion.
+// It finds the last complete JSON element and closes any open structures.
+func repairTruncatedJSON(jsonStr string) string {
+	// Check if it's already valid
+	var test interface{}
+	if json.Unmarshal([]byte(jsonStr), &test) == nil {
+		return jsonStr
+	}
+
+	// Track open structures
+	var stack []rune
+	inString := false
+	escaped := false
+	lastValidPos := 0
+
+	for i, ch := range jsonStr {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		switch ch {
+		case '{', '[':
+			stack = append(stack, ch)
+		case '}':
+			if len(stack) > 0 && stack[len(stack)-1] == '{' {
+				stack = stack[:len(stack)-1]
+				// This is a complete object - mark as valid position
+				if len(stack) > 0 || i == len(jsonStr)-1 {
+					lastValidPos = i + 1
+				}
+			}
+		case ']':
+			if len(stack) > 0 && stack[len(stack)-1] == '[' {
+				stack = stack[:len(stack)-1]
+				// This is a complete array - mark as valid position
+				if len(stack) > 0 || i == len(jsonStr)-1 {
+					lastValidPos = i + 1
+				}
+			}
+		case ',':
+			// After a comma is a good truncation point
+			if !inString && len(stack) > 0 {
+				lastValidPos = i
+			}
+		}
+	}
+
+	// If still valid JSON or no open structures, return as-is
+	if len(stack) == 0 {
+		return jsonStr
+	}
+
+	// Try to find the last complete element
+	// Look for the last comma or complete value before truncation
+	repaired := jsonStr
+	if lastValidPos > 0 && lastValidPos < len(jsonStr) {
+		// Truncate at the last comma (removing incomplete element)
+		repaired = jsonStr[:lastValidPos]
+		// If we ended at a comma, remove it
+		repaired = strings.TrimSuffix(repaired, ",")
+	}
+
+	// Close any open structures in reverse order
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			repaired += "}"
+		} else if stack[i] == '[' {
+			repaired += "]"
+		}
+	}
+
+	return repaired
 }
 
 // formatGenericJSONToMarkdown recursively formats any JSON structure to markdown

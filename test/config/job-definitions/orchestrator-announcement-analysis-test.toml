@@ -1,0 +1,81 @@
+# Orchestrator Test: Announcement Signal Analysis
+# =========================================================================
+# Tests the announcement signal-to-noise analysis workflow.
+# Uses the announcement-analysis template for schema-enforced output.
+#
+# WORKFLOW:
+# 1. Data Collection: ASX Announcements Worker (deterministic)
+# 2. Signal Analysis: SummaryWorker with announcement-analysis template
+# 3. Email Report: Send analysis results
+#
+# TEMPLATE: internal/templates/announcement-analysis.toml (embedded)
+# SCHEMA: internal/schemas/announcement-analysis.schema.json
+# OUTPUT TAG: announcement-analysis
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "orchestrator-announcement-analysis-test"
+name = "Test: Announcement Signal Analysis"
+type = "orchestrator"
+description = "Integration test for announcement signal-to-noise analysis workflow"
+tags = ["test", "orchestrator", "announcement-analysis", "signal-noise"]
+schedule = ""
+timeout = "1h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-04"
+purpose = "Integration test for announcement signal analysis with schema enforcement"
+
+# =========================================================================
+# Test Configuration - Single Stock
+# =========================================================================
+
+[config]
+variables = [
+    { ticker = "ASX:GNP", portfolio = "test" },
+]
+
+# =========================================================================
+# Step 1: Collect Announcements (Deterministic)
+# =========================================================================
+
+[step.collect_announcements]
+type = "asx_announcements"
+description = "Collect ASX announcements for ticker"
+on_error = "fail"
+
+# =========================================================================
+# Step 2: Signal Analysis (AI with Schema)
+# =========================================================================
+
+[step.analyze_signals]
+type = "summary"
+description = "Analyze announcements for signal-to-noise quality"
+depends = "collect_announcements"
+on_error = "fail"
+template = "announcement-analysis"
+filter_tags = ["asx-announcement-summary"]
+output_tags = ["announcement-analysis"]
+
+# =========================================================================
+# Step 3: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email announcement analysis report"
+depends = "analyze_signals"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Announcement Signal Analysis Test"
+body_from_tag = "announcement-analysis"

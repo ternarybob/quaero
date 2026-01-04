@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -89,17 +90,31 @@ type AnnouncementAnalysis struct {
 	SignalNoiseRationale string            // Explanation of why this rating was assigned
 	IsTradingHalt        bool              // Whether this announcement is a trading halt
 	IsReinstatement      bool              // Whether this is a reinstatement from trading halt
+
+	// Anomaly detection
+	IsAnomaly   bool   // True if announcement behavior doesn't match expectations
+	AnomalyType string // Type of anomaly: "NO_REACTION", "UNEXPECTED_REACTION", ""
+
+	// Dividend tracking
+	IsDividendAnnouncement bool // True if announcement is dividend-related
 }
 
 // PriceImpactData contains stock price movement around an announcement date
 type PriceImpactData struct {
-	PriceBefore       float64 `json:"price_before"`        // Close price 5 trading days before
-	PriceAfter        float64 `json:"price_after"`         // Close price 5 trading days after
-	ChangePercent     float64 `json:"change_percent"`      // Percentage change
+	PriceBefore       float64 `json:"price_before"`        // Close price 1 trading day before
+	PriceAfter        float64 `json:"price_after"`         // Close price on announcement day (or next trading day)
+	ChangePercent     float64 `json:"change_percent"`      // Percentage change (immediate reaction)
 	VolumeBefore      int64   `json:"volume_before"`       // Average volume 5 days before
 	VolumeAfter       int64   `json:"volume_after"`        // Average volume 5 days after
 	VolumeChangeRatio float64 `json:"volume_change_ratio"` // Volume ratio (after/before)
 	ImpactSignal      string  `json:"impact_signal"`       // "SIGNIFICANT", "MODERATE", "MINIMAL"
+
+	// Pre-announcement analysis (T-5 to T-1)
+	PreAnnouncementDrift   float64 `json:"pre_announcement_drift"`    // Price change % from T-5 to T-1
+	PreAnnouncementPriceT5 float64 `json:"pre_announcement_price_t5"` // Price at T-5
+	PreAnnouncementPriceT1 float64 `json:"pre_announcement_price_t1"` // Price at T-1
+	HasSignificantPreDrift bool    `json:"has_significant_pre_drift"` // True if drift >= 2%
+	PreDriftInterpretation string  `json:"pre_drift_interpretation"`  // Interpretation of pre-drift
 }
 
 // asxAPIResponse represents the JSON response from Markit Digital API
@@ -142,17 +157,59 @@ func (w *ASXAnnouncementsWorker) GetType() models.WorkerType {
 	return models.WorkerTypeASXAnnouncements
 }
 
+// extractASXCode extracts ASX code from step config or job-level variables.
+// Priority: step config asx_code > job variables ticker > job variables asx_code
+func (w *ASXAnnouncementsWorker) extractASXCode(stepConfig map[string]interface{}, jobDef models.JobDefinition) string {
+	// Source 1: Direct step config
+	if asxCode, ok := stepConfig["asx_code"].(string); ok && asxCode != "" {
+		parsed := common.ParseTicker(asxCode)
+		return parsed.Code
+	}
+
+	// Source 2: Job-level variables
+	if jobDef.Config != nil {
+		if vars, ok := jobDef.Config["variables"].([]interface{}); ok {
+			for _, v := range vars {
+				varMap, ok := v.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				// Try "ticker" key (e.g., "ASX:GNP")
+				if ticker, ok := varMap["ticker"].(string); ok && ticker != "" {
+					parsed := common.ParseTicker(ticker)
+					if parsed.Code != "" {
+						return parsed.Code
+					}
+				}
+
+				// Try "asx_code" key
+				if asxCode, ok := varMap["asx_code"].(string); ok && asxCode != "" {
+					parsed := common.ParseTicker(asxCode)
+					if parsed.Code != "" {
+						return parsed.Code
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
 // Init performs the initialization/setup phase for an ASX announcements step.
 func (w *ASXAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for asx_announcements")
+		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract ASX code (required)
-	asxCode, ok := stepConfig["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return nil, fmt.Errorf("asx_code is required in step config")
+	// Extract ASX code from multiple sources:
+	// 1. Direct step config (asx_code)
+	// 2. Job-level variables
+	asxCode := w.extractASXCode(stepConfig, jobDef)
+	if asxCode == "" {
+		return nil, fmt.Errorf("asx_code is required in step config or job variables")
 	}
 	asxCode = strings.ToUpper(asxCode)
 
@@ -379,18 +436,11 @@ func (w *ASXAnnouncementsWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateConfig validates step configuration for asx_announcements type
+// ValidateConfig validates step configuration for asx_announcements type.
+// Config can be nil if asx_code will be provided via job-level variables.
 func (w *ASXAnnouncementsWorker) ValidateConfig(step models.JobStep) error {
-	if step.Config == nil {
-		return fmt.Errorf("asx_announcements step requires config")
-	}
-
-	// Validate required asx_code field
-	asxCode, ok := step.Config["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return fmt.Errorf("asx_announcements step requires 'asx_code' in config")
-	}
-
+	// Config is optional - asx_code can come from job-level variables
+	// Full validation happens in Init() when we have access to jobDef
 	return nil
 }
 
@@ -726,7 +776,7 @@ func (w *ASXAnnouncementsWorker) calculateCutoffDate(period string) time.Time {
 	case "M6":
 		return now.AddDate(0, -6, 0)
 	case "Y1":
-		return now.AddDate(-1, 0, 0)
+		return now.AddDate(0, -13, 0) // 13 months to ensure full year coverage including overlap
 	case "Y5":
 		return now.AddDate(-5, 0, 0)
 	default:
@@ -1058,20 +1108,62 @@ func detectTradingHalt(headline string) (isTradingHalt bool, isReinstatement boo
 	return false, false
 }
 
+// detectDividendAnnouncement checks if an announcement is dividend-related
+func detectDividendAnnouncement(headline string, annType string) bool {
+	headlineUpper := strings.ToUpper(headline)
+	typeUpper := strings.ToUpper(annType)
+
+	dividendKeywords := []string{
+		"DIVIDEND",
+		"DRP", // Dividend Reinvestment Plan
+		"DISTRIBUTION",
+		"EX-DATE",
+		"EX DATE",
+		"RECORD DATE",
+		"PAYMENT DATE",
+		"FRANKING",
+		"UNFRANKED",
+		"FRANKED",
+	}
+
+	for _, kw := range dividendKeywords {
+		if strings.Contains(headlineUpper, kw) || strings.Contains(typeUpper, kw) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// SignalNoiseResult contains the full result of signal-to-noise analysis
+type SignalNoiseResult struct {
+	Rating      SignalNoiseRating
+	Rationale   string
+	IsAnomaly   bool
+	AnomalyType string // "NO_REACTION", "UNEXPECTED_REACTION", ""
+}
+
 // calculateSignalNoiseRating determines the overall signal quality based on price/volume impact
-// Returns the rating and a comprehensive rationale explaining the assessment
-func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, isTradingHalt, isReinstatement bool) (SignalNoiseRating, string) {
+// Returns the rating, rationale, and anomaly information
+func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, isTradingHalt, isReinstatement bool) SignalNoiseResult {
 	var rationale strings.Builder
+	result := SignalNoiseResult{}
 
 	// If no price data available, base rating on announcement characteristics only
 	if impact == nil {
 		if ann.PriceSensitive {
-			return SignalNoiseModerate, "Price-sensitive announcement (no price data available for impact analysis)"
+			result.Rating = SignalNoiseModerate
+			result.Rationale = "Price-sensitive announcement (no price data available for impact analysis)"
+			return result
 		}
 		if isTradingHalt {
-			return SignalNoiseLow, "Trading halt announced (no price data available for impact analysis)"
+			result.Rating = SignalNoiseLow
+			result.Rationale = "Trading halt announced (no price data available for impact analysis)"
+			return result
 		}
-		return SignalNoiseNone, "No price data available for impact analysis"
+		result.Rating = SignalNoiseNone
+		result.Rationale = "No price data available for impact analysis"
+		return result
 	}
 
 	// Calculate absolute price change for comparison
@@ -1098,19 +1190,31 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 		volumeDesc = fmt.Sprintf("%.1fx reduced volume", impact.VolumeChangeRatio)
 	}
 
+	// Add pre-announcement drift info if significant
+	if impact.HasSignificantPreDrift {
+		rationale.WriteString(fmt.Sprintf("PRE-ANNOUNCEMENT: %s ", impact.PreDriftInterpretation))
+	}
+
 	// HIGH_SIGNAL: Significant market impact
 	// Criteria: Price change >=3% OR volume ratio >=2x, especially with price-sensitive flag
 	if absPriceChange >= 3.0 || impact.VolumeChangeRatio >= 2.0 {
 		rationale.WriteString(fmt.Sprintf("HIGH SIGNAL: Significant market reaction with %s and %s. ", direction, volumeDesc))
 		if ann.PriceSensitive {
 			rationale.WriteString("Confirmed price-sensitive announcement. ")
+		} else {
+			// Non-price-sensitive with high reaction = ANOMALY
+			result.IsAnomaly = true
+			result.AnomalyType = "UNEXPECTED_REACTION"
+			rationale.WriteString("⚠️ ANOMALY: Non-price-sensitive announcement triggered significant market reaction. ")
 		}
 		if absPriceChange >= 5.0 {
 			rationale.WriteString("Price movement exceeds 5% threshold indicating major market reassessment.")
 		} else if impact.VolumeChangeRatio >= 3.0 {
 			rationale.WriteString("Exceptional volume indicates strong investor interest.")
 		}
-		return SignalNoiseHigh, rationale.String()
+		result.Rating = SignalNoiseHigh
+		result.Rationale = rationale.String()
+		return result
 	}
 
 	// MODERATE_SIGNAL: Notable market reaction
@@ -1119,11 +1223,18 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 		rationale.WriteString(fmt.Sprintf("MODERATE SIGNAL: Notable market reaction with %s and %s. ", direction, volumeDesc))
 		if ann.PriceSensitive {
 			rationale.WriteString("Price-sensitive flag indicates company deemed this material. ")
+		} else if !isTradingHalt && !isReinstatement {
+			// Non-price-sensitive with notable reaction = mild anomaly
+			result.IsAnomaly = true
+			result.AnomalyType = "UNEXPECTED_REACTION"
+			rationale.WriteString("Note: Non-price-sensitive announcement showed unexpected market response. ")
 		}
 		if isTradingHalt || isReinstatement {
 			rationale.WriteString("Associated with trading halt activity. ")
 		}
-		return SignalNoiseModerate, rationale.String()
+		result.Rating = SignalNoiseModerate
+		result.Rationale = rationale.String()
+		return result
 	}
 
 	// LOW_SIGNAL: Minimal but detectable market reaction
@@ -1131,9 +1242,14 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 	if absPriceChange >= 0.5 || impact.VolumeChangeRatio >= 1.2 {
 		rationale.WriteString(fmt.Sprintf("LOW SIGNAL: Minor market reaction with %s and %s. ", direction, volumeDesc))
 		if ann.PriceSensitive {
-			rationale.WriteString("Despite price-sensitive flag, market showed limited reaction. ")
+			// Price-sensitive with only low reaction = mild anomaly
+			result.IsAnomaly = true
+			result.AnomalyType = "NO_REACTION"
+			rationale.WriteString("⚠️ ANOMALY: Price-sensitive flag but market showed limited reaction. ")
 		}
-		return SignalNoiseLow, rationale.String()
+		result.Rating = SignalNoiseLow
+		result.Rationale = rationale.String()
+		return result
 	}
 
 	// NOISE: No meaningful price/volume impact
@@ -1143,11 +1259,16 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 	} else if isReinstatement {
 		rationale.WriteString("Reinstatement with no price change suggests halt was procedural. ")
 	} else if ann.PriceSensitive {
-		rationale.WriteString("Despite price-sensitive flag, market showed no reaction. ")
+		// Price-sensitive with NO reaction = definite anomaly
+		result.IsAnomaly = true
+		result.AnomalyType = "NO_REACTION"
+		rationale.WriteString("⚠️ ANOMALY: Price-sensitive announcement but market showed NO reaction - verify announcement accuracy. ")
 	} else {
 		rationale.WriteString("Announcement had no measurable effect on price or volume. ")
 	}
-	return SignalNoiseNone, rationale.String()
+	result.Rating = SignalNoiseNone
+	result.Rationale = rationale.String()
+	return result
 }
 
 // analyzeAnnouncements analyzes all announcements and adds relevance classification and price impact
@@ -1160,17 +1281,21 @@ func (w *ASXAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, annou
 		// Detect trading halts
 		isTradingHalt, isReinstatement := detectTradingHalt(ann.Headline)
 
+		// Detect dividend announcements
+		isDividend := detectDividendAnnouncement(ann.Headline, ann.Type)
+
 		analysis := AnnouncementAnalysis{
-			Date:              ann.Date,
-			Headline:          ann.Headline,
-			Type:              ann.Type,
-			PriceSensitive:    ann.PriceSensitive,
-			PDFURL:            ann.PDFURL,
-			DocumentKey:       ann.DocumentKey,
-			RelevanceCategory: category,
-			RelevanceReason:   reason,
-			IsTradingHalt:     isTradingHalt,
-			IsReinstatement:   isReinstatement,
+			Date:                   ann.Date,
+			Headline:               ann.Headline,
+			Type:                   ann.Type,
+			PriceSensitive:         ann.PriceSensitive,
+			PDFURL:                 ann.PDFURL,
+			DocumentKey:            ann.DocumentKey,
+			RelevanceCategory:      category,
+			RelevanceReason:        reason,
+			IsTradingHalt:          isTradingHalt,
+			IsReinstatement:        isReinstatement,
+			IsDividendAnnouncement: isDividend,
 		}
 
 		// Add price impact if we have price data
@@ -1179,8 +1304,16 @@ func (w *ASXAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, annou
 		}
 
 		// Calculate signal-to-noise rating based on actual market impact
-		analysis.SignalNoiseRating, analysis.SignalNoiseRationale = calculateSignalNoiseRating(
-			ann, analysis.PriceImpact, isTradingHalt, isReinstatement)
+		snResult := calculateSignalNoiseRating(ann, analysis.PriceImpact, isTradingHalt, isReinstatement)
+		analysis.SignalNoiseRating = snResult.Rating
+		analysis.SignalNoiseRationale = snResult.Rationale
+		analysis.IsAnomaly = snResult.IsAnomaly
+		analysis.AnomalyType = snResult.AnomalyType
+
+		// Add dividend context to rationale if applicable
+		if isDividend && analysis.PriceImpact != nil && analysis.PriceImpact.ChangePercent < 0 {
+			analysis.SignalNoiseRationale += " Note: Negative price movement may be due to ex-dividend adjustment rather than negative market reaction."
+		}
 
 		analyses = append(analyses, analysis)
 	}
@@ -1370,14 +1503,58 @@ func (w *ASXAnnouncementsWorker) calculatePriceImpact(announcementDate time.Time
 		impactSignal = "MODERATE"
 	}
 
+	// Calculate pre-announcement drift (T-5 to T-1)
+	// This detects price movement BEFORE the announcement that might indicate information leaks
+	var priceT5, priceT1 float64
+	var preAnnouncementDrift float64
+	var hasSignificantPreDrift bool
+	var preDriftInterpretation string
+
+	// Find T-5 price (5 trading days before announcement)
+	for i := 5; i <= 15; i++ {
+		checkDate := announcementDate.AddDate(0, 0, -i).Format("2006-01-02")
+		if p, ok := priceMap[checkDate]; ok {
+			priceT5 = p.Close
+			break
+		}
+	}
+
+	// T-1 price is priceBefore (already calculated)
+	priceT1 = priceBeforeVal
+
+	if priceT5 > 0 && priceT1 > 0 {
+		preAnnouncementDrift = ((priceT1 - priceT5) / priceT5) * 100
+		absPreDrift := preAnnouncementDrift
+		if absPreDrift < 0 {
+			absPreDrift = -absPreDrift
+		}
+
+		// Significant pre-drift threshold: 2%
+		if absPreDrift >= 2.0 {
+			hasSignificantPreDrift = true
+			if preAnnouncementDrift > 0 {
+				preDriftInterpretation = fmt.Sprintf("Stock rose %.1f%% in 5 days before announcement - possible anticipation or information leak", preAnnouncementDrift)
+			} else {
+				preDriftInterpretation = fmt.Sprintf("Stock fell %.1f%% in 5 days before announcement - possible anticipation of negative news", -preAnnouncementDrift)
+			}
+		} else {
+			preDriftInterpretation = "No significant pre-announcement movement detected"
+		}
+	}
+
 	return &PriceImpactData{
-		PriceBefore:       priceBeforeVal,
-		PriceAfter:        priceAfterVal,
-		ChangePercent:     changePercent,
-		VolumeBefore:      volumeBefore,
-		VolumeAfter:       volumeAfter,
-		VolumeChangeRatio: volumeRatio,
-		ImpactSignal:      impactSignal,
+		PriceBefore:            priceBeforeVal,
+		PriceAfter:             priceAfterVal,
+		ChangePercent:          changePercent,
+		VolumeBefore:           volumeBefore,
+		VolumeAfter:            volumeAfter,
+		VolumeChangeRatio:      volumeRatio,
+		ImpactSignal:           impactSignal,
+		PreAnnouncementDrift:   preAnnouncementDrift,
+		PreAnnouncementPriceT5: priceT5,
+		PreAnnouncementPriceT1: priceT1,
+		HasSignificantPreDrift: hasSignificantPreDrift,
+		PreDriftInterpretation: preDriftInterpretation,
 	}
 }
 
@@ -1394,6 +1571,10 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	// Signal-to-Noise Analysis Summary
 	highSignalCount, modSignalCount, lowSignalCount, noiseSignalCount := 0, 0, 0, 0
 	tradingHaltCount := 0
+	anomalyNoReactionCount, anomalyUnexpectedCount := 0, 0
+	dividendCount := 0
+	preDriftCount := 0
+	priceSensitiveTotal, priceSensitiveWithReaction := 0, 0
 	for _, a := range analyses {
 		switch a.SignalNoiseRating {
 		case SignalNoiseHigh:
@@ -1407,6 +1588,25 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 		}
 		if a.IsTradingHalt || a.IsReinstatement {
 			tradingHaltCount++
+		}
+		if a.IsAnomaly {
+			if a.AnomalyType == "NO_REACTION" {
+				anomalyNoReactionCount++
+			} else if a.AnomalyType == "UNEXPECTED_REACTION" {
+				anomalyUnexpectedCount++
+			}
+		}
+		if a.IsDividendAnnouncement {
+			dividendCount++
+		}
+		if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift {
+			preDriftCount++
+		}
+		if a.PriceSensitive {
+			priceSensitiveTotal++
+			if a.SignalNoiseRating == SignalNoiseHigh || a.SignalNoiseRating == SignalNoiseModerate {
+				priceSensitiveWithReaction++
+			}
 		}
 	}
 
@@ -1441,6 +1641,102 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 		}
 	}
 	content.WriteString(fmt.Sprintf("**Noise Ratio**: %s (%d signal vs %d noise announcements)\n\n", noiseRatioDesc, signalCount, noiseSignalCount+lowSignalCount))
+
+	// High Signal Summary Table (quick overview)
+	if highSignalCount > 0 {
+		content.WriteString("### High Signal Announcements\n\n")
+		content.WriteString("| Date | Headline | Price Change | Volume |\n")
+		content.WriteString("|------|----------|--------------|--------|\n")
+		for _, a := range analyses {
+			if a.SignalNoiseRating == SignalNoiseHigh {
+				headline := a.Headline
+				if len(headline) > 45 {
+					headline = headline[:42] + "..."
+				}
+				priceStr := "N/A"
+				volStr := "N/A"
+				if a.PriceImpact != nil {
+					sign := ""
+					if a.PriceImpact.ChangePercent > 0 {
+						sign = "+"
+					}
+					priceStr = fmt.Sprintf("%s%.1f%%", sign, a.PriceImpact.ChangePercent)
+					volStr = fmt.Sprintf("%.1fx", a.PriceImpact.VolumeChangeRatio)
+				}
+				content.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+					a.Date.Format("2006-01-02"),
+					headline,
+					priceStr,
+					volStr,
+				))
+			}
+		}
+		content.WriteString("\n")
+	}
+
+	// Price-Sensitive Accuracy Scoring
+	if priceSensitiveTotal > 0 {
+		accuracy := float64(priceSensitiveWithReaction) / float64(priceSensitiveTotal) * 100
+		content.WriteString("## Price-Sensitive Accuracy\n\n")
+		content.WriteString("How often did price-sensitive announcements actually move the market?\n\n")
+		content.WriteString(fmt.Sprintf("- **Total Price-Sensitive Announcements**: %d\n", priceSensitiveTotal))
+		content.WriteString(fmt.Sprintf("- **With Market Reaction (High/Moderate Signal)**: %d\n", priceSensitiveWithReaction))
+		content.WriteString(fmt.Sprintf("- **Accuracy Score**: %.1f%%\n\n", accuracy))
+	}
+
+	// Anomaly Detection Section
+	if anomalyNoReactionCount > 0 || anomalyUnexpectedCount > 0 {
+		content.WriteString("## Anomaly Detection\n\n")
+		content.WriteString("Announcements where market reaction didn't match expectations:\n\n")
+		if anomalyNoReactionCount > 0 {
+			content.WriteString(fmt.Sprintf("- **⚠️ No Reaction Anomalies**: %d (price-sensitive with no market reaction)\n", anomalyNoReactionCount))
+		}
+		if anomalyUnexpectedCount > 0 {
+			content.WriteString(fmt.Sprintf("- **📈 Unexpected Reaction Anomalies**: %d (non-price-sensitive with high reaction)\n", anomalyUnexpectedCount))
+		}
+		content.WriteString("\n")
+	}
+
+	// Pre-Announcement Drift Section
+	if preDriftCount > 0 {
+		content.WriteString("## Pre-Announcement Movement Analysis\n\n")
+		content.WriteString(fmt.Sprintf("**Announcements with Significant Pre-Drift (T-5 to T-1 ≥ 2%%)**: %d\n\n", preDriftCount))
+		content.WriteString("Pre-announcement price movement may indicate:\n")
+		content.WriteString("- Information leakage before official announcement\n")
+		content.WriteString("- Market anticipation of news\n")
+		content.WriteString("- Insider trading activity (requires further investigation)\n\n")
+
+		// List announcements with significant pre-drift
+		content.WriteString("| Date | Headline | Pre-Drift | Interpretation |\n")
+		content.WriteString("|------|----------|-----------|----------------|\n")
+		for _, a := range analyses {
+			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift {
+				headline := a.Headline
+				if len(headline) > 40 {
+					headline = headline[:37] + "..."
+				}
+				sign := ""
+				if a.PriceImpact.PreAnnouncementDrift > 0 {
+					sign = "+"
+				}
+				content.WriteString(fmt.Sprintf("| %s | %s | %s%.1f%% | %s |\n",
+					a.Date.Format("2006-01-02"),
+					headline,
+					sign,
+					a.PriceImpact.PreAnnouncementDrift,
+					a.PriceImpact.PreDriftInterpretation,
+				))
+			}
+		}
+		content.WriteString("\n")
+	}
+
+	// Dividend Announcements Section
+	if dividendCount > 0 {
+		content.WriteString("## Dividend Announcements\n\n")
+		content.WriteString(fmt.Sprintf("**Total Dividend-Related Announcements**: %d\n\n", dividendCount))
+		content.WriteString("*Note: Negative price movement on dividend announcements may be due to ex-dividend adjustment rather than negative market sentiment.*\n\n")
+	}
 
 	// Keyword-based classification summary (legacy)
 	highCount, mediumCount, lowCount, noiseCount := 0, 0, 0, 0
@@ -1584,29 +1880,35 @@ func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, anal
 	announcementsMetadata := make([]map[string]interface{}, 0, len(analyses))
 	for _, a := range analyses {
 		annMeta := map[string]interface{}{
-			"date":                   a.Date.Format(time.RFC3339),
-			"headline":               a.Headline,
-			"type":                   a.Type,
-			"price_sensitive":        a.PriceSensitive,
-			"relevance_category":     a.RelevanceCategory,
-			"relevance_reason":       a.RelevanceReason,
-			"document_key":           a.DocumentKey,
-			"pdf_url":                a.PDFURL,
-			"signal_noise_rating":    string(a.SignalNoiseRating),
-			"signal_noise_rationale": a.SignalNoiseRationale,
-			"is_trading_halt":        a.IsTradingHalt,
-			"is_reinstatement":       a.IsReinstatement,
+			"date":                     a.Date.Format(time.RFC3339),
+			"headline":                 a.Headline,
+			"type":                     a.Type,
+			"price_sensitive":          a.PriceSensitive,
+			"relevance_category":       a.RelevanceCategory,
+			"relevance_reason":         a.RelevanceReason,
+			"document_key":             a.DocumentKey,
+			"pdf_url":                  a.PDFURL,
+			"signal_noise_rating":      string(a.SignalNoiseRating),
+			"signal_noise_rationale":   a.SignalNoiseRationale,
+			"is_trading_halt":          a.IsTradingHalt,
+			"is_reinstatement":         a.IsReinstatement,
+			"is_anomaly":               a.IsAnomaly,
+			"anomaly_type":             a.AnomalyType,
+			"is_dividend_announcement": a.IsDividendAnnouncement,
 		}
 
 		if a.PriceImpact != nil {
 			annMeta["price_impact"] = map[string]interface{}{
-				"price_before":        a.PriceImpact.PriceBefore,
-				"price_after":         a.PriceImpact.PriceAfter,
-				"change_percent":      a.PriceImpact.ChangePercent,
-				"volume_before":       a.PriceImpact.VolumeBefore,
-				"volume_after":        a.PriceImpact.VolumeAfter,
-				"volume_change_ratio": a.PriceImpact.VolumeChangeRatio,
-				"impact_signal":       a.PriceImpact.ImpactSignal,
+				"price_before":              a.PriceImpact.PriceBefore,
+				"price_after":               a.PriceImpact.PriceAfter,
+				"change_percent":            a.PriceImpact.ChangePercent,
+				"volume_before":             a.PriceImpact.VolumeBefore,
+				"volume_after":              a.PriceImpact.VolumeAfter,
+				"volume_change_ratio":       a.PriceImpact.VolumeChangeRatio,
+				"impact_signal":             a.PriceImpact.ImpactSignal,
+				"pre_announcement_drift":    a.PriceImpact.PreAnnouncementDrift,
+				"has_significant_pre_drift": a.PriceImpact.HasSignificantPreDrift,
+				"pre_drift_interpretation":  a.PriceImpact.PreDriftInterpretation,
 			}
 		}
 
