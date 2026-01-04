@@ -177,12 +177,16 @@ func saveNavexaWorkerOutput(t *testing.T, helper *common.HTTPTestHelper, results
 
 	doc := result.Documents[0]
 
+	// Verify content is not empty or blank
+	content := strings.TrimSpace(doc.ContentMarkdown)
+	require.NotEmpty(t, content, "Document content_markdown is empty or blank for tag: %s", tag)
+
 	// Save output.md
 	mdPath := filepath.Join(resultsDir, "output.md")
 	if err := os.WriteFile(mdPath, []byte(doc.ContentMarkdown), 0644); err != nil {
 		t.Logf("Failed to write output.md: %v", err)
 	} else {
-		t.Logf("Saved output.md to: %s", mdPath)
+		t.Logf("Saved output.md to: %s (%d bytes)", mdPath, len(doc.ContentMarkdown))
 	}
 
 	// Save output.json (metadata)
@@ -327,6 +331,9 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	timingData.Complete()
 	common.SaveTimingData(t, resultsDir, timingData)
 
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
+
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)
 
@@ -456,6 +463,9 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	// Complete timing and save
 	timingData.Complete()
 	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
 
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)
@@ -605,6 +615,9 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	// Complete timing and save
 	timingData.Complete()
 	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
 
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)

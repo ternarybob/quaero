@@ -50,6 +50,259 @@ var testStocks = []string{testStockGNP, testStockBCN, testStockMYG}
 var testCodes = []string{testCodeGNP, testCodeBCN, testCodeMYG}
 
 // =============================================================================
+// Public Test Functions
+// =============================================================================
+
+// TestSignalComputerWorker tests the signal_computer worker with multiple stocks
+func TestSignalComputerWorker(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	resultsDir := env.GetResultsDir()
+
+	var testLog []string
+	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestSignalComputerWorker", time.Now().Format(time.RFC3339)))
+
+	// Check EODHD API key
+	apiKey := common.GetKVValue(t, helper, "eodhd_api_key")
+	if apiKey == "" {
+		testLog = append(testLog, fmt.Sprintf("[%s] SKIP: EODHD API key not configured", time.Now().Format(time.RFC3339)))
+		writeTestLog(t, resultsDir, testLog)
+		t.Skip("EODHD API key not configured - skipping test")
+	}
+	testLog = append(testLog, fmt.Sprintf("[%s] EODHD API key loaded from KV store", time.Now().Format(time.RFC3339)))
+
+	for i, stock := range testStocks {
+		code := testCodes[i] // Use code for EODHD API, stock (ASX:XXX) for workers
+		t.Run("ASX_"+code, func(t *testing.T) {
+			subResultsDir := filepath.Join(resultsDir, code)
+			if err := os.MkdirAll(subResultsDir, 0755); err != nil {
+				t.Fatalf("Failed to create results dir: %v", err)
+			}
+
+			runSignalComputerTest(t, env, helper, stock, code, apiKey, subResultsDir)
+		})
+	}
+
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestSignalComputerWorker completed", time.Now().Format(time.RFC3339)))
+	writeTestLog(t, resultsDir, testLog)
+}
+
+// TestSignalComputerMultipleStocks tests signal computation for all test stocks in a single batch job.
+// This test uses a multi-step job with market_fundamentals steps followed by a signal_computer step
+// that processes all tickers together. It validates that the output format is the same as
+// processing each ticker individually.
+func TestSignalComputerMultipleStocks(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	resultsDir := env.GetResultsDir()
+
+	var testLog []string
+	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestSignalComputerMultipleStocks", time.Now().Format(time.RFC3339)))
+
+	// Check EODHD API key
+	apiKey := common.GetKVValue(t, helper, "eodhd_api_key")
+	if apiKey == "" {
+		testLog = append(testLog, fmt.Sprintf("[%s] SKIP: EODHD API key not configured", time.Now().Format(time.RFC3339)))
+		writeTestLog(t, resultsDir, testLog)
+		t.Skip("EODHD API key not configured - skipping test")
+	}
+	testLog = append(testLog, fmt.Sprintf("[%s] EODHD API key loaded from KV store", time.Now().Format(time.RFC3339)))
+
+	// Step 1: Fetch EODHD data directly for validation baseline (same as single-stock test)
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Fetching EODHD data for all stocks", time.Now().Format(time.RFC3339)))
+	for i, code := range testCodes {
+		subDir := filepath.Join(resultsDir, code)
+		os.MkdirAll(subDir, 0755)
+
+		_, err := fetchEODHDFundamentals(t, subDir, code, apiKey)
+		if err != nil {
+			t.Logf("Warning: Failed to fetch EODHD fundamentals for %s: %v", code, err)
+		}
+		_, err = fetchEODHDHistorical(t, subDir, code, apiKey)
+		if err != nil {
+			t.Logf("Warning: Failed to fetch EODHD historical prices for %s: %v", code, err)
+		}
+		testLog = append(testLog, fmt.Sprintf("[%s] EODHD data fetched for %s", time.Now().Format(time.RFC3339), testStocks[i]))
+	}
+
+	// Create job with multiple exchange-qualified tickers
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Creating multi-stock job definition", time.Now().Format(time.RFC3339)))
+	defID := fmt.Sprintf("test-signal-multi-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        "Signal Computer Multi-Stock Test",
+		"description": "Compute signals for multiple ASX stocks",
+		"type":        "signal_computer",
+		"enabled":     true,
+		"tags":        []string{"signal-multi-test"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "collect-all",
+				"type": "market_fundamentals",
+				"config": map[string]interface{}{
+					"ticker": testStockGNP, // Exchange-qualified ticker
+					"period": "Y2",
+				},
+			},
+			{
+				"name": "collect-bcn",
+				"type": "market_fundamentals",
+				"config": map[string]interface{}{
+					"ticker": testStockBCN, // Exchange-qualified ticker
+					"period": "Y2",
+				},
+			},
+			{
+				"name": "collect-myg",
+				"type": "market_fundamentals",
+				"config": map[string]interface{}{
+					"ticker": testStockMYG, // Exchange-qualified ticker
+					"period": "Y2",
+				},
+			},
+			{
+				"name":    "compute-signals",
+				"type":    "signal_computer",
+				"depends": "collect-all,collect-bcn,collect-myg",
+				"config": map[string]interface{}{
+					"tickers":     testStocks, // Exchange-qualified tickers
+					"output_tags": []string{"signal-multi-test"},
+				},
+			},
+		},
+	}
+
+	// Save job definition
+	defPath := filepath.Join(resultsDir, "job_definition_multi.json")
+	if data, err := json.MarshalIndent(body, "", "  "); err == nil {
+		os.WriteFile(defPath, data, 0644)
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	require.NoError(t, err, "Failed to create multi-stock job definition")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Skipf("Multi-stock job creation failed with status: %d", resp.StatusCode)
+	}
+
+	defer func() {
+		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
+		if delResp != nil {
+			delResp.Body.Close()
+		}
+	}()
+
+	// Execute job
+	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
+	require.NoError(t, err, "Failed to execute multi-stock job")
+	defer execResp.Body.Close()
+
+	if execResp.StatusCode != http.StatusAccepted {
+		t.Skipf("Multi-stock job execution failed with status: %d", execResp.StatusCode)
+	}
+
+	var execResult map[string]interface{}
+	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
+	jobID := execResult["job_id"].(string)
+	t.Logf("Multi-stock job started: %s", jobID)
+
+	// Wait for completion with extended timeout
+	finalStatus := waitForJobCompletion(t, helper, jobID, 10*time.Minute)
+	require.Equal(t, "completed", finalStatus, "Multi-stock job must complete successfully")
+
+	// Get the signal_computer step's WorkerResult to validate by_ticker format
+	// First find the compute-signals step job ID
+	signalStepResult := getSignalComputerWorkerResult(t, helper, jobID)
+	if signalStepResult != nil {
+		// Validate by_ticker field exists and contains all test stocks
+		require.NotNil(t, signalStepResult.ByTicker, "WorkerResult must have by_ticker field for multi-stock processing")
+		require.Equal(t, len(testStocks), len(signalStepResult.ByTicker),
+			"by_ticker should have entries for all %d stocks", len(testStocks))
+
+		// Validate each stock has correct per-ticker result
+		for _, stock := range testStocks {
+			tickerResult, exists := signalStepResult.ByTicker[stock]
+			require.True(t, exists, "by_ticker must contain entry for %s", stock)
+			require.NotNil(t, tickerResult, "TickerResult for %s must not be nil", stock)
+			assert.Equal(t, 1, tickerResult.DocumentsCreated,
+				"Each stock should have exactly 1 document created, got %d for %s",
+				tickerResult.DocumentsCreated, stock)
+			assert.Len(t, tickerResult.DocumentIDs, 1,
+				"Each stock should have exactly 1 document ID for %s", stock)
+			assert.NotEmpty(t, tickerResult.Tags,
+				"TickerResult for %s must have tags", stock)
+			t.Logf("by_ticker[%s]: docs=%d, ids=%v, tags=%v",
+				stock, tickerResult.DocumentsCreated, tickerResult.DocumentIDs, tickerResult.Tags)
+		}
+
+		// Validate totals match per-ticker sum
+		totalDocs := 0
+		for _, tr := range signalStepResult.ByTicker {
+			totalDocs += tr.DocumentsCreated
+		}
+		assert.Equal(t, signalStepResult.DocumentsCreated, totalDocs,
+			"Total documents_created (%d) should equal sum of per-ticker counts (%d)",
+			signalStepResult.DocumentsCreated, totalDocs)
+
+		// Save the WorkerResult with by_ticker for inspection
+		resultPath := filepath.Join(resultsDir, "worker_result.json")
+		if data, err := json.MarshalIndent(signalStepResult, "", "  "); err == nil {
+			os.WriteFile(resultPath, data, 0644)
+			t.Logf("Saved worker_result.json with by_ticker to: %s", resultPath)
+		}
+	} else {
+		t.Error("Failed to get signal_computer WorkerResult from job metadata")
+	}
+
+	// Step 4: Save collector and signal output for each stock (same as single-stock test)
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 4: Saving output for each stock", time.Now().Format(time.RFC3339)))
+	for i, stock := range testStocks {
+		code := testCodes[i]
+		subDir := filepath.Join(resultsDir, code)
+		os.MkdirAll(subDir, 0755)
+
+		// Save collector output
+		collectorDir := filepath.Join(subDir, "collector")
+		os.MkdirAll(collectorDir, 0755)
+		saveASXStockCollectorOutput(t, helper, collectorDir, code)
+
+		// Save signal output
+		signalsDir := filepath.Join(subDir, "signals")
+		os.MkdirAll(signalsDir, 0755)
+		saveSignalWorkerOutput(t, helper, subDir, code)
+
+		jsonPath := filepath.Join(subDir, "output.json")
+		if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
+			t.Errorf("Signal document not created for %s", stock)
+			testLog = append(testLog, fmt.Sprintf("[%s] ERROR: Signal document not created for %s", time.Now().Format(time.RFC3339), stock))
+		} else {
+			t.Logf("Signal document verified for %s", stock)
+			testLog = append(testLog, fmt.Sprintf("[%s] Signal document verified for %s", time.Now().Format(time.RFC3339), stock))
+		}
+	}
+
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
+
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestSignalComputerMultipleStocks completed", time.Now().Format(time.RFC3339)))
+	writeTestLog(t, resultsDir, testLog)
+
+	t.Log("PASS: TestSignalComputerMultipleStocks completed successfully")
+}
+
+// =============================================================================
 // EODHD API Direct Validation Helpers
 // =============================================================================
 
@@ -135,47 +388,8 @@ func extractEODHDCompanyInfo(fundamentals map[string]interface{}) (name, sector,
 }
 
 // =============================================================================
-// Test Signal Computer Worker
+// Test Signal Computer Worker Helpers
 // =============================================================================
-
-// TestSignalComputerWorker tests the signal_computer worker with multiple stocks
-func TestSignalComputerWorker(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-	resultsDir := env.GetResultsDir()
-
-	var testLog []string
-	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestSignalComputerWorker", time.Now().Format(time.RFC3339)))
-
-	// Check EODHD API key
-	apiKey := getEODHDAPIKey(t, helper)
-	if apiKey == "" {
-		testLog = append(testLog, fmt.Sprintf("[%s] SKIP: EODHD API key not configured", time.Now().Format(time.RFC3339)))
-		writeTestLog(t, resultsDir, testLog)
-		t.Skip("EODHD API key not configured - skipping test")
-	}
-	testLog = append(testLog, fmt.Sprintf("[%s] EODHD API key loaded from KV store", time.Now().Format(time.RFC3339)))
-
-	for i, stock := range testStocks {
-		code := testCodes[i] // Use code for EODHD API, stock (ASX:XXX) for workers
-		t.Run("ASX_"+code, func(t *testing.T) {
-			subResultsDir := filepath.Join(resultsDir, code)
-			if err := os.MkdirAll(subResultsDir, 0755); err != nil {
-				t.Fatalf("Failed to create results dir: %v", err)
-			}
-
-			runSignalComputerTest(t, env, helper, stock, code, apiKey, subResultsDir)
-		})
-	}
-
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestSignalComputerWorker completed", time.Now().Format(time.RFC3339)))
-	writeTestLog(t, resultsDir, testLog)
-}
 
 // runSignalComputerTest runs signal computer test for a single stock
 // stock is the exchange-qualified ticker (e.g., "ASX:GNP")
@@ -201,21 +415,21 @@ func runSignalComputerTest(t *testing.T, env *common.TestEnvironment, helper *co
 	testLog = append(testLog, fmt.Sprintf("[%s] Company: %s, Sector: %s, Industry: %s",
 		time.Now().Format(time.RFC3339), companyName, sector, industry))
 
-	// Step 2: Run asx_stock_collector first to get stock data
-	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Running asx_stock_collector worker", time.Now().Format(time.RFC3339)))
+	// Step 2: Run market_fundamentals first to get stock data
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Running market_fundamentals worker", time.Now().Format(time.RFC3339)))
 	collectorDefID := fmt.Sprintf("test-signal-collector-%s-%d", strings.ToLower(code), time.Now().UnixNano())
 
 	collectorBody := map[string]interface{}{
 		"id":          collectorDefID,
 		"name":        fmt.Sprintf("Stock Collector for Signal Test - %s", stock),
 		"description": "Collect stock data for signal computation",
-		"type":        "asx_stock_collector",
+		"type":        "market_fundamentals",
 		"enabled":     true,
 		"tags":        []string{"signal-test", strings.ToLower(code)},
 		"steps": []map[string]interface{}{
 			{
 				"name": "collect-data",
-				"type": "asx_stock_collector",
+				"type": "market_fundamentals",
 				"config": map[string]interface{}{
 					"ticker": stock, // Use exchange-qualified ticker
 					"period": "Y2",
@@ -376,11 +590,14 @@ func runSignalComputerTest(t *testing.T, env *common.TestEnvironment, helper *co
 	saveSignalWorkerOutput(t, helper, resultsDir, code)
 	validateSignalOutput(t, resultsDir, code, fundamentals, historicalPrices)
 
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
+
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: %s signal computation completed", time.Now().Format(time.RFC3339), stock))
 	writeTestLog(t, resultsDir, testLog)
 }
 
-// saveASXStockCollectorOutput saves asx_stock_collector document output for a stock
+// saveASXStockCollectorOutput saves market_fundamentals document output for a stock
 func saveASXStockCollectorOutput(t *testing.T, helper *common.HTTPTestHelper, resultsDir, stock string) {
 	tags := []string{"asx-stock-data", strings.ToLower(stock)}
 	tagStr := strings.Join(tags, ",")
@@ -840,6 +1057,10 @@ func validateSignalsObject(t *testing.T, signals map[string]interface{}) {
 	t.Log("PASS: signals object schema validation completed")
 }
 
+// =============================================================================
+// Assertion Helpers
+// =============================================================================
+
 // assertFieldExistsInMap asserts that a field exists in a nested map
 func assertFieldExistsInMap(t *testing.T, m map[string]interface{}, field, parent string) {
 	_, ok := m[field]
@@ -851,273 +1072,6 @@ func assertFieldExists(t *testing.T, metadata map[string]interface{}, field stri
 	_, ok := metadata[field]
 	assert.True(t, ok, "Field '%s' must exist in metadata", field)
 }
-
-// =============================================================================
-// Test Multiple Stocks Pipeline
-// =============================================================================
-
-// TestSignalComputerMultipleStocks tests signal computation for all test stocks in a single batch job.
-// This test uses a multi-step job with asx_stock_collector steps followed by a signal_computer step
-// that processes all tickers together. It validates that the output format is the same as
-// processing each ticker individually.
-func TestSignalComputerMultipleStocks(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-	resultsDir := env.GetResultsDir()
-
-	var testLog []string
-	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestSignalComputerMultipleStocks", time.Now().Format(time.RFC3339)))
-
-	// Check EODHD API key
-	apiKey := getEODHDAPIKey(t, helper)
-	if apiKey == "" {
-		testLog = append(testLog, fmt.Sprintf("[%s] SKIP: EODHD API key not configured", time.Now().Format(time.RFC3339)))
-		writeTestLog(t, resultsDir, testLog)
-		t.Skip("EODHD API key not configured - skipping test")
-	}
-	testLog = append(testLog, fmt.Sprintf("[%s] EODHD API key loaded from KV store", time.Now().Format(time.RFC3339)))
-
-	// Step 1: Fetch EODHD data directly for validation baseline (same as single-stock test)
-	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Fetching EODHD data for all stocks", time.Now().Format(time.RFC3339)))
-	for i, code := range testCodes {
-		subDir := filepath.Join(resultsDir, code)
-		os.MkdirAll(subDir, 0755)
-
-		_, err := fetchEODHDFundamentals(t, subDir, code, apiKey)
-		if err != nil {
-			t.Logf("Warning: Failed to fetch EODHD fundamentals for %s: %v", code, err)
-		}
-		_, err = fetchEODHDHistorical(t, subDir, code, apiKey)
-		if err != nil {
-			t.Logf("Warning: Failed to fetch EODHD historical prices for %s: %v", code, err)
-		}
-		testLog = append(testLog, fmt.Sprintf("[%s] EODHD data fetched for %s", time.Now().Format(time.RFC3339), testStocks[i]))
-	}
-
-	// Create job with multiple exchange-qualified tickers
-	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Creating multi-stock job definition", time.Now().Format(time.RFC3339)))
-	defID := fmt.Sprintf("test-signal-multi-%d", time.Now().UnixNano())
-
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "Signal Computer Multi-Stock Test",
-		"description": "Compute signals for multiple ASX stocks",
-		"type":        "signal_computer",
-		"enabled":     true,
-		"tags":        []string{"signal-multi-test"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "collect-all",
-				"type": "asx_stock_collector",
-				"config": map[string]interface{}{
-					"ticker": testStockGNP, // Exchange-qualified ticker
-					"period": "Y2",
-				},
-			},
-			{
-				"name": "collect-bcn",
-				"type": "asx_stock_collector",
-				"config": map[string]interface{}{
-					"ticker": testStockBCN, // Exchange-qualified ticker
-					"period": "Y2",
-				},
-			},
-			{
-				"name": "collect-myg",
-				"type": "asx_stock_collector",
-				"config": map[string]interface{}{
-					"ticker": testStockMYG, // Exchange-qualified ticker
-					"period": "Y2",
-				},
-			},
-			{
-				"name":    "compute-signals",
-				"type":    "signal_computer",
-				"depends": "collect-all,collect-bcn,collect-myg",
-				"config": map[string]interface{}{
-					"tickers":     testStocks, // Exchange-qualified tickers
-					"output_tags": []string{"signal-multi-test"},
-				},
-			},
-		},
-	}
-
-	// Save job definition
-	defPath := filepath.Join(resultsDir, "job_definition_multi.json")
-	if data, err := json.MarshalIndent(body, "", "  "); err == nil {
-		os.WriteFile(defPath, data, 0644)
-	}
-
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create multi-stock job definition")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Skipf("Multi-stock job creation failed with status: %d", resp.StatusCode)
-	}
-
-	defer func() {
-		delResp, _ := helper.DELETE("/api/job-definitions/" + defID)
-		if delResp != nil {
-			delResp.Body.Close()
-		}
-	}()
-
-	// Execute job
-	execResp, err := helper.POST("/api/job-definitions/"+defID+"/execute", nil)
-	require.NoError(t, err, "Failed to execute multi-stock job")
-	defer execResp.Body.Close()
-
-	if execResp.StatusCode != http.StatusAccepted {
-		t.Skipf("Multi-stock job execution failed with status: %d", execResp.StatusCode)
-	}
-
-	var execResult map[string]interface{}
-	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
-	jobID := execResult["job_id"].(string)
-	t.Logf("Multi-stock job started: %s", jobID)
-
-	// Wait for completion with extended timeout
-	finalStatus := waitForJobCompletion(t, helper, jobID, 10*time.Minute)
-	require.Equal(t, "completed", finalStatus, "Multi-stock job must complete successfully")
-
-	// Get the signal_computer step's WorkerResult to validate by_ticker format
-	// First find the compute-signals step job ID
-	signalStepResult := getSignalComputerWorkerResult(t, helper, jobID)
-	if signalStepResult != nil {
-		// Validate by_ticker field exists and contains all test stocks
-		require.NotNil(t, signalStepResult.ByTicker, "WorkerResult must have by_ticker field for multi-stock processing")
-		require.Equal(t, len(testStocks), len(signalStepResult.ByTicker),
-			"by_ticker should have entries for all %d stocks", len(testStocks))
-
-		// Validate each stock has correct per-ticker result
-		for _, stock := range testStocks {
-			tickerResult, exists := signalStepResult.ByTicker[stock]
-			require.True(t, exists, "by_ticker must contain entry for %s", stock)
-			require.NotNil(t, tickerResult, "TickerResult for %s must not be nil", stock)
-			assert.Equal(t, 1, tickerResult.DocumentsCreated,
-				"Each stock should have exactly 1 document created, got %d for %s",
-				tickerResult.DocumentsCreated, stock)
-			assert.Len(t, tickerResult.DocumentIDs, 1,
-				"Each stock should have exactly 1 document ID for %s", stock)
-			assert.NotEmpty(t, tickerResult.Tags,
-				"TickerResult for %s must have tags", stock)
-			t.Logf("by_ticker[%s]: docs=%d, ids=%v, tags=%v",
-				stock, tickerResult.DocumentsCreated, tickerResult.DocumentIDs, tickerResult.Tags)
-		}
-
-		// Validate totals match per-ticker sum
-		totalDocs := 0
-		for _, tr := range signalStepResult.ByTicker {
-			totalDocs += tr.DocumentsCreated
-		}
-		assert.Equal(t, signalStepResult.DocumentsCreated, totalDocs,
-			"Total documents_created (%d) should equal sum of per-ticker counts (%d)",
-			signalStepResult.DocumentsCreated, totalDocs)
-
-		// Save the WorkerResult with by_ticker for inspection
-		resultPath := filepath.Join(resultsDir, "worker_result.json")
-		if data, err := json.MarshalIndent(signalStepResult, "", "  "); err == nil {
-			os.WriteFile(resultPath, data, 0644)
-			t.Logf("Saved worker_result.json with by_ticker to: %s", resultPath)
-		}
-	} else {
-		t.Error("Failed to get signal_computer WorkerResult from job metadata")
-	}
-
-	// Step 4: Save collector and signal output for each stock (same as single-stock test)
-	testLog = append(testLog, fmt.Sprintf("[%s] Step 4: Saving output for each stock", time.Now().Format(time.RFC3339)))
-	for i, stock := range testStocks {
-		code := testCodes[i]
-		subDir := filepath.Join(resultsDir, code)
-		os.MkdirAll(subDir, 0755)
-
-		// Save collector output
-		collectorDir := filepath.Join(subDir, "collector")
-		os.MkdirAll(collectorDir, 0755)
-		saveASXStockCollectorOutput(t, helper, collectorDir, code)
-
-		// Save signal output
-		signalsDir := filepath.Join(subDir, "signals")
-		os.MkdirAll(signalsDir, 0755)
-		saveSignalWorkerOutput(t, helper, subDir, code)
-
-		jsonPath := filepath.Join(subDir, "output.json")
-		if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
-			t.Errorf("Signal document not created for %s", stock)
-			testLog = append(testLog, fmt.Sprintf("[%s] ERROR: Signal document not created for %s", time.Now().Format(time.RFC3339), stock))
-		} else {
-			t.Logf("Signal document verified for %s", stock)
-			testLog = append(testLog, fmt.Sprintf("[%s] Signal document verified for %s", time.Now().Format(time.RFC3339), stock))
-		}
-	}
-
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestSignalComputerMultipleStocks completed", time.Now().Format(time.RFC3339)))
-	writeTestLog(t, resultsDir, testLog)
-
-	t.Log("PASS: TestSignalComputerMultipleStocks completed successfully")
-}
-
-// getSignalComputerWorkerResult retrieves the signal_computer step's WorkerResult from a multi-step job.
-// For manager jobs, it looks up the "compute-signals" step job ID and queries that.
-func getSignalComputerWorkerResult(t *testing.T, helper *common.HTTPTestHelper, jobID string) *WorkerResult {
-	resp, err := helper.GET("/api/jobs/" + jobID)
-	if err != nil {
-		t.Logf("Failed to get job %s: %v", jobID, err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Logf("Get job returned status %d", resp.StatusCode)
-		return nil
-	}
-
-	var job struct {
-		Type     string                 `json:"type"`
-		Metadata map[string]interface{} `json:"metadata"`
-	}
-	if err := helper.ParseJSONResponse(resp, &job); err != nil {
-		t.Logf("Failed to parse job response: %v", err)
-		return nil
-	}
-
-	if job.Metadata == nil {
-		t.Logf("Job %s has no metadata", jobID)
-		return nil
-	}
-
-	// For manager job, find the compute-signals step
-	if job.Type == "manager" {
-		stepJobIDs, ok := job.Metadata["step_job_ids"].(map[string]interface{})
-		if !ok || len(stepJobIDs) == 0 {
-			t.Logf("Manager job %s has no step_job_ids in metadata", jobID)
-			return nil
-		}
-
-		// Look for compute-signals step
-		computeSignalsJobID, ok := stepJobIDs["compute-signals"].(string)
-		if !ok {
-			t.Logf("Manager job %s has no compute-signals step in step_job_ids", jobID)
-			return nil
-		}
-
-		t.Logf("Querying compute-signals step job %s", computeSignalsJobID)
-		return getJobWorkerResult(t, helper, computeSignalsJobID)
-	}
-
-	// Not a manager job, try to get worker_result directly
-	return getJobWorkerResult(t, helper, jobID)
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 // assertFileExistsAndNotEmpty verifies file exists and has content
 func assertFileExistsAndNotEmpty(t *testing.T, path string) {
@@ -1284,6 +1238,58 @@ func getJobWorkerResult(t *testing.T, helper *common.HTTPTestHelper, jobID strin
 	return result
 }
 
+// getSignalComputerWorkerResult retrieves the signal_computer step's WorkerResult from a multi-step job.
+// For manager jobs, it looks up the "compute-signals" step job ID and queries that.
+func getSignalComputerWorkerResult(t *testing.T, helper *common.HTTPTestHelper, jobID string) *WorkerResult {
+	resp, err := helper.GET("/api/jobs/" + jobID)
+	if err != nil {
+		t.Logf("Failed to get job %s: %v", jobID, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Get job returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var job struct {
+		Type     string                 `json:"type"`
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := helper.ParseJSONResponse(resp, &job); err != nil {
+		t.Logf("Failed to parse job response: %v", err)
+		return nil
+	}
+
+	if job.Metadata == nil {
+		t.Logf("Job %s has no metadata", jobID)
+		return nil
+	}
+
+	// For manager job, find the compute-signals step
+	if job.Type == "manager" {
+		stepJobIDs, ok := job.Metadata["step_job_ids"].(map[string]interface{})
+		if !ok || len(stepJobIDs) == 0 {
+			t.Logf("Manager job %s has no step_job_ids in metadata", jobID)
+			return nil
+		}
+
+		// Look for compute-signals step
+		computeSignalsJobID, ok := stepJobIDs["compute-signals"].(string)
+		if !ok {
+			t.Logf("Manager job %s has no compute-signals step in step_job_ids", jobID)
+			return nil
+		}
+
+		t.Logf("Querying compute-signals step job %s", computeSignalsJobID)
+		return getJobWorkerResult(t, helper, computeSignalsJobID)
+	}
+
+	// Not a manager job, try to get worker_result directly
+	return getJobWorkerResult(t, helper, jobID)
+}
+
 // validateWorkerResult validates that a WorkerResult contains expected documents
 func validateWorkerResult(t *testing.T, helper *common.HTTPTestHelper, resultsDir string, result *WorkerResult, expectedCount int, requiredTags []string) bool {
 	if result == nil {
@@ -1371,6 +1377,10 @@ func validateWorkerResult(t *testing.T, helper *common.HTTPTestHelper, resultsDi
 
 	return true
 }
+
+// =============================================================================
+// Job Helpers
+// =============================================================================
 
 // getJobLogs retrieves job logs and checks for errors
 func getJobLogs(t *testing.T, helper *common.HTTPTestHelper, jobID string) ([]string, []string) {

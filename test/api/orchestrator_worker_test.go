@@ -214,6 +214,9 @@ func TestOrchestratorWorkerSubmission(t *testing.T) {
 	// Save timing summary as markdown
 	saveOrchestratorWorkerTimingSummary(t, structuredDir, timingData)
 
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
+
 	// Write test log
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestOrchestratorWorkerSubmission completed successfully", time.Now().Format(time.RFC3339)))
 	writeOrchestratorWorkerTestLog(t, structuredDir, testLog)
@@ -230,6 +233,12 @@ func TestOrchestratorWorkerSubmission(t *testing.T) {
 
 // validateOrchestratorOutputContent validates that the output content is actual analysis, not an error or placeholder
 func validateOrchestratorOutputContent(t *testing.T, content string) {
+	t.Helper()
+
+	// First check: content must not be empty or blank
+	trimmedContent := strings.TrimSpace(content)
+	require.NotEmpty(t, trimmedContent, "Output content is empty or blank")
+
 	// Check for error indicators
 	errorIndicators := []string{
 		"no tools are available",
@@ -241,9 +250,8 @@ func validateOrchestratorOutputContent(t *testing.T, content string) {
 
 	contentLower := strings.ToLower(content)
 	for _, indicator := range errorIndicators {
-		if strings.Contains(contentLower, strings.ToLower(indicator)) {
-			t.Errorf("Output content contains error indicator: %s", indicator)
-		}
+		require.False(t, strings.Contains(contentLower, strings.ToLower(indicator)),
+			"Output content contains error indicator: %s", indicator)
 	}
 
 	// Check for analysis content indicators
@@ -260,8 +268,8 @@ func validateOrchestratorOutputContent(t *testing.T, content string) {
 		}
 	}
 
-	assert.True(t, foundAnalysis, "Output should contain analysis-related content")
-	t.Log("PASS: Output content contains valid analysis")
+	require.True(t, foundAnalysis, "Output should contain analysis-related content")
+	t.Logf("PASS: Output content contains valid analysis (%d bytes)", len(content))
 }
 
 // saveOrchestratorWorkerJobOutput saves job output JSON to results directory

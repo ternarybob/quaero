@@ -26,6 +26,19 @@ import (
 // =============================================================================
 
 // =============================================================================
+// Test Types
+// =============================================================================
+
+// StockData is a test-only type for verifying output structure.
+// Mirrors key fields from StockCollectorData used by market_fundamentals worker.
+type StockData struct {
+	Symbol        string  `json:"symbol"`
+	CompanyName   string  `json:"company_name"`
+	LastPrice     float64 `json:"last_price"`
+	ChangePercent float64 `json:"change_percent"`
+}
+
+// =============================================================================
 // SummaryWorker Schema Tests
 // =============================================================================
 // The SummaryWorker is the primary AI worker that generates analysis.

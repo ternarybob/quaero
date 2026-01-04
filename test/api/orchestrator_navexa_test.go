@@ -101,6 +101,9 @@ func TestNavexaOrchestratorIntegration(t *testing.T) {
 	} else {
 		t.Logf("Job ended with status %s - skipping output validation", finalStatus)
 	}
+
+	// Step 5: Check service.log for errors
+	common.AssertNoErrorsInServiceLog(t, env)
 }
 
 // validateNavexaOutput validates the Navexa orchestrator output document

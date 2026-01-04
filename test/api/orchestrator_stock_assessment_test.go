@@ -103,7 +103,7 @@ func TestOrchestratorStockAnalysisGoal(t *testing.T) {
 // - Contains signal-noise assessment metrics
 // - Is repeatable (same structure each time)
 //
-// Workflow: asx_announcements → summary with announcement-analysis template → email
+// Workflow: market_announcements → summary with announcement-analysis template → email
 // Output tag: announcement-analysis
 func TestOrchestratorAnnouncementAnalysis(t *testing.T) {
 	tc := orchestratorTestCase{
@@ -125,7 +125,7 @@ func TestOrchestratorAnnouncementAnalysis(t *testing.T) {
 // - Per-stock signal-noise analysis
 // - Cross-stock summary
 //
-// Workflow: asx_announcements → summary with announcement-analysis-report template → email
+// Workflow: market_announcements → summary with announcement-analysis-report template → email
 // Output tag: announcement-analysis-report
 func TestOrchestratorAnnouncementAnalysisMultiStock(t *testing.T) {
 	tc := orchestratorTestCase{
@@ -257,6 +257,9 @@ func runOrchestratorTest(t *testing.T, tc orchestratorTestCase) {
 
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)
+
+	// Check service.log for errors
+	common.AssertNoErrorsInServiceLog(t, env)
 
 	t.Log("SUCCESS: Orchestrator integration test completed successfully")
 }

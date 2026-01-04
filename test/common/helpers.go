@@ -8,8 +8,11 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -310,13 +313,24 @@ func SaveTimingData(t *testing.T, resultsDir string, timing *TestTimingData) err
 // Test Results Directory Helpers
 // =============================================================================
 
-// GetTestResultsDir returns a results directory path that includes test identification.
-// Format: test/results/api/{prefix}-{timestamp}-{sanitized-test-name}/
-// Example: test/results/api/orchestrator-20260102-150405-StockAnalysisGoal-SingleStock/
+// GetTestResultsDir returns a results directory path based on the calling test file.
+// Format: test/results/api/{test_file_base}_{timestamp}/
+// Example: test/results/api/worker_navexa_20260102-150405/
+//
+// DEPRECATED: Prefer using env.GetResultsDir() from SetupTestEnvironment instead.
+// This function exists for backward compatibility with tests that need standalone directories.
 func GetTestResultsDir(prefix, testName string) string {
 	timestamp := time.Now().Format("20060102-150405")
 
-	// Sanitize test name: remove "Test" prefix, replace / with -, remove special chars
+	// Get test file name from call stack
+	fileBase := getTestFileBaseNameFromStack()
+	if fileBase != "" {
+		// Use file-based naming: {file_base}_{timestamp}
+		dirName := fmt.Sprintf("%s_%s", fileBase, timestamp)
+		return filepath.Join("..", "results", "api", dirName)
+	}
+
+	// Fallback to old behavior if file detection fails
 	sanitized := testName
 	if strings.HasPrefix(sanitized, "Test") {
 		sanitized = sanitized[4:]
@@ -324,13 +338,28 @@ func GetTestResultsDir(prefix, testName string) string {
 	sanitized = strings.ReplaceAll(sanitized, "/", "-")
 	sanitized = strings.ReplaceAll(sanitized, " ", "-")
 
-	// Limit length to avoid filesystem issues
 	if len(sanitized) > 50 {
 		sanitized = sanitized[:50]
 	}
 
 	dirName := fmt.Sprintf("%s-%s-%s", prefix, timestamp, sanitized)
 	return filepath.Join("..", "results", "api", dirName)
+}
+
+// getTestFileBaseNameFromStack walks up the call stack to find the *_test.go file
+// and returns its base name without the _test.go suffix.
+func getTestFileBaseNameFromStack() string {
+	for skip := 1; skip < 20; skip++ {
+		_, file, _, ok := runtime.Caller(skip)
+		if !ok {
+			break
+		}
+		base := filepath.Base(file)
+		if strings.HasSuffix(base, "_test.go") {
+			return strings.TrimSuffix(base, "_test.go")
+		}
+	}
+	return ""
 }
 
 // EnsureResultsDir creates the results directory if it doesn't exist
@@ -439,4 +468,180 @@ func CopyTDDSummary(t *testing.T, resultsDir string) error {
 	}
 
 	return nil
+}
+
+// =============================================================================
+// KV Store Helpers
+// =============================================================================
+
+// GetKVValue retrieves a value from the KV store by key.
+// Returns empty string if key not found or value is a placeholder (starts with "fake-").
+func GetKVValue(t *testing.T, helper *HTTPTestHelper, key string) string {
+	resp, err := helper.GET("/api/kv/" + key)
+	if err != nil {
+		t.Logf("Failed to get KV key %s: %v", key, err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Logf("KV key %s not found (status %d)", key, resp.StatusCode)
+		return ""
+	}
+
+	var result struct {
+		Value string `json:"value"`
+	}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		t.Logf("Failed to parse KV response for %s: %v", key, err)
+		return ""
+	}
+
+	if result.Value == "" || strings.HasPrefix(result.Value, "fake-") {
+		t.Logf("KV key %s is placeholder - skipping", key)
+		return ""
+	}
+
+	return result.Value
+}
+
+// HasEODHDAPIKey checks if a valid EODHD API key is available
+func HasEODHDAPIKey(t *testing.T, helper *HTTPTestHelper) bool {
+	return GetKVValue(t, helper, "eodhd_api_key") != ""
+}
+
+// =============================================================================
+// HTTP Fetch Helpers
+// =============================================================================
+
+// FetchAndSaveURL fetches a URL and saves the response to a file.
+// Returns error if fetch fails or file cannot be written.
+func FetchAndSaveURL(url, path string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("HTTP GET failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}
+
+// =============================================================================
+// Worker Output Assertion Helpers
+// =============================================================================
+
+// AssertWorkerOutputFilesExist asserts that standard worker output files exist.
+// Checks for output.md and output.json in the environment's results directory.
+func AssertWorkerOutputFilesExist(t *testing.T, env *TestEnvironment) {
+	AssertWorkerOutputFilesExistInDir(t, env.GetResultsDir())
+}
+
+// AssertWorkerOutputFilesExistInDir asserts that standard worker output files exist in a directory.
+func AssertWorkerOutputFilesExistInDir(t *testing.T, resultsDir string) {
+	mdPath := filepath.Join(resultsDir, "output.md")
+	AssertFileExistsAndNotEmpty(t, mdPath)
+
+	jsonPath := filepath.Join(resultsDir, "output.json")
+	AssertFileExistsAndNotEmpty(t, jsonPath)
+}
+
+// =============================================================================
+// Service Log Error Checking
+// =============================================================================
+
+// AssertNoErrorsInServiceLog reads the service.log file and fails the test if errors are found.
+// This catches issues like:
+// - Unknown worker types
+// - Missing functions or steps
+// - Runtime errors during job execution
+func AssertNoErrorsInServiceLog(t *testing.T, env *TestEnvironment) {
+	t.Helper()
+
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Log("Warning: results directory not available for log checking")
+		return
+	}
+
+	serviceLogPath := filepath.Join(resultsDir, "service.log")
+	content, err := os.ReadFile(serviceLogPath)
+	if err != nil {
+		t.Logf("Warning: failed to read service.log: %v", err)
+		return
+	}
+
+	logContent := string(content)
+	if len(logContent) == 0 {
+		t.Log("Warning: service.log is empty")
+		return
+	}
+
+	// Error patterns to detect - these indicate test failures
+	errorPatterns := []struct {
+		pattern string
+		desc    string
+	}{
+		{`"level":"error"`, "JSON structured error log"},
+		{"level=error", "Key-value error log"},
+		{"unknown worker type", "Non-existent worker type"},
+		{"worker not found", "Missing worker"},
+		{"failed to get worker", "Worker lookup failure"},
+		{"no such function", "Missing function"},
+		{"undefined step", "Missing step definition"},
+		{"step not found", "Step not found"},
+		{"panic:", "Panic occurred"},
+		{"PANIC", "Panic occurred"},
+		{"unknown step type", "Unknown step type"},
+		{"failed to create step", "Step creation failure"},
+		{"failed to execute step", "Step execution failure"},
+	}
+
+	var foundErrors []string
+	for _, ep := range errorPatterns {
+		if strings.Contains(logContent, ep.pattern) {
+			foundErrors = append(foundErrors, fmt.Sprintf("%s (pattern: %s)", ep.desc, ep.pattern))
+		}
+	}
+
+	if len(foundErrors) > 0 {
+		// Extract relevant error lines from the log for context
+		lines := strings.Split(logContent, "\n")
+		var errorLines []string
+		for _, line := range lines {
+			for _, ep := range errorPatterns {
+				if strings.Contains(line, ep.pattern) {
+					// Truncate long lines for readability
+					if len(line) > 200 {
+						line = line[:200] + "..."
+					}
+					errorLines = append(errorLines, line)
+					break
+				}
+			}
+			// Limit to 10 error lines
+			if len(errorLines) >= 10 {
+				break
+			}
+		}
+
+		// Fail the test with details
+		require.Fail(t, "Errors found in service.log",
+			"Found %d error pattern(s): %v\n\nError log entries:\n%s",
+			len(foundErrors), foundErrors, strings.Join(errorLines, "\n"))
+	}
+
+	t.Log("PASS: No errors found in service.log")
 }

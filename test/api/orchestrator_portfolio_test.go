@@ -181,6 +181,9 @@ func runPortfolioAssessmentTest(t *testing.T, tc orchestratorTestCase) {
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)
 
+	// Check service.log for errors
+	common.AssertNoErrorsInServiceLog(t, env)
+
 	t.Log("SUCCESS: Portfolio assessment integration test completed successfully")
 }
 
