@@ -1182,12 +1182,12 @@ func TestWorkerWebSearch(t *testing.T) {
 
 // StockCollectorWorkerResult mirrors the WorkerResult structure for test parsing
 type StockCollectorWorkerResult struct {
-	DocumentsCreated int                          `json:"documents_created"`
-	DocumentIDs      []string                     `json:"document_ids"`
-	Tags             []string                     `json:"tags"`
-	SourceType       string                       `json:"source_type"`
-	SourceIDs        []string                     `json:"source_ids"`
-	Errors           []string                     `json:"errors"`
+	DocumentsCreated int                           `json:"documents_created"`
+	DocumentIDs      []string                      `json:"document_ids"`
+	Tags             []string                      `json:"tags"`
+	SourceType       string                        `json:"source_type"`
+	SourceIDs        []string                      `json:"source_ids"`
+	Errors           []string                      `json:"errors"`
 	ByTicker         map[string]*StockTickerResult `json:"by_ticker"`
 }
 

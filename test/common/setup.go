@@ -59,6 +59,33 @@ func getCallerLocation(skip int) string {
 	return fmt.Sprintf("%s:%d", file, line)
 }
 
+// getTestFileBaseName walks up the call stack to find the *_test.go file
+// and returns its base name without the _test.go suffix.
+// Example: "worker_stock_test.go" -> "worker_stock"
+// This provides consistent suite naming based on the test file, not function name.
+func getTestFileBaseName() string {
+	// Walk up the call stack looking for a *_test.go file
+	for skip := 1; skip < 20; skip++ {
+		_, file, _, ok := runtime.Caller(skip)
+		if !ok {
+			break
+		}
+
+		// Get just the filename without directory
+		base := filepath.Base(file)
+
+		// Check if it's a test file
+		if strings.HasSuffix(base, "_test.go") {
+			// Remove _test.go suffix to get suite name
+			suiteName := strings.TrimSuffix(base, "_test.go")
+			return suiteName
+		}
+	}
+
+	// Fallback if no test file found in stack
+	return ""
+}
+
 // Log writes a message to both the test log file and t.Log()
 // Format in file: "    file:line: message" (matches Go test output)
 func (l *TestLogger) Log(args ...interface{}) {
@@ -298,8 +325,9 @@ func getOrCreateSuiteDirectory(suiteName string, baseDir string) (string, error)
 	}
 
 	// Create new parent directory for this suite
+	// Format: {suite_name}_{datetime} (underscore matches test file naming convention)
 	timestamp := time.Now().Format("20060102-150405")
-	suiteDir := filepath.Join(baseDir, fmt.Sprintf("%s-%s", suiteName, timestamp))
+	suiteDir := filepath.Join(baseDir, fmt.Sprintf("%s_%s", suiteName, timestamp))
 
 	if err := os.MkdirAll(suiteDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create suite directory: %w", err)
@@ -453,10 +481,15 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 	// Create results base directory with test type: ../../results/{ui|api}/
 	resultsBaseDir := filepath.Join(config.Output.ResultsBaseDir, testType)
 
-	// Extract suite name (e.g., "homepage" from "TestHomepageLoad")
-	suiteName := extractSuiteName(testName)
+	// Get suite name from the test file name (e.g., "worker_stock" from "worker_stock_test.go")
+	// This provides consistent naming based on file, not function name variations
+	suiteName := getTestFileBaseName()
+	if suiteName == "" {
+		// Fallback to function-based extraction if file detection fails
+		suiteName = extractSuiteName(testName)
+	}
 
-	// Get or create suite parent directory: ../../results/{ui|api}/{suite-name}-{datetime}
+	// Get or create suite parent directory: ../../results/{ui|api}/{suite-name}_{datetime}
 	suiteDir, err := getOrCreateSuiteDirectory(suiteName, resultsBaseDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create suite directory: %w", err)

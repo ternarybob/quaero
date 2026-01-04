@@ -179,7 +179,13 @@ echo "Found ${#TESTS[@]} tests to run sequentially"
 - Build logs: $WORKDIR/logs/build_*.log
 ````
 
-### PHASE 3: SEQUENTIAL TEST LOOP (max 3 iterations)
+### PHASE 3: TEST LOOP (max 3 iterations)
+
+**SINGLE PROCESS EXECUTION**
+Run ALL tests from the file in ONE `go test` command. This ensures:
+- All tests share one results directory
+- Tests run sequentially (Go's default behavior)
+- Tests "graduate" naturally - test 1 passes, test 2 runs, etc.
 
 **OUTPUT CAPTURE (MANDATORY)**
 All test output MUST go to file. Claude only sees pass/fail + brief error summary.
@@ -189,37 +195,33 @@ ITERATION = 0
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ START SEQUENTIAL RUN (iteration $ITERATION)                     │
+│ RUN ALL TESTS (iteration $ITERATION)                            │
 │                                                                 │
-│   for TEST in ${TESTS[@]}; do                                   │
-│       TEST_LOG="$WORKDIR/logs/test_${TEST}_iter${ITERATION}.log"│
+│   TEST_LOG="$WORKDIR/logs/test_iter${ITERATION}.log"            │
 │                                                                 │
-│       # CRITICAL: Capture ALL output to file                    │
-│       go test -v -timeout 20m \                                 │
-│           -run "^${TEST}$" ./$TEST_PKG/... \                    │
-│           > "$TEST_LOG" 2>&1                                    │
-│       RESULT=$?                                                 │
+│   # Run ALL tests from file in SINGLE process                   │
+│   # Tests run sequentially and share one results directory      │
+│   go test -v -timeout 30m ./$TEST_PKG/... \                     │
+│       > "$TEST_LOG" 2>&1                                        │
+│   RESULT=$?                                                     │
 │                                                                 │
-│       if [ $RESULT -eq 0 ]; then                                │
-│           echo "✓ PASS: ${TEST}"                                │
-│           continue                                              │
-│       fi                                                        │
-│                                                                 │
-│       # FAIL - show minimal context only                        │
-│       echo "✗ FAIL: ${TEST}"                                    │
-│       echo "Log: $TEST_LOG"                                     │
-│       echo "=== Last 30 lines ==="                              │
-│       tail -30 "$TEST_LOG"                                      │
-│       echo "=== End of summary ==="                             │
-│                                                                 │
-│       # Break for analysis                                      │
-│       FAILED_TEST=$TEST                                         │
-│       break                                                     │
-│   done                                                          │
-│                                                                 │
-│   if [ -z "$FAILED_TEST" ]; then                                │
-│       ALL PASSED → PHASE 4 (COMPLETE)                           │
+│   if [ $RESULT -eq 0 ]; then                                    │
+│       echo "✓ ALL TESTS PASSED"                                 │
+│       → PHASE 4 (COMPLETE)                                      │
 │   fi                                                            │
+│                                                                 │
+│   # FAIL - extract which test failed                            │
+│   echo "✗ TESTS FAILED"                                         │
+│   echo "Log: $TEST_LOG"                                         │
+│   echo "=== Failed tests ==="                                   │
+│   grep "^--- FAIL:" "$TEST_LOG"                                 │
+│   echo "=== Last 30 lines ==="                                  │
+│   tail -30 "$TEST_LOG"                                          │
+│   echo "=== End of summary ==="                                 │
+│                                                                 │
+│   # Extract first failed test name for analysis                 │
+│   FAILED_TEST=$(grep "^--- FAIL:" "$TEST_LOG" | head -1 | \     │
+│       sed 's/--- FAIL: \([^ ]*\).*/\1/')                        │
 └─────────────────────────────────────────────────────────────────┘
             │
          FAILURE at test N
@@ -228,7 +230,10 @@ ITERATION = 0
 ┌─────────────────────────────────────────────────────────────────┐
 │ ANALYZE FAILURE - FROM LOG FILE                                 │
 │                                                                 │
-│ Read error details from $TEST_LOG file:                         │
+│ Read error details from $WORKDIR/logs/test_iter${ITERATION}.log │
+│                                                                 │
+│   # List all failed tests                                       │
+│   grep "^--- FAIL:" "$TEST_LOG"                                 │
 │                                                                 │
 │   # Extract assertion failure (grep for key patterns)           │
 │   grep -A5 "FAIL\|Error\|assert\|expected\|got:" "$TEST_LOG" \  │
@@ -236,7 +241,7 @@ ITERATION = 0
 │                                                                 │
 │ DO NOT paste entire log into context!                           │
 │ Extract only:                                                   │
-│   • Test name that failed                                       │
+│   • Test name(s) that failed                                    │
 │   • Assertion that failed (expected vs actual)                  │
 │   • File:line of failure                                        │
 │                                                                 │
@@ -303,17 +308,22 @@ fi
 
 **Error extraction helper (use instead of reading full log):**
 ````bash
-# Extract just the failure info from test log
+# Extract failure info from test log
+# Usage: extract_failure "$WORKDIR/logs/test_iter0.log"
 extract_failure() {
     local LOG_FILE=$1
     echo "--- Failure Summary ---"
-    
-    # Get the FAIL line and context
+
+    # List all failed tests
+    echo "Failed tests:"
+    grep "^--- FAIL:" "$LOG_FILE"
+
+    # Get first failure with context
     grep -B2 -A10 "^--- FAIL:" "$LOG_FILE" | head -15
-    
+
     # Get assertion errors
     grep -A3 "Error:\|assert\|expected\|got:" "$LOG_FILE" | head -10
-    
+
     echo "--- End Summary ---"
     echo "Full log: $LOG_FILE"
 }
@@ -325,12 +335,12 @@ extract_failure() {
 - Iteration: {n}
 - Last failed test: {test_name}
 - Status: IN_PROGRESS
-- Log file: $WORKDIR/logs/test_{test_name}_iter{n}.log
+- Log file: $WORKDIR/logs/test_iter{n}.log
 
 ## Iteration History
 ### Iteration 1
 - Failed at: TestSecond
-- Log: $WORKDIR/logs/test_TestSecond_iter1.log
+- Log: $WORKDIR/logs/test_iter1.log
 - Error summary: <2-3 line description of failure>
 - Action: CODE_FIX / TEST_MISALIGNED
 - Details: <what was changed or documented>
@@ -350,7 +360,7 @@ Include in compact summary:
 Recovery context:
 - Read: `$WORKDIR/tdd_state.md`
 - Misaligned tests: Check `$WORKDIR/test_issues.md`
-- Last error: `tail -30 $WORKDIR/logs/test_*_iter*.log | tail -1` (most recent)
+- Last error: `tail -30 $WORKDIR/logs/test_iter*.log | tail -1` (most recent)
 
 ---
 
@@ -389,12 +399,12 @@ fi
 - Final status: PASS/PARTIAL/FAIL
 
 ## Test Results (in order)
-| # | Test Name | Status | Log File |
-|---|-----------|--------|----------|
-| 1 | TestFirst | ✓ PASS | logs/test_TestFirst_iter0.log |
-| 2 | TestSecond | ✓ PASS | logs/test_TestSecond_iter1.log |
-| 3 | TestThird | ✗ FAIL | logs/test_TestThird_iter2.log |
-| 4 | TestFourth | ⚠ MISALIGNED | N/A |
+| # | Test Name | Status | Notes |
+|---|-----------|--------|-------|
+| 1 | TestFirst | ✓ PASS | |
+| 2 | TestSecond | ✓ PASS | Fixed in iter 1 |
+| 3 | TestThird | ✗ FAIL | See logs/test_iter2.log |
+| 4 | TestFourth | ⚠ MISALIGNED | See test_issues.md |
 
 ## Code Changes Made
 | File | Change | Reason |
@@ -424,7 +434,8 @@ See full details: `$WORKDIR/test_issues.md`
 ## Log Files
 | File | Purpose |
 |------|---------|
-| logs/test_*.log | Individual test run output |
+| logs/test_iter0.log | First test run (all tests) |
+| logs/test_iter1.log | Second test run after fix (if needed) |
 | logs/build_*.log | Build verification output |
 | logs/final_run.log | Final test suite run |
 
@@ -591,7 +602,7 @@ if currentStatus != expectedStatus {
 | `test_issues.md` | Misaligned tests | Phase 3, when tests expect deprecated | If applicable |
 | `summary.md` | Final summary | Phase 4 | **YES - ALWAYS** |
 | `logs/` | All captured output | Throughout | **YES** |
-| `logs/test_*.log` | Individual test runs | Phase 3 | **YES** |
+| `logs/test_iter*.log` | Per-iteration test runs (all tests) | Phase 3 | **YES** |
 | `logs/build_*.log` | Build verifications | Phase 3 | **YES** |
 | `logs/final_run.log` | Final test suite | Phase 4 | **YES** |
 
@@ -600,25 +611,27 @@ if currentStatus != expectedStatus {
 ## OUTPUT CAPTURE QUICK REFERENCE
 
 ````bash
-# CORRECT: Test output to file, summary to Claude
-go test -v -run "^${TEST}$" ./pkg/... > "$WORKDIR/logs/test.log" 2>&1
-tail -30 "$WORKDIR/logs/test.log"
+# CORRECT: Run ALL tests in single process, output to file
+go test -v -timeout 30m ./$TEST_PKG/... > "$WORKDIR/logs/test_iter0.log" 2>&1
+tail -30 "$WORKDIR/logs/test_iter0.log"
 
-# CORRECT: Build output to file, summary to Claude  
+# CORRECT: Build output to file, summary to Claude
 go build ./... > "$WORKDIR/logs/build.log" 2>&1
 tail -20 "$WORKDIR/logs/build.log"
 
 # CORRECT: Extract specific error from log
-grep -A5 "FAIL\|Error:" "$WORKDIR/logs/test.log" | head -15
+grep -A5 "FAIL\|Error:" "$WORKDIR/logs/test_iter0.log" | head -15
+
+# WRONG: Run tests individually (creates multiple processes/result dirs)
+for TEST in ${TESTS[@]}; do
+    go test -v -run "^${TEST}$" ./pkg/...  # DON'T DO THIS
+done
 
 # WRONG: Direct output to Claude (will overflow context)
-go test -v -run "^${TEST}$" ./pkg/...
+go test -v ./$TEST_PKG/...
 
 # WRONG: Cat entire log file
-cat "$WORKDIR/logs/test.log"
-
-# WRONG: Read large sections of log
-tail -500 "$WORKDIR/logs/test.log"
+cat "$WORKDIR/logs/test_iter0.log"
 ````
 
 ## RESULTS INTEGRATION
@@ -637,8 +650,14 @@ When running tests that produce results directories (e.g., `test/results/api/orc
 #    ├── test_issues.md    (if misaligned tests found)
 #    ├── summary.md        (created Phase 4 - REQUIRED)
 #    └── logs/
-#        ├── test_TestFirst_iter0.log
-#        ├── test_TestSecond_iter1.log
+#        ├── test_iter0.log     (all tests, first run)
+#        ├── test_iter1.log     (all tests, after fix - if needed)
 #        ├── build_iter0.log
 #        └── final_run.log
+
+# Result: ONE results directory per iteration
+# test/results/api/job_definition_20241217-143000/
+#    ├── TestJobDefinitionFirst/
+#    ├── TestJobDefinitionSecond/
+#    └── TestJobDefinitionThird/
 ````
