@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------
-// CompetitorAnalysisWorker - Analyzes competitors and fetches their stock data
+// MarketCompetitorWorker - Analyzes competitors and fetches their stock data
 // Uses LLM to identify competitor ASX codes, then directly fetches stock data
-// for each competitor using ASXStockDataWorker (inline execution).
+// for each competitor using MarketFundamentalsWorker (inline execution).
 // -----------------------------------------------------------------------
 
 package workers
@@ -22,31 +22,31 @@ import (
 	"google.golang.org/genai"
 )
 
-// CompetitorAnalysisWorker analyzes a target company, identifies competitors,
+// MarketCompetitorWorker analyzes a target company, identifies competitors,
 // and fetches stock data for each competitor inline.
-type CompetitorAnalysisWorker struct {
+type MarketCompetitorWorker struct {
 	documentStorage      interfaces.DocumentStorage
 	kvStorage            interfaces.KeyValueStorage
 	jobMgr               *queue.Manager
 	logger               arbor.ILogger
-	stockCollectorWorker *ASXStockCollectorWorker // Reuses stock collector for competitor data
+	stockCollectorWorker *MarketFundamentalsWorker // Reuses stock collector for competitor data
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*CompetitorAnalysisWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketCompetitorWorker)(nil)
 
-// NewCompetitorAnalysisWorker creates a new competitor analysis worker
-func NewCompetitorAnalysisWorker(
+// NewMarketCompetitorWorker creates a new competitor analysis worker
+func NewMarketCompetitorWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	jobMgr *queue.Manager,
 	logger arbor.ILogger,
 	debugEnabled bool,
-) *CompetitorAnalysisWorker {
+) *MarketCompetitorWorker {
 	// Create embedded stock collector worker for fetching competitor data
-	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
+	stockCollectorWorker := NewMarketFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
 
-	return &CompetitorAnalysisWorker{
+	return &MarketCompetitorWorker{
 		documentStorage:      documentStorage,
 		kvStorage:            kvStorage,
 		jobMgr:               jobMgr,
@@ -55,14 +55,14 @@ func NewCompetitorAnalysisWorker(
 	}
 }
 
-// GetType returns WorkerTypeCompetitorAnalysis
-func (w *CompetitorAnalysisWorker) GetType() models.WorkerType {
-	return models.WorkerTypeCompetitorAnalysis
+// GetType returns WorkerTypeMarketCompetitor
+func (w *MarketCompetitorWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketCompetitor
 }
 
 // Init performs initialization for the competitor analysis step.
 // Validates config and resolves API key.
-func (w *CompetitorAnalysisWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketCompetitorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return nil, fmt.Errorf("step config is required for competitor_analysis")
@@ -142,7 +142,7 @@ func (w *CompetitorAnalysisWorker) Init(ctx context.Context, step models.JobStep
 }
 
 // CreateJobs uses LLM to identify competitors, then fetches stock data inline.
-func (w *CompetitorAnalysisWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
@@ -195,7 +195,7 @@ func (w *CompetitorAnalysisWorker) CreateJobs(ctx context.Context, step models.J
 		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Identified %d competitors: %s", len(competitors), strings.Join(competitors, ", ")))
 	}
 
-	// Step 2: Fetch stock data for each competitor inline using ASXStockDataWorker
+	// Step 2: Fetch stock data for each competitor inline using MarketFundamentalsWorker
 	successCount := 0
 	for _, competitorCode := range competitors {
 		err := w.fetchCompetitorStockData(ctx, competitorCode, period, outputTags, stepID, jobDef)
@@ -223,12 +223,12 @@ func (w *CompetitorAnalysisWorker) CreateJobs(ctx context.Context, step models.J
 	return stepID, nil
 }
 
-// fetchCompetitorStockData fetches stock data for a single competitor using ASXStockCollectorWorker
-func (w *CompetitorAnalysisWorker) fetchCompetitorStockData(ctx context.Context, asxCode, period string, outputTags []string, stepID string, jobDef models.JobDefinition) error {
+// fetchCompetitorStockData fetches stock data for a single competitor using MarketFundamentalsWorker
+func (w *MarketCompetitorWorker) fetchCompetitorStockData(ctx context.Context, asxCode, period string, outputTags []string, stepID string, jobDef models.JobDefinition) error {
 	// Create a synthetic step for the stock collector worker
 	stockStep := models.JobStep{
 		Name:        fmt.Sprintf("fetch_competitor_%s", strings.ToLower(asxCode)),
-		Type:        models.WorkerTypeASXStockCollector,
+		Type:        models.WorkerTypeMarketFundamentals,
 		Description: fmt.Sprintf("Fetch stock data for competitor ASX:%s", asxCode),
 		Config: map[string]interface{}{
 			"asx_code":    asxCode,
@@ -247,7 +247,7 @@ func (w *CompetitorAnalysisWorker) fetchCompetitorStockData(ctx context.Context,
 }
 
 // identifyCompetitors uses Gemini to identify competitor ASX codes
-func (w *CompetitorAnalysisWorker) identifyCompetitors(ctx context.Context, asxCode, prompt, apiKey string) ([]string, error) {
+func (w *MarketCompetitorWorker) identifyCompetitors(ctx context.Context, asxCode, prompt, apiKey string) ([]string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
@@ -392,12 +392,12 @@ func filterValidCodes(codes []string, targetCode string) []string {
 }
 
 // ReturnsChildJobs returns false - we execute inline, not via child jobs
-func (w *CompetitorAnalysisWorker) ReturnsChildJobs() bool {
+func (w *MarketCompetitorWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates step configuration
-func (w *CompetitorAnalysisWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketCompetitorWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("competitor_analysis step requires config")
 	}

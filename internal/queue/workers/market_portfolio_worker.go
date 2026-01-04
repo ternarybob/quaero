@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// PortfolioRollupWorker - Aggregates ticker signals into portfolio metrics
+// MarketPortfolioWorker - Aggregates ticker signals into portfolio metrics
 // Produces portfolio-level analysis with concentration checks and action summary
 // -----------------------------------------------------------------------
 
@@ -21,8 +21,8 @@ import (
 	"github.com/ternarybob/quaero/internal/signals"
 )
 
-// PortfolioRollupWorker aggregates individual stock signals into portfolio-level metrics.
-type PortfolioRollupWorker struct {
+// MarketPortfolioWorker aggregates individual stock signals into portfolio-level metrics.
+type MarketPortfolioWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
@@ -30,16 +30,16 @@ type PortfolioRollupWorker struct {
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*PortfolioRollupWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketPortfolioWorker)(nil)
 
-// NewPortfolioRollupWorker creates a new portfolio rollup worker
-func NewPortfolioRollupWorker(
+// NewMarketPortfolioWorker creates a new portfolio rollup worker
+func NewMarketPortfolioWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-) *PortfolioRollupWorker {
-	return &PortfolioRollupWorker{
+) *MarketPortfolioWorker {
+	return &MarketPortfolioWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
 		logger:          logger,
@@ -47,18 +47,18 @@ func NewPortfolioRollupWorker(
 	}
 }
 
-// GetType returns WorkerTypePortfolioRollup
-func (w *PortfolioRollupWorker) GetType() models.WorkerType {
-	return models.WorkerTypePortfolioRollup
+// GetType returns WorkerTypeMarketPortfolio
+func (w *MarketPortfolioWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketPortfolio
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
-func (w *PortfolioRollupWorker) ReturnsChildJobs() bool {
+func (w *MarketPortfolioWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates the worker configuration
-func (w *PortfolioRollupWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketPortfolioWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("portfolio_rollup step requires config")
 	}
@@ -69,7 +69,7 @@ func (w *PortfolioRollupWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // Init initializes the portfolio rollup worker
-func (w *PortfolioRollupWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketPortfolioWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -80,7 +80,7 @@ func (w *PortfolioRollupWorker) Init(ctx context.Context, step models.JobStep, j
 			{
 				ID:     "portfolio-rollup",
 				Name:   "Aggregate portfolio signals",
-				Type:   "portfolio_rollup",
+				Type:   "market_portfolio",
 				Config: step.Config,
 			},
 		},
@@ -94,7 +94,7 @@ func (w *PortfolioRollupWorker) Init(ctx context.Context, step models.JobStep, j
 }
 
 // CreateJobs aggregates portfolio signals and stores result
-func (w *PortfolioRollupWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketPortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
@@ -156,7 +156,7 @@ func (w *PortfolioRollupWorker) CreateJobs(ctx context.Context, step models.JobS
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "portfolio_rollup",
+		SourceType:      "market_portfolio",
 		SourceID:        fmt.Sprintf("rollup:%s", portfolio.Meta.Name),
 		Title:           fmt.Sprintf("Portfolio Rollup: %s", portfolio.Meta.Name),
 		ContentMarkdown: markdown,
@@ -201,7 +201,7 @@ func (w *PortfolioRollupWorker) CreateJobs(ctx context.Context, step models.JobS
 }
 
 // loadPortfolioState loads portfolio from document storage
-func (w *PortfolioRollupWorker) loadPortfolioState(ctx context.Context, portfolioTag string) (signals.PortfolioState, error) {
+func (w *MarketPortfolioWorker) loadPortfolioState(ctx context.Context, portfolioTag string) (signals.PortfolioState, error) {
 	// Try to find portfolio document by source
 	doc, err := w.documentStorage.GetDocumentBySource("navexa_holdings", portfolioTag)
 	if err != nil {
@@ -246,7 +246,7 @@ func (w *PortfolioRollupWorker) loadPortfolioState(ctx context.Context, portfoli
 }
 
 // loadSignals loads signal documents for portfolio holdings
-func (w *PortfolioRollupWorker) loadSignals(ctx context.Context, portfolio signals.PortfolioState, tagPrefix string) map[string]signals.TickerSignals {
+func (w *MarketPortfolioWorker) loadSignals(ctx context.Context, portfolio signals.PortfolioState, tagPrefix string) map[string]signals.TickerSignals {
 	result := make(map[string]signals.TickerSignals)
 
 	for _, holding := range portfolio.Holdings {
@@ -297,7 +297,7 @@ func (w *PortfolioRollupWorker) loadSignals(ctx context.Context, portfolio signa
 }
 
 // computeRollup calculates portfolio-level metrics
-func (w *PortfolioRollupWorker) computeRollup(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals) signals.PortfolioRollup {
+func (w *MarketPortfolioWorker) computeRollup(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals) signals.PortfolioRollup {
 	rollup := signals.PortfolioRollup{
 		Meta: signals.RollupMeta{
 			AsOf:             time.Now(),
@@ -334,7 +334,7 @@ func (w *PortfolioRollupWorker) computeRollup(portfolio signals.PortfolioState, 
 }
 
 // computeAllocation calculates sector and regime allocations
-func (w *PortfolioRollupWorker) computeAllocation(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals, totalValue float64) signals.AllocationMetrics {
+func (w *MarketPortfolioWorker) computeAllocation(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals, totalValue float64) signals.AllocationMetrics {
 	alloc := signals.AllocationMetrics{
 		BySector:      make(map[string]float64),
 		ByHoldingType: make(map[string]float64),
@@ -380,7 +380,7 @@ func (w *PortfolioRollupWorker) computeAllocation(portfolio signals.PortfolioSta
 }
 
 // checkConcentration checks for concentration limit violations
-func (w *PortfolioRollupWorker) checkConcentration(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals, totalValue float64) []string {
+func (w *MarketPortfolioWorker) checkConcentration(portfolio signals.PortfolioState, tickerSignals map[string]signals.TickerSignals, totalValue float64) []string {
 	alerts := []string{}
 
 	if totalValue == 0 {
@@ -447,7 +447,7 @@ func (w *PortfolioRollupWorker) checkConcentration(portfolio signals.PortfolioSt
 }
 
 // generateMarkdown creates markdown content from rollup
-func (w *PortfolioRollupWorker) generateMarkdown(portfolioName string, rollup signals.PortfolioRollup) string {
+func (w *MarketPortfolioWorker) generateMarkdown(portfolioName string, rollup signals.PortfolioRollup) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# Portfolio Rollup: %s\n\n", portfolioName))

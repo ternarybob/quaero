@@ -253,9 +253,9 @@ func TestSummaryWorker_NoSchemaWhenNotProvided(t *testing.T) {
 // Data workers don't use AI, but should produce consistent structured output.
 // These tests verify the output structure is predictable.
 
-// TestASXStockDataWorker_OutputStructure verifies consistent output structure
-func TestASXStockDataWorker_OutputStructure(t *testing.T) {
-	// ASXStockDataWorker creates markdown documents with consistent structure
+// TestMarketFundamentalsWorker_OutputStructure verifies consistent output structure
+func TestMarketFundamentalsWorker_OutputStructure(t *testing.T) {
+	// MarketFundamentalsWorker creates markdown documents with consistent structure
 	// This is a structural test - the worker should always produce these sections
 
 	expectedSections := []string{
@@ -266,7 +266,7 @@ func TestASXStockDataWorker_OutputStructure(t *testing.T) {
 
 	// The worker formats StockData into markdown with these sections
 	// Downstream consumers (analyze_summary) depend on this structure
-	t.Logf("ASXStockDataWorker expected output sections: %v", expectedSections)
+	t.Logf("MarketFundamentalsWorker expected output sections: %v", expectedSections)
 
 	// Verify the StockData structure has fields for each section
 	stockData := StockData{
@@ -282,9 +282,9 @@ func TestASXStockDataWorker_OutputStructure(t *testing.T) {
 	t.Log("PASS: StockData structure supports consistent output sections")
 }
 
-// TestASXAnnouncementsWorker_OutputStructure verifies consistent announcement output
-func TestASXAnnouncementsWorker_OutputStructure(t *testing.T) {
-	// ASXAnnouncementsWorker creates markdown with consistent structure
+// TestMarketAnnouncementsWorker_OutputStructure verifies consistent announcement output
+func TestMarketAnnouncementsWorker_OutputStructure(t *testing.T) {
+	// MarketAnnouncementsWorker creates markdown with consistent structure
 	// Each announcement should have these fields in the output
 
 	expectedFields := []string{
@@ -294,7 +294,7 @@ func TestASXAnnouncementsWorker_OutputStructure(t *testing.T) {
 		"Price Sensitive", // Boolean flag
 	}
 
-	t.Logf("ASXAnnouncementsWorker expected fields per announcement: %v", expectedFields)
+	t.Logf("MarketAnnouncementsWorker expected fields per announcement: %v", expectedFields)
 
 	// The worker produces a markdown table with these columns
 	// This ensures downstream analyze_summary can parse announcements reliably

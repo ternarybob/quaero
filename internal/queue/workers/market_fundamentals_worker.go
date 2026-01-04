@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// ASXStockCollectorWorker - Consolidated Yahoo Finance data collector
+// MarketFundamentalsWorker - Consolidated Yahoo Finance data collector
 // Fetches price, analyst coverage, and historical financials in a single API call
 // DEPRECATED: asx_stock_data, asx_analyst_coverage, asx_historical_financials
 // -----------------------------------------------------------------------
@@ -83,10 +83,10 @@ const (
 	eodhdAPIKeyEnvVar = "eodhd_api_key"
 )
 
-// ASXStockCollectorWorker fetches comprehensive stock data using EODHD API.
+// MarketFundamentalsWorker fetches comprehensive stock data using EODHD API.
 // This consolidates asx_stock_data, asx_analyst_coverage, and asx_historical_financials.
 // NO AI processing - pure data collection only.
-type ASXStockCollectorWorker struct {
+type MarketFundamentalsWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
@@ -96,7 +96,7 @@ type ASXStockCollectorWorker struct {
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*ASXStockCollectorWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketFundamentalsWorker)(nil)
 
 // StockCollectorData holds all consolidated stock data (in-code schema)
 type StockCollectorData struct {
@@ -475,15 +475,15 @@ type eodhdFinancialStatements struct {
 	Quarterly map[string]map[string]interface{} `json:"quarterly"`
 }
 
-// NewASXStockCollectorWorker creates a new consolidated stock collector worker
-func NewASXStockCollectorWorker(
+// NewMarketFundamentalsWorker creates a new consolidated stock collector worker
+func NewMarketFundamentalsWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
-) *ASXStockCollectorWorker {
-	return &ASXStockCollectorWorker{
+) *MarketFundamentalsWorker {
+	return &MarketFundamentalsWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
 		logger:          logger,
@@ -495,16 +495,16 @@ func NewASXStockCollectorWorker(
 	}
 }
 
-// GetType returns WorkerTypeASXStockCollector
-func (w *ASXStockCollectorWorker) GetType() models.WorkerType {
-	return models.WorkerTypeASXStockCollector
+// GetType returns WorkerTypeMarketFundamentals
+func (w *MarketFundamentalsWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketFundamentals
 }
 
 // Init initializes the stock collector worker
-func (w *ASXStockCollectorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketFundamentalsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for asx_stock_collector")
+		return nil, fmt.Errorf("step config is required for market_fundamentals")
 	}
 
 	// Collect tickers - supports both single and multiple formats
@@ -532,7 +532,7 @@ func (w *ASXStockCollectorWorker) Init(ctx context.Context, step models.JobStep,
 		workItems[i] = interfaces.WorkItem{
 			ID:   ticker.Code,
 			Name: fmt.Sprintf("Fetch %s comprehensive stock data", ticker.String()),
-			Type: "asx_stock_collector",
+			Type: "market_fundamentals",
 			Config: map[string]interface{}{
 				"ticker":   ticker.String(),
 				"asx_code": ticker.Code,
@@ -555,7 +555,7 @@ func (w *ASXStockCollectorWorker) Init(ctx context.Context, step models.JobStep,
 }
 
 // isCacheFresh checks if a document was synced within the cache window
-func (w *ASXStockCollectorWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
+func (w *MarketFundamentalsWorker) isCacheFresh(doc *models.Document, cacheHours int) bool {
 	if doc == nil || doc.LastSynced == nil {
 		return false
 	}
@@ -564,12 +564,12 @@ func (w *ASXStockCollectorWorker) isCacheFresh(doc *models.Document, cacheHours 
 }
 
 // CreateJobs fetches comprehensive stock data and stores as document
-func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketFundamentalsWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize asx_stock_collector worker: %w", err)
+			return "", fmt.Errorf("failed to initialize market_fundamentals worker: %w", err)
 		}
 	}
 
@@ -656,7 +656,7 @@ func (w *ASXStockCollectorWorker) CreateJobs(ctx context.Context, step models.Jo
 		DocumentsCreated: processedCount,
 		DocumentIDs:      allDocIDs,
 		Tags:             allTags,
-		SourceType:       "asx_stock_collector",
+		SourceType:       "market_fundamentals",
 		SourceIDs:        allSourceIDs,
 		Errors:           allErrors,
 		ByTicker:         byTicker,
@@ -682,12 +682,12 @@ type docInfo struct {
 }
 
 // processTicker processes a single ticker and returns document info
-func (w *ASXStockCollectorWorker) processTicker(ctx context.Context, ticker common.Ticker, period string, cacheHours int, forceRefresh bool, jobDef *models.JobDefinition, stepID string, outputTags []string) (*docInfo, error) {
+func (w *MarketFundamentalsWorker) processTicker(ctx context.Context, ticker common.Ticker, period string, cacheHours int, forceRefresh bool, jobDef *models.JobDefinition, stepID string, outputTags []string) (*docInfo, error) {
 	// Initialize debug tracking
-	debug := NewWorkerDebug("asx_stock_collector", w.debugEnabled)
+	debug := NewWorkerDebug("market_fundamentals", w.debugEnabled)
 	debug.SetTicker(ticker.String())
 
-	sourceType := "asx_stock_collector"
+	sourceType := "market_fundamentals"
 	sourceID := ticker.SourceID("stock_collector")
 
 	// Check for cached data before fetching
@@ -766,25 +766,25 @@ func (w *ASXStockCollectorWorker) processTicker(ctx context.Context, ticker comm
 }
 
 // ReturnsChildJobs returns false
-func (w *ASXStockCollectorWorker) ReturnsChildJobs() bool {
+func (w *MarketFundamentalsWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates step configuration
-func (w *ASXStockCollectorWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketFundamentalsWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("asx_stock_collector step requires config")
+		return fmt.Errorf("market_fundamentals step requires config")
 	}
 	// Must have either ticker/asx_code (single) or tickers/asx_codes (multiple)
 	tickers := collectTickers(step.Config)
 	if len(tickers) == 0 {
-		return fmt.Errorf("asx_stock_collector step requires 'ticker', 'asx_code', 'tickers', or 'asx_codes' in config")
+		return fmt.Errorf("market_fundamentals step requires 'ticker', 'asx_code', 'tickers', or 'asx_codes' in config")
 	}
 	return nil
 }
 
 // getEODHDAPIKey retrieves the EODHD API key from KV storage
-func (w *ASXStockCollectorWorker) getEODHDAPIKey(ctx context.Context) string {
+func (w *MarketFundamentalsWorker) getEODHDAPIKey(ctx context.Context) string {
 	if w.kvStorage == nil {
 		w.logger.Warn().Msg("EODHD API key lookup failed: kvStorage is nil")
 		return ""
@@ -801,7 +801,7 @@ func (w *ASXStockCollectorWorker) getEODHDAPIKey(ctx context.Context) string {
 }
 
 // makeRequest makes an HTTP request
-func (w *ASXStockCollectorWorker) makeRequest(ctx context.Context, url string) (*http.Response, error) {
+func (w *MarketFundamentalsWorker) makeRequest(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -813,7 +813,7 @@ func (w *ASXStockCollectorWorker) makeRequest(ctx context.Context, url string) (
 }
 
 // fetchComprehensiveData fetches all stock data from EODHD API
-func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, ticker common.Ticker, period string) (*StockCollectorData, error) {
+func (w *MarketFundamentalsWorker) fetchComprehensiveData(ctx context.Context, ticker common.Ticker, period string) (*StockCollectorData, error) {
 	data := &StockCollectorData{
 		Symbol:      ticker.String(),
 		AsxCode:     ticker.Code,
@@ -864,7 +864,7 @@ func (w *ASXStockCollectorWorker) fetchComprehensiveData(ctx context.Context, ti
 }
 
 // fetchEODHDFundamentals fetches all fundamental data from EODHD
-func (w *ASXStockCollectorWorker) fetchEODHDFundamentals(ctx context.Context, apiKey, symbol string, data *StockCollectorData) error {
+func (w *MarketFundamentalsWorker) fetchEODHDFundamentals(ctx context.Context, apiKey, symbol string, data *StockCollectorData) error {
 	url := fmt.Sprintf("%s/fundamentals/%s?api_token=%s&fmt=json", eodhdAPIBaseURL, symbol, apiKey)
 
 	resp, err := w.makeRequest(ctx, url)
@@ -1009,7 +1009,7 @@ func (w *ASXStockCollectorWorker) fetchEODHDFundamentals(ctx context.Context, ap
 }
 
 // parseEODHDFinancials parses EODHD financial statements into annual/quarterly data
-func (w *ASXStockCollectorWorker) parseEODHDFinancials(financials eodhdFinancials, data *StockCollectorData) {
+func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancials, data *StockCollectorData) {
 	// Get sorted years from income statement
 	incomeYears := make([]string, 0, len(financials.IncomeStatement.Yearly))
 	for year := range financials.IncomeStatement.Yearly {
@@ -1131,7 +1131,7 @@ func (w *ASXStockCollectorWorker) parseEODHDFinancials(financials eodhdFinancial
 }
 
 // fetchEODHDHistoricalPrices fetches historical OHLCV data from EODHD
-func (w *ASXStockCollectorWorker) fetchEODHDHistoricalPrices(ctx context.Context, apiKey, symbol, period string, data *StockCollectorData) error {
+func (w *MarketFundamentalsWorker) fetchEODHDHistoricalPrices(ctx context.Context, apiKey, symbol, period string, data *StockCollectorData) error {
 	now := time.Now()
 	var dateFrom time.Time
 
@@ -1218,7 +1218,7 @@ func (w *ASXStockCollectorWorker) fetchEODHDHistoricalPrices(ctx context.Context
 }
 
 // calculateRevenueCAGR calculates Compound Annual Growth Rate for revenue
-func (w *ASXStockCollectorWorker) calculateRevenueCAGR(annualData []FinancialPeriodEntry, years int) float64 {
+func (w *MarketFundamentalsWorker) calculateRevenueCAGR(annualData []FinancialPeriodEntry, years int) float64 {
 	if len(annualData) < years+1 {
 		return 0
 	}
@@ -1236,7 +1236,7 @@ func (w *ASXStockCollectorWorker) calculateRevenueCAGR(annualData []FinancialPer
 
 // calculateTechnicals calculates technical indicators from historical data
 // If no historical data available, uses SMA50/SMA200 from fundamentals (if set)
-func (w *ASXStockCollectorWorker) calculateTechnicals(data *StockCollectorData) {
+func (w *MarketFundamentalsWorker) calculateTechnicals(data *StockCollectorData) {
 	if len(data.HistoricalPrices) == 0 {
 		// No historical data - determine trend from fundamentals-provided SMAs
 		if data.CurrentPrice > 0 && data.SMA50 > 0 {
@@ -1291,7 +1291,7 @@ func (w *ASXStockCollectorWorker) calculateTechnicals(data *StockCollectorData) 
 }
 
 // calculateSMA calculates Simple Moving Average
-func (w *ASXStockCollectorWorker) calculateSMA(prices []float64, period int) float64 {
+func (w *MarketFundamentalsWorker) calculateSMA(prices []float64, period int) float64 {
 	if len(prices) < period {
 		if len(prices) == 0 {
 			return 0
@@ -1307,7 +1307,7 @@ func (w *ASXStockCollectorWorker) calculateSMA(prices []float64, period int) flo
 }
 
 // calculateRSI calculates Relative Strength Index
-func (w *ASXStockCollectorWorker) calculateRSI(prices []float64, period int) float64 {
+func (w *MarketFundamentalsWorker) calculateRSI(prices []float64, period int) float64 {
 	if len(prices) < period+1 {
 		return 50 // Neutral if not enough data
 	}
@@ -1333,7 +1333,7 @@ func (w *ASXStockCollectorWorker) calculateRSI(prices []float64, period int) flo
 }
 
 // findMin finds minimum value
-func (w *ASXStockCollectorWorker) findMin(values []float64) float64 {
+func (w *MarketFundamentalsWorker) findMin(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
@@ -1347,7 +1347,7 @@ func (w *ASXStockCollectorWorker) findMin(values []float64) float64 {
 }
 
 // findMax finds maximum value
-func (w *ASXStockCollectorWorker) findMax(values []float64) float64 {
+func (w *MarketFundamentalsWorker) findMax(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
@@ -1361,7 +1361,7 @@ func (w *ASXStockCollectorWorker) findMax(values []float64) float64 {
 }
 
 // determineTrend determines the overall trend signal
-func (w *ASXStockCollectorWorker) determineTrend(price, sma20, sma50, sma200, rsi float64) string {
+func (w *MarketFundamentalsWorker) determineTrend(price, sma20, sma50, sma200, rsi float64) string {
 	bullishSignals := 0
 	bearishSignals := 0
 
@@ -1411,7 +1411,7 @@ func (w *ASXStockCollectorWorker) determineTrend(price, sma20, sma50, sma200, rs
 }
 
 // calculatePeriodPerformance calculates price changes over various periods
-func (w *ASXStockCollectorWorker) calculatePeriodPerformance(data *StockCollectorData) {
+func (w *MarketFundamentalsWorker) calculatePeriodPerformance(data *StockCollectorData) {
 	if len(data.HistoricalPrices) == 0 || data.CurrentPrice == 0 {
 		return
 	}
@@ -1466,13 +1466,13 @@ func (w *ASXStockCollectorWorker) calculatePeriodPerformance(data *StockCollecto
 }
 
 // createDocument creates a document from stock collector data
-func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *StockCollectorData, ticker common.Ticker, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
+func (w *MarketFundamentalsWorker) createDocument(ctx context.Context, data *StockCollectorData, ticker common.Ticker, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
 	var content strings.Builder
 
 	content.WriteString(fmt.Sprintf("# %s Comprehensive Stock Data - %s\n\n", ticker.String(), data.CompanyName))
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
 	content.WriteString(fmt.Sprintf("**Currency**: %s\n", data.Currency))
-	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeASXStockCollector))
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeMarketFundamentals))
 
 	// Current Price Section
 	content.WriteString("## Current Price\n\n")
@@ -1733,7 +1733,7 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "asx_stock_collector",
+		SourceType:      "market_fundamentals",
 		SourceID:        ticker.SourceID("stock_collector"),
 		URL:             fmt.Sprintf("https://eodhd.com/financial-summary/%s", ticker.EODHDSymbol()),
 		Title:           fmt.Sprintf("%s Comprehensive Stock Data", ticker.String()),
@@ -1750,7 +1750,7 @@ func (w *ASXStockCollectorWorker) createDocument(ctx context.Context, data *Stoc
 }
 
 // formatNumber formats a number with commas
-func (w *ASXStockCollectorWorker) formatNumber(n int64) string {
+func (w *MarketFundamentalsWorker) formatNumber(n int64) string {
 	if n == 0 {
 		return "0"
 	}
@@ -1766,7 +1766,7 @@ func (w *ASXStockCollectorWorker) formatNumber(n int64) string {
 }
 
 // formatLargeNumber formats large numbers with M/B suffix
-func (w *ASXStockCollectorWorker) formatLargeNumber(n int64) string {
+func (w *MarketFundamentalsWorker) formatLargeNumber(n int64) string {
 	if n >= 1e9 {
 		return fmt.Sprintf("%.2fB", float64(n)/1e9)
 	}

@@ -49,7 +49,7 @@ variables = [
 # =========================================================================
 
 [step.collect_announcements]
-type = "asx_announcements"
+type = "market_announcements"
 description = "Collect ASX announcements for ticker"
 on_error = "fail"
 

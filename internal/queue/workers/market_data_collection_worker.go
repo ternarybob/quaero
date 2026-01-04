@@ -1,8 +1,9 @@
 // -----------------------------------------------------------------------
-// StockDataCollectionWorker - Deterministic stock data collection
+// MarketDataCollectionWorker - Deterministic stock data collection
 // Replaces LLM-based data collection with explicit API calls
-// Executes ASXStockCollector, ASXAnnouncements, and ASXIndexData workers inline
+// Executes MarketFundamentals, MarketAnnouncements, and MarketData workers inline
 // (no child jobs - direct worker invocation for immediate document creation)
+// Uses EODHD for index/benchmark data via MarketDataWorker
 // -----------------------------------------------------------------------
 
 package workers
@@ -14,64 +15,66 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/eodhd"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// StockDataCollectionWorker handles deterministic stock data collection.
+// MarketDataCollectionWorker handles deterministic stock data collection.
 // This worker calls ASX workers directly (inline) for data collection without LLM reasoning.
 // Input sources:
 // - config.variables[] - array of { ticker, portfolio? }
 // - filter_tags - find tickers from tagged documents (e.g., navexa-holdings)
-type StockDataCollectionWorker struct {
+type MarketDataCollectionWorker struct {
 	documentStorage interfaces.DocumentStorage
 	searchService   interfaces.SearchService
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
-	// ASX workers for inline execution (no child jobs)
-	stockCollectorWorker *ASXStockCollectorWorker
-	announcementsWorker  *ASXAnnouncementsWorker
-	indexDataWorker      *ASXIndexDataWorker
+	// Workers for inline execution (no child jobs)
+	fundamentalsWorker  *MarketFundamentalsWorker
+	announcementsWorker *MarketAnnouncementsWorker
+	marketDataWorker    *MarketDataWorker // For index/benchmark data via EODHD
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*StockDataCollectionWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketDataCollectionWorker)(nil)
 
-// NewStockDataCollectionWorker creates a new stock data collection worker
-func NewStockDataCollectionWorker(
+// NewMarketDataCollectionWorker creates a new stock data collection worker
+func NewMarketDataCollectionWorker(
 	documentStorage interfaces.DocumentStorage,
 	searchService interfaces.SearchService,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	eodhdClient *eodhd.Client,
 	debugEnabled bool,
-) *StockDataCollectionWorker {
-	// Create embedded ASX workers for inline execution
-	stockCollectorWorker := NewASXStockCollectorWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
-	announcementsWorker := NewASXAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled)
-	indexDataWorker := NewASXIndexDataWorker(documentStorage, logger, jobMgr)
+) *MarketDataCollectionWorker {
+	// Create embedded workers for inline execution
+	fundamentalsWorker := NewMarketFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
+	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled)
+	marketDataWorker := NewMarketDataWorker(documentStorage, logger, jobMgr, eodhdClient)
 
-	return &StockDataCollectionWorker{
-		documentStorage:      documentStorage,
-		searchService:        searchService,
-		kvStorage:            kvStorage,
-		logger:               logger,
-		jobMgr:               jobMgr,
-		stockCollectorWorker: stockCollectorWorker,
-		announcementsWorker:  announcementsWorker,
-		indexDataWorker:      indexDataWorker,
+	return &MarketDataCollectionWorker{
+		documentStorage:     documentStorage,
+		searchService:       searchService,
+		kvStorage:           kvStorage,
+		logger:              logger,
+		jobMgr:              jobMgr,
+		fundamentalsWorker:  fundamentalsWorker,
+		announcementsWorker: announcementsWorker,
+		marketDataWorker:    marketDataWorker,
 	}
 }
 
-// GetType returns WorkerTypeStockDataCollection for the DefinitionWorker interface
-func (w *StockDataCollectionWorker) GetType() models.WorkerType {
-	return models.WorkerTypeStockDataCollection
+// GetType returns WorkerTypeMarketDataCollection for the DefinitionWorker interface
+func (w *MarketDataCollectionWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketDataCollection
 }
 
 // ValidateConfig validates step configuration
-func (w *StockDataCollectionWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketDataCollectionWorker) ValidateConfig(step models.JobStep) error {
 	// Config is optional - can use job-level variables
 	// If no config, will use job definition variables
 	return nil
@@ -79,7 +82,7 @@ func (w *StockDataCollectionWorker) ValidateConfig(step models.JobStep) error {
 
 // Init performs the initialization/setup phase.
 // Collects tickers from all sources: step config, job config, filter documents.
-func (w *StockDataCollectionWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketDataCollectionWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -105,7 +108,7 @@ func (w *StockDataCollectionWorker) Init(ctx context.Context, step models.JobSte
 		workItems[i] = interfaces.WorkItem{
 			ID:   fmt.Sprintf("ticker_%d", i),
 			Name: ticker,
-			Type: "stock_data_collection",
+			Type: "market_data_collection",
 			Config: map[string]interface{}{
 				"ticker": ticker,
 			},
@@ -151,7 +154,7 @@ func (w *StockDataCollectionWorker) Init(ctx context.Context, step models.JobSte
 }
 
 // collectTickers gathers tickers from all sources
-func (w *StockDataCollectionWorker) collectTickers(ctx context.Context, stepConfig map[string]interface{}, jobDef models.JobDefinition) []string {
+func (w *MarketDataCollectionWorker) collectTickers(ctx context.Context, stepConfig map[string]interface{}, jobDef models.JobDefinition) []string {
 	tickerSet := make(map[string]bool)
 
 	// Source 1: Step-level variables
@@ -191,7 +194,7 @@ func (w *StockDataCollectionWorker) collectTickers(ctx context.Context, stepConf
 }
 
 // extractTickersFromVariables extracts tickers from a config map
-func (w *StockDataCollectionWorker) extractTickersFromVariables(config map[string]interface{}, tickerSet map[string]bool) {
+func (w *MarketDataCollectionWorker) extractTickersFromVariables(config map[string]interface{}, tickerSet map[string]bool) {
 	vars, ok := config["variables"].([]interface{})
 	if !ok {
 		return
@@ -223,7 +226,7 @@ func (w *StockDataCollectionWorker) extractTickersFromVariables(config map[strin
 }
 
 // extractFilterTags extracts filter_tags from step config
-func (w *StockDataCollectionWorker) extractFilterTags(stepConfig map[string]interface{}) ([]string, bool) {
+func (w *MarketDataCollectionWorker) extractFilterTags(stepConfig map[string]interface{}) ([]string, bool) {
 	if tags, ok := stepConfig["filter_tags"].([]interface{}); ok {
 		result := make([]string, 0, len(tags))
 		for _, tag := range tags {
@@ -240,7 +243,7 @@ func (w *StockDataCollectionWorker) extractFilterTags(stepConfig map[string]inte
 }
 
 // extractTickersFromDocument extracts tickers from a document (e.g., navexa-holdings)
-func (w *StockDataCollectionWorker) extractTickersFromDocument(doc *models.Document) []string {
+func (w *MarketDataCollectionWorker) extractTickersFromDocument(doc *models.Document) []string {
 	var tickers []string
 
 	if doc.Metadata == nil {
@@ -278,7 +281,7 @@ func (w *StockDataCollectionWorker) extractTickersFromDocument(doc *models.Docum
 }
 
 // CreateJobs executes ASX workers inline (no child jobs) for data collection
-func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
@@ -303,24 +306,27 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 	var totalDocs int
 	var errors []string
 
-	// Fetch benchmark index data first
+	// Fetch benchmark index data first via EODHD (market_data worker)
 	for _, code := range benchmarkCodes {
+		// Use EODHD index format: XJO.INDX for ASX indices
+		ticker := fmt.Sprintf("ASX:%s", code)
 		indexStep := models.JobStep{
-			Name:        fmt.Sprintf("index_data_%s", code),
-			Type:        models.WorkerTypeASXIndexData,
-			Description: fmt.Sprintf("Fetch index data for %s", code),
+			Name:        fmt.Sprintf("market_data_%s", code),
+			Type:        models.WorkerTypeMarketData,
+			Description: fmt.Sprintf("Fetch index data for %s via EODHD", code),
 			Config: map[string]interface{}{
-				"asx_code":    code,
+				"ticker":      ticker,
+				"period":      dataPeriod,
 				"output_tags": []string{"stock-data-collected", "benchmark", code},
 			},
 		}
-		_, err := w.indexDataWorker.CreateJobs(ctx, indexStep, jobDef, stepID, nil)
+		_, err := w.marketDataWorker.CreateJobs(ctx, indexStep, jobDef, stepID, nil)
 		if err != nil {
 			w.logger.Error().Err(err).Str("code", code).Msg("Failed to fetch index data")
 			errors = append(errors, fmt.Sprintf("index %s: %v", code, err))
 		} else {
 			totalDocs++
-			w.logger.Debug().Str("code", code).Msg("Fetched index data")
+			w.logger.Debug().Str("code", code).Msg("Fetched index data via EODHD")
 		}
 	}
 
@@ -329,7 +335,7 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 		// Stock collector (inline)
 		stockStep := models.JobStep{
 			Name:        fmt.Sprintf("stock_collector_%s", ticker),
-			Type:        models.WorkerTypeASXStockCollector,
+			Type:        models.WorkerTypeMarketFundamentals,
 			Description: fmt.Sprintf("Fetch stock data for %s", ticker),
 			Config: map[string]interface{}{
 				"asx_code":    ticker,
@@ -337,7 +343,7 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 				"output_tags": []string{"stock-data-collected", ticker},
 			},
 		}
-		_, err := w.stockCollectorWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
+		_, err := w.fundamentalsWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
 		if err != nil {
 			w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch stock data")
 			errors = append(errors, fmt.Sprintf("stock %s: %v", ticker, err))
@@ -349,7 +355,7 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 		// Announcements (inline)
 		announcementStep := models.JobStep{
 			Name:        fmt.Sprintf("announcements_%s", ticker),
-			Type:        models.WorkerTypeASXAnnouncements,
+			Type:        models.WorkerTypeMarketAnnouncements,
 			Description: fmt.Sprintf("Fetch announcements for %s", ticker),
 			Config: map[string]interface{}{
 				"asx_code":    ticker,
@@ -410,6 +416,6 @@ func (w *StockDataCollectionWorker) CreateJobs(ctx context.Context, step models.
 }
 
 // ReturnsChildJobs returns false since this worker executes ASX workers inline (no child jobs)
-func (w *StockDataCollectionWorker) ReturnsChildJobs() bool {
+func (w *MarketDataCollectionWorker) ReturnsChildJobs() bool {
 	return false
 }

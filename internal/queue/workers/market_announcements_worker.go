@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// ASXAnnouncementsWorker - Fetches ASX company announcements
+// MarketAnnouncementsWorker - Fetches ASX company announcements
 // Uses the Markit Digital API to fetch announcements in JSON format
 // Produces individual announcement documents AND a summary document
 // with relevance classification and price impact analysis
@@ -27,9 +27,37 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// ASXAnnouncementsWorker fetches ASX company announcements and stores them as documents.
+// OHLCV represents a single day's price data for price impact correlation
+type OHLCV struct {
+	Date   time.Time
+	Open   float64
+	High   float64
+	Low    float64
+	Close  float64
+	Volume int64
+}
+
+// yahooChartResponse for Yahoo Finance chart endpoint (price history for impact analysis)
+type yahooChartResponse struct {
+	Chart struct {
+		Result []struct {
+			Timestamp  []int64 `json:"timestamp"`
+			Indicators struct {
+				Quote []struct {
+					Open   []float64 `json:"open"`
+					High   []float64 `json:"high"`
+					Low    []float64 `json:"low"`
+					Close  []float64 `json:"close"`
+					Volume []int64   `json:"volume"`
+				} `json:"quote"`
+			} `json:"indicators"`
+		} `json:"result"`
+	} `json:"chart"`
+}
+
+// MarketAnnouncementsWorker fetches ASX company announcements and stores them as documents.
 // This worker executes synchronously (no child jobs).
-type ASXAnnouncementsWorker struct {
+type MarketAnnouncementsWorker struct {
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
@@ -37,8 +65,8 @@ type ASXAnnouncementsWorker struct {
 	debugEnabled    bool
 }
 
-// Compile-time assertion: ASXAnnouncementsWorker implements DefinitionWorker interface
-var _ interfaces.DefinitionWorker = (*ASXAnnouncementsWorker)(nil)
+// Compile-time assertion: MarketAnnouncementsWorker implements DefinitionWorker interface
+var _ interfaces.DefinitionWorker = (*MarketAnnouncementsWorker)(nil)
 
 // ASXAnnouncement represents a single ASX announcement
 type ASXAnnouncement struct {
@@ -134,14 +162,14 @@ type asxAPIResponse struct {
 	} `json:"data"`
 }
 
-// NewASXAnnouncementsWorker creates a new ASX announcements worker
-func NewASXAnnouncementsWorker(
+// NewMarketAnnouncementsWorker creates a new ASX announcements worker
+func NewMarketAnnouncementsWorker(
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
-) *ASXAnnouncementsWorker {
-	return &ASXAnnouncementsWorker{
+) *MarketAnnouncementsWorker {
+	return &MarketAnnouncementsWorker{
 		documentStorage: documentStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
@@ -152,14 +180,14 @@ func NewASXAnnouncementsWorker(
 	}
 }
 
-// GetType returns WorkerTypeASXAnnouncements for the DefinitionWorker interface
-func (w *ASXAnnouncementsWorker) GetType() models.WorkerType {
-	return models.WorkerTypeASXAnnouncements
+// GetType returns WorkerTypeMarketAnnouncements for the DefinitionWorker interface
+func (w *MarketAnnouncementsWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketAnnouncements
 }
 
 // extractASXCode extracts ASX code from step config or job-level variables.
 // Priority: step config asx_code > job variables ticker > job variables asx_code
-func (w *ASXAnnouncementsWorker) extractASXCode(stepConfig map[string]interface{}, jobDef models.JobDefinition) string {
+func (w *MarketAnnouncementsWorker) extractASXCode(stepConfig map[string]interface{}, jobDef models.JobDefinition) string {
 	// Source 1: Direct step config
 	if asxCode, ok := stepConfig["asx_code"].(string); ok && asxCode != "" {
 		parsed := common.ParseTicker(asxCode)
@@ -198,7 +226,7 @@ func (w *ASXAnnouncementsWorker) extractASXCode(stepConfig map[string]interface{
 }
 
 // Init performs the initialization/setup phase for an ASX announcements step.
-func (w *ASXAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -241,7 +269,7 @@ func (w *ASXAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, 
 			{
 				ID:   asxCode,
 				Name: fmt.Sprintf("Fetch ASX:%s announcements", asxCode),
-				Type: "asx_announcements",
+				Type: "market_announcements",
 				Config: map[string]interface{}{
 					"asx_code": asxCode,
 					"period":   period,
@@ -263,13 +291,13 @@ func (w *ASXAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, 
 
 // CreateJobs fetches ASX announcements and stores them as documents.
 // Returns the step job ID since this executes synchronously.
-func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize asx_announcements worker: %w", err)
+			return "", fmt.Errorf("failed to initialize market_announcements worker: %w", err)
 		}
 	}
 
@@ -280,7 +308,7 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
 	// Initialize debug tracking
-	debug := NewWorkerDebug("asx_announcements", w.debugEnabled)
+	debug := NewWorkerDebug("market_announcements", w.debugEnabled)
 	debug.SetTicker(fmt.Sprintf("ASX:%s", asxCode))
 
 	w.logger.Info().
@@ -432,13 +460,13 @@ func (w *ASXAnnouncementsWorker) CreateJobs(ctx context.Context, step models.Job
 }
 
 // ReturnsChildJobs returns false since this executes synchronously
-func (w *ASXAnnouncementsWorker) ReturnsChildJobs() bool {
+func (w *MarketAnnouncementsWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateConfig validates step configuration for asx_announcements type.
+// ValidateConfig validates step configuration for market_announcements type.
 // Config can be nil if asx_code will be provided via job-level variables.
-func (w *ASXAnnouncementsWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketAnnouncementsWorker) ValidateConfig(step models.JobStep) error {
 	// Config is optional - asx_code can come from job-level variables
 	// Full validation happens in Init() when we have access to jobDef
 	return nil
@@ -447,7 +475,7 @@ func (w *ASXAnnouncementsWorker) ValidateConfig(step models.JobStep) error {
 // fetchAnnouncements fetches announcements using the best source for the period.
 // For Y1+ periods, uses ASX statistics HTML page (more comprehensive).
 // For shorter periods, uses Markit Digital API (faster, sufficient).
-func (w *ASXAnnouncementsWorker) fetchAnnouncements(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
+func (w *MarketAnnouncementsWorker) fetchAnnouncements(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
 	// For Y1 or longer periods, use ASX HTML page which returns full year data
 	if period == "Y1" || period == "Y5" {
 		announcements, err := w.fetchAnnouncementsFromHTML(ctx, asxCode, period, limit)
@@ -543,7 +571,7 @@ func (w *ASXAnnouncementsWorker) fetchAnnouncements(ctx context.Context, asxCode
 // fetchAnnouncementsFromHTML scrapes announcements from ASX statistics HTML page.
 // URL: https://www.asx.com.au/asx/v2/statistics/announcements.do?by=asxCode&asxCode={CODE}&timeframe=Y&year={YEAR}
 // This provides 50+ announcements per year vs ~5 from the Markit API.
-func (w *ASXAnnouncementsWorker) fetchAnnouncementsFromHTML(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
+func (w *MarketAnnouncementsWorker) fetchAnnouncementsFromHTML(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
 	currentYear := time.Now().Year()
 	var allAnnouncements []ASXAnnouncement
 
@@ -619,7 +647,7 @@ func (w *ASXAnnouncementsWorker) fetchAnnouncementsFromHTML(ctx context.Context,
 //	<td><a href="/asx/v2/statistics/displayAnnouncement.do?display=pdf&idsId=03038930">Headline</a></td>
 //
 // </tr>
-func (w *ASXAnnouncementsWorker) parseAnnouncementsHTML(html, asxCode string, year int) []ASXAnnouncement {
+func (w *MarketAnnouncementsWorker) parseAnnouncementsHTML(html, asxCode string, year int) []ASXAnnouncement {
 	var announcements []ASXAnnouncement
 
 	// Extract tbody content
@@ -718,7 +746,7 @@ func (w *ASXAnnouncementsWorker) parseAnnouncementsHTML(html, asxCode string, ye
 }
 
 // inferAnnouncementType attempts to categorize announcement based on headline keywords.
-func (w *ASXAnnouncementsWorker) inferAnnouncementType(headline string, pageCount int) string {
+func (w *MarketAnnouncementsWorker) inferAnnouncementType(headline string, pageCount int) string {
 	headlineUpper := strings.ToUpper(headline)
 
 	// Financial reports
@@ -762,7 +790,7 @@ func (w *ASXAnnouncementsWorker) inferAnnouncementType(headline string, pageCoun
 }
 
 // calculateCutoffDate returns the cutoff date based on period string
-func (w *ASXAnnouncementsWorker) calculateCutoffDate(period string) time.Time {
+func (w *MarketAnnouncementsWorker) calculateCutoffDate(period string) time.Time {
 	now := time.Now()
 	switch period {
 	case "D1":
@@ -785,7 +813,7 @@ func (w *ASXAnnouncementsWorker) calculateCutoffDate(period string) time.Time {
 }
 
 // createDocument creates a Document from an ASX announcement
-func (w *ASXAnnouncementsWorker) createDocument(ctx context.Context, ann ASXAnnouncement, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *MarketAnnouncementsWorker) createDocument(ctx context.Context, ann ASXAnnouncement, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# ASX Announcement: %s\n\n", ann.Headline))
@@ -872,7 +900,7 @@ func (w *ASXAnnouncementsWorker) createDocument(ctx context.Context, ann ASXAnno
 // fetchHistoricalPrices gets historical price data for price impact analysis.
 // First tries to get data from asx_stock_data documents (preferred source).
 // Falls back to direct Yahoo Finance API if no document exists.
-func (w *ASXAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, asxCode, period string) ([]OHLCV, error) {
+func (w *MarketAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, asxCode, period string) ([]OHLCV, error) {
 	// First, try to get price data from an existing asx_stock_data document
 	// This avoids duplicate Yahoo Finance API calls and ensures consistency
 	prices, err := w.getPricesFromStockDataDocument(ctx, asxCode)
@@ -897,7 +925,7 @@ func (w *ASXAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, asxC
 // getPricesFromStockDataDocument retrieves OHLCV data from an existing stock data document.
 // First tries asx_stock_collector (recommended), then falls back to asx_stock_data (deprecated).
 // Returns the historical_prices array from document metadata if available.
-func (w *ASXAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Context, asxCode string) ([]OHLCV, error) {
+func (w *MarketAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Context, asxCode string) ([]OHLCV, error) {
 	upperCode := strings.ToUpper(asxCode)
 
 	// Try asx_stock_collector first (preferred source)
@@ -989,7 +1017,7 @@ func (w *ASXAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Cont
 
 // fetchPricesFromYahoo is the fallback that fetches directly from Yahoo Finance API.
 // This is used when no asx_stock_data document is available.
-func (w *ASXAnnouncementsWorker) fetchPricesFromYahoo(ctx context.Context, asxCode, period string) ([]OHLCV, error) {
+func (w *MarketAnnouncementsWorker) fetchPricesFromYahoo(ctx context.Context, asxCode, period string) ([]OHLCV, error) {
 	// Convert period to Yahoo range - fetch extra history for impact analysis
 	yahooRange := "2y" // Default to 2 years for comprehensive analysis
 	switch period {
@@ -1272,7 +1300,7 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 }
 
 // analyzeAnnouncements analyzes all announcements and adds relevance classification and price impact
-func (w *ASXAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, announcements []ASXAnnouncement, asxCode string, prices []OHLCV) []AnnouncementAnalysis {
+func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, announcements []ASXAnnouncement, asxCode string, prices []OHLCV) []AnnouncementAnalysis {
 	var analyses []AnnouncementAnalysis
 
 	for _, ann := range announcements {
@@ -1390,7 +1418,7 @@ func classifyRelevance(ann ASXAnnouncement) (category string, reason string) {
 // - PriceBefore: Closing price on the trading day BEFORE the announcement
 // - PriceAfter: Closing price on the announcement date (or next trading day if announcement is after market close)
 // This measures the immediate market reaction to the announcement.
-func (w *ASXAnnouncementsWorker) calculatePriceImpact(announcementDate time.Time, prices []OHLCV) *PriceImpactData {
+func (w *MarketAnnouncementsWorker) calculatePriceImpact(announcementDate time.Time, prices []OHLCV) *PriceImpactData {
 	if len(prices) == 0 {
 		return nil
 	}
@@ -1559,14 +1587,14 @@ func (w *ASXAnnouncementsWorker) calculatePriceImpact(announcementDate time.Time
 }
 
 // createSummaryDocument creates a summary document with all analyzed announcements
-func (w *ASXAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
+func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
 	var content strings.Builder
 
 	// Header
 	content.WriteString(fmt.Sprintf("# ASX Announcements Summary: %s\n\n", asxCode))
 	content.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM AEST")))
 	content.WriteString(fmt.Sprintf("**Total Announcements**: %d\n", len(analyses)))
-	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeASXAnnouncements))
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeMarketAnnouncements))
 
 	// Signal-to-Noise Analysis Summary
 	highSignalCount, modSignalCount, lowSignalCount, noiseSignalCount := 0, 0, 0, 0

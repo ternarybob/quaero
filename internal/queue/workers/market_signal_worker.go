@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// SignalComputerWorker - Computes signals from stock collector data
+// MarketSignalWorker - Computes signals from stock collector data
 // Reads asx_stock_collector documents and produces ticker-signals documents
 // -----------------------------------------------------------------------
 
@@ -20,8 +20,8 @@ import (
 	"github.com/ternarybob/quaero/internal/signals"
 )
 
-// SignalComputerWorker computes signals from existing stock data documents.
-type SignalComputerWorker struct {
+// MarketSignalWorker computes signals from existing stock data documents.
+type MarketSignalWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
@@ -30,16 +30,16 @@ type SignalComputerWorker struct {
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*SignalComputerWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketSignalWorker)(nil)
 
-// NewSignalComputerWorker creates a new signal computer worker
-func NewSignalComputerWorker(
+// NewMarketSignalWorker creates a new signal computer worker
+func NewMarketSignalWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-) *SignalComputerWorker {
-	return &SignalComputerWorker{
+) *MarketSignalWorker {
+	return &MarketSignalWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
 		logger:          logger,
@@ -48,18 +48,18 @@ func NewSignalComputerWorker(
 	}
 }
 
-// GetType returns WorkerTypeSignalComputer
-func (w *SignalComputerWorker) GetType() models.WorkerType {
-	return models.WorkerTypeSignalComputer
+// GetType returns WorkerTypeMarketSignal
+func (w *MarketSignalWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketSignal
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
-func (w *SignalComputerWorker) ReturnsChildJobs() bool {
+func (w *MarketSignalWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates the worker configuration
-func (w *SignalComputerWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketSignalWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("signal_computer step requires config")
 	}
@@ -72,7 +72,7 @@ func (w *SignalComputerWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // Init initializes the signal computer worker
-func (w *SignalComputerWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketSignalWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -114,7 +114,7 @@ func (w *SignalComputerWorker) Init(ctx context.Context, step models.JobStep, jo
 }
 
 // CreateJobs computes signals for each ticker and stores results
-func (w *SignalComputerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketSignalWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
@@ -197,7 +197,7 @@ func (w *SignalComputerWorker) CreateJobs(ctx context.Context, step models.JobSt
 		DocumentsCreated: processedCount,
 		DocumentIDs:      allDocIDs,
 		Tags:             allTags,
-		SourceType:       "signal_computer",
+		SourceType:       "market_signal",
 		SourceIDs:        allSourceIDs,
 		Errors:           allErrors,
 		ByTicker:         byTicker,
@@ -226,7 +226,7 @@ type signalDocInfo struct {
 }
 
 // processSignals computes signals for a single ticker and returns document info
-func (w *SignalComputerWorker) processSignals(ctx context.Context, ticker common.Ticker, stepID string, outputTags []string) (*signalDocInfo, error) {
+func (w *MarketSignalWorker) processSignals(ctx context.Context, ticker common.Ticker, stepID string, outputTags []string) (*signalDocInfo, error) {
 	// Find source document using ticker's source ID format
 	sourceType := "asx_stock_collector"
 	sourceID := ticker.SourceID("stock_collector")
@@ -269,7 +269,7 @@ func (w *SignalComputerWorker) processSignals(ctx context.Context, ticker common
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "signal_computer",
+		SourceType:      "market_signal",
 		SourceID:        ticker.SourceID("signals"),
 		Title:           fmt.Sprintf("Signal Analysis: %s", ticker.String()),
 		ContentMarkdown: markdown,
@@ -332,7 +332,7 @@ func (w *SignalComputerWorker) processSignals(ctx context.Context, ticker common
 }
 
 // collectTickers extracts tickers from config, supporting both legacy and exchange-qualified formats
-func (w *SignalComputerWorker) collectTickers(config map[string]interface{}) []common.Ticker {
+func (w *MarketSignalWorker) collectTickers(config map[string]interface{}) []common.Ticker {
 	var tickers []common.Ticker
 
 	// Try "ticker" first (new format), then "asx_code" (legacy)
@@ -361,11 +361,11 @@ func (w *SignalComputerWorker) collectTickers(config map[string]interface{}) []c
 }
 
 // loadBenchmarkReturns loads XJO benchmark returns from index data
-func (w *SignalComputerWorker) loadBenchmarkReturns(ctx context.Context) map[string]float64 {
+func (w *MarketSignalWorker) loadBenchmarkReturns(ctx context.Context) map[string]float64 {
 	benchmarks := make(map[string]float64)
 
-	// Try to load from asx_index_data document
-	indexDoc, err := w.documentStorage.GetDocumentBySource("asx_index_data", "asx:XJO:index")
+	// Try to load from market_data document (EODHD source)
+	indexDoc, err := w.documentStorage.GetDocumentBySource("market_data", "ASX:XJO:market_data")
 	if err != nil {
 		w.logger.Debug().Msg("No XJO benchmark data found, using defaults")
 		return benchmarks
@@ -385,7 +385,7 @@ func (w *SignalComputerWorker) loadBenchmarkReturns(ctx context.Context) map[str
 }
 
 // extractTickerRaw converts document metadata to TickerRaw
-func (w *SignalComputerWorker) extractTickerRaw(asxCode string, doc *models.Document) (signals.TickerRaw, error) {
+func (w *MarketSignalWorker) extractTickerRaw(asxCode string, doc *models.Document) (signals.TickerRaw, error) {
 	metadata := doc.Metadata
 	if metadata == nil {
 		return signals.TickerRaw{}, fmt.Errorf("document has no metadata")
@@ -452,7 +452,7 @@ func (w *SignalComputerWorker) extractTickerRaw(asxCode string, doc *models.Docu
 }
 
 // generateMarkdown creates markdown content from signals
-func (w *SignalComputerWorker) generateMarkdown(ticker string, s signals.TickerSignals) string {
+func (w *MarketSignalWorker) generateMarkdown(ticker string, s signals.TickerSignals) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# Signal Analysis: %s\n\n", ticker))

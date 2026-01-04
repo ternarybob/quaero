@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// AIAssessorWorker - AI-powered stock assessment generation with validation
+// MarketAssessorWorker - AI-powered stock assessment generation with validation
 // Uses LLM service to generate assessments, validates and retries as needed
 // -----------------------------------------------------------------------
 
@@ -26,8 +26,8 @@ const (
 	maxRetries       = 2
 )
 
-// AIAssessorWorker generates AI-powered stock assessments.
-type AIAssessorWorker struct {
+// MarketAssessorWorker generates AI-powered stock assessments.
+type MarketAssessorWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
@@ -37,17 +37,17 @@ type AIAssessorWorker struct {
 }
 
 // Compile-time assertion
-var _ interfaces.DefinitionWorker = (*AIAssessorWorker)(nil)
+var _ interfaces.DefinitionWorker = (*MarketAssessorWorker)(nil)
 
-// NewAIAssessorWorker creates a new AI assessor worker
-func NewAIAssessorWorker(
+// NewMarketAssessorWorker creates a new AI assessor worker
+func NewMarketAssessorWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	llmService interfaces.LLMService,
-) *AIAssessorWorker {
-	return &AIAssessorWorker{
+) *MarketAssessorWorker {
+	return &MarketAssessorWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
 		logger:          logger,
@@ -57,18 +57,18 @@ func NewAIAssessorWorker(
 	}
 }
 
-// GetType returns WorkerTypeAIAssessor
-func (w *AIAssessorWorker) GetType() models.WorkerType {
-	return models.WorkerTypeAIAssessor
+// GetType returns WorkerTypeMarketAssessor
+func (w *MarketAssessorWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketAssessor
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
-func (w *AIAssessorWorker) ReturnsChildJobs() bool {
+func (w *MarketAssessorWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates the worker configuration
-func (w *AIAssessorWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketAssessorWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
 		return fmt.Errorf("ai_assessor step requires config")
 	}
@@ -76,7 +76,7 @@ func (w *AIAssessorWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // Init initializes the AI assessor worker
-func (w *AIAssessorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketAssessorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -87,7 +87,7 @@ func (w *AIAssessorWorker) Init(ctx context.Context, step models.JobStep, jobDef
 			{
 				ID:     "ai-assessment",
 				Name:   "Generate AI assessments",
-				Type:   "ai_assessor",
+				Type:   "market_assessor",
 				Config: step.Config,
 			},
 		},
@@ -101,7 +101,7 @@ func (w *AIAssessorWorker) Init(ctx context.Context, step models.JobStep, jobDef
 }
 
 // CreateJobs generates AI assessments for portfolio holdings
-func (w *AIAssessorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketAssessorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
@@ -231,7 +231,7 @@ func (w *AIAssessorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 }
 
 // loadSignals loads signal documents for specified tickers
-func (w *AIAssessorWorker) loadSignals(ctx context.Context, tickers []string, tagPrefix string) map[string]signals.TickerSignals {
+func (w *MarketAssessorWorker) loadSignals(ctx context.Context, tickers []string, tagPrefix string) map[string]signals.TickerSignals {
 	result := make(map[string]signals.TickerSignals)
 
 	for _, ticker := range tickers {
@@ -261,7 +261,7 @@ func (w *AIAssessorWorker) loadSignals(ctx context.Context, tickers []string, ta
 }
 
 // generateAssessments calls LLM to generate assessments for a batch
-func (w *AIAssessorWorker) generateAssessments(ctx context.Context, batchSignals []signals.TickerSignals, holdingTypes map[string]string) ([]signals.TickerAssessment, error) {
+func (w *MarketAssessorWorker) generateAssessments(ctx context.Context, batchSignals []signals.TickerSignals, holdingTypes map[string]string) ([]signals.TickerAssessment, error) {
 	if w.llmService == nil {
 		// Return placeholder assessments when LLM not available
 		return w.generatePlaceholderAssessments(batchSignals, holdingTypes), nil
@@ -289,7 +289,7 @@ func (w *AIAssessorWorker) generateAssessments(ctx context.Context, batchSignals
 }
 
 // buildPrompt creates the assessment prompt for the LLM
-func (w *AIAssessorWorker) buildPrompt(batchSignals []signals.TickerSignals, holdingTypes map[string]string) string {
+func (w *MarketAssessorWorker) buildPrompt(batchSignals []signals.TickerSignals, holdingTypes map[string]string) string {
 	var sb strings.Builder
 
 	sb.WriteString(`You are an expert ASX equity analyst assessing portfolio holdings.
@@ -361,7 +361,7 @@ OUTPUT TEMPLATE (repeat for each ticker):
 }
 
 // parseAssessmentResponse parses YAML response from LLM
-func (w *AIAssessorWorker) parseAssessmentResponse(response string, batchSignals []signals.TickerSignals) ([]signals.TickerAssessment, error) {
+func (w *MarketAssessorWorker) parseAssessmentResponse(response string, batchSignals []signals.TickerSignals) ([]signals.TickerAssessment, error) {
 	// Extract YAML from response (may have markdown wrapping)
 	yamlContent := response
 	if strings.Contains(response, "```yaml") {
@@ -430,7 +430,7 @@ func (w *AIAssessorWorker) parseAssessmentResponse(response string, batchSignals
 }
 
 // generatePlaceholderAssessments creates placeholder assessments when LLM unavailable
-func (w *AIAssessorWorker) generatePlaceholderAssessments(batchSignals []signals.TickerSignals, holdingTypes map[string]string) []signals.TickerAssessment {
+func (w *MarketAssessorWorker) generatePlaceholderAssessments(batchSignals []signals.TickerSignals, holdingTypes map[string]string) []signals.TickerAssessment {
 	assessments := make([]signals.TickerAssessment, 0, len(batchSignals))
 
 	for _, sig := range batchSignals {
@@ -491,7 +491,7 @@ func (w *AIAssessorWorker) generatePlaceholderAssessments(batchSignals []signals
 }
 
 // validateWithRetry validates assessment and retries if needed
-func (w *AIAssessorWorker) validateWithRetry(ctx context.Context, assessment signals.TickerAssessment, sig signals.TickerSignals) signals.TickerAssessment {
+func (w *MarketAssessorWorker) validateWithRetry(ctx context.Context, assessment signals.TickerAssessment, sig signals.TickerSignals) signals.TickerAssessment {
 	validation := w.validator.Validate(assessment, sig)
 	if validation.Valid {
 		assessment.ValidationPassed = true
@@ -511,7 +511,7 @@ func (w *AIAssessorWorker) validateWithRetry(ctx context.Context, assessment sig
 }
 
 // storeAssessment saves assessment as a document
-func (w *AIAssessorWorker) storeAssessment(ctx context.Context, assessment signals.TickerAssessment, outputTags []string) error {
+func (w *MarketAssessorWorker) storeAssessment(ctx context.Context, assessment signals.TickerAssessment, outputTags []string) error {
 	markdown := w.generateMarkdown(assessment)
 
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
@@ -521,7 +521,7 @@ func (w *AIAssessorWorker) storeAssessment(ctx context.Context, assessment signa
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "ai_assessor",
+		SourceType:      "market_assessor",
 		SourceID:        fmt.Sprintf("assessment:%s", assessment.Ticker),
 		Title:           fmt.Sprintf("AI Assessment: %s", assessment.Ticker),
 		ContentMarkdown: markdown,
@@ -547,7 +547,7 @@ func (w *AIAssessorWorker) storeAssessment(ctx context.Context, assessment signa
 }
 
 // generateMarkdown creates markdown content from assessment
-func (w *AIAssessorWorker) generateMarkdown(a signals.TickerAssessment) string {
+func (w *MarketAssessorWorker) generateMarkdown(a signals.TickerAssessment) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# AI Assessment: %s\n\n", a.Ticker))

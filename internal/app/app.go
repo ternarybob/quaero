@@ -16,11 +16,11 @@ import (
 	arbormodels "github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/arbor/services/logviewer"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/eodhd"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/logs"
-	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/queue/workers"
@@ -804,68 +804,83 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
-	// Register ASX Announcements worker (synchronous execution, fetches ASX company announcements)
-	asxAnnouncementsWorker := workers.NewASXAnnouncementsWorker(
+	// Register Market Announcements worker (company announcements via Markit API)
+	marketAnnouncementsWorker := workers.NewMarketAnnouncementsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
 		a.Config.Workers.Debug,
 	)
-	a.StepManager.RegisterWorker(asxAnnouncementsWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxAnnouncementsWorker.GetType().String()).Msg("ASX Announcements worker registered")
+	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
+	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
 
-	// Register ASX Index Data worker (synchronous execution, fetches index benchmarks like XJO, XSO)
-	asxIndexDataWorker := workers.NewASXIndexDataWorker(
+	// Create EODHD client for multi-exchange workers (market_data, announcements)
+	eodhdClient := eodhd.NewClient(
+		"", // API key will be resolved at runtime from KV store
+		eodhd.WithLogger(a.Logger),
+		eodhd.WithRateLimit(10),
+	)
+
+	// Register Market Data worker (multi-exchange via EODHD)
+	marketDataWorker := workers.NewMarketDataWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+		eodhdClient,
+	)
+	a.StepManager.RegisterWorker(marketDataWorker)
+	a.Logger.Debug().Str("step_type", marketDataWorker.GetType().String()).Msg("Market Data worker registered")
+
+	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
+	marketNewsWorker := workers.NewMarketNewsWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+		eodhdClient,
+		marketAnnouncementsWorker,
+	)
+	a.StepManager.RegisterWorker(marketNewsWorker)
+	a.Logger.Debug().Str("step_type", marketNewsWorker.GetType().String()).Msg("Market News worker registered")
+
+	// Register Market Director Interest worker (director interest filings via Markit API)
+	marketDirectorInterestWorker := workers.NewMarketDirectorInterestWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(asxIndexDataWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxIndexDataWorker.GetType().String()).Msg("ASX Index Data worker registered")
+	a.StepManager.RegisterWorker(marketDirectorInterestWorker)
+	a.Logger.Debug().Str("step_type", marketDirectorInterestWorker.GetType().String()).Msg("Market Director Interest worker registered")
 
-	// Register ASX Director Interest worker (synchronous execution, fetches Appendix 3Y filings)
-	asxDirectorInterestWorker := workers.NewASXDirectorInterestWorker(
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-		jobMgr,
-	)
-	a.StepManager.RegisterWorker(asxDirectorInterestWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxDirectorInterestWorker.GetType().String()).Msg("ASX Director Interest worker registered")
-
-	// Register ASX Stock Collector worker (consolidated: price, analyst coverage, historical financials)
-	asxStockCollectorWorker := workers.NewASXStockCollectorWorker(
+	// Register Market Fundamentals worker (consolidated: price, analyst coverage, historical financials via EODHD)
+	marketFundamentalsWorker := workers.NewMarketFundamentalsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 		a.Config.Workers.Debug,
 	)
-	a.StepManager.RegisterWorker(asxStockCollectorWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", asxStockCollectorWorker.GetType().String()).Msg("ASX Stock Collector worker registered")
+	a.StepManager.RegisterWorker(marketFundamentalsWorker)
+	a.Logger.Debug().Str("step_type", marketFundamentalsWorker.GetType().String()).Msg("Market Fundamentals worker registered")
 
-	// Register asx_stock_data as an alias for asx_stock_collector (backward compatibility)
-	a.StepManager.RegisterWorkerAlias(asxStockCollectorWorker, models.WorkerTypeASXStockData)
-	a.Logger.Debug().Str("step_type", models.WorkerTypeASXStockData.String()).Msg("ASX Stock Data worker alias registered (deprecated)")
-
-	// Register Macro Data worker (synchronous execution, fetches RBA rates and commodity prices)
-	macroDataWorker := workers.NewMacroDataWorker(
+	// Register Market Macro worker (synchronous execution, fetches RBA rates and commodity prices)
+	marketMacroWorker := workers.NewMarketMacroWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(macroDataWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", macroDataWorker.GetType().String()).Msg("Macro Data worker registered")
+	a.StepManager.RegisterWorker(marketMacroWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", marketMacroWorker.GetType().String()).Msg("Market Macro worker registered")
 
-	// Register Competitor Analysis worker (identifies competitors via LLM and fetches their stock data)
-	competitorAnalysisWorker := workers.NewCompetitorAnalysisWorker(
+	// Register Market Competitor worker (identifies competitors via LLM and fetches their stock data)
+	marketCompetitorWorker := workers.NewMarketCompetitorWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		jobMgr,
 		a.Logger,
 		a.Config.Workers.Debug,
 	)
-	a.StepManager.RegisterWorker(competitorAnalysisWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", competitorAnalysisWorker.GetType().String()).Msg("Competitor Analysis worker registered")
+	a.StepManager.RegisterWorker(marketCompetitorWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", marketCompetitorWorker.GetType().String()).Msg("Market Competitor worker registered")
 
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
 	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(
@@ -1008,49 +1023,51 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(testJobGeneratorWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", testJobGeneratorWorker.GetType().String()).Str("job_type", testJobGeneratorWorker.GetWorkerType()).Msg("Test Job Generator worker registered")
 
-	// Register Signal Computer worker (computes PBAS, VLI, Regime signals from stock data)
-	signalComputerWorker := workers.NewSignalComputerWorker(
+	// Register Market Signal worker (computes PBAS, VLI, Regime signals from stock data)
+	marketSignalWorker := workers.NewMarketSignalWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(signalComputerWorker)
-	a.Logger.Debug().Str("step_type", signalComputerWorker.GetType().String()).Msg("Signal Computer worker registered")
+	a.StepManager.RegisterWorker(marketSignalWorker)
+	a.Logger.Debug().Str("step_type", marketSignalWorker.GetType().String()).Msg("Market Signal worker registered")
 
-	// Register Portfolio Rollup worker (aggregates ticker signals into portfolio-level metrics)
-	portfolioRollupWorker := workers.NewPortfolioRollupWorker(
+	// Register Market Portfolio worker (aggregates ticker signals into portfolio-level metrics)
+	marketPortfolioWorker := workers.NewMarketPortfolioWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(portfolioRollupWorker)
-	a.Logger.Debug().Str("step_type", portfolioRollupWorker.GetType().String()).Msg("Portfolio Rollup worker registered")
+	a.StepManager.RegisterWorker(marketPortfolioWorker)
+	a.Logger.Debug().Str("step_type", marketPortfolioWorker.GetType().String()).Msg("Market Portfolio worker registered")
 
-	// Register AI Assessor worker (AI-powered stock assessment with validation)
-	aiAssessorWorker := workers.NewAIAssessorWorker(
+	// Register Market Assessor worker (AI-powered stock assessment with validation)
+	marketAssessorWorker := workers.NewMarketAssessorWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 		a.LLMService,
 	)
-	a.StepManager.RegisterWorker(aiAssessorWorker)
-	a.Logger.Debug().Str("step_type", aiAssessorWorker.GetType().String()).Msg("AI Assessor worker registered")
+	a.StepManager.RegisterWorker(marketAssessorWorker)
+	a.Logger.Debug().Str("step_type", marketAssessorWorker.GetType().String()).Msg("Market Assessor worker registered")
 
-	// Register StockDataCollection worker (deterministic data collection)
-	// Creates ASX workers internally for inline execution (no child jobs)
-	stockDataCollectionWorker := workers.NewStockDataCollectionWorker(
+	// Register Market Data Collection worker (deterministic data collection)
+	// Creates workers internally for inline execution (no child jobs)
+	// Uses EODHD for index/benchmark data via MarketDataWorker
+	marketDataCollectionWorker := workers.NewMarketDataCollectionWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		eodhdClient,
 		a.Config.Workers.Debug,
 	)
-	a.StepManager.RegisterWorker(stockDataCollectionWorker)
-	a.Logger.Debug().Str("step_type", stockDataCollectionWorker.GetType().String()).Msg("Stock data collection worker registered")
+	a.StepManager.RegisterWorker(marketDataCollectionWorker)
+	a.Logger.Debug().Str("step_type", marketDataCollectionWorker.GetType().String()).Msg("Market Data Collection worker registered")
 
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 

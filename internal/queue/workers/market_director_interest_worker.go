@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// ASXDirectorInterestWorker - Fetches ASX director interest (Appendix 3Y) filings
+// MarketDirectorInterestWorker - Fetches ASX director interest (Appendix 3Y) filings
 // Uses the Markit Digital API to fetch announcements and filters to director-related items
 // -----------------------------------------------------------------------
 
@@ -20,17 +20,17 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// ASXDirectorInterestWorker fetches ASX director interest filings (Appendix 3Y) and stores them as documents.
+// MarketDirectorInterestWorker fetches ASX director interest filings (Appendix 3Y) and stores them as documents.
 // This worker executes synchronously (no child jobs).
-type ASXDirectorInterestWorker struct {
+type MarketDirectorInterestWorker struct {
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
 }
 
-// Compile-time assertion: ASXDirectorInterestWorker implements DefinitionWorker interface
-var _ interfaces.DefinitionWorker = (*ASXDirectorInterestWorker)(nil)
+// Compile-time assertion: MarketDirectorInterestWorker implements DefinitionWorker interface
+var _ interfaces.DefinitionWorker = (*MarketDirectorInterestWorker)(nil)
 
 // DirectorInterestFiling represents a director interest notice
 type DirectorInterestFiling struct {
@@ -43,13 +43,13 @@ type DirectorInterestFiling struct {
 	Type        string
 }
 
-// NewASXDirectorInterestWorker creates a new ASX director interest worker
-func NewASXDirectorInterestWorker(
+// NewMarketDirectorInterestWorker creates a new ASX director interest worker
+func NewMarketDirectorInterestWorker(
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-) *ASXDirectorInterestWorker {
-	return &ASXDirectorInterestWorker{
+) *MarketDirectorInterestWorker {
+	return &MarketDirectorInterestWorker{
 		documentStorage: documentStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
@@ -59,16 +59,16 @@ func NewASXDirectorInterestWorker(
 	}
 }
 
-// GetType returns WorkerTypeASXDirectorInterest for the DefinitionWorker interface
-func (w *ASXDirectorInterestWorker) GetType() models.WorkerType {
-	return models.WorkerTypeASXDirectorInterest
+// GetType returns WorkerTypeMarketDirectorInterest for the DefinitionWorker interface
+func (w *MarketDirectorInterestWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketDirectorInterest
 }
 
 // Init performs the initialization/setup phase for an ASX director interest step.
-func (w *ASXDirectorInterestWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketDirectorInterestWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for asx_director_interest")
+		return nil, fmt.Errorf("step config is required for market_director_interest")
 	}
 
 	// Extract ASX code (required)
@@ -105,7 +105,7 @@ func (w *ASXDirectorInterestWorker) Init(ctx context.Context, step models.JobSte
 			{
 				ID:   asxCode,
 				Name: fmt.Sprintf("Fetch ASX:%s director interest filings", asxCode),
-				Type: "asx_director_interest",
+				Type: "market_director_interest",
 				Config: map[string]interface{}{
 					"asx_code": asxCode,
 					"period":   period,
@@ -127,13 +127,13 @@ func (w *ASXDirectorInterestWorker) Init(ctx context.Context, step models.JobSte
 
 // CreateJobs fetches ASX director interest filings and stores them as documents.
 // Returns the step job ID since this executes synchronously.
-func (w *ASXDirectorInterestWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketDirectorInterestWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize asx_director_interest worker: %w", err)
+			return "", fmt.Errorf("failed to initialize market_director_interest worker: %w", err)
 		}
 	}
 
@@ -220,27 +220,27 @@ func (w *ASXDirectorInterestWorker) CreateJobs(ctx context.Context, step models.
 }
 
 // ReturnsChildJobs returns false since this executes synchronously
-func (w *ASXDirectorInterestWorker) ReturnsChildJobs() bool {
+func (w *MarketDirectorInterestWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateConfig validates step configuration for asx_director_interest type
-func (w *ASXDirectorInterestWorker) ValidateConfig(step models.JobStep) error {
+// ValidateConfig validates step configuration for market_director_interest type
+func (w *MarketDirectorInterestWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("asx_director_interest step requires config")
+		return fmt.Errorf("market_director_interest step requires config")
 	}
 
 	// Validate required asx_code field
 	asxCode, ok := step.Config["asx_code"].(string)
 	if !ok || asxCode == "" {
-		return fmt.Errorf("asx_director_interest step requires 'asx_code' in config")
+		return fmt.Errorf("market_director_interest step requires 'asx_code' in config")
 	}
 
 	return nil
 }
 
 // fetchDirectorInterest fetches director interest filings from Markit Digital API
-func (w *ASXDirectorInterestWorker) fetchDirectorInterest(ctx context.Context, asxCode, period string, limit int) ([]DirectorInterestFiling, error) {
+func (w *MarketDirectorInterestWorker) fetchDirectorInterest(ctx context.Context, asxCode, period string, limit int) ([]DirectorInterestFiling, error) {
 	// Build Markit Digital API URL (same as announcements)
 	url := fmt.Sprintf("https://asx.api.markitdigital.com/asx-research/1.0/companies/%s/announcements",
 		strings.ToLower(asxCode))
@@ -344,14 +344,14 @@ func (w *ASXDirectorInterestWorker) fetchDirectorInterest(ctx context.Context, a
 }
 
 // extractDirectorName attempts to extract director name from headline
-func (w *ASXDirectorInterestWorker) extractDirectorName(headline string) string {
+func (w *MarketDirectorInterestWorker) extractDirectorName(headline string) string {
 	// Common patterns: "Appendix 3Y - John Smith", "Director Interest Notice - J Smith"
 	// For now, return empty - would need more sophisticated parsing
 	return ""
 }
 
 // calculateCutoffDate returns the cutoff date based on period string
-func (w *ASXDirectorInterestWorker) calculateCutoffDate(period string) time.Time {
+func (w *MarketDirectorInterestWorker) calculateCutoffDate(period string) time.Time {
 	now := time.Now()
 	switch period {
 	case "D1":
@@ -374,7 +374,7 @@ func (w *ASXDirectorInterestWorker) calculateCutoffDate(period string) time.Time
 }
 
 // createDocument creates a Document from a director interest filing
-func (w *ASXDirectorInterestWorker) createDocument(ctx context.Context, filing DirectorInterestFiling, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *MarketDirectorInterestWorker) createDocument(ctx context.Context, filing DirectorInterestFiling, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Director Interest Notice: %s\n\n", filing.Headline))
@@ -441,7 +441,7 @@ func (w *ASXDirectorInterestWorker) createDocument(ctx context.Context, filing D
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "asx_director_interest",
+		SourceType:      "market_director_interest",
 		SourceID:        filing.PDFURL,
 		URL:             filing.PDFURL,
 		Title:           fmt.Sprintf("ASX:%s Director Interest - %s", asxCode, filing.Headline),
@@ -458,7 +458,7 @@ func (w *ASXDirectorInterestWorker) createDocument(ctx context.Context, filing D
 }
 
 // createNoFilingsDocument creates a document indicating no director interest filings were found
-func (w *ASXDirectorInterestWorker) createNoFilingsDocument(ctx context.Context, asxCode string, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) *models.Document {
+func (w *MarketDirectorInterestWorker) createNoFilingsDocument(ctx context.Context, asxCode string, jobDef *models.JobDefinition, parentJobID string, stepConfig map[string]interface{}) *models.Document {
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Director Interest Analysis: ASX:%s\n\n", asxCode))
 	content.WriteString("**Status**: No director interest filings found in the specified period.\n\n")
@@ -497,7 +497,7 @@ func (w *ASXDirectorInterestWorker) createNoFilingsDocument(ctx context.Context,
 	now := time.Now()
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "asx_director_interest",
+		SourceType:      "market_director_interest",
 		SourceID:        fmt.Sprintf("no-filings-%s-%s", asxCode, now.Format("2006-01-02")),
 		Title:           fmt.Sprintf("ASX:%s Director Interest - No Recent Filings", asxCode),
 		ContentMarkdown: content.String(),

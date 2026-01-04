@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// MacroDataWorker - Fetches macroeconomic data (RBA rates, commodity prices)
+// MarketMacroWorker - Fetches macroeconomic data (RBA rates, commodity prices)
 // Uses public APIs to fetch interest rates and commodity price data
 // -----------------------------------------------------------------------
 
@@ -20,18 +20,18 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// MacroDataWorker fetches macroeconomic data and stores it as documents.
+// MarketMacroWorker fetches macroeconomic data and stores it as documents.
 // Supports: RBA cash rate, commodity prices (Iron Ore, Gold)
 // This worker executes synchronously (no child jobs).
-type MacroDataWorker struct {
+type MarketMacroWorker struct {
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
 }
 
-// Compile-time assertion: MacroDataWorker implements DefinitionWorker interface
-var _ interfaces.DefinitionWorker = (*MacroDataWorker)(nil)
+// Compile-time assertion: MarketMacroWorker implements DefinitionWorker interface
+var _ interfaces.DefinitionWorker = (*MarketMacroWorker)(nil)
 
 // MacroDataType represents the type of macro data to fetch
 type MacroDataType string
@@ -55,13 +55,13 @@ type MacroDataPoint struct {
 	Source      string
 }
 
-// NewMacroDataWorker creates a new macro data worker
-func NewMacroDataWorker(
+// NewMarketMacroWorker creates a new macro data worker
+func NewMarketMacroWorker(
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-) *MacroDataWorker {
-	return &MacroDataWorker{
+) *MarketMacroWorker {
+	return &MarketMacroWorker{
 		documentStorage: documentStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
@@ -71,13 +71,13 @@ func NewMacroDataWorker(
 	}
 }
 
-// GetType returns WorkerTypeMacroData for the DefinitionWorker interface
-func (w *MacroDataWorker) GetType() models.WorkerType {
-	return models.WorkerTypeMacroData
+// GetType returns WorkerTypeMarketMacro for the DefinitionWorker interface
+func (w *MarketMacroWorker) GetType() models.WorkerType {
+	return models.WorkerTypeMarketMacro
 }
 
 // Init performs the initialization/setup phase for a macro data step.
-func (w *MacroDataWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+func (w *MarketMacroWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -100,7 +100,7 @@ func (w *MacroDataWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			{
 				ID:   string(dataType),
 				Name: fmt.Sprintf("Fetch macro data: %s", dataType),
-				Type: "macro_data",
+				Type: "market_macro",
 				Config: map[string]interface{}{
 					"data_type": string(dataType),
 				},
@@ -118,7 +118,7 @@ func (w *MacroDataWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 
 // CreateJobs fetches macro data and stores it as documents.
 // Returns the step job ID since this executes synchronously.
-func (w *MacroDataWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+func (w *MarketMacroWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
 		var err error
@@ -233,12 +233,12 @@ func (w *MacroDataWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 }
 
 // ReturnsChildJobs returns false since this executes synchronously
-func (w *MacroDataWorker) ReturnsChildJobs() bool {
+func (w *MarketMacroWorker) ReturnsChildJobs() bool {
 	return false
 }
 
 // ValidateConfig validates step configuration for macro_data type
-func (w *MacroDataWorker) ValidateConfig(step models.JobStep) error {
+func (w *MarketMacroWorker) ValidateConfig(step models.JobStep) error {
 	// No required fields - data_type defaults to "all"
 	if step.Config != nil {
 		if dt, ok := step.Config["data_type"].(string); ok && dt != "" {
@@ -259,7 +259,7 @@ func (w *MacroDataWorker) ValidateConfig(step models.JobStep) error {
 }
 
 // fetchRBACashRate fetches the current RBA cash rate
-func (w *MacroDataWorker) fetchRBACashRate(ctx context.Context) ([]MacroDataPoint, error) {
+func (w *MarketMacroWorker) fetchRBACashRate(ctx context.Context) ([]MacroDataPoint, error) {
 	// Use a simple approach: hardcode current rate with date
 	// In production, this could scrape RBA website or use their data API
 	// RBA Statistics: https://www.rba.gov.au/statistics/cash-rate/
@@ -290,7 +290,7 @@ func (w *MacroDataWorker) fetchRBACashRate(ctx context.Context) ([]MacroDataPoin
 }
 
 // fetchRBAFromAPI attempts to fetch RBA cash rate from public data
-func (w *MacroDataWorker) fetchRBAFromAPI(ctx context.Context) (float64, error) {
+func (w *MarketMacroWorker) fetchRBAFromAPI(ctx context.Context) (float64, error) {
 	// RBA provides some data in JSON format
 	// This is a simplified implementation - in production, parse actual RBA data feeds
 	// Return error to trigger fallback for now
@@ -298,7 +298,7 @@ func (w *MacroDataWorker) fetchRBAFromAPI(ctx context.Context) (float64, error) 
 }
 
 // fetchCommodityPrice fetches commodity price data
-func (w *MacroDataWorker) fetchCommodityPrice(ctx context.Context, commodity string) ([]MacroDataPoint, error) {
+func (w *MarketMacroWorker) fetchCommodityPrice(ctx context.Context, commodity string) ([]MacroDataPoint, error) {
 	now := time.Now()
 
 	switch commodity {
@@ -362,20 +362,20 @@ type yahooFinanceQuote struct {
 }
 
 // fetchIronOrePrice fetches iron ore price from Yahoo Finance
-func (w *MacroDataWorker) fetchIronOrePrice(ctx context.Context) (float64, error) {
+func (w *MarketMacroWorker) fetchIronOrePrice(ctx context.Context) (float64, error) {
 	// BHP (iron ore proxy) or other commodity ETF
 	// Could also use SGX iron ore futures
 	return w.fetchYahooFinancePrice(ctx, "BHP.AX")
 }
 
 // fetchGoldPrice fetches gold price from Yahoo Finance
-func (w *MacroDataWorker) fetchGoldPrice(ctx context.Context) (float64, error) {
+func (w *MarketMacroWorker) fetchGoldPrice(ctx context.Context) (float64, error) {
 	// GC=F is gold futures, GLD is gold ETF
 	return w.fetchYahooFinancePrice(ctx, "GC=F")
 }
 
 // fetchYahooFinancePrice fetches a price from Yahoo Finance API
-func (w *MacroDataWorker) fetchYahooFinancePrice(ctx context.Context, symbol string) (float64, error) {
+func (w *MarketMacroWorker) fetchYahooFinancePrice(ctx context.Context, symbol string) (float64, error) {
 	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d", symbol)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -409,7 +409,7 @@ func (w *MacroDataWorker) fetchYahooFinancePrice(ctx context.Context, symbol str
 }
 
 // createDocument creates a Document from macro data points
-func (w *MacroDataWorker) createDocument(ctx context.Context, dataPoints []MacroDataPoint, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
+func (w *MarketMacroWorker) createDocument(ctx context.Context, dataPoints []MacroDataPoint, jobDef *models.JobDefinition, parentJobID string, outputTags []string) *models.Document {
 	now := time.Now()
 
 	// Build markdown content
@@ -508,7 +508,7 @@ func (w *MacroDataWorker) createDocument(ctx context.Context, dataPoints []Macro
 
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
-		SourceType:      "macro_data",
+		SourceType:      "market_macro",
 		SourceID:        fmt.Sprintf("macro-data-%s", now.Format("2006-01-02")),
 		Title:           fmt.Sprintf("Macroeconomic Data - %s", now.Format("2 Jan 2006")),
 		ContentMarkdown: content.String(),

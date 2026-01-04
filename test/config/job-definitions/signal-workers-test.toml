@@ -27,7 +27,7 @@ tickers = ["ASX:GNP", "ASX:BCN", "ASX:MYG"]
 # Step 1: Collect stock data for each ticker
 [[steps]]
 name = "collect_stock_data"
-type = "asx_stock_collector"
+type = "market_fundamentals"
 description = "Fetch comprehensive stock data from EODHD"
 [steps.config]
 ticker = "{ticker}"

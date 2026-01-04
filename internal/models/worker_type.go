@@ -33,14 +33,18 @@ const (
 	// Notification workers
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
-	// Financial data workers
-	WorkerTypeASXAnnouncements    WorkerType = "asx_announcements"     // Fetch ASX company announcements
-	WorkerTypeASXIndexData        WorkerType = "asx_index_data"        // Fetch ASX index data (XJO, XSO benchmarks)
-	WorkerTypeASXDirectorInterest WorkerType = "asx_director_interest" // Fetch ASX director interest (Appendix 3Y) filings
-	WorkerTypeASXStockCollector   WorkerType = "asx_stock_collector"   // Consolidated worker: price, analyst coverage, and historical financials
-	WorkerTypeASXStockData        WorkerType = "asx_stock_data"        // DEPRECATED: Use asx_stock_collector instead - alias for backward compatibility
-	WorkerTypeMacroData           WorkerType = "macro_data"            // Fetch macroeconomic data (RBA rates, commodity prices)
-	WorkerTypeCompetitorAnalysis  WorkerType = "competitor_analysis"   // Analyze competitors and spawn stock data jobs
+	// Financial/market data workers (market_ prefix)
+	WorkerTypeMarketAnnouncements    WorkerType = "market_announcements"     // Company announcements via Markit API
+	WorkerTypeMarketData             WorkerType = "market_data"              // Price data, technicals, indices via EODHD
+	WorkerTypeMarketNews             WorkerType = "market_news"              // Multi-exchange news via EODHD News API
+	WorkerTypeMarketDirectorInterest WorkerType = "market_director_interest" // Director interest (Appendix 3Y) filings
+	WorkerTypeMarketFundamentals     WorkerType = "market_fundamentals"      // Price, analyst coverage, financials via EODHD
+	WorkerTypeMarketMacro            WorkerType = "market_macro"             // Macroeconomic data (RBA rates, commodities)
+	WorkerTypeMarketCompetitor       WorkerType = "market_competitor"        // Competitor stock analysis
+	WorkerTypeMarketSignal           WorkerType = "market_signal"            // PBAS, VLI, Regime signals computation
+	WorkerTypeMarketPortfolio        WorkerType = "market_portfolio"         // Portfolio-level signal aggregation
+	WorkerTypeMarketAssessor         WorkerType = "market_assessor"          // AI-powered stock assessment
+	WorkerTypeMarketDataCollection   WorkerType = "market_data_collection"   // Deterministic market data collection
 
 	// Navexa portfolio workers
 	WorkerTypeNavexaPortfolios  WorkerType = "navexa_portfolios"  // Fetch all Navexa portfolios for the user
@@ -48,7 +52,7 @@ const (
 	WorkerTypeNavexaPerformance WorkerType = "navexa_performance" // Fetch P/L performance for a Navexa portfolio
 
 	// Testing workers
-	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors for testing logging, error tolerance, and job hierarchy
+	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors
 
 	// Email monitoring workers
 	WorkerTypeEmailWatcher WorkerType = "email_watcher" // Monitors IMAP inbox for job execution commands
@@ -57,15 +61,7 @@ const (
 	WorkerTypeJobTemplate WorkerType = "job_template" // Executes job templates with variable substitution
 
 	// AI-powered cognitive orchestration workers
-	WorkerTypeOrchestrator WorkerType = "orchestrator" // AI agent that dynamically plans and executes steps using LLM reasoning
-
-	// Signal computation workers
-	WorkerTypeSignalComputer  WorkerType = "signal_computer"  // Computes PBAS, VLI, Regime signals from stock data
-	WorkerTypePortfolioRollup WorkerType = "portfolio_rollup" // Aggregates ticker signals into portfolio-level analysis
-	WorkerTypeAIAssessor      WorkerType = "ai_assessor"      // AI-powered assessment of signals and portfolio
-
-	// Data collection workers
-	WorkerTypeStockDataCollection WorkerType = "stock_data_collection" // Deterministic stock data collection for analysis
+	WorkerTypeOrchestrator WorkerType = "orchestrator" // AI agent that dynamically plans and executes steps
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -75,13 +71,13 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
-		WorkerTypeAggregateSummary, WorkerTypeEmail, WorkerTypeASXAnnouncements,
-		WorkerTypeASXIndexData, WorkerTypeASXDirectorInterest, WorkerTypeASXStockCollector,
-		WorkerTypeASXStockData, WorkerTypeMacroData, WorkerTypeCompetitorAnalysis,
+		WorkerTypeAggregateSummary, WorkerTypeEmail,
+		WorkerTypeMarketAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
+		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
+		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
+		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection,
 		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
-		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
-		WorkerTypeSignalComputer, WorkerTypePortfolioRollup, WorkerTypeAIAssessor,
-		WorkerTypeStockDataCollection:
+		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
 	}
 	return false
@@ -112,13 +108,17 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary,
 		WorkerTypeEmail,
-		WorkerTypeASXAnnouncements,
-		WorkerTypeASXIndexData,
-		WorkerTypeASXDirectorInterest,
-		WorkerTypeASXStockCollector,
-		WorkerTypeASXStockData, // DEPRECATED: backward compatibility
-		WorkerTypeMacroData,
-		WorkerTypeCompetitorAnalysis,
+		WorkerTypeMarketAnnouncements,
+		WorkerTypeMarketData,
+		WorkerTypeMarketNews,
+		WorkerTypeMarketDirectorInterest,
+		WorkerTypeMarketFundamentals,
+		WorkerTypeMarketMacro,
+		WorkerTypeMarketCompetitor,
+		WorkerTypeMarketSignal,
+		WorkerTypeMarketPortfolio,
+		WorkerTypeMarketAssessor,
+		WorkerTypeMarketDataCollection,
 		WorkerTypeNavexaPortfolios,
 		WorkerTypeNavexaHoldings,
 		WorkerTypeNavexaPerformance,
@@ -126,9 +126,5 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,
 		WorkerTypeOrchestrator,
-		WorkerTypeSignalComputer,
-		WorkerTypePortfolioRollup,
-		WorkerTypeAIAssessor,
-		WorkerTypeStockDataCollection,
 	}
 }

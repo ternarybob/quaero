@@ -34,30 +34,30 @@ type JobDefinitionType string
 
 // JobDefinitionType constants
 const (
-	JobDefinitionTypeCrawler             JobDefinitionType = "crawler"
-	JobDefinitionTypeSummarizer          JobDefinitionType = "summarizer"
-	JobDefinitionTypeCustom              JobDefinitionType = "custom"
-	JobDefinitionTypePlaces              JobDefinitionType = "places"
-	JobDefinitionTypeAgent               JobDefinitionType = "agent"                 // Agent-powered document processing jobs
-	JobDefinitionTypeFetch               JobDefinitionType = "fetch"                 // API-based data collection with authentication (GitHub, etc.)
-	JobDefinitionTypeWebSearch           JobDefinitionType = "web_search"            // Gemini-powered web search with grounding
-	JobDefinitionTypeLocalDir            JobDefinitionType = "local_dir"             // Local filesystem directory indexing
-	JobDefinitionTypeCodeMap             JobDefinitionType = "code_map"              // Hierarchical code structure analysis
-	JobDefinitionTypeJobTemplate         JobDefinitionType = "job_template"          // Template orchestration - executes job templates with variable substitution
-	JobDefinitionTypeOrchestrator        JobDefinitionType = "orchestrator"          // AI-powered cognitive orchestration with dynamic planning
-	JobDefinitionTypeASXIndexData        JobDefinitionType = "asx_index_data"        // ASX index data fetching (XJO, XSO benchmarks)
-	JobDefinitionTypeASXAnnouncements    JobDefinitionType = "asx_announcements"     // ASX company announcements fetching
-	JobDefinitionTypeASXStockCollector   JobDefinitionType = "asx_stock_collector"   // Consolidated stock data: price, analyst coverage, and historical financials
-	JobDefinitionTypeASXStockData        JobDefinitionType = "asx_stock_data"        // DEPRECATED: Use asx_stock_collector instead - alias for backward compatibility
-	JobDefinitionTypeASXDirectorInterest JobDefinitionType = "asx_director_interest" // ASX director interest (Appendix 3Y) filings
-	JobDefinitionTypeMacroData           JobDefinitionType = "macro_data"            // Macroeconomic data (RBA rates, commodity prices)
-	JobDefinitionTypeCompetitorAnalysis  JobDefinitionType = "competitor_analysis"   // Competitor analysis and stock data
-	JobDefinitionTypeNavexaPortfolios    JobDefinitionType = "navexa_portfolios"     // Fetch all Navexa portfolios for the user
-	JobDefinitionTypeNavexaHoldings      JobDefinitionType = "navexa_holdings"       // Fetch holdings for a Navexa portfolio
-	JobDefinitionTypeNavexaPerformance   JobDefinitionType = "navexa_performance"    // Fetch P/L performance for a Navexa portfolio
-	JobDefinitionTypeSignalComputer      JobDefinitionType = "signal_computer"       // Computes PBAS, VLI, Regime signals from stock data
-	JobDefinitionTypePortfolioRollup     JobDefinitionType = "portfolio_rollup"      // Aggregates ticker signals into portfolio-level analysis
-	JobDefinitionTypeAIAssessor          JobDefinitionType = "ai_assessor"           // AI-powered assessment of signals and portfolio
+	JobDefinitionTypeCrawler                JobDefinitionType = "crawler"
+	JobDefinitionTypeSummarizer             JobDefinitionType = "summarizer"
+	JobDefinitionTypeCustom                 JobDefinitionType = "custom"
+	JobDefinitionTypePlaces                 JobDefinitionType = "places"
+	JobDefinitionTypeAgent                  JobDefinitionType = "agent"                    // Agent-powered document processing jobs
+	JobDefinitionTypeFetch                  JobDefinitionType = "fetch"                    // API-based data collection with authentication (GitHub, etc.)
+	JobDefinitionTypeWebSearch              JobDefinitionType = "web_search"               // Gemini-powered web search with grounding
+	JobDefinitionTypeLocalDir               JobDefinitionType = "local_dir"                // Local filesystem directory indexing
+	JobDefinitionTypeCodeMap                JobDefinitionType = "code_map"                 // Hierarchical code structure analysis
+	JobDefinitionTypeJobTemplate            JobDefinitionType = "job_template"             // Template orchestration - executes job templates with variable substitution
+	JobDefinitionTypeOrchestrator           JobDefinitionType = "orchestrator"             // AI-powered cognitive orchestration with dynamic planning
+	JobDefinitionTypeMarketAnnouncements    JobDefinitionType = "market_announcements"     // Company announcements via Markit API
+	JobDefinitionTypeMarketFundamentals     JobDefinitionType = "market_fundamentals"      // Consolidated: price, analyst coverage, historical financials
+	JobDefinitionTypeMarketDirectorInterest JobDefinitionType = "market_director_interest" // Director interest (Appendix 3Y) filings
+	JobDefinitionTypeMarketMacro            JobDefinitionType = "market_macro"             // Macroeconomic data (RBA rates, commodity prices)
+	JobDefinitionTypeMarketCompetitor       JobDefinitionType = "market_competitor"        // Competitor analysis and stock data
+	JobDefinitionTypeMarketSignal           JobDefinitionType = "market_signal"            // Computes PBAS, VLI, Regime signals from stock data
+	JobDefinitionTypeMarketPortfolio        JobDefinitionType = "market_portfolio"         // Aggregates ticker signals into portfolio-level analysis
+	JobDefinitionTypeMarketAssessor         JobDefinitionType = "market_assessor"          // AI-powered assessment of signals and portfolio
+	JobDefinitionTypeMarketNews             JobDefinitionType = "market_news"              // Multi-exchange news via EODHD News API
+	JobDefinitionTypeMarketDataCollection   JobDefinitionType = "market_data_collection"   // Deterministic market data collection
+	JobDefinitionTypeNavexaPortfolios       JobDefinitionType = "navexa_portfolios"        // Fetch all Navexa portfolios for the user
+	JobDefinitionTypeNavexaHoldings         JobDefinitionType = "navexa_holdings"          // Fetch holdings for a Navexa portfolio
+	JobDefinitionTypeNavexaPerformance      JobDefinitionType = "navexa_performance"       // Fetch P/L performance for a Navexa portfolio
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -75,11 +75,12 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces,
 		JobDefinitionTypeAgent, JobDefinitionTypeFetch, JobDefinitionTypeWebSearch,
 		JobDefinitionTypeLocalDir, JobDefinitionTypeCodeMap, JobDefinitionTypeJobTemplate,
-		JobDefinitionTypeOrchestrator, JobDefinitionTypeASXIndexData, JobDefinitionTypeASXAnnouncements,
-		JobDefinitionTypeASXStockCollector, JobDefinitionTypeASXStockData, JobDefinitionTypeASXDirectorInterest,
-		JobDefinitionTypeMacroData, JobDefinitionTypeCompetitorAnalysis,
-		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
-		JobDefinitionTypeSignalComputer, JobDefinitionTypePortfolioRollup, JobDefinitionTypeAIAssessor:
+		JobDefinitionTypeOrchestrator, JobDefinitionTypeMarketAnnouncements,
+		JobDefinitionTypeMarketFundamentals, JobDefinitionTypeMarketDirectorInterest,
+		JobDefinitionTypeMarketMacro, JobDefinitionTypeMarketCompetitor, JobDefinitionTypeMarketSignal,
+		JobDefinitionTypeMarketPortfolio, JobDefinitionTypeMarketAssessor, JobDefinitionTypeMarketNews,
+		JobDefinitionTypeMarketDataCollection,
+		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance:
 		return true
 	default:
 		return false
@@ -224,7 +225,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, asx_index_data, asx_announcements, asx_stock_collector, asx_director_interest, macro_data, competitor_analysis)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data_collection)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -323,7 +324,7 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, asx_announcements, asx_index_data, asx_director_interest, asx_stock_collector, macro_data, competitor_analysis, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, market_announcements, market_data, market_news, market_director_interest, market_fundamentals, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_data_collection, navexa_portfolios, navexa_holdings, navexa_performance, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
 	}
 
 	// Validate error strategy if provided
