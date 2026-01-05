@@ -27,9 +27,9 @@ import (
 // Supports any exchange via the EODHD API.
 type MarketDataWorker struct {
 	documentStorage interfaces.DocumentStorage
+	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
-	eodhdClient     *eodhd.Client
 }
 
 // Compile-time assertion
@@ -85,15 +85,15 @@ type MarketOHLCV struct {
 // NewMarketDataWorker creates a new market data worker
 func NewMarketDataWorker(
 	documentStorage interfaces.DocumentStorage,
+	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-	eodhdClient *eodhd.Client,
 ) *MarketDataWorker {
 	return &MarketDataWorker{
 		documentStorage: documentStorage,
+		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
-		eodhdClient:     eodhdClient,
 	}
 }
 
@@ -280,8 +280,34 @@ func (w *MarketDataWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
+// getEODHDAPIKey retrieves the EODHD API key from KV storage
+func (w *MarketDataWorker) getEODHDAPIKey(ctx context.Context) string {
+	if w.kvStorage == nil {
+		w.logger.Warn().Msg("EODHD API key lookup failed: kvStorage is nil")
+		return ""
+	}
+	apiKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "eodhd_api_key", "")
+	if err != nil {
+		w.logger.Warn().Err(err).Str("key_name", "eodhd_api_key").Msg("Failed to resolve EODHD API key")
+		return ""
+	}
+	if apiKey == "" {
+		w.logger.Warn().Str("key_name", "eodhd_api_key").Msg("EODHD API key is empty")
+	}
+	return apiKey
+}
+
 // fetchMarketData fetches EOD data from EODHD API
 func (w *MarketDataWorker) fetchMarketData(ctx context.Context, ticker common.Ticker, period string) (*MarketData, error) {
+	// Get API key from KV store
+	apiKey := w.getEODHDAPIKey(ctx)
+	if apiKey == "" {
+		return nil, fmt.Errorf("EODHD API key 'eodhd_api_key' not configured in KV store")
+	}
+
+	// Create EODHD client with resolved API key
+	eodhdClient := eodhd.NewClient(apiKey, eodhd.WithLogger(w.logger))
+
 	marketData := &MarketData{
 		Ticker:      ticker,
 		Symbol:      ticker.Code,
@@ -311,7 +337,7 @@ func (w *MarketDataWorker) fetchMarketData(ctx context.Context, ticker common.Ti
 
 	// Fetch EOD data
 	symbol := ticker.EODHDSymbol()
-	eodData, err := w.eodhdClient.GetEOD(ctx, symbol,
+	eodData, err := eodhdClient.GetEOD(ctx, symbol,
 		eodhd.WithDateRange(from, to),
 		eodhd.WithOrder("a"), // Ascending order
 	)

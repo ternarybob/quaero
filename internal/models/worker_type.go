@@ -45,6 +45,7 @@ const (
 	WorkerTypeMarketPortfolio        WorkerType = "market_portfolio"         // Portfolio-level signal aggregation
 	WorkerTypeMarketAssessor         WorkerType = "market_assessor"          // AI-powered stock assessment
 	WorkerTypeMarketDataCollection   WorkerType = "market_data_collection"   // Deterministic market data collection
+	WorkerTypeMarketConsolidate      WorkerType = "market_consolidate"       // Consolidate tagged documents (no AI)
 
 	// Navexa portfolio workers
 	WorkerTypeNavexaPortfolios  WorkerType = "navexa_portfolios"  // Fetch all Navexa portfolios for the user
@@ -75,7 +76,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeMarketAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
 		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
-		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection,
+		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
 		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
 		return true
@@ -119,6 +120,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor,
 		WorkerTypeMarketDataCollection,
+		WorkerTypeMarketConsolidate,
 		WorkerTypeNavexaPortfolios,
 		WorkerTypeNavexaHoldings,
 		WorkerTypeNavexaPerformance,

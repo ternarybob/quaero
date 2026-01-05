@@ -28,6 +28,7 @@ This document describes all queue workers in `internal/queue/workers/`. Each wor
   - [Places Worker](#places-worker)
   - [Portfolio Rollup Worker](#portfolio-rollup-worker)
   - [Signal Computer Worker](#signal-computer-worker)
+  - [Market Consolidate Worker](#market-consolidate-worker)
   - [Summary Worker](#summary-worker)
   - [Test Job Generator Worker](#test-job-generator-worker)
   - [Web Search Worker](#web-search-worker)
@@ -542,10 +543,15 @@ filter_tags = ["devops-candidate"]
 **Step Config**:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `asx_code` | string | Yes | ASX company code (e.g., "GNP", "BHP") |
+| `asx_code` | string | No* | ASX company code (e.g., "GNP", "BHP") |
 | `period` | string | No | Time period for announcements (default: "Y1" = 1 year). Options: D1 (1 day), W1 (1 week), M1 (1 month), M3 (3 months), M6 (6 months), Y1 (1 year), Y5 (5 years) |
-| `limit` | int | No | Maximum number of announcements to fetch (default: 50) |
+| `limit` | int | No | Maximum number of announcements to fetch per ticker (default: 50) |
 | `output_tags` | []string | No | Additional tags to apply to output documents |
+
+*Either `asx_code` in step config OR tickers from `[config].variables` are required.
+
+**Multi-Ticker Support**:
+When job-level variables are defined with `ticker` or `asx_code` keys, the worker processes all tickers sequentially. Uses "continue on error" behavior - if one ticker fails, others still process.
 
 **Period Options**:
 | Value | Description | Use Case |
@@ -605,8 +611,9 @@ asx_code = "GNP"
 period = "Y1"
 ```
 
-#### Example Job Definition
+#### Example Job Definitions
 
+**Single Ticker**:
 ```toml
 [step.fetch_announcements]
 type = "asx_announcements"
@@ -616,6 +623,23 @@ asx_code = "GNP"
 period = "M6"
 limit = 20
 output_tags = ["asx-gnp-search", "gnp"]
+```
+
+**Multi-Ticker (from variables)**:
+```toml
+[config]
+variables = [
+    { ticker = "EXR" },
+    { ticker = "GNP" },
+    { ticker = "SKS" },
+]
+
+[step.fetch_announcements]
+type = "asx_announcements"
+description = "Fetch ASX announcements for all watchlist stocks"
+on_error = "continue"
+period = "Y1"
+# asx_code is inherited from config.variables
 ```
 
 ---
@@ -1428,6 +1452,46 @@ asx_code = "GNP"
 source_tag_prefix = "asx-stock-data"
 output_tags = ["portfolio-analysis"]
 benchmark_returns = { "3m" = 5.0, "6m" = 10.0 }
+```
+
+---
+
+### Market Consolidate Worker
+
+**File**: `market_consolidate_worker.go`
+
+**Purpose**: Consolidates tagged documents into a single output document. No AI involved - pure document merging with alphabetical sorting by ticker.
+
+**Interfaces**: DefinitionWorker
+
+**Job Type**: N/A (inline execution only)
+
+#### Inputs
+
+**Step Config**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `input_tags` | []string | Yes | Tags to search for source documents |
+| `output_tags` | []string | No | Tags to apply to consolidated output document |
+| `title` | string | No | Title for consolidated document (default: "Consolidated Documents") |
+
+#### Outputs
+
+- Creates single consolidated markdown document
+- Documents sorted alphabetically by ticker tag
+- Tags: `[...output_tags, "date:YYYY-MM-DD"]`
+- Metadata includes: `source_count`, `source_tags`, `tickers`, `consolidation`, `consolidate_date`
+
+#### Example Job Definition
+
+```toml
+[step.consolidate]
+type = "market_consolidate"
+description = "Consolidate announcement summaries"
+depends = "fetch_announcements"
+input_tags = ["asx-announcement-summary"]
+output_tags = ["announcements-consolidated"]
+title = "ASX Announcements - Watchlist Summary"
 ```
 
 ---

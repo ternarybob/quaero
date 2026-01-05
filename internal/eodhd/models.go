@@ -319,3 +319,127 @@ type FinancialStatement struct {
 	Quarterly map[string]map[string]interface{} `json:"quarterly"`
 	Yearly    map[string]map[string]interface{} `json:"yearly"`
 }
+
+// ExchangeDetailsResponse represents the response from /api/exchange-details/{code} endpoint.
+type ExchangeDetailsResponse struct {
+	Code         string            `json:"Code"`
+	Name         string            `json:"Name"`
+	OperatingMIC string            `json:"OperatingMIC"`
+	Country      string            `json:"Country"`
+	Currency     string            `json:"Currency"`
+	Timezone     string            `json:"Timezone"`
+	TradingHours string            `json:"TradingHours"`     // e.g., "10:00 - 16:00"
+	Holidays     map[string]string `json:"ExchangeHolidays"` // date -> name
+	IsOpen       bool              `json:"isOpen"`
+}
+
+// ExchangeMetadata represents normalized exchange information for staleness checking.
+type ExchangeMetadata struct {
+	// Code is the exchange code (e.g., "AU", "US", "LSE")
+	Code string `json:"code"`
+	// Name is the human-readable exchange name
+	Name string `json:"name"`
+	// Timezone is the IANA timezone (e.g., "Australia/Sydney", "America/New_York")
+	Timezone string `json:"timezone"`
+	// CloseTime is the market close time in "HH:MM" format, local to exchange timezone
+	CloseTime string `json:"close_time"`
+	// DataDelayMinutes is the delay after close before EOD data is available
+	DataDelayMinutes int `json:"data_delay_minutes"`
+	// WorkingDays are the days the market is open (0=Sunday, 1=Monday, ..., 6=Saturday)
+	WorkingDays []time.Weekday `json:"working_days"`
+	// Holidays are dates when the market is closed (in UTC, date only)
+	Holidays []time.Time `json:"holidays"`
+	// LastFetched is when this metadata was last refreshed from the API
+	LastFetched time.Time `json:"last_fetched"`
+}
+
+// DefaultWorkingDays returns standard Monday-Friday working days.
+func DefaultWorkingDays() []time.Weekday {
+	return []time.Weekday{
+		time.Monday,
+		time.Tuesday,
+		time.Wednesday,
+		time.Thursday,
+		time.Friday,
+	}
+}
+
+// DefaultDataDelays maps exchange codes to their typical data availability delay in minutes.
+// US markets: 15 minutes after close
+// Most other markets: 180 minutes (3 hours) after close
+// OTC/PINK/Mutual funds: 720 minutes (next morning)
+var DefaultDataDelays = map[string]int{
+	// US exchanges - 15 minute delay
+	"US":     15,
+	"NYSE":   15,
+	"NASDAQ": 15,
+	"AMEX":   15,
+	"BATS":   15,
+	"ARCA":   15,
+
+	// OTC/PINK/Mutual funds - next morning (720 min = 12 hours)
+	"PINK":  720,
+	"OTCBB": 720,
+	"NMFQS": 720, // Mutual funds
+
+	// Crypto - real-time, minimal delay
+	"CC": 5,
+
+	// Forex - real-time, minimal delay
+	"FOREX": 5,
+
+	// Default for most exchanges - 180 minutes (3 hours)
+	"AU":    180, // ASX
+	"LSE":   180, // London
+	"XETRA": 180, // Frankfurt
+	"PA":    180, // Paris
+	"TO":    180, // Toronto
+	"HK":    180, // Hong Kong
+	"TYO":   180, // Tokyo
+	"SG":    180, // Singapore
+}
+
+// GetDataDelay returns the data delay for an exchange code.
+// Returns 180 minutes as default for unknown exchanges.
+func GetDataDelay(exchangeCode string) int {
+	if delay, ok := DefaultDataDelays[exchangeCode]; ok {
+		return delay
+	}
+	return 180 // Default 3 hours for unknown exchanges
+}
+
+// DefaultExchangeTimezones maps exchange codes to their IANA timezones.
+var DefaultExchangeTimezones = map[string]string{
+	"AU":     "Australia/Sydney",
+	"US":     "America/New_York",
+	"NYSE":   "America/New_York",
+	"NASDAQ": "America/New_York",
+	"AMEX":   "America/New_York",
+	"LSE":    "Europe/London",
+	"XETRA":  "Europe/Berlin",
+	"PA":     "Europe/Paris",
+	"TO":     "America/Toronto",
+	"HK":     "Asia/Hong_Kong",
+	"TYO":    "Asia/Tokyo",
+	"SG":     "Asia/Singapore",
+	"CC":     "UTC",
+	"FOREX":  "UTC",
+}
+
+// DefaultCloseTime maps exchange codes to their typical close times (local time "HH:MM").
+var DefaultCloseTime = map[string]string{
+	"AU":     "16:00",
+	"US":     "16:00",
+	"NYSE":   "16:00",
+	"NASDAQ": "16:00",
+	"AMEX":   "16:00",
+	"LSE":    "16:30",
+	"XETRA":  "17:30",
+	"PA":     "17:30",
+	"TO":     "16:00",
+	"HK":     "16:00",
+	"TYO":    "15:00",
+	"SG":     "17:00",
+	"CC":     "23:59", // Crypto trades 24/7
+	"FOREX":  "17:00", // Forex closes Friday 5pm NY time
+}

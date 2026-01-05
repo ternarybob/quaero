@@ -24,6 +24,15 @@ var ExchangeToSuffix = map[string]string{
 	"LSE":    ".LSE",
 	"TSX":    ".TO",
 	"XETRA":  ".XETRA",
+	"INDX":   ".INDX", // For indices like AXJO (ASX 200)
+}
+
+// IndexCodeToEODHD maps common benchmark index codes to EODHD index symbols.
+// These are used with the INDX exchange, e.g., "XJO" -> "AXJO" -> "AXJO.INDX"
+var IndexCodeToEODHD = map[string]string{
+	"XJO": "AXJO", // S&P/ASX 200
+	"XSO": "AXSO", // S&P/ASX Small Ordinaries
+	"XAO": "AORD", // All Ordinaries
 }
 
 // ParseTicker parses an exchange-qualified ticker string.
@@ -133,5 +142,85 @@ func ParseTickersFromInterface(value interface{}) []Ticker {
 		}
 	}
 
+	return result
+}
+
+// EODHDSuffixToExchange maps EODHD API suffixes back to exchange-details API codes.
+// These are the suffixes used in EODHD symbols (e.g., "CBA.AU" -> "AU").
+var EODHDSuffixToExchange = map[string]string{
+	"AU":    "AU",    // Australia (ASX)
+	"US":    "US",    // United States (NYSE, NASDAQ, AMEX)
+	"LSE":   "LSE",   // London Stock Exchange
+	"XETRA": "XETRA", // Frankfurt Stock Exchange
+	"TO":    "TO",    // Toronto Stock Exchange
+	"PA":    "PA",    // Paris (Euronext)
+	"HK":    "HK",    // Hong Kong
+	"SG":    "SG",    // Singapore
+	"TYO":   "TYO",   // Tokyo
+	"CC":    "CC",    // Cryptocurrency
+	"FOREX": "FOREX", // Foreign Exchange
+	"INDX":  "INDX",  // Indices
+}
+
+// ParseEODHDTicker parses an EODHD-format ticker string.
+// EODHD format: CODE.EXCHANGE (e.g., "CBA.AU", "AAPL.US", "BTC-USD.CC")
+// Returns a Ticker with Exchange set to the EODHD exchange suffix.
+//
+// Examples:
+//   - "CBA.AU" -> Exchange="AU", Code="CBA"
+//   - "AAPL.US" -> Exchange="US", Code="AAPL"
+//   - "BTC-USD.CC" -> Exchange="CC", Code="BTC-USD"
+//   - "EURUSD.FOREX" -> Exchange="FOREX", Code="EURUSD"
+func ParseEODHDTicker(symbol string) Ticker {
+	symbol = strings.TrimSpace(symbol)
+	if symbol == "" {
+		return Ticker{}
+	}
+
+	// Find the last dot to split code and exchange
+	// Use LastIndex because codes can contain dots (e.g., "BRK.B.US")
+	lastDot := strings.LastIndex(symbol, ".")
+	if lastDot < 0 || lastDot == len(symbol)-1 {
+		// No dot or dot at end - invalid format
+		return Ticker{}
+	}
+
+	code := symbol[:lastDot]
+	exchange := strings.ToUpper(symbol[lastDot+1:])
+
+	if code == "" || exchange == "" {
+		return Ticker{}
+	}
+
+	return Ticker{
+		Exchange: exchange,
+		Code:     strings.ToUpper(code),
+		Raw:      symbol,
+	}
+}
+
+// DetailsExchangeCode returns the exchange code to use with the EODHD
+// exchange-details API endpoint. For most exchanges this is the same
+// as the Exchange field, but some may need mapping.
+func (t Ticker) DetailsExchangeCode() string {
+	if t.Exchange == "" {
+		return ""
+	}
+	// Check if there's a specific mapping
+	if mapped, ok := EODHDSuffixToExchange[t.Exchange]; ok {
+		return mapped
+	}
+	// Return as-is for unknown exchanges
+	return t.Exchange
+}
+
+// ParseEODHDTickers parses a list of EODHD-format ticker strings.
+func ParseEODHDTickers(symbols []string) []Ticker {
+	result := make([]Ticker, 0, len(symbols))
+	for _, s := range symbols {
+		if parsed := ParseEODHDTicker(s); parsed.Code != "" {
+			result = append(result, parsed)
+		}
+	}
 	return result
 }

@@ -12,10 +12,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
-	"github.com/ternarybob/quaero/internal/eodhd"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -26,6 +26,7 @@ import (
 // Input sources:
 // - config.variables[] - array of { ticker, portfolio? }
 // - filter_tags - find tickers from tagged documents (e.g., navexa-holdings)
+// - config.workers[] - array of worker names to run (default: all)
 type MarketDataCollectionWorker struct {
 	documentStorage interfaces.DocumentStorage
 	searchService   interfaces.SearchService
@@ -33,9 +34,11 @@ type MarketDataCollectionWorker struct {
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	// Workers for inline execution (no child jobs)
-	fundamentalsWorker  *MarketFundamentalsWorker
-	announcementsWorker *MarketAnnouncementsWorker
-	marketDataWorker    *MarketDataWorker // For index/benchmark data via EODHD
+	fundamentalsWorker     *MarketFundamentalsWorker
+	announcementsWorker    *MarketAnnouncementsWorker
+	marketDataWorker       *MarketDataWorker // For index/benchmark data via EODHD
+	directorInterestWorker *MarketDirectorInterestWorker
+	competitorWorker       *MarketCompetitorWorker
 }
 
 // Compile-time assertion
@@ -48,24 +51,28 @@ func NewMarketDataCollectionWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-	eodhdClient *eodhd.Client,
 	debugEnabled bool,
 ) *MarketDataCollectionWorker {
 	// Create embedded workers for inline execution
 	// Note: announcementsWorker gets nil providerFactory as AI summary is not needed in collection mode
+	// API keys are resolved at runtime from KV store by each worker
 	fundamentalsWorker := NewMarketFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
 	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled, nil)
-	marketDataWorker := NewMarketDataWorker(documentStorage, logger, jobMgr, eodhdClient)
+	marketDataWorker := NewMarketDataWorker(documentStorage, kvStorage, logger, jobMgr)
+	directorInterestWorker := NewMarketDirectorInterestWorker(documentStorage, logger, jobMgr)
+	competitorWorker := NewMarketCompetitorWorker(documentStorage, kvStorage, jobMgr, logger, debugEnabled)
 
 	return &MarketDataCollectionWorker{
-		documentStorage:     documentStorage,
-		searchService:       searchService,
-		kvStorage:           kvStorage,
-		logger:              logger,
-		jobMgr:              jobMgr,
-		fundamentalsWorker:  fundamentalsWorker,
-		announcementsWorker: announcementsWorker,
-		marketDataWorker:    marketDataWorker,
+		documentStorage:        documentStorage,
+		searchService:          searchService,
+		kvStorage:              kvStorage,
+		logger:                 logger,
+		jobMgr:                 jobMgr,
+		fundamentalsWorker:     fundamentalsWorker,
+		announcementsWorker:    announcementsWorker,
+		marketDataWorker:       marketDataWorker,
+		directorInterestWorker: directorInterestWorker,
+		competitorWorker:       competitorWorker,
 	}
 }
 
@@ -139,6 +146,25 @@ func (w *MarketDataCollectionWorker) Init(ctx context.Context, step models.JobSt
 		announcementPeriod = period
 	}
 
+	// Extract workers to run (default: fundamentals + announcements + market_data)
+	// Supported: market_fundamentals, market_data, market_announcements, market_director_interest, market_competitor
+	activeWorkers := map[string]bool{
+		"market_fundamentals":      true,
+		"market_data":              true,
+		"market_announcements":     true,
+		"market_director_interest": false,
+		"market_competitor":        false,
+	}
+	if workers, ok := stepConfig["workers"].([]interface{}); ok && len(workers) > 0 {
+		// If workers are explicitly specified, use only those
+		activeWorkers = map[string]bool{}
+		for _, worker := range workers {
+			if s, ok := worker.(string); ok && s != "" {
+				activeWorkers[s] = true
+			}
+		}
+	}
+
 	return &interfaces.WorkerInitResult{
 		WorkItems:            workItems,
 		TotalCount:           len(tickers),
@@ -149,6 +175,7 @@ func (w *MarketDataCollectionWorker) Init(ctx context.Context, step models.JobSt
 			"benchmark_codes":     benchmarkCodes,
 			"data_period":         dataPeriod,
 			"announcement_period": announcementPeriod,
+			"active_workers":      activeWorkers,
 			"step_config":         stepConfig,
 		},
 	}, nil
@@ -195,7 +222,30 @@ func (w *MarketDataCollectionWorker) collectTickers(ctx context.Context, stepCon
 }
 
 // extractTickersFromVariables extracts tickers from a config map
+// Supports both "variables" array (objects with ticker/asx_code) and "tickers" array (strings)
 func (w *MarketDataCollectionWorker) extractTickersFromVariables(config map[string]interface{}, tickerSet map[string]bool) {
+	// Source 1: Direct "tickers" array (e.g., ["ASX:BHP", "ASX:CSL"])
+	if tickers, ok := config["tickers"].([]interface{}); ok {
+		for _, t := range tickers {
+			if ticker, ok := t.(string); ok && ticker != "" {
+				parsed := common.ParseTicker(ticker)
+				if parsed.Code != "" {
+					tickerSet[strings.ToUpper(parsed.Code)] = true
+				}
+			}
+		}
+	}
+	// Also support []string directly
+	if tickers, ok := config["tickers"].([]string); ok {
+		for _, ticker := range tickers {
+			parsed := common.ParseTicker(ticker)
+			if parsed.Code != "" {
+				tickerSet[strings.ToUpper(parsed.Code)] = true
+			}
+		}
+	}
+
+	// Source 2: "variables" array (objects with ticker or asx_code keys)
 	vars, ok := config["variables"].([]interface{})
 	if !ok {
 		return
@@ -295,6 +345,7 @@ func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models
 	benchmarkCodes, _ := initResult.Metadata["benchmark_codes"].([]string)
 	dataPeriod, _ := initResult.Metadata["data_period"].(string)
 	announcementPeriod, _ := initResult.Metadata["announcement_period"].(string)
+	activeWorkers, _ := initResult.Metadata["active_workers"].(map[string]bool)
 
 	w.logger.Info().
 		Str("step_id", stepID).
@@ -306,72 +357,145 @@ func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models
 
 	var totalDocs int
 	var errors []string
+	var benchmarkWarnings []string
 
 	// Fetch benchmark index data first via EODHD (market_data worker)
-	for _, code := range benchmarkCodes {
-		// Use EODHD index format: XJO.INDX for ASX indices
-		ticker := fmt.Sprintf("ASX:%s", code)
-		indexStep := models.JobStep{
-			Name:        fmt.Sprintf("market_data_%s", code),
-			Type:        models.WorkerTypeMarketData,
-			Description: fmt.Sprintf("Fetch index data for %s via EODHD", code),
-			Config: map[string]interface{}{
-				"ticker":      ticker,
-				"period":      dataPeriod,
-				"output_tags": []string{"stock-data-collected", "benchmark", code},
-			},
-		}
-		_, err := w.marketDataWorker.CreateJobs(ctx, indexStep, jobDef, stepID, nil)
-		if err != nil {
-			w.logger.Error().Err(err).Str("code", code).Msg("Failed to fetch index data")
-			errors = append(errors, fmt.Sprintf("index %s: %v", code, err))
-		} else {
-			totalDocs++
-			w.logger.Debug().Str("code", code).Msg("Fetched index data via EODHD")
+	// Note: Benchmark fetching is optional - stock data collection continues even if benchmarks fail
+	if activeWorkers["market_data"] {
+		for _, code := range benchmarkCodes {
+			// Map common benchmark codes to EODHD index symbols (e.g., XJO -> AXJO)
+			eodhdCode := code
+			if mapped, ok := common.IndexCodeToEODHD[code]; ok {
+				eodhdCode = mapped
+			}
+			// Use EODHD index format: AXJO.INDX for ASX indices
+			ticker := fmt.Sprintf("INDX:%s", eodhdCode)
+			indexStep := models.JobStep{
+				Name:        fmt.Sprintf("market_data_%s", code),
+				Type:        models.WorkerTypeMarketData,
+				Description: fmt.Sprintf("Fetch index data for %s via EODHD", code),
+				Config: map[string]interface{}{
+					"ticker":      ticker,
+					"period":      dataPeriod,
+					"output_tags": []string{"stock-data-collected", "benchmark", code},
+				},
+			}
+			_, err := w.marketDataWorker.CreateJobs(ctx, indexStep, jobDef, stepID, nil)
+			if err != nil {
+				// Benchmark failures are warnings, not errors - don't block stock data collection
+				w.logger.Warn().Err(err).Str("code", code).Msg("Failed to fetch benchmark index data (continuing)")
+				benchmarkWarnings = append(benchmarkWarnings, fmt.Sprintf("benchmark %s: %v", code, err))
+			} else {
+				totalDocs++
+				w.logger.Debug().Str("code", code).Msg("Fetched index data via EODHD")
+			}
 		}
 	}
 
-	// Fetch stock data and announcements for each ticker
+	// Fetch data for each ticker based on active workers
 	for _, ticker := range tickers {
-		// Stock collector (inline)
-		stockStep := models.JobStep{
-			Name:        fmt.Sprintf("stock_collector_%s", ticker),
-			Type:        models.WorkerTypeMarketFundamentals,
-			Description: fmt.Sprintf("Fetch stock data for %s", ticker),
-			Config: map[string]interface{}{
-				"asx_code":    ticker,
-				"period":      dataPeriod,
-				"output_tags": []string{"stock-data-collected", ticker},
-			},
-		}
-		_, err := w.fundamentalsWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
-		if err != nil {
-			w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch stock data")
-			errors = append(errors, fmt.Sprintf("stock %s: %v", ticker, err))
-		} else {
-			totalDocs++
-			w.logger.Debug().Str("ticker", ticker).Msg("Fetched stock data")
+		// Stock fundamentals (inline)
+		if activeWorkers["market_fundamentals"] {
+			stockStep := models.JobStep{
+				Name:        fmt.Sprintf("stock_collector_%s", ticker),
+				Type:        models.WorkerTypeMarketFundamentals,
+				Description: fmt.Sprintf("Fetch stock data for %s", ticker),
+				Config: map[string]interface{}{
+					"asx_code":    ticker,
+					"period":      dataPeriod,
+					"output_tags": []string{"stock-data-collected", ticker},
+				},
+			}
+			_, err := w.fundamentalsWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
+			if err != nil {
+				w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch stock data")
+				errors = append(errors, fmt.Sprintf("stock %s: %v", ticker, err))
+			} else {
+				totalDocs++
+				w.logger.Debug().Str("ticker", ticker).Msg("Fetched stock data")
+			}
 		}
 
 		// Announcements (inline)
-		announcementStep := models.JobStep{
-			Name:        fmt.Sprintf("announcements_%s", ticker),
-			Type:        models.WorkerTypeMarketAnnouncements,
-			Description: fmt.Sprintf("Fetch announcements for %s", ticker),
-			Config: map[string]interface{}{
-				"asx_code":    ticker,
-				"period":      announcementPeriod,
-				"output_tags": []string{"stock-data-collected", ticker},
-			},
+		if activeWorkers["market_announcements"] {
+			announcementStep := models.JobStep{
+				Name:        fmt.Sprintf("announcements_%s", ticker),
+				Type:        models.WorkerTypeMarketAnnouncements,
+				Description: fmt.Sprintf("Fetch announcements for %s", ticker),
+				Config: map[string]interface{}{
+					"asx_code":    ticker,
+					"period":      announcementPeriod,
+					"output_tags": []string{"stock-data-collected", ticker},
+				},
+			}
+			_, err := w.announcementsWorker.CreateJobs(ctx, announcementStep, jobDef, stepID, nil)
+			if err != nil {
+				w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch announcements")
+				errors = append(errors, fmt.Sprintf("announcements %s: %v", ticker, err))
+			} else {
+				totalDocs++
+				w.logger.Debug().Str("ticker", ticker).Msg("Fetched announcements")
+			}
 		}
-		_, err = w.announcementsWorker.CreateJobs(ctx, announcementStep, jobDef, stepID, nil)
-		if err != nil {
-			w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch announcements")
-			errors = append(errors, fmt.Sprintf("announcements %s: %v", ticker, err))
-		} else {
-			totalDocs++
-			w.logger.Debug().Str("ticker", ticker).Msg("Fetched announcements")
+
+		// Director interest (inline)
+		if activeWorkers["market_director_interest"] {
+			directorStep := models.JobStep{
+				Name:        fmt.Sprintf("director_interest_%s", ticker),
+				Type:        models.WorkerTypeMarketDirectorInterest,
+				Description: fmt.Sprintf("Fetch director interest for %s", ticker),
+				Config: map[string]interface{}{
+					"asx_code":    ticker,
+					"period":      dataPeriod,
+					"output_tags": []string{"stock-data-collected", ticker},
+				},
+			}
+			_, err := w.directorInterestWorker.CreateJobs(ctx, directorStep, jobDef, stepID, nil)
+			if err != nil {
+				w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch director interest")
+				errors = append(errors, fmt.Sprintf("director_interest %s: %v", ticker, err))
+			} else {
+				totalDocs++
+				w.logger.Debug().Str("ticker", ticker).Msg("Fetched director interest")
+			}
 		}
+
+		// Competitor analysis (inline) - requires LLM API key
+		if activeWorkers["market_competitor"] {
+			competitorStep := models.JobStep{
+				Name:        fmt.Sprintf("competitor_%s", ticker),
+				Type:        models.WorkerTypeMarketCompetitor,
+				Description: fmt.Sprintf("Fetch competitor data for %s", ticker),
+				Config: map[string]interface{}{
+					"asx_code":    ticker,
+					"api_key":     "{google_gemini_api_key}", // Resolve from KV store at runtime
+					"output_tags": []string{"stock-data-collected", ticker},
+				},
+			}
+			_, err := w.competitorWorker.CreateJobs(ctx, competitorStep, jobDef, stepID, nil)
+			if err != nil {
+				w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to fetch competitor data")
+				errors = append(errors, fmt.Sprintf("competitor %s: %v", ticker, err))
+			} else {
+				totalDocs++
+				w.logger.Debug().Str("ticker", ticker).Msg("Fetched competitor data")
+			}
+		}
+	}
+
+	// Count active per-ticker workers (excluding market_data which is benchmark-only)
+	activePerTickerWorkers := 0
+	if activeWorkers["market_fundamentals"] {
+		activePerTickerWorkers++
+	}
+	if activeWorkers["market_announcements"] {
+		activePerTickerWorkers++
+	}
+	if activeWorkers["market_director_interest"] {
+		activePerTickerWorkers++
+	}
+	if activeWorkers["market_competitor"] {
+		activePerTickerWorkers++
 	}
 
 	w.logger.Info().
@@ -379,15 +503,17 @@ func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models
 		Int("documents_created", totalDocs).
 		Int("tickers", len(tickers)).
 		Int("benchmarks", len(benchmarkCodes)).
+		Int("benchmark_warnings", len(benchmarkWarnings)).
 		Int("errors", len(errors)).
+		Int("active_per_ticker_workers", activePerTickerWorkers).
 		Msg("Stock data collection completed")
 
-	// Dead-man check #1: Verify at least one document was created
-	// Expected: len(benchmarkCodes) index docs + len(tickers) stock docs + len(tickers) announcement docs
-	expectedDocs := len(benchmarkCodes) + len(tickers)*2
-	if totalDocs == 0 {
-		errMsg := fmt.Sprintf("DEAD-MAN CHECK FAILED: No documents created. Expected %d documents (%d benchmarks + %d tickers × 2)",
-			expectedDocs, len(benchmarkCodes), len(tickers))
+	// Dead-man check #1: Verify at least one stock document was created
+	// Expected: len(tickers) × active_per_ticker_workers (benchmarks are optional)
+	expectedStockDocs := len(tickers) * activePerTickerWorkers
+	if expectedStockDocs > 0 && (totalDocs == 0 || len(errors) == expectedStockDocs) {
+		errMsg := fmt.Sprintf("DEAD-MAN CHECK FAILED: No stock documents created. Expected %d stock documents (%d tickers × %d workers)",
+			expectedStockDocs, len(tickers), activePerTickerWorkers)
 		w.logger.Error().Msg(errMsg)
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
@@ -395,16 +521,26 @@ func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models
 		return "", fmt.Errorf("%s", errMsg)
 	}
 
-	// Dead-man check #2: Verify no worker failures
-	// If any inline worker failed, the step must fail to prevent downstream LLM hallucination
+	// Dead-man check #2: Verify no stock worker failures (benchmark failures are just warnings)
+	// If any stock worker failed, the step must fail to prevent downstream LLM hallucination
 	if len(errors) > 0 {
-		errMsg := fmt.Sprintf("DEAD-MAN CHECK FAILED: %d of %d expected workers failed: %s",
-			len(errors), expectedDocs, strings.Join(errors, "; "))
+		errMsg := fmt.Sprintf("DEAD-MAN CHECK FAILED: %d of %d expected stock workers failed: %s",
+			len(errors), expectedStockDocs, strings.Join(errors, "; "))
 		w.logger.Error().Msg(errMsg)
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 		}
 		return "", fmt.Errorf("%s", errMsg)
+	}
+
+	// Log benchmark warnings if any (non-fatal)
+	if len(benchmarkWarnings) > 0 {
+		warnMsg := fmt.Sprintf("Benchmark index fetch had %d warnings (non-fatal): %s",
+			len(benchmarkWarnings), strings.Join(benchmarkWarnings, "; "))
+		w.logger.Warn().Msg(warnMsg)
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "warn", warnMsg)
+		}
 	}
 
 	// Log event for UI (success case only)
@@ -413,7 +549,74 @@ func (w *MarketDataCollectionWorker) CreateJobs(ctx context.Context, step models
 		w.jobMgr.AddJobLog(ctx, stepID, "info", message)
 	}
 
+	// Create summary document for downstream consumption
+	summaryDoc := w.createSummaryDocument(ctx, tickers, benchmarkCodes, totalDocs, benchmarkWarnings, &jobDef, stepID)
+	if summaryDoc != nil {
+		if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
+			w.logger.Warn().Err(err).Msg("Failed to store data collection summary document")
+		} else {
+			w.logger.Debug().Str("doc_id", summaryDoc.ID).Msg("Stored data collection summary document")
+		}
+	}
+
 	return stepID, nil
+}
+
+// createSummaryDocument creates a summary document with collection results
+func (w *MarketDataCollectionWorker) createSummaryDocument(ctx context.Context, tickers []string, benchmarkCodes []string, totalDocs int, benchmarkWarnings []string, jobDef *models.JobDefinition, stepID string) *models.Document {
+	var sb strings.Builder
+
+	// Build summary content
+	sb.WriteString("# Data Collection Summary\n\n")
+	sb.WriteString(fmt.Sprintf("**Tickers Processed**: %d\n", len(tickers)))
+	sb.WriteString(fmt.Sprintf("**Documents Created**: %d\n", totalDocs))
+	sb.WriteString(fmt.Sprintf("**Benchmarks Requested**: %d\n\n", len(benchmarkCodes)))
+
+	// List tickers
+	sb.WriteString("## Tickers\n")
+	for _, ticker := range tickers {
+		sb.WriteString(fmt.Sprintf("- %s\n", ticker))
+	}
+	sb.WriteString("\n")
+
+	// List benchmarks
+	if len(benchmarkCodes) > 0 {
+		sb.WriteString("## Benchmarks\n")
+		for _, code := range benchmarkCodes {
+			sb.WriteString(fmt.Sprintf("- %s\n", code))
+		}
+		sb.WriteString("\n")
+	}
+
+	// List any warnings
+	if len(benchmarkWarnings) > 0 {
+		sb.WriteString("## Warnings\n")
+		for _, warn := range benchmarkWarnings {
+			sb.WriteString(fmt.Sprintf("- %s\n", warn))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Create document
+	doc := &models.Document{
+		ID:              fmt.Sprintf("data-collection-summary-%s-%d", stepID, time.Now().UnixNano()),
+		Title:           "Data Collection Summary",
+		ContentMarkdown: sb.String(),
+		SourceType:      "market_data_collection",
+		SourceID:        stepID,
+		Tags:            []string{"data-collection-summary"},
+		Metadata: map[string]interface{}{
+			"tickers_processed":    len(tickers),
+			"documents_created":    totalDocs,
+			"benchmarks_requested": len(benchmarkCodes),
+			"benchmark_warnings":   len(benchmarkWarnings),
+			"job_definition_id":    jobDef.ID,
+			"step_id":              stepID,
+		},
+		CreatedAt: time.Now(),
+	}
+
+	return doc
 }
 
 // ReturnsChildJobs returns false since this worker executes ASX workers inline (no child jobs)

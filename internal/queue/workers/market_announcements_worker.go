@@ -198,16 +198,21 @@ func (w *MarketAnnouncementsWorker) GetType() models.WorkerType {
 	return models.WorkerTypeMarketAnnouncements
 }
 
-// extractASXCode extracts ASX code from step config or job-level variables.
-// Priority: step config asx_code > job variables ticker > job variables asx_code
-func (w *MarketAnnouncementsWorker) extractASXCode(stepConfig map[string]interface{}, jobDef models.JobDefinition) string {
-	// Source 1: Direct step config
+// extractASXCodes extracts all ASX codes from step config and job-level variables.
+// Returns a deduplicated list of ASX codes.
+// Sources: step config asx_code (single) > job config variables (multiple)
+func (w *MarketAnnouncementsWorker) extractASXCodes(stepConfig map[string]interface{}, jobDef models.JobDefinition) []string {
+	tickerSet := make(map[string]bool)
+
+	// Source 1: Direct step config (single ticker)
 	if asxCode, ok := stepConfig["asx_code"].(string); ok && asxCode != "" {
 		parsed := common.ParseTicker(asxCode)
-		return parsed.Code
+		if parsed.Code != "" {
+			tickerSet[strings.ToUpper(parsed.Code)] = true
+		}
 	}
 
-	// Source 2: Job-level variables
+	// Source 2: Job-level variables (multiple tickers)
 	if jobDef.Config != nil {
 		if vars, ok := jobDef.Config["variables"].([]interface{}); ok {
 			for _, v := range vars {
@@ -216,11 +221,11 @@ func (w *MarketAnnouncementsWorker) extractASXCode(stepConfig map[string]interfa
 					continue
 				}
 
-				// Try "ticker" key (e.g., "ASX:GNP")
+				// Try "ticker" key (e.g., "ASX:GNP" or "GNP")
 				if ticker, ok := varMap["ticker"].(string); ok && ticker != "" {
 					parsed := common.ParseTicker(ticker)
 					if parsed.Code != "" {
-						return parsed.Code
+						tickerSet[strings.ToUpper(parsed.Code)] = true
 					}
 				}
 
@@ -228,31 +233,38 @@ func (w *MarketAnnouncementsWorker) extractASXCode(stepConfig map[string]interfa
 				if asxCode, ok := varMap["asx_code"].(string); ok && asxCode != "" {
 					parsed := common.ParseTicker(asxCode)
 					if parsed.Code != "" {
-						return parsed.Code
+						tickerSet[strings.ToUpper(parsed.Code)] = true
 					}
 				}
 			}
 		}
 	}
 
-	return ""
+	// Convert to slice
+	tickers := make([]string, 0, len(tickerSet))
+	for ticker := range tickerSet {
+		tickers = append(tickers, ticker)
+	}
+
+	// Sort for deterministic ordering
+	sort.Strings(tickers)
+
+	return tickers
 }
 
 // Init performs the initialization/setup phase for an ASX announcements step.
+// Supports multiple tickers from job-level variables - creates work item per ticker.
 func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract ASX code from multiple sources:
-	// 1. Direct step config (asx_code)
-	// 2. Job-level variables
-	asxCode := w.extractASXCode(stepConfig, jobDef)
-	if asxCode == "" {
+	// Extract ALL ASX codes from step config and job-level variables
+	asxCodes := w.extractASXCodes(stepConfig, jobDef)
+	if len(asxCodes) == 0 {
 		return nil, fmt.Errorf("asx_code is required in step config or job variables")
 	}
-	asxCode = strings.ToUpper(asxCode)
 
 	// Extract period (optional, used to filter results by date)
 	// Supported: D1, W1, M1, M3, M6, Y1, Y5
@@ -261,7 +273,7 @@ func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobSte
 		period = p
 	}
 
-	// Extract limit (optional, max announcements to fetch)
+	// Extract limit (optional, max announcements to fetch per ticker)
 	limit := 50 // Default
 	if l, ok := stepConfig["limit"].(float64); ok {
 		limit = int(l)
@@ -272,29 +284,34 @@ func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobSte
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Str("asx_code", asxCode).
+		Int("ticker_count", len(asxCodes)).
+		Strs("asx_codes", asxCodes).
 		Str("period", period).
 		Int("limit", limit).
 		Msg("ASX announcements worker initialized")
 
-	return &interfaces.WorkerInitResult{
-		WorkItems: []interfaces.WorkItem{
-			{
-				ID:   asxCode,
-				Name: fmt.Sprintf("Fetch ASX:%s announcements", asxCode),
-				Type: "market_announcements",
-				Config: map[string]interface{}{
-					"asx_code": asxCode,
-					"period":   period,
-					"limit":    limit,
-				},
+	// Create work items for each ticker
+	workItems := make([]interfaces.WorkItem, len(asxCodes))
+	for i, asxCode := range asxCodes {
+		workItems[i] = interfaces.WorkItem{
+			ID:   asxCode,
+			Name: fmt.Sprintf("Fetch ASX:%s announcements", asxCode),
+			Type: "market_announcements",
+			Config: map[string]interface{}{
+				"asx_code": asxCode,
+				"period":   period,
+				"limit":    limit,
 			},
-		},
-		TotalCount:           1,
+		}
+	}
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(asxCodes),
 		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"asx_code":    asxCode,
+			"asx_codes":   asxCodes,
 			"period":      period,
 			"limit":       limit,
 			"step_config": stepConfig,
@@ -303,6 +320,7 @@ func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobSte
 }
 
 // CreateJobs fetches ASX announcements and stores them as documents.
+// Processes all tickers from work items sequentially.
 // Returns the step job ID since this executes synchronously.
 func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
@@ -315,50 +333,11 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 	}
 
 	// Extract metadata from init result
-	asxCode, _ := initResult.Metadata["asx_code"].(string)
 	period, _ := initResult.Metadata["period"].(string)
 	limit, _ := initResult.Metadata["limit"].(int)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
-	// Initialize debug tracking
-	debug := NewWorkerDebug("market_announcements", w.debugEnabled)
-	debug.SetTicker(fmt.Sprintf("ASX:%s", asxCode))
-
-	w.logger.Info().
-		Str("phase", "run").
-		Str("step_name", step.Name).
-		Str("asx_code", asxCode).
-		Str("period", period).
-		Str("step_id", stepID).
-		Msg("Fetching ASX announcements")
-
-	// Log step start for UI
-	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetching ASX:%s announcements (period: %s)", asxCode, period))
-	}
-
-	// Fetch announcements
-	debug.StartPhase("api_fetch")
-	announcements, err := w.fetchAnnouncements(ctx, asxCode, period, limit)
-	if err != nil {
-		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch ASX announcements")
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to fetch announcements: %v", err))
-		}
-		return "", fmt.Errorf("failed to fetch ASX announcements: %w", err)
-	}
-
-	debug.EndPhase("api_fetch")
-
-	if len(announcements) == 0 {
-		w.logger.Warn().Str("asx_code", asxCode).Msg("No announcements found")
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "warn", "No announcements found")
-		}
-		return stepID, nil
-	}
-
-	// Extract output_tags from step config
+	// Extract output_tags from step config (shared across all tickers)
 	var outputTags []string
 	if stepConfig != nil {
 		if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -372,6 +351,88 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 		}
 	}
 
+	// Log overall step start
+	tickerCount := len(initResult.WorkItems)
+	if w.jobMgr != nil {
+		tickers := make([]string, tickerCount)
+		for i, wi := range initResult.WorkItems {
+			tickers[i] = wi.ID
+		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Processing %d tickers: %s", tickerCount, strings.Join(tickers, ", ")))
+	}
+
+	// Process each work item (ticker) sequentially
+	var lastErr error
+	successCount := 0
+	for i, workItem := range initResult.WorkItems {
+		asxCode := workItem.ID
+
+		w.logger.Info().
+			Str("phase", "run").
+			Str("step_name", step.Name).
+			Str("asx_code", asxCode).
+			Int("ticker_num", i+1).
+			Int("ticker_total", tickerCount).
+			Str("period", period).
+			Str("step_id", stepID).
+			Msg("Fetching ASX announcements")
+
+		err := w.processOneTicker(ctx, asxCode, period, limit, &jobDef, stepID, outputTags)
+		if err != nil {
+			w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to process ticker")
+			lastErr = err
+			// Continue with next ticker (on_error = "continue" behavior)
+			continue
+		}
+		successCount++
+	}
+
+	// Log overall completion
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Completed %d/%d tickers successfully", successCount, tickerCount))
+	}
+
+	// Return error only if ALL tickers failed
+	if successCount == 0 && lastErr != nil {
+		return "", fmt.Errorf("all tickers failed, last error: %w", lastErr)
+	}
+
+	return stepID, nil
+}
+
+// processOneTicker handles fetching and analyzing announcements for a single ticker.
+func (w *MarketAnnouncementsWorker) processOneTicker(ctx context.Context, asxCode, period string, limit int, jobDef *models.JobDefinition, stepID string, outputTags []string) error {
+	// Initialize debug tracking
+	debug := NewWorkerDebug("market_announcements", w.debugEnabled)
+	debug.SetTicker(fmt.Sprintf("ASX:%s", asxCode))
+
+	// Log step start for UI
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetching ASX:%s announcements (period: %s)", asxCode, period))
+	}
+
+	// Fetch announcements
+	debug.StartPhase("api_fetch")
+	announcements, err := w.fetchAnnouncements(ctx, asxCode, period, limit)
+	if err != nil {
+		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch ASX announcements")
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to fetch ASX:%s announcements: %v", asxCode, err))
+		}
+		return fmt.Errorf("failed to fetch ASX announcements: %w", err)
+	}
+	debug.EndPhase("api_fetch")
+
+	if len(announcements) == 0 {
+		w.logger.Warn().Str("asx_code", asxCode).Msg("No announcements found")
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("No announcements found for ASX:%s", asxCode))
+		}
+		return nil // Not an error - just no data
+	}
+
 	// Log progress for UI
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
@@ -380,8 +441,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 
 	// Fetch historical price data for price impact analysis
 	debug.StartPhase("api_fetch") // Accumulates with earlier API fetch
-	var priceData []OHLCV
-	priceData, err = w.fetchHistoricalPrices(ctx, asxCode, period)
+	priceData, err := w.fetchHistoricalPrices(ctx, asxCode, period)
 	debug.EndPhase("api_fetch")
 	if err != nil {
 		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch price data for impact analysis")
@@ -442,7 +502,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 			continue
 		}
 
-		doc := w.createDocument(ctx, ann, asxCode, &jobDef, stepID, outputTags)
+		doc := w.createDocument(ctx, ann, asxCode, jobDef, stepID, outputTags)
 		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Warn().Err(err).Str("headline", ann.Headline).Msg("Failed to save announcement document")
 			continue
@@ -463,7 +523,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 		Msg("ASX announcements analyzed and filtered")
 
 	// Create and save summary document (contains ALL deduplicated announcements)
-	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, &jobDef, stepID, outputTags, debug, dedupStats)
+	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, jobDef, stepID, outputTags, debug, dedupStats)
 	if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
 		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to save summary document")
 	} else {
@@ -480,7 +540,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 				asxCode, len(analyses), highCount, mediumCount, lowCount+noiseCount))
 	}
 
-	return stepID, nil
+	return nil
 }
 
 // ReturnsChildJobs returns false since this executes synchronously

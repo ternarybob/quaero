@@ -135,3 +135,111 @@ func TestParseTickersFromInterface(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEODHDTicker(t *testing.T) {
+	tests := []struct {
+		input        string
+		wantExchange string
+		wantCode     string
+	}{
+		// Standard EODHD format
+		{"CBA.AU", "AU", "CBA"},
+		{"AAPL.US", "US", "AAPL"},
+		{"VOD.LSE", "LSE", "VOD"},
+		{"SAP.XETRA", "XETRA", "SAP"},
+
+		// Crypto (code contains hyphen)
+		{"BTC-USD.CC", "CC", "BTC-USD"},
+		{"ETH-USD.CC", "CC", "ETH-USD"},
+
+		// Forex
+		{"EURUSD.FOREX", "FOREX", "EURUSD"},
+		{"GBPUSD.FOREX", "FOREX", "GBPUSD"},
+
+		// Indices
+		{"AXJO.INDX", "INDX", "AXJO"},
+
+		// Code with dot (e.g., BRK.B)
+		{"BRK.B.US", "US", "BRK.B"},
+
+		// Case normalization
+		{"cba.au", "AU", "CBA"},
+		{"aapl.us", "US", "AAPL"},
+
+		// Whitespace handling
+		{"  CBA.AU  ", "AU", "CBA"},
+
+		// Invalid formats
+		{"", "", ""},
+		{"NODOT", "", ""},
+		{".", "", ""},
+		{".AU", "", ""},
+		{"CBA.", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := ParseEODHDTicker(tt.input)
+
+			if result.Exchange != tt.wantExchange {
+				t.Errorf("Exchange = %q, want %q", result.Exchange, tt.wantExchange)
+			}
+			if result.Code != tt.wantCode {
+				t.Errorf("Code = %q, want %q", result.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestTicker_DetailsExchangeCode(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"CBA.AU", "AU"},
+		{"AAPL.US", "US"},
+		{"VOD.LSE", "LSE"},
+		{"BTC-USD.CC", "CC"},
+		{"EURUSD.FOREX", "FOREX"},
+		// Unknown exchange returns as-is
+		{"ABC.UNKNOWN", "UNKNOWN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			parsed := ParseEODHDTicker(tt.input)
+			result := parsed.DetailsExchangeCode()
+
+			if result != tt.want {
+				t.Errorf("DetailsExchangeCode() = %q, want %q", result, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseEODHDTickers(t *testing.T) {
+	input := []string{"CBA.AU", "AAPL.US", "BTC-USD.CC", "", "INVALID"}
+	result := ParseEODHDTickers(input)
+
+	if len(result) != 3 {
+		t.Errorf("ParseEODHDTickers returned %d tickers, want 3", len(result))
+	}
+
+	expected := []struct {
+		code     string
+		exchange string
+	}{
+		{"CBA", "AU"},
+		{"AAPL", "US"},
+		{"BTC-USD", "CC"},
+	}
+
+	for i, ticker := range result {
+		if ticker.Code != expected[i].code {
+			t.Errorf("result[%d].Code = %q, want %q", i, ticker.Code, expected[i].code)
+		}
+		if ticker.Exchange != expected[i].exchange {
+			t.Errorf("result[%d].Exchange = %q, want %q", i, ticker.Exchange, expected[i].exchange)
+		}
+	}
+}

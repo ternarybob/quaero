@@ -1,0 +1,91 @@
+# Announcements Watchlist
+# =========================================================================
+# Fetches ASX announcements for a watchlist of stocks, consolidates,
+# and emails the consolidated report.
+#
+# WORKFLOW:
+# 1. Fetch Announcements: For each ticker, fetch ASX announcements
+# 2. Consolidate: Merge all announcement summaries into single document
+# 3. Email Report: Send consolidated report via email
+#
+# TICKERS: EXR, GNP, SKS, TWR
+# OUTPUT TAG: announcements-consolidated
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "announcements-watchlist"
+name = "Announcements Watchlist"
+type = "orchestrator"
+description = "Fetches and consolidates ASX announcements for watchlist stocks"
+tags = ["announcements", "watchlist", "email"]
+schedule = ""
+timeout = "1h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-05"
+updated = "2026-01-05"
+purpose = "Consolidated announcements report for watchlist stocks"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+# Ticker list - add/remove as needed
+variables = [
+    { ticker = "EXR" },
+    { ticker = "GNP" },
+    { ticker = "SKS" },
+    { ticker = "TWR" },
+]
+
+# =========================================================================
+# Step 1: Fetch Announcements (per ticker)
+# =========================================================================
+# Fetches ASX announcements for each stock using MarketAnnouncementsWorker
+# Creates documents tagged ['asx-announcement-summary', '<ticker>']
+
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch ASX announcements for each watchlist stock"
+on_error = "continue"
+
+# =========================================================================
+# Step 2: Consolidate
+# =========================================================================
+# Consolidates all announcement summaries into single document
+# Sorts by ticker (alphabetical) for consistent ordering
+# No AI - pure document merging
+
+[step.consolidate]
+type = "market_consolidate"
+description = "Consolidate all announcement summaries"
+depends = "fetch_announcements"
+on_error = "fail"
+input_tags = ["asx-announcement-summary"]
+output_tags = ["announcements-consolidated"]
+title = "ASX Announcements - Watchlist Summary"
+
+# =========================================================================
+# Step 3: Email Report
+# =========================================================================
+# Sends consolidated announcements report via email
+
+[step.email_report]
+type = "email"
+description = "Email consolidated announcements report"
+depends = "consolidate"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "ASX Announcements - Watchlist Summary"
+body_from_tag = "announcements-consolidated"

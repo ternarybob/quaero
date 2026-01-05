@@ -27,9 +27,9 @@ import (
 // For other exchanges, uses EODHD News API.
 type MarketNewsWorker struct {
 	documentStorage           interfaces.DocumentStorage
+	kvStorage                 interfaces.KeyValueStorage
 	logger                    arbor.ILogger
 	jobMgr                    *queue.Manager
-	eodhdClient               *eodhd.Client
 	marketAnnouncementsWorker *MarketAnnouncementsWorker
 }
 
@@ -59,18 +59,35 @@ type AnnouncementSentiment struct {
 // NewMarketNewsWorker creates a new market news worker
 func NewMarketNewsWorker(
 	documentStorage interfaces.DocumentStorage,
+	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
-	eodhdClient *eodhd.Client,
 	marketAnnouncementsWorker *MarketAnnouncementsWorker,
 ) *MarketNewsWorker {
 	return &MarketNewsWorker{
 		documentStorage:           documentStorage,
+		kvStorage:                 kvStorage,
 		logger:                    logger,
 		jobMgr:                    jobMgr,
-		eodhdClient:               eodhdClient,
 		marketAnnouncementsWorker: marketAnnouncementsWorker,
 	}
+}
+
+// getEODHDAPIKey retrieves the EODHD API key from KV storage
+func (w *MarketNewsWorker) getEODHDAPIKey(ctx context.Context) string {
+	if w.kvStorage == nil {
+		w.logger.Warn().Msg("EODHD API key lookup failed: kvStorage is nil")
+		return ""
+	}
+	apiKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "eodhd_api_key", "")
+	if err != nil {
+		w.logger.Warn().Err(err).Str("key_name", "eodhd_api_key").Msg("Failed to resolve EODHD API key")
+		return ""
+	}
+	if apiKey == "" {
+		w.logger.Warn().Str("key_name", "eodhd_api_key").Msg("EODHD API key is empty")
+	}
+	return apiKey
 }
 
 // GetType returns WorkerTypeMarketNews
@@ -259,6 +276,15 @@ func (w *MarketNewsWorker) ValidateConfig(step models.JobStep) error {
 
 // fetchAnnouncements fetches news from EODHD
 func (w *MarketNewsWorker) fetchAnnouncements(ctx context.Context, ticker common.Ticker, period string, limit int) ([]Announcement, error) {
+	// Get API key from KV store
+	apiKey := w.getEODHDAPIKey(ctx)
+	if apiKey == "" {
+		return nil, fmt.Errorf("EODHD API key 'eodhd_api_key' not configured in KV store")
+	}
+
+	// Create EODHD client with resolved API key
+	eodhdClient := eodhd.NewClient(apiKey, eodhd.WithLogger(w.logger))
+
 	// Calculate date range
 	to := time.Now()
 	var from time.Time
@@ -279,7 +305,7 @@ func (w *MarketNewsWorker) fetchAnnouncements(ctx context.Context, ticker common
 
 	// Fetch from EODHD
 	symbol := ticker.EODHDSymbol()
-	news, err := w.eodhdClient.GetNews(ctx, []string{symbol},
+	news, err := eodhdClient.GetNews(ctx, []string{symbol},
 		eodhd.WithDateRange(from, to),
 		eodhd.WithLimit(limit),
 	)

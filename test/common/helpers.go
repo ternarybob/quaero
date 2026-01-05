@@ -686,8 +686,9 @@ func RequireLLM(t *testing.T, env *TestEnvironment) {
 	t.Log("OK: LLM service available")
 }
 
-// RequireEODHD fails the test if EODHD API is not configured.
+// RequireEODHD fails the test if EODHD API is not validated at startup.
 // Call this at the start of tests that require market data.
+// The startup now makes an actual API call to validate the key, not just check if it exists.
 func RequireEODHD(t *testing.T, env *TestEnvironment) {
 	t.Helper()
 
@@ -711,15 +712,24 @@ func RequireEODHD(t *testing.T, env *TestEnvironment) {
 		t.Fatal("FAIL: EODHD API not configured - this test requires EODHD. Configure eodhd_api_key in .env")
 	}
 
-	// Verify EODHD is available in startup summary
-	if !strings.Contains(logContent, "\"eodhd\":true") && !strings.Contains(logContent, "eodhd=true") {
-		// Also check for the structured log field format
-		if !strings.Contains(logContent, "EODHD=OK") {
-			t.Fatal("FAIL: EODHD API status not confirmed in startup logs")
-		}
+	// Check for validation failure (key exists but is invalid/expired)
+	if strings.Contains(logContent, "[STARTUP] EODHD API: validation failed") {
+		t.Fatal("FAIL: EODHD API key validation failed - the API key may be invalid or expired. Check eodhd_api_key in .env")
 	}
 
-	t.Log("OK: EODHD API available")
+	// Require explicit validation success marker (new startup behavior)
+	if strings.Contains(logContent, "EODHD=VALIDATED") {
+		t.Log("OK: EODHD API available")
+		return
+	}
+
+	// Fall back to legacy markers for backwards compatibility
+	if strings.Contains(logContent, "\"eodhd\":true") || strings.Contains(logContent, "eodhd=true") || strings.Contains(logContent, "EODHD=OK") {
+		t.Log("OK: EODHD API available (legacy marker)")
+		return
+	}
+
+	t.Fatal("FAIL: EODHD API status not confirmed in startup logs - expected EODHD=VALIDATED marker")
 }
 
 // RequireAllMarketServices fails the test if any required market service is unavailable.

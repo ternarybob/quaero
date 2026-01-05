@@ -421,6 +421,7 @@ func TestAllWorkerTypes(t *testing.T) {
 		WorkerTypeMarketPortfolio:        true,
 		WorkerTypeMarketAssessor:         true,
 		WorkerTypeMarketDataCollection:   true,
+		WorkerTypeMarketConsolidate:      true,
 		WorkerTypeEmailWatcher:           true,
 		WorkerTypeJobTemplate:            true,
 		WorkerTypeOrchestrator:           true,

@@ -65,31 +65,22 @@ func TestWorkerDataCollectionSingle(t *testing.T) {
 	}
 
 	// === ASSERTIONS ===
-	// Data collection creates a summary document
-	tags := []string{"data-collection-summary"}
-	metadata, content := AssertOutputNotEmpty(t, helper, tags)
+	// Query actual stock data document (not just summary)
+	stockDataTags := []string{"stock-data-collected", ticker}
+	metadata, content := AssertOutputNotEmpty(t, helper, stockDataTags)
 
-	// Assert content contains expected sections
-	expectedSections := []string{"Data Collection", "Summary"}
-	AssertOutputContains(t, content, expectedSections)
+	// Assert schema compliance for fundamentals data
+	isValid := ValidateSchema(t, metadata, FundamentalsSchema)
+	assert.True(t, isValid, "Output should comply with fundamentals schema")
 
-	// Assert schema compliance
-	isValid := ValidateSchema(t, metadata, DataCollectionSchema)
-	assert.True(t, isValid, "Output should comply with data collection schema")
+	// Validate correct ticker in output (REQ-2)
+	AssertTickerInOutput(t, ticker, metadata, content)
 
-	// Validate tickers_processed
-	if processed, ok := metadata["tickers_processed"].(float64); ok {
-		assert.GreaterOrEqual(t, int(processed), 1, "Should have processed at least 1 ticker")
-		t.Logf("PASS: Processed %d tickers", int(processed))
-	}
+	// Validate non-zero stock data (REQ-3 - prevents hallucinations)
+	AssertNonZeroStockData(t, metadata)
 
-	// Validate documents_created
-	if created, ok := metadata["documents_created"].(float64); ok {
-		assert.GreaterOrEqual(t, int(created), 1, "Should have created at least 1 document")
-		t.Logf("PASS: Created %d documents", int(created))
-	}
-
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	// Save actual stock data output (REQ-1, REQ-4)
+	SaveWorkerOutput(t, env, helper, stockDataTags, 1)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -154,31 +145,26 @@ func TestWorkerDataCollectionMulti(t *testing.T) {
 	}
 
 	// === ASSERTIONS ===
-	tags := []string{"data-collection-summary"}
-	metadata, content := AssertOutputNotEmpty(t, helper, tags)
+	// Query and validate stock data for each ticker (REQ-1, REQ-2, REQ-3)
+	for _, stock := range stocks {
+		stockDataTags := []string{"stock-data-collected", stock}
+		metadata, content := AssertOutputNotEmpty(t, helper, stockDataTags)
 
-	assert.NotEmpty(t, content, "Content should not be empty")
+		// Validate correct ticker in output (REQ-2)
+		AssertTickerInOutput(t, stock, metadata, content)
 
-	// Assert schema compliance
-	isValid := ValidateSchema(t, metadata, DataCollectionSchema)
-	assert.True(t, isValid, "Output should comply with data collection schema")
+		// Validate non-zero stock data (REQ-3 - prevents hallucinations)
+		AssertNonZeroStockData(t, metadata)
 
-	// Validate tickers_processed matches input
-	if processed, ok := metadata["tickers_processed"].(float64); ok {
-		assert.GreaterOrEqual(t, int(processed), len(stocks), "Should have processed all tickers")
-		t.Logf("PASS: Processed %d tickers (expected %d)", int(processed), len(stocks))
+		// Assert schema compliance
+		isValid := ValidateSchema(t, metadata, FundamentalsSchema)
+		assert.True(t, isValid, "Output for %s should comply with fundamentals schema", stock)
+
+		t.Logf("PASS: Stock data validated for %s", stock)
 	}
 
-	// Check for errors field
-	if errors, ok := metadata["errors"].([]interface{}); ok {
-		if len(errors) > 0 {
-			t.Logf("WARNING: Data collection had %d errors", len(errors))
-		} else {
-			t.Log("PASS: No errors during data collection")
-		}
-	}
-
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	// Save combined stock data output (REQ-4)
+	SaveMultiStockOutput(t, env, helper, stocks, 1)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -246,18 +232,22 @@ func TestWorkerDataCollectionAllWorkers(t *testing.T) {
 	}
 
 	// === ASSERTIONS ===
-	tags := []string{"data-collection-summary"}
-	metadata, content := AssertOutputNotEmpty(t, helper, tags)
+	// Query actual stock data document (not just summary)
+	stockDataTags := []string{"stock-data-collected", ticker}
+	metadata, content := AssertOutputNotEmpty(t, helper, stockDataTags)
 
-	assert.NotEmpty(t, content, "Content should not be empty")
+	// Assert schema compliance for fundamentals data
+	isValid := ValidateSchema(t, metadata, FundamentalsSchema)
+	assert.True(t, isValid, "Output should comply with fundamentals schema")
 
-	// Validate documents_created matches expected (1 per worker)
-	if created, ok := metadata["documents_created"].(float64); ok {
-		assert.GreaterOrEqual(t, int(created), len(allWorkers), "Should have created at least 1 document per worker")
-		t.Logf("PASS: Created %d documents (expected at least %d)", int(created), len(allWorkers))
-	}
+	// Validate correct ticker in output (REQ-2)
+	AssertTickerInOutput(t, ticker, metadata, content)
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	// Validate non-zero stock data (REQ-3 - prevents hallucinations)
+	AssertNonZeroStockData(t, metadata)
+
+	// Save actual stock data output (REQ-1, REQ-4)
+	SaveWorkerOutput(t, env, helper, stockDataTags, 1)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 

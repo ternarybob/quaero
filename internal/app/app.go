@@ -577,11 +577,21 @@ func (a *App) initServices() error {
 	// These are service-specific defaults that workers fall back to
 	a.seedDefaultKVValues(context.Background())
 
-	// Validate EODHD API key at startup
+	// Validate EODHD API key at startup with actual API call
 	eodhdKey, eodhdErr := a.StorageManager.KeyValueStorage().Get(context.Background(), "eodhd_api_key")
 	if eodhdErr == nil && eodhdKey != "" && eodhdKey != "fake-eodhd-api-key-for-testing" {
-		a.ServiceStatus.EODHD = true
-		a.Logger.Debug().Msg("EODHD API key configured")
+		// Create a temporary client to validate the API key
+		validationClient := eodhd.NewClient(eodhdKey, eodhd.WithLogger(a.Logger))
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if validationErr := validationClient.Validate(ctx); validationErr != nil {
+			a.ServiceStatus.EODHD = false
+			a.Logger.Error().Err(validationErr).Msg("[STARTUP] EODHD API: validation failed - API key may be invalid or expired")
+		} else {
+			a.ServiceStatus.EODHD = true
+			a.Logger.Info().Msg("[STARTUP] EODHD=VALIDATED - API key verified successfully")
+		}
 	} else {
 		a.Logger.Error().Msg("[STARTUP] EODHD API: not configured - market data workers will fail")
 	}
@@ -866,29 +876,24 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
 
-	// Create EODHD client for multi-exchange workers (market_data, announcements)
-	eodhdClient := eodhd.NewClient(
-		"", // API key will be resolved at runtime from KV store
-		eodhd.WithLogger(a.Logger),
-		eodhd.WithRateLimit(10),
-	)
-
 	// Register Market Data worker (multi-exchange via EODHD)
+	// API key is resolved at runtime from KV store
 	marketDataWorker := workers.NewMarketDataWorker(
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		eodhdClient,
 	)
 	a.StepManager.RegisterWorker(marketDataWorker)
 	a.Logger.Debug().Str("step_type", marketDataWorker.GetType().String()).Msg("Market Data worker registered")
 
 	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
+	// API key is resolved at runtime from KV store
 	marketNewsWorker := workers.NewMarketNewsWorker(
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		eodhdClient,
 		marketAnnouncementsWorker,
 	)
 	a.StepManager.RegisterWorker(marketNewsWorker)
@@ -933,6 +938,17 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(marketCompetitorWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", marketCompetitorWorker.GetType().String()).Msg("Market Competitor worker registered")
+
+	// Register Market Consolidate worker (consolidates tagged documents, no AI)
+	marketConsolidateWorker := workers.NewMarketConsolidateWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(marketConsolidateWorker)
+	a.Logger.Debug().Str("step_type", marketConsolidateWorker.GetType().String()).Msg("Market Consolidate worker registered")
 
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
 	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(
@@ -1108,14 +1124,13 @@ func (a *App) initServices() error {
 
 	// Register Market Data Collection worker (deterministic data collection)
 	// Creates workers internally for inline execution (no child jobs)
-	// Uses EODHD for index/benchmark data via MarketDataWorker
+	// API keys are resolved at runtime from KV store by each embedded worker
 	marketDataCollectionWorker := workers.NewMarketDataCollectionWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		eodhdClient,
 		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(marketDataCollectionWorker)

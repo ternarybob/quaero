@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -114,7 +115,11 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 			}
 
 			if !stepType.IsValid() {
-				return nil, fmt.Errorf("step '%s': invalid type '%s' - must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, test_job_generator", name, stepType)
+				validTypes := make([]string, len(models.AllWorkerTypes()))
+				for i, t := range models.AllWorkerTypes() {
+					validTypes[i] = string(t)
+				}
+				return nil, fmt.Errorf("step '%s': invalid type '%s' - must be one of: %s", name, stepType, strings.Join(validTypes, ", "))
 			}
 
 			// Build config from all remaining fields (excluding known step metadata)

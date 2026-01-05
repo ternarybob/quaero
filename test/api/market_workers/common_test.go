@@ -37,9 +37,11 @@ type WorkerSchema struct {
 var (
 	// FundamentalsSchema for market_fundamentals worker
 	FundamentalsSchema = WorkerSchema{
-		RequiredFields: []string{"symbol", "company_name", "current_price", "currency"},
-		OptionalFields: []string{"historical_prices", "analyst_count", "pe_ratio", "change_percent", "volume", "market_cap"},
+		RequiredFields: []string{"asx_code", "company_name", "current_price", "currency"},
+		OptionalFields: []string{"historical_prices", "analyst_count", "pe_ratio", "change_percent", "volume", "market_cap", "ticker", "symbol"},
 		FieldTypes: map[string]string{
+			"asx_code":          "string",
+			"ticker":            "string",
 			"symbol":            "string",
 			"company_name":      "string",
 			"current_price":     "number",
@@ -566,6 +568,129 @@ func RequireEODHD(t *testing.T, env *common.TestEnvironment) {
 // RequireAllMarketServices fails test if any market service unavailable
 func RequireAllMarketServices(t *testing.T, env *common.TestEnvironment) {
 	common.RequireAllMarketServices(t, env)
+}
+
+// =============================================================================
+// Stock Data Validation Helpers
+// =============================================================================
+
+// AssertTickerInOutput validates that the ticker appears in output content and metadata
+func AssertTickerInOutput(t *testing.T, ticker string, metadata map[string]interface{}, content string) {
+	// Check content contains ticker
+	assert.Contains(t, content, ticker, "Content should contain ticker %s", ticker)
+	t.Logf("PASS: Content contains ticker %s", ticker)
+
+	// Check metadata has ticker/symbol field
+	var foundTicker bool
+	for _, field := range []string{"ticker", "symbol", "asx_code"} {
+		if val, ok := metadata[field].(string); ok && strings.Contains(val, ticker) {
+			foundTicker = true
+			t.Logf("PASS: Found ticker %s in metadata field '%s'", ticker, field)
+			break
+		}
+	}
+	assert.True(t, foundTicker, "Metadata should contain ticker %s", ticker)
+}
+
+// AssertNonZeroStockData validates that key stock data fields are present and non-zero
+func AssertNonZeroStockData(t *testing.T, metadata map[string]interface{}) {
+	// Check for price field (current_price or last_price)
+	var priceFound bool
+	for _, field := range []string{"current_price", "last_price"} {
+		if val, ok := metadata[field].(float64); ok && val > 0 {
+			priceFound = true
+			t.Logf("PASS: %s = %.4f (non-zero)", field, val)
+			break
+		}
+	}
+	assert.True(t, priceFound, "Price data must be present and non-zero")
+
+	// Check currency is present
+	if currency, ok := metadata["currency"].(string); ok {
+		assert.NotEmpty(t, currency, "Currency should not be empty")
+		t.Logf("PASS: currency = %s", currency)
+	}
+
+	// Check company_name is present (if available)
+	if name, ok := metadata["company_name"].(string); ok {
+		assert.NotEmpty(t, name, "Company name should not be empty")
+		t.Logf("PASS: company_name = %s", name)
+	}
+}
+
+// SaveMultiStockOutput saves combined output from multiple stock data documents
+func SaveMultiStockOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, tickers []string, runNumber int) error {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		return fmt.Errorf("results directory not available")
+	}
+
+	var contentBuilder strings.Builder
+	combinedMetadata := make(map[string]interface{})
+	combinedMetadata["tickers"] = tickers
+	combinedMetadata["by_ticker"] = make(map[string]interface{})
+
+	contentBuilder.WriteString("# Combined Stock Data Output\n\n")
+
+	for _, ticker := range tickers {
+		tags := []string{"stock-data-collected", ticker}
+		resp, err := helper.GET("/api/documents?tags=" + strings.Join(tags, ",") + "&limit=1")
+		if err != nil {
+			t.Logf("Warning: failed to query docs for ticker %s: %v", ticker, err)
+			continue
+		}
+
+		var result struct {
+			Documents []struct {
+				ContentMarkdown string                 `json:"content_markdown"`
+				Metadata        map[string]interface{} `json:"metadata"`
+			} `json:"documents"`
+		}
+		if err := helper.ParseJSONResponse(resp, &result); err != nil || len(result.Documents) == 0 {
+			resp.Body.Close()
+			t.Logf("Warning: no docs found for ticker %s", ticker)
+			continue
+		}
+		resp.Body.Close()
+
+		doc := result.Documents[0]
+		contentBuilder.WriteString(fmt.Sprintf("## %s\n\n", ticker))
+		contentBuilder.WriteString(doc.ContentMarkdown)
+		contentBuilder.WriteString("\n\n---\n\n")
+
+		byTicker := combinedMetadata["by_ticker"].(map[string]interface{})
+		byTicker[ticker] = doc.Metadata
+	}
+
+	// Save output.md
+	mdPath := filepath.Join(resultsDir, "output.md")
+	if err := os.WriteFile(mdPath, []byte(contentBuilder.String()), 0644); err != nil {
+		t.Logf("Warning: failed to write output.md: %v", err)
+	} else {
+		t.Logf("Saved combined output.md to: %s", mdPath)
+	}
+
+	// Save numbered output
+	numberedMdPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber))
+	os.WriteFile(numberedMdPath, []byte(contentBuilder.String()), 0644)
+
+	// Save output.json
+	jsonPath := filepath.Join(resultsDir, "output.json")
+	if data, err := json.MarshalIndent(combinedMetadata, "", "  "); err == nil {
+		if err := os.WriteFile(jsonPath, data, 0644); err != nil {
+			t.Logf("Warning: failed to write output.json: %v", err)
+		} else {
+			t.Logf("Saved combined output.json to: %s", jsonPath)
+		}
+	}
+
+	// Save numbered JSON
+	numberedJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+	if data, err := json.MarshalIndent(combinedMetadata, "", "  "); err == nil {
+		os.WriteFile(numberedJsonPath, data, 0644)
+	}
+
+	return nil
 }
 
 // =============================================================================

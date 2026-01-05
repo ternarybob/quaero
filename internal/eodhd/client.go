@@ -295,6 +295,32 @@ func (c *Client) GetExchangesList(ctx context.Context) (ExchangesResponse, error
 	return result, nil
 }
 
+// Validate checks if the API key is valid by making a lightweight API call.
+// Returns nil if the key is valid, or an error describing the authentication failure.
+func (c *Client) Validate(ctx context.Context) error {
+	if c.apiKey == "" {
+		return &APIError{
+			StatusCode: 401,
+			Message:    "API key is empty",
+			Endpoint:   "/exchanges-list",
+		}
+	}
+
+	// Use exchanges-list as it's a lightweight endpoint
+	_, err := c.GetExchangesList(ctx)
+	if err != nil {
+		// Check if it's an authentication error
+		if apiErr, ok := err.(*APIError); ok {
+			if apiErr.StatusCode == 401 || apiErr.StatusCode == 403 {
+				return fmt.Errorf("EODHD API key validation failed: %w", err)
+			}
+		}
+		return fmt.Errorf("EODHD API validation request failed: %w", err)
+	}
+
+	return nil
+}
+
 // GetRealTimeQuote retrieves real-time quote for a symbol.
 // Note: This may require a higher tier subscription.
 func (c *Client) GetRealTimeQuote(ctx context.Context, symbol string) (*EODData, error) {
@@ -303,4 +329,81 @@ func (c *Client) GetRealTimeQuote(ctx context.Context, symbol string) (*EODData,
 		return nil, err
 	}
 	return &result, nil
+}
+
+// GetExchangeDetails retrieves detailed information about an exchange including
+// trading hours and holidays. This is used for staleness checking.
+// exchangeCode should be the EODHD exchange code (e.g., "AU", "US", "LSE").
+func (c *Client) GetExchangeDetails(ctx context.Context, exchangeCode string) (*ExchangeDetailsResponse, error) {
+	var result ExchangeDetailsResponse
+	if err := c.get(ctx, "/exchange-details/"+exchangeCode, nil, &result); err != nil {
+		return nil, fmt.Errorf("failed to get exchange details for %s: %w", exchangeCode, err)
+	}
+	return &result, nil
+}
+
+// ParseExchangeDetails converts an ExchangeDetailsResponse into an ExchangeMetadata
+// for use in staleness checking. It extracts and normalizes the relevant fields.
+func ParseExchangeDetails(resp *ExchangeDetailsResponse) *ExchangeMetadata {
+	if resp == nil {
+		return nil
+	}
+
+	metadata := &ExchangeMetadata{
+		Code:             resp.Code,
+		Name:             resp.Name,
+		Timezone:         resp.Timezone,
+		DataDelayMinutes: GetDataDelay(resp.Code),
+		WorkingDays:      DefaultWorkingDays(),
+		LastFetched:      time.Now().UTC(),
+	}
+
+	// Parse close time from TradingHours (format: "HH:MM - HH:MM")
+	if resp.TradingHours != "" {
+		parts := strings.Split(resp.TradingHours, " - ")
+		if len(parts) == 2 {
+			metadata.CloseTime = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Fall back to defaults if not parsed
+	if metadata.CloseTime == "" {
+		if closeTime, ok := DefaultCloseTime[resp.Code]; ok {
+			metadata.CloseTime = closeTime
+		} else {
+			metadata.CloseTime = "16:00" // Default close time
+		}
+	}
+
+	// Fall back to default timezone if not provided
+	if metadata.Timezone == "" {
+		if tz, ok := DefaultExchangeTimezones[resp.Code]; ok {
+			metadata.Timezone = tz
+		} else {
+			metadata.Timezone = "UTC"
+		}
+	}
+
+	// Parse holidays from map
+	if resp.Holidays != nil {
+		metadata.Holidays = make([]time.Time, 0, len(resp.Holidays))
+		for dateStr := range resp.Holidays {
+			// Try parsing date in YYYY-MM-DD format
+			if t, err := time.Parse("2006-01-02", dateStr); err == nil {
+				metadata.Holidays = append(metadata.Holidays, t.UTC())
+			}
+		}
+	}
+
+	return metadata
+}
+
+// GetExchangeMetadata is a convenience method that fetches exchange details
+// and parses them into ExchangeMetadata in one call.
+func (c *Client) GetExchangeMetadata(ctx context.Context, exchangeCode string) (*ExchangeMetadata, error) {
+	resp, err := c.GetExchangeDetails(ctx, exchangeCode)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExchangeDetails(resp), nil
 }
