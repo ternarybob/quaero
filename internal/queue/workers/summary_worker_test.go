@@ -219,6 +219,14 @@ func (m *MockKVStorage) GetAll(ctx context.Context) (map[string]string, error) {
 	return args.Get(0).(map[string]string), args.Error(1)
 }
 
+func (m *MockKVStorage) ListByPrefix(ctx context.Context, prefix string) ([]interfaces.KeyValuePair, error) {
+	args := m.Called(ctx, prefix)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]interfaces.KeyValuePair), args.Error(1)
+}
+
 // TestSummaryWorker_Init tests the Init method
 func TestSummaryWorker_Init(t *testing.T) {
 	logger := arbor.NewLogger()

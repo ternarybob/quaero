@@ -982,17 +982,17 @@ func (w *MarketAnnouncementsWorker) createDocument(ctx context.Context, ann ASXA
 }
 
 // fetchHistoricalPrices gets historical price data for price impact analysis.
-// First tries to get data from asx_stock_data documents (preferred source).
+// First tries to get data from market_fundamentals documents (created by MarketDataCollectionWorker).
 // Falls back to direct Yahoo Finance API if no document exists.
 func (w *MarketAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, asxCode, period string) ([]OHLCV, error) {
-	// First, try to get price data from an existing asx_stock_data document
-	// This avoids duplicate Yahoo Finance API calls and ensures consistency
+	// First, try to get price data from an existing market_fundamentals document
+	// This avoids duplicate API calls and ensures consistency with market data collection
 	prices, err := w.getPricesFromStockDataDocument(ctx, asxCode)
 	if err == nil && len(prices) > 0 {
 		w.logger.Info().
 			Str("asx_code", asxCode).
 			Int("price_count", len(prices)).
-			Msg("Using price data from asx_stock_data document")
+			Msg("Using price data from market_fundamentals document")
 		return prices, nil
 	}
 
@@ -1000,34 +1000,28 @@ func (w *MarketAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, a
 	w.logger.Info().
 		Str("asx_code", asxCode).
 		Err(err).
-		Msg("No asx_stock_data document found, fetching directly from Yahoo Finance")
+		Msg("No market_fundamentals document found, fetching directly from Yahoo Finance")
 
 	// Fallback: Fetch directly from Yahoo Finance
 	return w.fetchPricesFromYahoo(ctx, asxCode, period)
 }
 
 // getPricesFromStockDataDocument retrieves OHLCV data from an existing stock data document.
-// First tries asx_stock_collector (recommended), then falls back to asx_stock_data (deprecated).
+// Looks for market_fundamentals documents created by MarketFundamentalsWorker.
 // Returns the historical_prices array from document metadata if available.
 func (w *MarketAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Context, asxCode string) ([]OHLCV, error) {
 	upperCode := strings.ToUpper(asxCode)
 
-	// Try asx_stock_collector first (preferred source)
-	sourceType := "asx_stock_collector"
+	// Look for market_fundamentals document (created by MarketFundamentalsWorker)
+	sourceType := "market_fundamentals"
 	sourceID := fmt.Sprintf("asx:%s:stock_collector", upperCode)
 
 	doc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
-	if err != nil || doc == nil {
-		// Fallback to deprecated asx_stock_data
-		sourceType = "asx_stock_data"
-		sourceID = fmt.Sprintf("asx:%s:stock_data", upperCode)
-		doc, err = w.documentStorage.GetDocumentBySource(sourceType, sourceID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get stock data document: %w", err)
-		}
-		if doc == nil {
-			return nil, fmt.Errorf("no stock data document found for %s (tried asx_stock_collector and asx_stock_data)", asxCode)
-		}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stock data document: %w", err)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("no market_fundamentals document found for %s", asxCode)
 	}
 
 	// Check if document is fresh enough (within 24 hours)

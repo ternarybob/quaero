@@ -19,6 +19,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/exchange"
 )
 
 // MarketDataCollectionWorker handles deterministic stock data collection.
@@ -27,12 +28,15 @@ import (
 // - config.variables[] - array of { ticker, portfolio? }
 // - filter_tags - find tickers from tagged documents (e.g., navexa-holdings)
 // - config.workers[] - array of worker names to run (default: all)
+//
+// Embeds BaseMarketWorker for cache-aware document retrieval via GetDocument/GetDocuments.
 type MarketDataCollectionWorker struct {
-	documentStorage interfaces.DocumentStorage
-	searchService   interfaces.SearchService
-	kvStorage       interfaces.KeyValueStorage
-	logger          arbor.ILogger
-	jobMgr          *queue.Manager
+	*BaseMarketWorker // Embed for caching methods (GetDocument, GetDocuments)
+	documentStorage   interfaces.DocumentStorage
+	searchService     interfaces.SearchService
+	kvStorage         interfaces.KeyValueStorage
+	logger            arbor.ILogger
+	jobMgr            *queue.Manager
 	// Workers for inline execution (no child jobs)
 	fundamentalsWorker     *MarketFundamentalsWorker
 	announcementsWorker    *MarketAnnouncementsWorker
@@ -45,6 +49,14 @@ type MarketDataCollectionWorker struct {
 var _ interfaces.DefinitionWorker = (*MarketDataCollectionWorker)(nil)
 
 // NewMarketDataCollectionWorker creates a new stock data collection worker
+// Parameters:
+//   - documentStorage: For document persistence
+//   - searchService: For tag-based document lookup and caching
+//   - kvStorage: For KV storage access
+//   - logger: For logging
+//   - jobMgr: For job management
+//   - debugEnabled: Enable debug logging
+//   - exchangeService: For staleness checking (can be nil to skip staleness checks)
 func NewMarketDataCollectionWorker(
 	documentStorage interfaces.DocumentStorage,
 	searchService interfaces.SearchService,
@@ -52,7 +64,19 @@ func NewMarketDataCollectionWorker(
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
+	exchangeService *exchange.Service,
 ) *MarketDataCollectionWorker {
+	// Create base worker for caching functionality
+	baseWorker := NewBaseMarketWorker(
+		documentStorage,
+		searchService,
+		exchangeService,
+		kvStorage,
+		logger,
+		jobMgr,
+		models.WorkerTypeMarketDataCollection.String(),
+	)
+
 	// Create embedded workers for inline execution
 	// Note: announcementsWorker gets nil providerFactory as AI summary is not needed in collection mode
 	// API keys are resolved at runtime from KV store by each worker
@@ -63,6 +87,7 @@ func NewMarketDataCollectionWorker(
 	competitorWorker := NewMarketCompetitorWorker(documentStorage, kvStorage, jobMgr, logger, debugEnabled)
 
 	return &MarketDataCollectionWorker{
+		BaseMarketWorker:       baseWorker,
 		documentStorage:        documentStorage,
 		searchService:          searchService,
 		kvStorage:              kvStorage,

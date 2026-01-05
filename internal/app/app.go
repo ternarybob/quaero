@@ -33,6 +33,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
+	"github.com/ternarybob/quaero/internal/services/exchange"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	"github.com/ternarybob/quaero/internal/services/imap"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
@@ -123,6 +124,9 @@ type App struct {
 
 	// IMAP service
 	IMAPService *imap.Service
+
+	// Exchange metadata service (for staleness checking)
+	ExchangeService *exchange.Service
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -576,6 +580,15 @@ func (a *App) initServices() error {
 	// Seed default KV values (only creates if not already set)
 	// These are service-specific defaults that workers fall back to
 	a.seedDefaultKVValues(context.Background())
+
+	// 5.11.1. Initialize exchange metadata service for staleness checking
+	// Uses KV storage for caching exchange metadata, EODHD client is nil (uses cached/default metadata)
+	a.ExchangeService = exchange.NewService(
+		nil, // EODHD client - nil uses cached metadata and defaults
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Logger.Debug().Msg("Exchange metadata service initialized")
 
 	// Validate EODHD API key at startup with actual API call
 	eodhdKey, eodhdErr := a.StorageManager.KeyValueStorage().Get(context.Background(), "eodhd_api_key")
@@ -1125,6 +1138,7 @@ func (a *App) initServices() error {
 	// Register Market Data Collection worker (deterministic data collection)
 	// Creates workers internally for inline execution (no child jobs)
 	// API keys are resolved at runtime from KV store by each embedded worker
+	// Embeds BaseMarketWorker for cache-aware document retrieval
 	marketDataCollectionWorker := workers.NewMarketDataCollectionWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
@@ -1132,6 +1146,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		a.Config.Jobs.Debug,
+		a.ExchangeService, // For staleness checking
 	)
 	a.StepManager.RegisterWorker(marketDataCollectionWorker)
 	a.Logger.Debug().Str("step_type", marketDataCollectionWorker.GetType().String()).Msg("Market Data Collection worker registered")
