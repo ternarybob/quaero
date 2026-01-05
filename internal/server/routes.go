@@ -88,6 +88,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/kv", s.handleKVRoute)   // GET (list), POST (create)
 	mux.HandleFunc("/api/kv/", s.handleKVRoutes) // GET/PUT/DELETE /{key}
 
+	// API routes - Timing (worker performance metrics)
+	mux.HandleFunc("/api/timing", s.app.TimingHandler.HandleGetTimingRecords)     // GET - list timing records
+	mux.HandleFunc("/api/timing/stats", s.app.TimingHandler.HandleGetTimingStats) // GET - timing statistics
+
 	// API routes - Connectors
 	mux.HandleFunc("/api/connectors", s.handleConnectorsRoute)
 	mux.HandleFunc("/api/connectors/", s.handleConnectorRoutes)

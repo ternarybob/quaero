@@ -1,16 +1,23 @@
 // -----------------------------------------------------------------------
 // WorkerDebug - Debug metadata collection for workers
 // Captures timing, API calls, and AI source information for debugging
-// Only active when config.Workers.Debug = true
+// Only active when config.Jobs.Debug = true
 // -----------------------------------------------------------------------
 
 package workers
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // WorkerDebugInfo collects debug metadata for a single worker instance
@@ -25,6 +32,13 @@ type WorkerDebugInfo struct {
 	AISource     *AISourceInfo        `json:"ai_source,omitempty"`
 	Timing       TimingInfo           `json:"timing"`
 	phases       map[string]time.Time // internal phase tracking
+
+	// Fields for timing persistence
+	jobID     string
+	status    string // "success" or "failed"
+	errorMsg  string
+	logger    arbor.ILogger
+	kvStorage interfaces.KeyValueStorage
 }
 
 // APICallInfo records details of an API call
@@ -61,6 +75,25 @@ func NewWorkerDebug(workerType string, debugEnabled bool) *WorkerDebugInfo {
 		WorkerType: workerType,
 		StartedAt:  time.Now(),
 		phases:     make(map[string]time.Time),
+	}
+}
+
+// NewWorkerDebugWithStorage creates a WorkerDebugInfo with logging and storage capabilities
+func NewWorkerDebugWithStorage(
+	workerType string,
+	jobID string,
+	debugEnabled bool,
+	logger arbor.ILogger,
+	kvStorage interfaces.KeyValueStorage,
+) *WorkerDebugInfo {
+	return &WorkerDebugInfo{
+		enabled:    debugEnabled,
+		WorkerType: workerType,
+		jobID:      jobID,
+		StartedAt:  time.Now(),
+		phases:     make(map[string]time.Time),
+		logger:     logger,
+		kvStorage:  kvStorage,
 	}
 }
 
@@ -156,16 +189,146 @@ func (w *WorkerDebugInfo) EndPhase(phase string) {
 	}
 }
 
-// Complete marks the worker execution as complete and calculates total time
+// Complete marks the worker execution as complete and calculates total time.
+// If logger and kvStorage are configured, logs timing and persists to storage.
 func (w *WorkerDebugInfo) Complete() {
 	if !w.enabled {
 		return
 	}
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	w.CompletedAt = time.Now()
 	w.Timing.TotalMs = w.CompletedAt.Sub(w.StartedAt).Milliseconds()
+	w.status = "success"
+	w.mu.Unlock()
+
+	w.logAndPersist()
+}
+
+// CompleteWithError marks the worker execution as failed with error context.
+func (w *WorkerDebugInfo) CompleteWithError(err error) {
+	if !w.enabled {
+		return
+	}
+	w.mu.Lock()
+	w.CompletedAt = time.Now()
+	w.Timing.TotalMs = w.CompletedAt.Sub(w.StartedAt).Milliseconds()
+	w.status = "failed"
+	if err != nil {
+		w.errorMsg = err.Error()
+	}
+	w.mu.Unlock()
+
+	w.logAndPersist()
+}
+
+// logAndPersist logs timing info and persists to KV storage if configured.
+func (w *WorkerDebugInfo) logAndPersist() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Log with type=timing field
+	if w.logger != nil {
+		logEvent := w.logger.Info().
+			Str("type", "timing").
+			Str("worker_type", w.WorkerType).
+			Int64("total_ms", w.Timing.TotalMs).
+			Str("status", w.status)
+
+		if w.jobID != "" {
+			logEvent = logEvent.Str("job_id", w.jobID)
+		}
+		if w.Ticker != "" {
+			logEvent = logEvent.Str("ticker", w.Ticker)
+		}
+		if w.Timing.APIFetchMs > 0 {
+			logEvent = logEvent.Int64("api_fetch_ms", w.Timing.APIFetchMs)
+		}
+		if w.Timing.AIGenerationMs > 0 {
+			logEvent = logEvent.Int64("ai_generation_ms", w.Timing.AIGenerationMs)
+		}
+		if w.errorMsg != "" {
+			logEvent = logEvent.Str("error", w.errorMsg)
+		}
+		logEvent.Msg("Worker timing recorded")
+	}
+
+	// Persist to KV storage
+	if w.kvStorage != nil {
+		record := w.toTimingRecordLocked()
+		data, err := json.Marshal(record)
+		if err != nil {
+			if w.logger != nil {
+				w.logger.Error().Err(err).Msg("Failed to marshal timing record")
+			}
+			return
+		}
+
+		key := fmt.Sprintf("timing:%s", record.ID)
+		ctx := context.Background()
+		if err := w.kvStorage.Set(ctx, key, string(data), "timing record"); err != nil {
+			if w.logger != nil {
+				w.logger.Error().Err(err).Str("key", key).Msg("Failed to persist timing record")
+			}
+		}
+	}
+}
+
+// ToTimingRecord converts WorkerDebugInfo to a TimingRecord model.
+func (w *WorkerDebugInfo) ToTimingRecord() *models.TimingRecord {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.toTimingRecordLocked()
+}
+
+// toTimingRecordLocked converts to TimingRecord (caller must hold lock).
+func (w *WorkerDebugInfo) toTimingRecordLocked() *models.TimingRecord {
+	phases := make(map[string]int64)
+	if w.Timing.APIFetchMs > 0 {
+		phases["api_fetch"] = w.Timing.APIFetchMs
+	}
+	if w.Timing.JSONGenerationMs > 0 {
+		phases["json_generation"] = w.Timing.JSONGenerationMs
+	}
+	if w.Timing.MarkdownConversionMs > 0 {
+		phases["markdown_conversion"] = w.Timing.MarkdownConversionMs
+	}
+	if w.Timing.AIGenerationMs > 0 {
+		phases["ai_generation"] = w.Timing.AIGenerationMs
+	}
+	if w.Timing.ComputationMs > 0 {
+		phases["computation"] = w.Timing.ComputationMs
+	}
+
+	var aiIn, aiOut int
+	var apiMs int64
+	if w.AISource != nil {
+		aiIn = w.AISource.InputTokens
+		aiOut = w.AISource.OutputTokens
+	}
+	for _, ep := range w.APIEndpoints {
+		apiMs += ep.DurationMs
+	}
+
+	id := w.jobID
+	if id == "" {
+		id = uuid.New().String()
+	}
+
+	return &models.TimingRecord{
+		ID:          id,
+		JobID:       w.jobID,
+		WorkerType:  w.WorkerType,
+		Ticker:      w.Ticker,
+		StartedAt:   w.StartedAt,
+		CompletedAt: w.CompletedAt,
+		TotalMs:     w.Timing.TotalMs,
+		Phases:      phases,
+		Status:      w.status,
+		Error:       w.errorMsg,
+		APICallsMs:  apiMs,
+		AITokensIn:  aiIn,
+		AITokensOut: aiOut,
+	}
 }
 
 // ToMetadata converts the debug info to a map suitable for document metadata

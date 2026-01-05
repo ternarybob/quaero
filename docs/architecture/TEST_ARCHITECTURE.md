@@ -8,7 +8,20 @@ This document describes the test architecture and patterns used in the Quaero pr
 test/
 ├── api/                    # API integration tests
 │   ├── main_test.go        # Test suite setup
-│   └── *_test.go           # Individual API tests
+│   ├── *_test.go           # Individual API tests
+│   └── market_workers/     # Market worker tests (subdirectory)
+│       ├── common_test.go  # Shared schemas and helpers
+│       ├── fundamentals_test.go
+│       ├── announcements_test.go
+│       ├── data_test.go
+│       ├── news_test.go
+│       ├── director_interest_test.go
+│       ├── macro_test.go
+│       ├── competitor_test.go
+│       ├── assessor_test.go
+│       ├── signal_test.go
+│       ├── portfolio_test.go
+│       └── data_collection_test.go
 ├── ui/                     # UI/browser automation tests
 │   ├── uitest_context.go   # Core test infrastructure (NOT a test file)
 │   └── *_test.go           # Individual UI tests
@@ -170,6 +183,111 @@ func TestMyAPI(t *testing.T) {
 - `test/api/main_test.go` - Test suite setup
 - `test/api/jobs_test.go` - Job API tests
 - `test/api/health_check_test.go` - Simple endpoint tests
+
+## Market Worker Tests (`test/api/market_workers/`)
+
+Market worker tests follow a specific pattern with shared infrastructure in `common_test.go`.
+
+### Core Infrastructure
+
+```go
+package market_workers
+
+import (
+    "testing"
+    "time"
+
+    "github.com/stretchr/testify/assert"
+    "github.com/ternarybob/quaero/test/common"
+)
+
+func TestWorkerFundamentalsSingle(t *testing.T) {
+    // MANDATORY: Fresh environment per test
+    env := SetupFreshEnvironment(t)
+    if env == nil {
+        return
+    }
+    defer env.Cleanup()
+
+    helper := env.NewHTTPTestHelper(t)
+
+    // Create and execute job
+    body := map[string]interface{}{...}
+    jobID, _ := CreateAndExecuteJob(t, helper, body)
+
+    // Wait for completion
+    finalStatus := WaitForJobCompletion(t, helper, jobID, 2*time.Minute)
+
+    // Assert output not empty
+    tags := []string{"market-data", "bhp"}
+    metadata, content := AssertOutputNotEmpty(t, helper, tags)
+
+    // Validate schema
+    isValid := ValidateSchema(t, metadata, FundamentalsSchema)
+    assert.True(t, isValid)
+}
+```
+
+### Test Patterns
+
+| Pattern | Description |
+|---------|-------------|
+| `TestWorker*Single` | Tests single-stock functionality |
+| `TestWorker*Multi` | Tests multi-stock with subtests |
+| `SetupFreshEnvironment(t)` | Creates clean database per test |
+| `CreateAndExecuteJob(t, helper, body)` | Creates and runs job |
+| `WaitForJobCompletion(t, helper, id, timeout)` | Polls until terminal state |
+| `AssertOutputNotEmpty(t, helper, tags)` | Validates output.md and output.json |
+| `ValidateSchema(t, metadata, schema)` | Validates against WorkerSchema |
+| `HasGeminiAPIKey(env)` | Check for LLM API key (skip if missing) |
+
+### Worker Schemas
+
+Each worker has a defined schema in `common_test.go`:
+
+```go
+var FundamentalsSchema = WorkerSchema{
+    RequiredFields: []string{"symbol", "company_name", "current_price", "currency"},
+    OptionalFields: []string{"historical_prices", "pe_ratio", "market_cap"},
+    FieldTypes: map[string]string{
+        "symbol":        "string",
+        "current_price": "number",
+    },
+    ArraySchemas: map[string][]string{
+        "historical_prices": {"date", "close"},
+    },
+}
+```
+
+### LLM-Dependent Tests
+
+Tests requiring LLM (Gemini) should skip gracefully:
+
+```go
+if !HasGeminiAPIKey(env) {
+    t.Skip("Skipping: GEMINI_API_KEY not configured")
+    return
+}
+```
+
+### Multi-Stock Test Pattern
+
+```go
+func TestWorkerMulti(t *testing.T) {
+    env := SetupFreshEnvironment(t)
+    defer env.Cleanup()
+
+    stocks := []string{"BHP", "CSL", "GNP"}
+
+    for i, stock := range stocks {
+        t.Run(stock, func(t *testing.T) {
+            // Each subtest uses same env but separate job
+            // ...
+            SaveWorkerOutput(t, env, helper, tags, i+1)
+        })
+    }
+}
+```
 
 ## Unit Tests (`internal/**/`)
 

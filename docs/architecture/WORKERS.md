@@ -2049,3 +2049,60 @@ include_logs_on_error = true
 **Utility Workers**:
 - Code Map Worker
 - Test Job Generator Worker
+
+---
+
+## Worker Timing & Debug
+
+Workers support timing and debug information collection via `WorkerDebugInfo`. When enabled (via `config.Jobs.Debug = true`), workers collect:
+
+- **Phase timing**: API fetch, JSON generation, AI processing, etc.
+- **API call details**: Endpoints, methods, durations, status codes
+- **AI source info**: Provider, model, token counts
+- **Success/failure status**: With error context for failed jobs
+
+### Enabling Timing
+
+Set `debug = true` in the `[jobs]` config section:
+
+```toml
+[jobs]
+definitions_dir = "./job-definitions"
+debug = true  # Enable worker timing collection
+```
+
+### Using WorkerDebugWithStorage
+
+For persistent timing with API access:
+
+```go
+debug := workers.NewWorkerDebugWithStorage(
+    "market_fundamentals",
+    job.ID,
+    config.Jobs.Debug,
+    logger,
+    kvStorage,
+)
+
+debug.StartPhase("api_fetch")
+// ... fetch data ...
+debug.EndPhase("api_fetch")
+
+// On success
+debug.Complete()
+
+// On failure
+debug.CompleteWithError(err)
+```
+
+### Timing API Endpoints
+
+**GET /api/timing** - List timing records with filters:
+- `worker_type`: Filter by worker type
+- `job_id`: Filter by job ID
+- `status`: Filter by success/failed
+- `limit`/`offset`: Pagination
+
+**GET /api/timing/stats** - Aggregated statistics by worker type:
+- Count, avg/min/max duration, success rate
+- Time range of records

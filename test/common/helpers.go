@@ -645,3 +645,87 @@ func AssertNoErrorsInServiceLog(t *testing.T, env *TestEnvironment) {
 
 	t.Log("PASS: No errors found in service.log")
 }
+
+// =============================================================================
+// Service Requirement Functions
+// =============================================================================
+
+// RequireLLM fails the test if LLM service is not available.
+// Call this at the start of tests that require AI features.
+func RequireLLM(t *testing.T, env *TestEnvironment) {
+	t.Helper()
+
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Fatal("FAIL: Results directory not available - cannot check service status")
+		return
+	}
+
+	serviceLogPath := filepath.Join(resultsDir, "service.log")
+	content, err := os.ReadFile(serviceLogPath)
+	if err != nil {
+		t.Fatalf("FAIL: Cannot read service.log to verify LLM availability: %v", err)
+		return
+	}
+
+	logContent := string(content)
+
+	// Check for LLM unavailability marker
+	if strings.Contains(logContent, "[STARTUP] LLM service: unavailable") {
+		t.Fatal("FAIL: LLM service not configured - this test requires LLM. Configure gemini_api_key or anthropic_api_key in .env")
+	}
+
+	// Verify LLM is available in startup summary
+	if !strings.Contains(logContent, "\"llm\":true") && !strings.Contains(logContent, "llm=true") {
+		// Also check for the structured log field format
+		if !strings.Contains(logContent, "LLM=OK") {
+			t.Fatal("FAIL: LLM service status not confirmed in startup logs")
+		}
+	}
+
+	t.Log("OK: LLM service available")
+}
+
+// RequireEODHD fails the test if EODHD API is not configured.
+// Call this at the start of tests that require market data.
+func RequireEODHD(t *testing.T, env *TestEnvironment) {
+	t.Helper()
+
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Fatal("FAIL: Results directory not available - cannot check service status")
+		return
+	}
+
+	serviceLogPath := filepath.Join(resultsDir, "service.log")
+	content, err := os.ReadFile(serviceLogPath)
+	if err != nil {
+		t.Fatalf("FAIL: Cannot read service.log to verify EODHD availability: %v", err)
+		return
+	}
+
+	logContent := string(content)
+
+	// Check for EODHD unavailability marker
+	if strings.Contains(logContent, "[STARTUP] EODHD API: not configured") {
+		t.Fatal("FAIL: EODHD API not configured - this test requires EODHD. Configure eodhd_api_key in .env")
+	}
+
+	// Verify EODHD is available in startup summary
+	if !strings.Contains(logContent, "\"eodhd\":true") && !strings.Contains(logContent, "eodhd=true") {
+		// Also check for the structured log field format
+		if !strings.Contains(logContent, "EODHD=OK") {
+			t.Fatal("FAIL: EODHD API status not confirmed in startup logs")
+		}
+	}
+
+	t.Log("OK: EODHD API available")
+}
+
+// RequireAllMarketServices fails the test if any required market service is unavailable.
+// Call this at the start of tests that need both LLM and EODHD.
+func RequireAllMarketServices(t *testing.T, env *TestEnvironment) {
+	t.Helper()
+	RequireLLM(t, env)
+	RequireEODHD(t, env)
+}

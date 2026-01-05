@@ -25,6 +25,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/llm"
 )
 
 // OHLCV represents a single day's price data for price impact correlation
@@ -63,6 +64,7 @@ type MarketAnnouncementsWorker struct {
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
 	debugEnabled    bool
+	providerFactory *llm.ProviderFactory
 }
 
 // Compile-time assertion: MarketAnnouncementsWorker implements DefinitionWorker interface
@@ -99,6 +101,11 @@ const (
 	// SignalNoiseNone indicates no meaningful price/volume impact - pure noise
 	// Criteria: Price change <0.5% AND volume ratio <1.2x
 	SignalNoiseNone SignalNoiseRating = "NOISE"
+
+	// SignalNoiseRoutine indicates routine administrative announcement
+	// These are standard regulatory filings that all companies must make
+	// and are NOT correlated with price/volume movements - excluded from signal analysis
+	SignalNoiseRoutine SignalNoiseRating = "ROUTINE"
 )
 
 // AnnouncementAnalysis represents an analyzed announcement with classification and price impact
@@ -125,6 +132,10 @@ type AnnouncementAnalysis struct {
 
 	// Dividend tracking
 	IsDividendAnnouncement bool // True if announcement is dividend-related
+
+	// Routine announcement tracking
+	IsRoutine   bool   // True if announcement is routine administrative filing
+	RoutineType string // Type of routine announcement (e.g., "Director Interest (3Y)")
 }
 
 // PriceImpactData contains stock price movement around an announcement date
@@ -168,6 +179,7 @@ func NewMarketAnnouncementsWorker(
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
+	providerFactory *llm.ProviderFactory,
 ) *MarketAnnouncementsWorker {
 	return &MarketAnnouncementsWorker{
 		documentStorage: documentStorage,
@@ -176,7 +188,8 @@ func NewMarketAnnouncementsWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		debugEnabled: debugEnabled,
+		debugEnabled:    debugEnabled,
+		providerFactory: providerFactory,
 	}
 }
 
@@ -375,10 +388,20 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 		// Continue without price data - analysis will be incomplete but still useful
 	}
 
-	// Analyze ALL announcements for classification and price impact
+	// Analyze ALL announcements for classification and price impact (with deduplication)
 	debug.StartPhase("computation")
-	analyses := w.analyzeAnnouncements(ctx, announcements, asxCode, priceData)
+	analyses, dedupStats := w.analyzeAnnouncements(ctx, announcements, asxCode, priceData)
 	debug.EndPhase("computation")
+
+	// Log deduplication results
+	if dedupStats.DuplicatesFound > 0 {
+		w.logger.Info().
+			Str("asx_code", asxCode).
+			Int("original", dedupStats.TotalBefore).
+			Int("deduplicated", dedupStats.TotalAfter).
+			Int("duplicates_removed", dedupStats.DuplicatesFound).
+			Msg("Deduplicated same-day similar announcements")
+	}
 
 	// Build lookup map for quick relevance checking
 	analysisMap := make(map[string]AnnouncementAnalysis)
@@ -408,7 +431,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 	for _, ann := range announcements {
 		analysis, exists := analysisMap[ann.DocumentKey]
 		if !exists {
-			// If no analysis, skip (shouldn't happen but be safe)
+			// If no analysis, skip (may have been deduplicated)
 			skippedCount++
 			continue
 		}
@@ -430,6 +453,7 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 	w.logger.Info().
 		Str("asx_code", asxCode).
 		Int("total", len(announcements)).
+		Int("after_dedup", len(analyses)).
 		Int("high", highCount).
 		Int("medium", mediumCount).
 		Int("low", lowCount).
@@ -438,8 +462,8 @@ func (w *MarketAnnouncementsWorker) CreateJobs(ctx context.Context, step models.
 		Int("skipped", skippedCount).
 		Msg("ASX announcements analyzed and filtered")
 
-	// Create and save summary document (contains ALL announcements)
-	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, &jobDef, stepID, outputTags, debug)
+	// Create and save summary document (contains ALL deduplicated announcements)
+	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, &jobDef, stepID, outputTags, debug, dedupStats)
 	if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
 		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to save summary document")
 	} else {
@@ -1163,6 +1187,191 @@ func detectDividendAnnouncement(headline string, annType string) bool {
 	return false
 }
 
+// DeduplicationStats tracks announcements that were consolidated
+type DeduplicationStats struct {
+	TotalBefore     int                  // Count before deduplication
+	TotalAfter      int                  // Count after deduplication
+	DuplicatesFound int                  // Number of duplicates removed
+	Groups          []DeduplicationGroup // Details of each duplicate group
+}
+
+// DeduplicationGroup represents a set of similar announcements consolidated into one
+type DeduplicationGroup struct {
+	Date      time.Time
+	Headlines []string // All headlines in the group
+	Count     int      // Number of announcements in group
+}
+
+// normalizeHeadline removes trailing ticker codes and whitespace for comparison
+func normalizeHeadline(headline string) string {
+	h := strings.TrimSpace(headline)
+	// Remove trailing " - CODE" pattern (e.g., "Proposed issue of securities - EXR")
+	if idx := strings.LastIndex(h, " - "); idx > 0 {
+		// Check if suffix looks like a ticker code (2-4 uppercase letters)
+		suffix := strings.TrimSpace(h[idx+3:])
+		if len(suffix) >= 2 && len(suffix) <= 4 && isAllUpperAlpha(suffix) {
+			h = strings.TrimSpace(h[:idx])
+		}
+	}
+	return strings.ToUpper(h)
+}
+
+// isAllUpperAlpha checks if string is all uppercase letters
+func isAllUpperAlpha(s string) bool {
+	for _, r := range s {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// appendixBasePattern matches "APPENDIX 3X", "APPENDIX 3Y", etc.
+var appendixBasePattern = regexp.MustCompile(`APPENDIX\s+\d+[A-Z]`)
+
+// getAppendixBase extracts the appendix base type (e.g., "APPENDIX 3Y" from "Appendix 3Y SN")
+func getAppendixBase(headline string) string {
+	headlineUpper := strings.ToUpper(headline)
+	match := appendixBasePattern.FindString(headlineUpper)
+	return match
+}
+
+// areSimilarHeadlines checks if two headlines should be considered duplicates
+func areSimilarHeadlines(h1, h2 string) bool {
+	// Exact match
+	if h1 == h2 {
+		return true
+	}
+
+	// Normalized match (removes trailing ticker code)
+	norm1 := normalizeHeadline(h1)
+	norm2 := normalizeHeadline(h2)
+	if norm1 == norm2 {
+		return true
+	}
+
+	// Appendix pattern: "Appendix 3Y XX" variants all match
+	base1 := getAppendixBase(h1)
+	base2 := getAppendixBase(h2)
+	if base1 != "" && base2 != "" && base1 == base2 {
+		return true
+	}
+
+	return false
+}
+
+// deduplicateAnnouncements consolidates same-day announcements with similar headlines
+// Returns deduplicated list and statistics about what was consolidated
+func deduplicateAnnouncements(announcements []ASXAnnouncement) ([]ASXAnnouncement, DeduplicationStats) {
+	stats := DeduplicationStats{TotalBefore: len(announcements)}
+
+	if len(announcements) == 0 {
+		return announcements, stats
+	}
+
+	// Group by date
+	byDate := make(map[string][]ASXAnnouncement)
+	for _, ann := range announcements {
+		dateKey := ann.Date.Format("2006-01-02")
+		byDate[dateKey] = append(byDate[dateKey], ann)
+	}
+
+	var result []ASXAnnouncement
+
+	for dateKey, dayAnnouncements := range byDate {
+		// Within each day, find similar headline groups
+		used := make(map[int]bool)
+
+		for i := 0; i < len(dayAnnouncements); i++ {
+			if used[i] {
+				continue
+			}
+
+			// Start a new group with this announcement
+			group := []ASXAnnouncement{dayAnnouncements[i]}
+			used[i] = true
+
+			// Find all similar announcements on same day
+			for j := i + 1; j < len(dayAnnouncements); j++ {
+				if used[j] {
+					continue
+				}
+				if areSimilarHeadlines(dayAnnouncements[i].Headline, dayAnnouncements[j].Headline) {
+					group = append(group, dayAnnouncements[j])
+					used[j] = true
+				}
+			}
+
+			// Keep only one representative (first one - typically most recent by time)
+			result = append(result, group[0])
+
+			// Track groups with duplicates
+			if len(group) > 1 {
+				headlines := make([]string, len(group))
+				for k, a := range group {
+					headlines[k] = a.Headline
+				}
+				date, _ := time.Parse("2006-01-02", dateKey)
+				stats.Groups = append(stats.Groups, DeduplicationGroup{
+					Date:      date,
+					Headlines: headlines,
+					Count:     len(group),
+				})
+			}
+		}
+	}
+
+	stats.TotalAfter = len(result)
+	stats.DuplicatesFound = stats.TotalBefore - stats.TotalAfter
+
+	// Sort result by date descending
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Date.After(result[j].Date)
+	})
+
+	return result, stats
+}
+
+// isRoutineAnnouncement checks if announcement is a standard administrative filing
+// that should be excluded from signal/noise analysis.
+// These are regulatory filings that all companies must make and are NOT correlated
+// with price/volume movements.
+func isRoutineAnnouncement(headline string) (isRoutine bool, routineType string) {
+	headlineUpper := strings.ToUpper(headline)
+
+	// Ordered by specificity (more specific patterns first)
+	routinePatterns := []struct {
+		pattern     string
+		routineType string
+	}{
+		{"NOTICE OF ANNUAL GENERAL MEETING", "AGM Notice"},
+		{"NOTICE OF GENERAL MEETING", "Meeting Notice"},
+		{"RESULTS OF MEETING", "Meeting Results"},
+		{"PROPOSED ISSUE OF SECURITIES", "Securities Issue"},
+		{"APPLICATION FOR QUOTATION OF SECURITIES", "Quotation Application"},
+		{"APPLICATION FOR QUOTATION", "Quotation Application"},
+		{"NOTIFICATION OF CESSATION OF SECURITIES", "Securities Cessation"},
+		{"NOTIFICATION OF CESSATION", "Securities Cessation"},
+		{"NOTIFICATION REGARDING UNQUOTED SECURITIES", "Unquoted Securities"},
+		{"NOTIFICATION REGARDING UNQUOTED", "Unquoted Securities"},
+		{"CHANGE OF DIRECTOR'S INTEREST NOTICE", "Director Interest Change"},
+		{"CHANGE OF DIRECTORS INTEREST", "Director Interest Change"},
+		{"APPENDIX 3Y", "Director Interest (3Y)"},
+		{"APPENDIX 3X", "Initial Director Interest (3X)"},
+		{"APPENDIX 3B", "New Issue (3B)"},
+		{"APPENDIX 3G", "Issue Notification (3G)"},
+		{"CLEANSING NOTICE", "Cleansing Notice"},
+		{"CLEANSING STATEMENT", "Cleansing Notice"},
+	}
+
+	for _, p := range routinePatterns {
+		if strings.Contains(headlineUpper, p.pattern) {
+			return true, p.routineType
+		}
+	}
+	return false, ""
+}
+
 // SignalNoiseResult contains the full result of signal-to-noise analysis
 type SignalNoiseResult struct {
 	Rating      SignalNoiseRating
@@ -1176,6 +1385,15 @@ type SignalNoiseResult struct {
 func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, isTradingHalt, isReinstatement bool) SignalNoiseResult {
 	var rationale strings.Builder
 	result := SignalNoiseResult{}
+
+	// Check for routine announcements FIRST - these are excluded from signal analysis
+	isRoutine, routineType := isRoutineAnnouncement(ann.Headline)
+	if isRoutine {
+		return SignalNoiseResult{
+			Rating:    SignalNoiseRoutine,
+			Rationale: fmt.Sprintf("ROUTINE: Standard administrative filing (%s). Excluded from signal analysis - not correlated with price/volume movements.", routineType),
+		}
+	}
 
 	// If no price data available, base rating on announcement characteristics only
 	if impact == nil {
@@ -1300,10 +1518,14 @@ func calculateSignalNoiseRating(ann ASXAnnouncement, impact *PriceImpactData, is
 }
 
 // analyzeAnnouncements analyzes all announcements and adds relevance classification and price impact
-func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, announcements []ASXAnnouncement, asxCode string, prices []OHLCV) []AnnouncementAnalysis {
+// Returns deduplicated analyses and deduplication statistics
+func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, announcements []ASXAnnouncement, asxCode string, prices []OHLCV) ([]AnnouncementAnalysis, DeduplicationStats) {
+	// Deduplicate same-day similar announcements FIRST
+	dedupedAnnouncements, dedupStats := deduplicateAnnouncements(announcements)
+
 	var analyses []AnnouncementAnalysis
 
-	for _, ann := range announcements {
+	for _, ann := range dedupedAnnouncements {
 		category, reason := classifyRelevance(ann)
 
 		// Detect trading halts
@@ -1311,6 +1533,9 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 
 		// Detect dividend announcements
 		isDividend := detectDividendAnnouncement(ann.Headline, ann.Type)
+
+		// Detect routine administrative filings
+		isRoutine, routineType := isRoutineAnnouncement(ann.Headline)
 
 		analysis := AnnouncementAnalysis{
 			Date:                   ann.Date,
@@ -1324,6 +1549,8 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 			IsTradingHalt:          isTradingHalt,
 			IsReinstatement:        isReinstatement,
 			IsDividendAnnouncement: isDividend,
+			IsRoutine:              isRoutine,
+			RoutineType:            routineType,
 		}
 
 		// Add price impact if we have price data
@@ -1351,7 +1578,7 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 		return analyses[i].Date.After(analyses[j].Date)
 	})
 
-	return analyses
+	return analyses, dedupStats
 }
 
 // classifyRelevance determines the relevance category of an announcement
@@ -1561,9 +1788,9 @@ func (w *MarketAnnouncementsWorker) calculatePriceImpact(announcementDate time.T
 		if absPreDrift >= 2.0 {
 			hasSignificantPreDrift = true
 			if preAnnouncementDrift > 0 {
-				preDriftInterpretation = fmt.Sprintf("Stock rose %.1f%% in 5 days before announcement - possible anticipation or information leak", preAnnouncementDrift)
+				preDriftInterpretation = fmt.Sprintf("Stock rose %.1f%% in 5 days before announcement", preAnnouncementDrift)
 			} else {
-				preDriftInterpretation = fmt.Sprintf("Stock fell %.1f%% in 5 days before announcement - possible anticipation of negative news", -preAnnouncementDrift)
+				preDriftInterpretation = fmt.Sprintf("Stock fell %.1f%% in 5 days before announcement", -preAnnouncementDrift)
 			}
 		} else {
 			preDriftInterpretation = "No significant pre-announcement movement detected"
@@ -1586,33 +1813,162 @@ func (w *MarketAnnouncementsWorker) calculatePriceImpact(announcementDate time.T
 	}
 }
 
+// AnnouncementSummaryData holds counts and data needed for AI summary generation
+type AnnouncementSummaryData struct {
+	ASXCode                    string
+	HighSignalCount            int
+	ModerateSignalCount        int
+	LowSignalCount             int
+	NoiseCount                 int
+	RoutineCount               int
+	TradingHaltCount           int
+	AnomalyNoReactionCount     int
+	AnomalyUnexpectedCount     int
+	PreDriftCount              int
+	PriceSensitiveTotal        int
+	PriceSensitiveWithReaction int
+	HighSignalAnnouncements    []AnnouncementAnalysis
+}
+
+// generateAISummary uses AI to create an executive summary of the announcement analysis
+func (w *MarketAnnouncementsWorker) generateAISummary(ctx context.Context, data AnnouncementSummaryData) (string, error) {
+	if w.providerFactory == nil {
+		return "", nil
+	}
+
+	// Build prompt with analysis data
+	prompt := w.buildSummaryPrompt(data)
+
+	systemInstruction := `You are a senior financial analyst providing executive summaries of company announcement histories.
+Your summaries should be:
+- Concise (2-3 paragraphs maximum)
+- Focused on actionable investor insights
+- Objective and data-driven
+- Written in third person
+
+Key aspects to cover:
+1. ANNOUNCEMENT QUALITY: Are the company's announcements generally informative and market-moving, or mostly routine filings?
+2. PRE-MARKET AWARENESS: Is there evidence of information leakage or insider knowledge based on pre-announcement price movements?
+3. COMPANY COMMUNICATION: What themes emerge from the announcement patterns - transparency, growth signals, compliance focus, etc.?
+
+Do NOT include any markdown formatting in your response - just plain text paragraphs.`
+
+	request := &llm.ContentRequest{
+		Messages: []interfaces.Message{
+			{Role: "user", Content: prompt},
+		},
+		SystemInstruction: systemInstruction,
+		Temperature:       0.3,
+		MaxTokens:         800,
+	}
+
+	resp, err := w.providerFactory.GenerateContent(ctx, request)
+	if err != nil {
+		return "", fmt.Errorf("AI summary generation failed: %w", err)
+	}
+
+	return resp.Text, nil
+}
+
+// buildSummaryPrompt constructs the prompt for AI summary generation
+func (w *MarketAnnouncementsWorker) buildSummaryPrompt(data AnnouncementSummaryData) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Analyze the announcement history for ASX:%s and provide an executive summary.\n\n", data.ASXCode))
+
+	// Signal distribution
+	sb.WriteString("SIGNAL DISTRIBUTION (based on actual price/volume impact):\n")
+	sb.WriteString(fmt.Sprintf("- HIGH_SIGNAL (significant market reaction): %d\n", data.HighSignalCount))
+	sb.WriteString(fmt.Sprintf("- MODERATE_SIGNAL (notable reaction): %d\n", data.ModerateSignalCount))
+	sb.WriteString(fmt.Sprintf("- LOW_SIGNAL (minor impact): %d\n", data.LowSignalCount))
+	sb.WriteString(fmt.Sprintf("- NOISE (no meaningful impact): %d\n", data.NoiseCount))
+	sb.WriteString(fmt.Sprintf("- ROUTINE (administrative filings): %d\n", data.RoutineCount))
+	if data.TradingHaltCount > 0 {
+		sb.WriteString(fmt.Sprintf("- Trading Halts: %d\n", data.TradingHaltCount))
+	}
+	sb.WriteString("\n")
+
+	// Price-sensitive accuracy
+	if data.PriceSensitiveTotal > 0 {
+		accuracy := float64(data.PriceSensitiveWithReaction) / float64(data.PriceSensitiveTotal) * 100
+		sb.WriteString("PRICE-SENSITIVE ACCURACY:\n")
+		sb.WriteString(fmt.Sprintf("- Announcements marked price-sensitive: %d\n", data.PriceSensitiveTotal))
+		sb.WriteString(fmt.Sprintf("- Actually caused market reaction: %d (%.0f%%)\n\n", data.PriceSensitiveWithReaction, accuracy))
+	}
+
+	// Anomalies
+	if data.AnomalyNoReactionCount > 0 || data.AnomalyUnexpectedCount > 0 {
+		sb.WriteString("ANOMALIES DETECTED:\n")
+		if data.AnomalyNoReactionCount > 0 {
+			sb.WriteString(fmt.Sprintf("- Price-sensitive with NO market reaction: %d\n", data.AnomalyNoReactionCount))
+		}
+		if data.AnomalyUnexpectedCount > 0 {
+			sb.WriteString(fmt.Sprintf("- Unexpected reactions to routine news: %d\n", data.AnomalyUnexpectedCount))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Pre-announcement drift
+	if data.PreDriftCount > 0 {
+		sb.WriteString("PRE-ANNOUNCEMENT MOVEMENT:\n")
+		sb.WriteString(fmt.Sprintf("- Trading days with significant pre-drift (>=2%%): %d\n", data.PreDriftCount))
+		sb.WriteString("- This may indicate information leakage or market anticipation\n\n")
+	}
+
+	// High signal announcements detail
+	if len(data.HighSignalAnnouncements) > 0 {
+		sb.WriteString("HIGH SIGNAL ANNOUNCEMENTS:\n")
+		for i, a := range data.HighSignalAnnouncements {
+			if i >= 5 {
+				sb.WriteString(fmt.Sprintf("... and %d more\n", len(data.HighSignalAnnouncements)-5))
+				break
+			}
+			priceStr := "N/A"
+			if a.PriceImpact != nil {
+				sign := ""
+				if a.PriceImpact.ChangePercent > 0 {
+					sign = "+"
+				}
+				priceStr = fmt.Sprintf("%s%.1f%%", sign, a.PriceImpact.ChangePercent)
+			}
+			sb.WriteString(fmt.Sprintf("- %s: %s (%s)\n", a.Date.Format("2006-01-02"), a.Headline, priceStr))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("Based on this data, provide a 2-3 paragraph executive summary covering:\n")
+	sb.WriteString("1. The quality of announcements from a buyer/seller perspective\n")
+	sb.WriteString("2. Evidence of pre-market awareness or information leakage\n")
+	sb.WriteString("3. Overall themes in the company's market communication\n")
+
+	return sb.String()
+}
+
 // createSummaryDocument creates a summary document with all analyzed announcements
-func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
+func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo, dedupStats DeduplicationStats) *models.Document {
 	var content strings.Builder
 
-	// Header
-	content.WriteString(fmt.Sprintf("# ASX Announcements Summary: %s\n\n", asxCode))
-	content.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM AEST")))
-	content.WriteString(fmt.Sprintf("**Total Announcements**: %d\n", len(analyses)))
-	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeMarketAnnouncements))
-
-	// Signal-to-Noise Analysis Summary
-	highSignalCount, modSignalCount, lowSignalCount, noiseSignalCount := 0, 0, 0, 0
+	// Pre-calculate signal counts for AI summary and later sections
+	highSignalCount, modSignalCount, lowSignalCount, noiseSignalCount, routineCount := 0, 0, 0, 0, 0
 	tradingHaltCount := 0
 	anomalyNoReactionCount, anomalyUnexpectedCount := 0, 0
-	dividendCount := 0
 	preDriftCount := 0
 	priceSensitiveTotal, priceSensitiveWithReaction := 0, 0
+	var highSignalAnnouncements []AnnouncementAnalysis
+
 	for _, a := range analyses {
 		switch a.SignalNoiseRating {
 		case SignalNoiseHigh:
 			highSignalCount++
+			highSignalAnnouncements = append(highSignalAnnouncements, a)
 		case SignalNoiseModerate:
 			modSignalCount++
 		case SignalNoiseLow:
 			lowSignalCount++
 		case SignalNoiseNone:
 			noiseSignalCount++
+		case SignalNoiseRoutine:
+			routineCount++
 		}
 		if a.IsTradingHalt || a.IsReinstatement {
 			tradingHaltCount++
@@ -1624,10 +1980,10 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 				anomalyUnexpectedCount++
 			}
 		}
-		if a.IsDividendAnnouncement {
-			dividendCount++
-		}
-		if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift {
+		// Only count high-signal announcements for pre-drift analysis
+		// Routine filings (Appendix 3X, 3Y, etc.) are excluded as they don't drive price movement
+		if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift &&
+			a.SignalNoiseRating == SignalNoiseHigh && !a.IsRoutine {
 			preDriftCount++
 		}
 		if a.PriceSensitive {
@@ -1638,12 +1994,90 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		}
 	}
 
+	// Generate AI executive summary if provider is available
+	var aiSummary string
+	if w.providerFactory != nil && len(analyses) > 0 {
+		summaryData := AnnouncementSummaryData{
+			ASXCode:                    asxCode,
+			HighSignalCount:            highSignalCount,
+			ModerateSignalCount:        modSignalCount,
+			LowSignalCount:             lowSignalCount,
+			NoiseCount:                 noiseSignalCount,
+			RoutineCount:               routineCount,
+			TradingHaltCount:           tradingHaltCount,
+			AnomalyNoReactionCount:     anomalyNoReactionCount,
+			AnomalyUnexpectedCount:     anomalyUnexpectedCount,
+			PreDriftCount:              preDriftCount,
+			PriceSensitiveTotal:        priceSensitiveTotal,
+			PriceSensitiveWithReaction: priceSensitiveWithReaction,
+			HighSignalAnnouncements:    highSignalAnnouncements,
+		}
+		var err error
+		aiSummary, err = w.generateAISummary(ctx, summaryData)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to generate AI summary")
+		}
+	}
+
+	// Header
+	content.WriteString(fmt.Sprintf("# ASX Announcements Summary: %s\n\n", asxCode))
+	content.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM AEST")))
+	content.WriteString(fmt.Sprintf("**Total Announcements**: %d", len(analyses)))
+	if dedupStats.DuplicatesFound > 0 {
+		content.WriteString(fmt.Sprintf(" (deduplicated from %d)", dedupStats.TotalBefore))
+	}
+	content.WriteString("\n")
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeMarketAnnouncements))
+
+	// Executive Summary (AI-generated)
+	if aiSummary != "" {
+		content.WriteString("## Executive Summary\n\n")
+		content.WriteString(aiSummary)
+		content.WriteString("\n\n")
+	}
+
+	// Deduplication Summary (if any duplicates were found)
+	if dedupStats.DuplicatesFound > 0 {
+		content.WriteString("## Deduplication Summary\n\n")
+		content.WriteString(fmt.Sprintf("**Original Announcements**: %d\n", dedupStats.TotalBefore))
+		content.WriteString(fmt.Sprintf("**After Deduplication**: %d\n", dedupStats.TotalAfter))
+		content.WriteString(fmt.Sprintf("**Duplicates Consolidated**: %d\n\n", dedupStats.DuplicatesFound))
+
+		if len(dedupStats.Groups) > 0 {
+			content.WriteString("| Date | Consolidated Headlines | Count |\n")
+			content.WriteString("|------|----------------------|-------|\n")
+			for _, g := range dedupStats.Groups {
+				// Truncate first headline for display
+				headline := g.Headlines[0]
+				if len(headline) > 40 {
+					headline = headline[:37] + "..."
+				}
+				content.WriteString(fmt.Sprintf("| %s | %s | %d |\n",
+					g.Date.Format("2006-01-02"),
+					headline,
+					g.Count,
+				))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Count dividend announcements (not included in AI summary data)
+	dividendCount := 0
+	for _, a := range analyses {
+		if a.IsDividendAnnouncement {
+			dividendCount++
+		}
+	}
+
+	// Signal-to-Noise Analysis Summary (counts already calculated at top)
 	content.WriteString("## Signal-to-Noise Analysis\n\n")
 	content.WriteString("**Rating Definitions:**\n")
 	content.WriteString("- **HIGH_SIGNAL**: Significant market impact (price change >=3% OR volume >=2x)\n")
 	content.WriteString("- **MODERATE_SIGNAL**: Notable market reaction (price change >=1.5% OR volume >=1.5x)\n")
 	content.WriteString("- **LOW_SIGNAL**: Minor market reaction (price change >=0.5% OR volume >=1.2x)\n")
-	content.WriteString("- **NOISE**: No meaningful impact (price change <0.5% AND volume <1.2x)\n\n")
+	content.WriteString("- **NOISE**: No meaningful impact (price change <0.5% AND volume <1.2x)\n")
+	content.WriteString("- **ROUTINE**: Administrative filing excluded from signal analysis\n\n")
 
 	content.WriteString("| Signal Rating | Count | Interpretation |\n")
 	content.WriteString("|---------------|-------|----------------|\n")
@@ -1651,24 +2085,33 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	content.WriteString(fmt.Sprintf("| MODERATE_SIGNAL | %d | Announcements with notable price/volume movement |\n", modSignalCount))
 	content.WriteString(fmt.Sprintf("| LOW_SIGNAL | %d | Announcements with minor detectable impact |\n", lowSignalCount))
 	content.WriteString(fmt.Sprintf("| NOISE | %d | Announcements with no meaningful market effect |\n", noiseSignalCount))
+	if routineCount > 0 {
+		content.WriteString(fmt.Sprintf("| *ROUTINE* | %d | Administrative filings (excluded from ratio) |\n", routineCount))
+	}
 	if tradingHaltCount > 0 {
 		content.WriteString(fmt.Sprintf("| *Trading Halts* | %d | Trading halt/reinstatement announcements |\n", tradingHaltCount))
 	}
 	content.WriteString("\n")
 
-	// Calculate signal-to-noise ratio
+	// Calculate signal-to-noise ratio (EXCLUDING routine announcements)
 	signalCount := highSignalCount + modSignalCount
 	noiseRatioDesc := "Very High"
 	if signalCount > 0 {
-		if noiseSignalCount <= signalCount {
+		// Only count actual noise, not routine administrative filings
+		actualNoise := noiseSignalCount + lowSignalCount
+		if actualNoise <= signalCount {
 			noiseRatioDesc = "Low"
-		} else if noiseSignalCount <= signalCount*2 {
+		} else if actualNoise <= signalCount*2 {
 			noiseRatioDesc = "Moderate"
 		} else {
 			noiseRatioDesc = "High"
 		}
 	}
-	content.WriteString(fmt.Sprintf("**Noise Ratio**: %s (%d signal vs %d noise announcements)\n\n", noiseRatioDesc, signalCount, noiseSignalCount+lowSignalCount))
+	content.WriteString(fmt.Sprintf("**Noise Ratio**: %s (%d signal vs %d noise announcements", noiseRatioDesc, signalCount, noiseSignalCount+lowSignalCount))
+	if routineCount > 0 {
+		content.WriteString(fmt.Sprintf(", %d routine excluded", routineCount))
+	}
+	content.WriteString(")\n\n")
 
 	// High Signal Summary Table (quick overview)
 	if highSignalCount > 0 {
@@ -1725,20 +2168,49 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		content.WriteString("\n")
 	}
 
-	// Pre-Announcement Drift Section
+	// Pre-Announcement Drift Section (HIGH-SIGNAL ONLY)
+	// Only analyze announcements that are HIGH_SIGNAL and not routine filings
+	// Routine filings (Appendix 3X, 3Y, etc.) are excluded as they don't drive price movement
 	if preDriftCount > 0 {
-		content.WriteString("## Pre-Announcement Movement Analysis\n\n")
-		content.WriteString(fmt.Sprintf("**Announcements with Significant Pre-Drift (T-5 to T-1 ≥ 2%%)**: %d\n\n", preDriftCount))
+		content.WriteString("## Pre-Announcement Movement Analysis (High-Signal Only)\n\n")
+		content.WriteString("*Analysis limited to HIGH_SIGNAL announcements - routine filings excluded as they do not drive price movement.*\n\n")
+
+		// Count unique dates with significant pre-drift for high-signal announcements
+		seenDates := make(map[string]bool)
+		uniqueDateCount := 0
+		for _, a := range analyses {
+			// Only count high-signal, non-routine announcements
+			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift &&
+				a.SignalNoiseRating == SignalNoiseHigh && !a.IsRoutine {
+				dateKey := a.Date.Format("2006-01-02")
+				if !seenDates[dateKey] {
+					seenDates[dateKey] = true
+					uniqueDateCount++
+				}
+			}
+		}
+
+		content.WriteString(fmt.Sprintf("**Trading Days with Significant Pre-Drift (T-5 to T-1 ≥ 2%%)**: %d\n\n", uniqueDateCount))
 		content.WriteString("Pre-announcement price movement may indicate:\n")
 		content.WriteString("- Information leakage before official announcement\n")
 		content.WriteString("- Market anticipation of news\n")
 		content.WriteString("- Insider trading activity (requires further investigation)\n\n")
 
-		// List announcements with significant pre-drift
+		// List high-signal announcements with significant pre-drift (deduplicated by date)
+		// Excludes routine filings as they are not market-moving events
 		content.WriteString("| Date | Headline | Pre-Drift | Interpretation |\n")
 		content.WriteString("|------|----------|-----------|----------------|\n")
+		seenDates = make(map[string]bool) // Reset for output loop
 		for _, a := range analyses {
-			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift {
+			// Only show high-signal, non-routine announcements in pre-announcement analysis
+			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift &&
+				a.SignalNoiseRating == SignalNoiseHigh && !a.IsRoutine {
+				dateKey := a.Date.Format("2006-01-02")
+				if seenDates[dateKey] {
+					continue // Skip - already output an announcement for this date
+				}
+				seenDates[dateKey] = true
+
 				headline := a.Headline
 				if len(headline) > 40 {
 					headline = headline[:37] + "..."
@@ -1764,6 +2236,30 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		content.WriteString("## Dividend Announcements\n\n")
 		content.WriteString(fmt.Sprintf("**Total Dividend-Related Announcements**: %d\n\n", dividendCount))
 		content.WriteString("*Note: Negative price movement on dividend announcements may be due to ex-dividend adjustment rather than negative market sentiment.*\n\n")
+	}
+
+	// Routine Administrative Announcements Section
+	if routineCount > 0 {
+		content.WriteString("## Routine Administrative Announcements\n\n")
+		content.WriteString(fmt.Sprintf("**Total Routine Announcements**: %d\n\n", routineCount))
+		content.WriteString("*These are standard regulatory filings excluded from signal/noise analysis - not correlated with price/volume movements.*\n\n")
+
+		content.WriteString("| Date | Headline | Type |\n")
+		content.WriteString("|------|----------|------|\n")
+		for _, a := range analyses {
+			if a.IsRoutine {
+				headline := a.Headline
+				if len(headline) > 45 {
+					headline = headline[:42] + "..."
+				}
+				content.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
+					a.Date.Format("2006-01-02"),
+					headline,
+					a.RoutineType,
+				))
+			}
+		}
+		content.WriteString("\n")
 	}
 
 	// Keyword-based classification summary (legacy)
@@ -1923,6 +2419,8 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 			"is_anomaly":               a.IsAnomaly,
 			"anomaly_type":             a.AnomalyType,
 			"is_dividend_announcement": a.IsDividendAnnouncement,
+			"is_routine":               a.IsRoutine,
+			"routine_type":             a.RoutineType,
 		}
 
 		if a.PriceImpact != nil {
@@ -1949,14 +2447,23 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		"parent_job_id": parentJobID,
 		"announcements": announcementsMetadata,
 		"generated_at":  time.Now().Format(time.RFC3339),
+		// Deduplication stats
+		"deduplication_stats": map[string]interface{}{
+			"total_before":     dedupStats.TotalBefore,
+			"total_after":      dedupStats.TotalAfter,
+			"duplicates_found": dedupStats.DuplicatesFound,
+		},
 		// Signal-to-noise summary
 		"signal_noise_summary": map[string]interface{}{
 			"high_signal_count":     highSignalCount,
 			"moderate_signal_count": modSignalCount,
 			"low_signal_count":      lowSignalCount,
 			"noise_count":           noiseSignalCount,
+			"routine_count":         routineCount,
 			"trading_halt_count":    tradingHaltCount,
 		},
+		// AI-generated executive summary
+		"ai_summary": aiSummary,
 		// Keyword-based classification summary (legacy)
 		"relevance_summary": map[string]interface{}{
 			"high_count":   highCount,

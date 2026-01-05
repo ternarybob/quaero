@@ -52,8 +52,9 @@ func NewMarketDataCollectionWorker(
 	debugEnabled bool,
 ) *MarketDataCollectionWorker {
 	// Create embedded workers for inline execution
+	// Note: announcementsWorker gets nil providerFactory as AI summary is not needed in collection mode
 	fundamentalsWorker := NewMarketFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
-	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled)
+	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled, nil)
 	marketDataWorker := NewMarketDataWorker(documentStorage, logger, jobMgr, eodhdClient)
 
 	return &MarketDataCollectionWorker{

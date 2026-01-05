@@ -165,6 +165,10 @@ type TestConfig struct {
 	// ServiceConfigFiles holds the list of service config files to pass to quaero binary
 	// First file is base config, subsequent files are overrides
 	ServiceConfigFiles []string
+
+	// PathPrefix is the relative path adjustment for subdirectory tests
+	// e.g., "../" when running from test/api/market_workers instead of test/api
+	PathPrefix string
 }
 
 // TestEnvironment represents a running test environment
@@ -404,7 +408,9 @@ func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 	}
 
 	// Load test harness config (build, service lifecycle, output)
-	harnessConfigFile := "../config/setup.toml"
+	// Support both direct test/api|ui runs and subdirectory runs (e.g., test/api/market_workers)
+	pathPrefix := calculateSubdirPathPrefix(cwd)
+	harnessConfigFile := pathPrefix + "../config/setup.toml"
 	harnessData, err := os.ReadFile(harnessConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read harness config %s: %w", harnessConfigFile, err)
@@ -416,8 +422,13 @@ func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 	}
 
 	// Build list of service config files (base + overrides)
-	serviceConfigFiles := []string{"../config/test-quaero.toml"} // Base config
-	serviceConfigFiles = append(serviceConfigFiles, additionalConfigPaths...)
+	// Apply path prefix immediately for subdirectory runs
+	serviceConfigFiles := []string{pathPrefix + "../config/test-quaero.toml"}
+	for _, additionalPath := range additionalConfigPaths {
+		if additionalPath != "" {
+			serviceConfigFiles = append(serviceConfigFiles, pathPrefix+additionalPath)
+		}
+	}
 
 	// Validate all service config files exist and are valid TOML
 	for _, serviceConfigFile := range serviceConfigFiles {
@@ -446,7 +457,51 @@ func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 	}
 	// UI tests use default port from harness config (18085)
 
+	// Adjust relative paths for subdirectory tests (e.g., test/api/market_workers)
+	// pathPrefix was calculated at the start of this function
+	config.PathPrefix = pathPrefix
+	if pathPrefix != "" {
+		config.Build.SourceDir = pathPrefix + config.Build.SourceDir
+		config.Build.BinaryOutput = pathPrefix + config.Build.BinaryOutput
+		config.Build.ConfigFile = pathPrefix + config.Build.ConfigFile
+		config.Build.VersionFile = pathPrefix + config.Build.VersionFile
+		config.Output.ResultsBaseDir = pathPrefix + config.Output.ResultsBaseDir
+	}
+
 	return &config, nil
+}
+
+// calculateSubdirPathPrefix returns the path prefix needed for subdirectory tests
+// e.g., if running from test/api/market_workers, returns "../" to adjust paths
+// that were designed for test/api
+func calculateSubdirPathPrefix(cwd string) string {
+	// Find the test/api or test/ui position
+	var baseTestDir string
+	if idx := strings.Index(cwd, "test/api"); idx != -1 {
+		baseTestDir = cwd[:idx+len("test/api")]
+	} else if idx := strings.Index(cwd, "test\\api"); idx != -1 {
+		baseTestDir = cwd[:idx+len("test\\api")]
+	} else if idx := strings.Index(cwd, "test/ui"); idx != -1 {
+		baseTestDir = cwd[:idx+len("test/ui")]
+	} else if idx := strings.Index(cwd, "test\\ui"); idx != -1 {
+		baseTestDir = cwd[:idx+len("test\\ui")]
+	} else {
+		return ""
+	}
+
+	// Calculate depth difference
+	relPath, err := filepath.Rel(baseTestDir, cwd)
+	if err != nil || relPath == "." {
+		return ""
+	}
+
+	// Count directory levels in relative path
+	parts := strings.Split(relPath, string(filepath.Separator))
+	var prefix string
+	for range parts {
+		prefix += "../"
+	}
+	return prefix
 }
 
 // SetupTestEnvironment starts the Quaero service and prepares the test environment
@@ -563,7 +618,8 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		}
 
 		// Then load from test/config/.env (can override root .env)
-		testEnvPath := "../config/.env"
+		// Path is relative to test/api/* or test/ui/* directories
+		testEnvPath := "../../config/.env"
 		if testEnvVars, err := loadEnvFile(testEnvPath); err == nil && len(testEnvVars) > 0 {
 			for k, v := range testEnvVars {
 				if v != "" {
@@ -824,7 +880,7 @@ func (env *TestEnvironment) buildService() error {
 	}
 
 	// Copy pages directory to bin/pages
-	pagesSourcePath, err := filepath.Abs("../../pages")
+	pagesSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../../pages")
 	if err != nil {
 		return fmt.Errorf("failed to resolve pages source path: %w", err)
 	}
@@ -847,7 +903,7 @@ func (env *TestEnvironment) buildService() error {
 	fmt.Fprintf(env.LogFile, "Pages copied from %s to: %s\n", pagesSourcePath, pagesDestPath)
 
 	// Copy Chrome extension to bin/quaero-chrome-extension
-	extensionSourcePath, err := filepath.Abs("../../cmd/quaero-chrome-extension")
+	extensionSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../../cmd/quaero-chrome-extension")
 	if err != nil {
 		return fmt.Errorf("failed to resolve extension source path: %w", err)
 	}
@@ -869,7 +925,7 @@ func (env *TestEnvironment) buildService() error {
 	fmt.Fprintf(env.LogFile, "Chrome extension copied from %s to: %s\n", extensionSourcePath, extensionDestPath)
 
 	// Copy job-definitions directory to bin/job-definitions
-	jobDefsSourcePath, err := filepath.Abs("../config/job-definitions")
+	jobDefsSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../config/job-definitions")
 	if err != nil {
 		return fmt.Errorf("failed to resolve job-definitions source path: %w", err)
 	}
@@ -891,7 +947,7 @@ func (env *TestEnvironment) buildService() error {
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
 	// Copy templates directory to bin/templates (for job template worker)
-	templatesSourcePath, err := filepath.Abs("../config/templates")
+	templatesSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../config/templates")
 	if err != nil {
 		return fmt.Errorf("failed to resolve templates source path: %w", err)
 	}
@@ -923,7 +979,7 @@ func (env *TestEnvironment) buildService() error {
 	}
 
 	// Copy variables.toml file to bin/variables.toml (for variables and key/value storage)
-	variablesSourcePath, err := filepath.Abs("../config/variables.toml")
+	variablesSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../config/variables.toml")
 	if err != nil {
 		return fmt.Errorf("failed to resolve variables source path: %w", err)
 	}
@@ -1067,6 +1123,21 @@ func (env *TestEnvironment) buildService() error {
 		}
 	}
 
+	// Load Anthropic API key from .env.test (for Claude LLM fallback)
+	if key := env.EnvVars["anthropic_api_key"]; key != "" {
+		variablesConfig["anthropic_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from anthropic_api_key in .env.test",
+		}
+	}
+	// Override with ANTHROPIC_API_KEY environment variable if set
+	if key := env.EnvVars["ANTHROPIC_API_KEY"]; key != "" {
+		variablesConfig["anthropic_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from ANTHROPIC_API_KEY environment variable",
+		}
+	}
+
 	// Write updated variables.toml
 	if data, err := toml.Marshal(variablesConfig); err == nil {
 		if err := os.WriteFile(variablesFile, data, 0644); err != nil {
@@ -1078,7 +1149,7 @@ func (env *TestEnvironment) buildService() error {
 	}
 
 	// Copy connectors.toml file to bin/connectors.toml
-	connectorsSourcePath, err := filepath.Abs("../config/connectors.toml")
+	connectorsSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../config/connectors.toml")
 	if err != nil {
 		return fmt.Errorf("failed to resolve connectors source path: %w", err)
 	}
@@ -1092,7 +1163,7 @@ func (env *TestEnvironment) buildService() error {
 	fmt.Fprintf(env.LogFile, "Connectors copied from %s to: %s\n", connectorsSourcePath, connectorsDestPath)
 
 	// Copy email.toml file to bin/email.toml
-	emailSourcePath, err := filepath.Abs("../config/email.toml")
+	emailSourcePath, err := filepath.Abs(env.Config.PathPrefix + "../config/email.toml")
 	if err != nil {
 		return fmt.Errorf("failed to resolve email source path: %w", err)
 	}

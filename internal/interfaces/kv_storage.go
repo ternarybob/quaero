@@ -49,4 +49,7 @@ type KeyValueStorage interface {
 
 	// GetAll returns all key/value pairs as a map (useful for bulk operations)
 	GetAll(ctx context.Context) (map[string]string, error)
+
+	// ListByPrefix returns all key/value pairs with keys starting with the given prefix
+	ListByPrefix(ctx context.Context, prefix string) ([]KeyValuePair, error)
 }

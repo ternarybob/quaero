@@ -37,6 +37,7 @@ concurrency = 10  # Global job processor concurrency - how many jobs run in para
 # =============================================================================
 [jobs]
 definitions_dir = "./job-definitions"  # Directory for job definition files
+debug = true  # Enable worker debug metadata in tests (timing, API calls, AI sources)
 
 [places_api]
 api_key = "{google_places_api_key}"  # Required for places search jobs
@@ -50,13 +51,6 @@ model = "gemini-3-flash-preview"      # Model for AI operations
 thinking = "NORMAL"                   # Default thinking level
 timeout = "5m"                        # Operation timeout
 temperature = 0.7                     # Completion temperature
-
-
-# =============================================================================
-# Workers Configuration
-# =============================================================================
-[workers]
-debug = true  # Enable worker debug metadata in tests (timing, API calls, AI sources)
 
 # =============================================================================
 # Logging Configuration

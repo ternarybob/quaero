@@ -175,3 +175,22 @@ func (s *KVStorage) GetAll(ctx context.Context) (map[string]string, error) {
 
 	return kvMap, nil
 }
+
+// ListByPrefix returns all key/value pairs with keys starting with the given prefix
+func (s *KVStorage) ListByPrefix(ctx context.Context, prefix string) ([]interfaces.KeyValuePair, error) {
+	normalizedPrefix := s.normalizeKey(prefix)
+	var allPairs []interfaces.KeyValuePair
+	err := s.db.Store().Find(&allPairs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list key/value pairs: %w", err)
+	}
+
+	var result []interfaces.KeyValuePair
+	for _, pair := range allPairs {
+		if strings.HasPrefix(pair.Key, normalizedPrefix) {
+			result = append(result, pair)
+		}
+	}
+
+	return result, nil
+}

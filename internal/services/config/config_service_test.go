@@ -100,6 +100,22 @@ func (m *mockKVStorage) DeleteAll(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockKVStorage) ListByPrefix(ctx context.Context, prefix string) ([]interfaces.KeyValuePair, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var pairs []interfaces.KeyValuePair
+	for k, v := range m.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			pairs = append(pairs, interfaces.KeyValuePair{
+				Key:   k,
+				Value: v,
+			})
+		}
+	}
+	return pairs, nil
+}
+
 // mockEventService implements interfaces.EventService for testing
 type mockEventService struct {
 	handlers map[interfaces.EventType][]interfaces.EventHandler

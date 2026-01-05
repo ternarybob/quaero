@@ -36,7 +36,6 @@ type Config struct {
 	Gemini          GeminiConfig       `toml:"gemini"`
 	Claude          ClaudeConfig       `toml:"claude"`
 	LLM             LLMConfig          `toml:"llm"`
-	Workers         WorkersConfig      `toml:"workers"`
 }
 
 type ServerConfig struct {
@@ -83,10 +82,11 @@ type LoggingConfig struct {
 	MinEventLevel string   `toml:"min_event_level"` // Minimum log level to publish as events to UI ("debug", "info", "warn", "error")
 }
 
-// JobsConfig contains configuration for job definitions
+// JobsConfig contains configuration for job definitions and worker behavior
 type JobsConfig struct {
 	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
 	TemplatesDir   string `toml:"templates_dir"`   // Directory containing job template files (TOML)
+	Debug          bool   `toml:"debug"`           // Enable worker debug metadata (timing, API calls, AI sources)
 }
 
 // DocsConfig contains configuration for documentation reference files
@@ -200,11 +200,6 @@ const (
 // LLMConfig contains unified configuration for all AI providers
 type LLMConfig struct {
 	DefaultProvider LLMProvider `toml:"default_provider"` // Default provider: "gemini" or "claude" (default: "gemini")
-}
-
-// WorkersConfig contains configuration for worker behavior
-type WorkersConfig struct {
-	Debug bool `toml:"debug"` // Enable worker debug metadata (timing, API calls, AI sources)
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -335,9 +330,6 @@ func NewDefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			DefaultProvider: LLMProviderGemini, // Default to Gemini for backward compatibility
-		},
-		Workers: WorkersConfig{
-			Debug: false, // Disabled by default - zero overhead in production
 		},
 	}
 }
@@ -696,10 +688,10 @@ func applyEnvOverrides(config *Config) {
 		config.LLM.DefaultProvider = LLMProvider(provider)
 	}
 
-	// Workers configuration
-	if debug := os.Getenv("QUAERO_WORKERS_DEBUG"); debug != "" {
+	// Jobs debug configuration
+	if debug := os.Getenv("QUAERO_JOBS_DEBUG"); debug != "" {
 		if d, err := strconv.ParseBool(debug); err == nil {
-			config.Workers.Debug = d
+			config.Jobs.Debug = d
 		}
 	}
 

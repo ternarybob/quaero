@@ -146,6 +146,19 @@ type App struct {
 	UnifiedLogsHandler   *handlers.UnifiedLogsHandler
 	SSELogsHandler       *handlers.SSELogsHandler
 	MailerHandler        *handlers.MailerHandler
+	TimingHandler        *handlers.TimingHandler
+
+	// Service status tracking for startup validation
+	ServiceStatus ServiceStatus
+}
+
+// ServiceStatus tracks availability of critical dependencies at startup
+type ServiceStatus struct {
+	Config      bool   // Configuration (TOML) loaded successfully
+	Database    bool   // BadgerDB initialized successfully
+	LLM         bool   // LLM provider available (Gemini or Claude)
+	EODHD       bool   // EODHD API key configured
+	LLMProvider string // "gemini", "claude", or "none"
 }
 
 // New initializes the application with all dependencies
@@ -363,6 +376,9 @@ func (a *App) initDatabase() error {
 		a.Logger.Debug().Msg("No key/value pairs found, skipping config replacement")
 	}
 
+	// Track database initialization success
+	a.ServiceStatus.Database = true
+
 	return nil
 }
 
@@ -402,21 +418,47 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize search service: %w", err)
 	}
 
-	// 3.6. Initialize LLM service (Google ADK with Gemini)
+	// 3.6. Initialize LLM service (try Gemini first, then Claude as fallback)
+	// The LLMService field is specifically for Gemini, but ServiceStatus.LLM reflects
+	// whether ANY LLM provider is available for workers using ProviderFactory.
 	a.LLMService, err = llm.NewGeminiService(&a.Config.Gemini, a.StorageManager, a.Logger)
 	if err != nil {
 		a.LLMService = nil // Explicitly set to nil on error
-		a.Logger.Warn().Err(err).Msg("Failed to initialize LLM service - chat features will be unavailable")
-		a.Logger.Info().Msg("To enable LLM features, set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config")
+		a.Logger.Debug().Err(err).Msg("Gemini service initialization failed, trying Claude fallback")
 	} else {
 		// Perform health check to validate API key and connectivity
 		if err := a.LLMService.HealthCheck(context.Background()); err != nil {
 			// Set to nil if health check fails (invalid/placeholder API key)
 			a.LLMService = nil
-			a.Logger.Warn().Err(err).Msg("LLM service health check failed - service disabled")
-			a.Logger.Info().Msg("To enable LLM features, provide a valid Google Gemini API key")
+			a.Logger.Debug().Err(err).Msg("Gemini health check failed, trying Claude fallback")
 		} else {
-			a.Logger.Debug().Msg("LLM service initialized and health check passed")
+			a.ServiceStatus.LLM = true
+			a.ServiceStatus.LLMProvider = "gemini"
+			a.Logger.Debug().Msg("LLM service initialized with Gemini")
+		}
+	}
+
+	// If Gemini failed, try Claude as fallback for LLM availability
+	if !a.ServiceStatus.LLM {
+		claudeService, claudeErr := llm.NewClaudeService(&a.Config.Claude, a.StorageManager, a.Logger)
+		if claudeErr != nil {
+			a.Logger.Debug().Err(claudeErr).Msg("Claude service initialization also failed")
+		} else {
+			// Perform health check on Claude
+			if healthErr := claudeService.HealthCheck(context.Background()); healthErr != nil {
+				a.Logger.Debug().Err(healthErr).Msg("Claude health check failed")
+			} else {
+				a.ServiceStatus.LLM = true
+				a.ServiceStatus.LLMProvider = "claude"
+				a.Logger.Debug().Msg("LLM service available via Claude fallback")
+			}
+		}
+
+		// If both failed, log the error
+		if !a.ServiceStatus.LLM {
+			a.ServiceStatus.LLMProvider = "none"
+			a.Logger.Error().Msg("[STARTUP] LLM service: unavailable - AI features will not work")
+			a.Logger.Info().Msg("To enable LLM features, configure gemini_api_key or anthropic_api_key")
 		}
 	}
 
@@ -534,6 +576,15 @@ func (a *App) initServices() error {
 	// Seed default KV values (only creates if not already set)
 	// These are service-specific defaults that workers fall back to
 	a.seedDefaultKVValues(context.Background())
+
+	// Validate EODHD API key at startup
+	eodhdKey, eodhdErr := a.StorageManager.KeyValueStorage().Get(context.Background(), "eodhd_api_key")
+	if eodhdErr == nil && eodhdKey != "" && eodhdKey != "fake-eodhd-api-key-for-testing" {
+		a.ServiceStatus.EODHD = true
+		a.Logger.Debug().Msg("EODHD API key configured")
+	} else {
+		a.Logger.Error().Msg("[STARTUP] EODHD API: not configured - market data workers will fail")
+	}
 
 	// 5.12. Initialize config service with event-driven cache invalidation
 	a.ConfigService, err = config.NewService(
@@ -799,7 +850,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
@@ -809,7 +860,8 @@ func (a *App) initServices() error {
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
+		a.ProviderFactory,
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
@@ -857,7 +909,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(marketFundamentalsWorker)
 	a.Logger.Debug().Str("step_type", marketFundamentalsWorker.GetType().String()).Msg("Market Fundamentals worker registered")
@@ -877,7 +929,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		jobMgr,
 		a.Logger,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(marketCompetitorWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", marketCompetitorWorker.GetType().String()).Msg("Market Competitor worker registered")
@@ -888,7 +940,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaPortfoliosWorker)
 	a.Logger.Debug().Str("step_type", navexaPortfoliosWorker.GetType().String()).Msg("Navexa Portfolios worker registered")
@@ -899,7 +951,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaHoldingsWorker)
 	a.Logger.Debug().Str("step_type", navexaHoldingsWorker.GetType().String()).Msg("Navexa Holdings worker registered")
@@ -910,7 +962,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(navexaPerformanceWorker)
 	a.Logger.Debug().Str("step_type", navexaPerformanceWorker.GetType().String()).Msg("Navexa Performance worker registered")
@@ -926,7 +978,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		a.ProviderFactory,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 		"./templates", // Templates directory for prompt templates
 	)
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
@@ -1064,7 +1116,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 		eodhdClient,
-		a.Config.Workers.Debug,
+		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(marketDataCollectionWorker)
 	a.Logger.Debug().Str("step_type", marketDataCollectionWorker.GetType().String()).Msg("Market Data Collection worker registered")
@@ -1144,6 +1196,24 @@ func (a *App) initServices() error {
 	// NOTE: JobProcessor.Start() moved to New() after initHandlers() completes
 	// This prevents log channel blocking during handler initialization
 
+	// Log service status summary
+	a.ServiceStatus.Config = true // If we got here, config is OK
+	llmStatus := "OK"
+	if !a.ServiceStatus.LLM {
+		llmStatus = "FAIL"
+	}
+	eodhdStatus := "OK"
+	if !a.ServiceStatus.EODHD {
+		eodhdStatus = "FAIL"
+	}
+	a.Logger.Info().
+		Bool("config", a.ServiceStatus.Config).
+		Bool("database", a.ServiceStatus.Database).
+		Bool("llm", a.ServiceStatus.LLM).
+		Str("llm_provider", a.ServiceStatus.LLMProvider).
+		Bool("eodhd", a.ServiceStatus.EODHD).
+		Msgf("[STARTUP] Service status: Config=OK Database=OK LLM=%s EODHD=%s", llmStatus, eodhdStatus)
+
 	return nil
 }
 
@@ -1167,6 +1237,9 @@ func (a *App) initHandlers() error {
 
 	a.KVHandler = handlers.NewKVHandler(a.KVService, a.Logger)
 	a.Logger.Debug().Msg("KV handler initialized")
+
+	a.TimingHandler = handlers.NewTimingHandler(a.StorageManager.KeyValueStorage(), a.Logger)
+	a.Logger.Debug().Msg("Timing handler initialized")
 
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,

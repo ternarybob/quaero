@@ -32,6 +32,7 @@ Thumbs.db
 build/
 dist/
 bin/
+bin.bak/
 nul
 .playwright-mcp
 
