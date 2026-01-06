@@ -136,6 +136,9 @@ type AnnouncementAnalysis struct {
 	// Routine announcement tracking
 	IsRoutine   bool   // True if announcement is routine administrative filing
 	RoutineType string // Type of routine announcement (e.g., "Director Interest (3Y)")
+
+	// Critical review classification (REQ-1)
+	SignalClassification string // TRUE_SIGNAL, PRICED_IN, SENTIMENT_NOISE, MANAGEMENT_BLUFF, ROUTINE
 }
 
 // PriceImpactData contains stock price movement around an announcement date
@@ -1624,6 +1627,24 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 			analysis.SignalNoiseRationale += " Note: Negative price movement may be due to ex-dividend adjustment rather than negative market reaction."
 		}
 
+		// Apply critical review classification (REQ-1)
+		// Uses ClassifyAnnouncement from signal_analysis_classifier.go
+		if analysis.PriceImpact != nil {
+			metrics := ClassificationMetrics{
+				DayOfChange: analysis.PriceImpact.ChangePercent,
+				PreDrift:    analysis.PriceImpact.PreAnnouncementDrift,
+				VolumeRatio: analysis.PriceImpact.VolumeChangeRatio,
+			}
+			// Use routine type as category for SENTIMENT_NOISE detection
+			category := analysis.RoutineType
+			if isRoutine {
+				category = "ROUTINE"
+			}
+			analysis.SignalClassification = ClassifyAnnouncement(metrics, ann.PriceSensitive, category)
+		} else if isRoutine {
+			analysis.SignalClassification = ClassificationRoutine
+		}
+
 		analyses = append(analyses, analysis)
 	}
 
@@ -1998,6 +2019,404 @@ func (w *MarketAnnouncementsWorker) buildSummaryPrompt(data AnnouncementSummaryD
 	return sb.String()
 }
 
+// ReportingDate represents a historical mandatory reporting date extracted from announcements
+type ReportingDate struct {
+	ReportType string
+	Date       time.Time
+	Reference  string // "Actual" or source
+}
+
+// PredictedReport represents a predicted upcoming mandatory report
+type PredictedReport struct {
+	ReportType    string
+	PredictedDate string // e.g., "Mid-January 2026"
+	Basis         string // Explanation of prediction
+	IsImminent    bool   // True if within 2 months
+}
+
+// isFYRelatedAnnouncement checks if an announcement is related to fiscal year reporting
+// These are excluded from the non-FY impact rating as they have their own reporting cycle
+func isFYRelatedAnnouncement(headline string) bool {
+	upper := strings.ToUpper(headline)
+	// FY-related patterns to exclude from non-FY impact rating
+	fyPatterns := []string{
+		"ANNUAL REPORT", "APPENDIX 4E", "4E AND",
+		"FY20", "FY19", "FY21", "FY22", "FY23", "FY24", "FY25", "FY26", "FY27",
+		"FULL YEAR", "FULL-YEAR", "FORM 20-F", "20-F",
+		"ECONOMIC CONTRIBUTION REPORT", // Published with FY results
+	}
+	for _, pattern := range fyPatterns {
+		if strings.Contains(upper, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildSignalSummaryFromAnalyses constructs a SignalSummary from AnnouncementAnalysis slice.
+// This bridges the AnnouncementAnalysis data to the SignalSummary format used by scoring functions.
+func buildSignalSummaryFromAnalyses(analyses []AnnouncementAnalysis) SignalSummary {
+	summary := SignalSummary{
+		TotalAnnouncements: len(analyses),
+		ConvictionScore:    5, // Default
+		CommunicationStyle: StyleStandard,
+	}
+
+	if len(analyses) == 0 {
+		return summary
+	}
+
+	priceSensitiveCount := 0
+	var classifications []AnnouncementClassification
+
+	// Count classifications and build classification list for scoring
+	for _, a := range analyses {
+		switch a.SignalClassification {
+		case ClassificationTrueSignal:
+			summary.CountTrueSignal++
+		case ClassificationPricedIn:
+			summary.CountPricedIn++
+		case ClassificationSentimentNoise:
+			summary.CountSentimentNoise++
+		case ClassificationManagementBluff:
+			summary.CountManagementBluff++
+		case ClassificationRoutine:
+			summary.CountRoutine++
+		}
+
+		if a.PriceSensitive {
+			priceSensitiveCount++
+		}
+
+		// Build classification for conviction score calculation
+		if a.PriceImpact != nil {
+			classifications = append(classifications, AnnouncementClassification{
+				Date:                a.Date,
+				Title:               a.Headline,
+				ManagementSensitive: a.PriceSensitive,
+				Classification:      a.SignalClassification,
+				Metrics: ClassificationMetrics{
+					DayOfChange: a.PriceImpact.ChangePercent,
+					PreDrift:    a.PriceImpact.PreAnnouncementDrift,
+					VolumeRatio: a.PriceImpact.VolumeChangeRatio,
+				},
+			})
+		}
+	}
+
+	// Calculate ratios
+	total := float64(summary.TotalAnnouncements)
+	if total > 0 {
+		summary.SignalRatio = float64(summary.CountTrueSignal) / total
+		summary.NoiseRatio = float64(summary.CountSentimentNoise) / total
+	}
+
+	// Calculate price-sensitive-dependent metrics
+	if priceSensitiveCount > 0 {
+		psCount := float64(priceSensitiveCount)
+		summary.LeakScore = float64(summary.CountPricedIn) / psCount
+		summary.CredibilityScore = 1.0 - (float64(summary.CountManagementBluff) / psCount)
+	} else {
+		summary.LeakScore = 0
+		summary.CredibilityScore = 1.0
+	}
+
+	// Clamp values to [0, 1]
+	if summary.CredibilityScore < 0 {
+		summary.CredibilityScore = 0
+	}
+	if summary.CredibilityScore > 1 {
+		summary.CredibilityScore = 1
+	}
+
+	// Calculate conviction score and communication style using existing functions
+	summary.ConvictionScore = CalculateConvictionScore(summary, classifications)
+	summary.CommunicationStyle = DetermineCommunicationStyle(summary)
+
+	return summary
+}
+
+// calculateNonFYImpactRating calculates the overall impact rating excluding FY announcements
+// DEPRECATED: This function is replaced by buildSignalSummaryFromAnalyses for conviction-based rating
+func calculateNonFYImpactRating(analyses []AnnouncementAnalysis) (rating string, color string, emoji string, justification string) {
+	// Count non-FY signals
+	nonFYHigh, nonFYModerate := 0, 0
+	keyEventsSet := make(map[string]bool)
+	var keyEventDetails []string
+
+	for _, a := range analyses {
+		if isFYRelatedAnnouncement(a.Headline) {
+			continue
+		}
+
+		upper := strings.ToUpper(a.Headline)
+		switch a.SignalNoiseRating {
+		case SignalNoiseHigh:
+			nonFYHigh++
+			if strings.Contains(upper, "QUARTERLY") {
+				if !keyEventsSet["quarterly"] {
+					keyEventsSet["quarterly"] = true
+					keyEventDetails = append(keyEventDetails, "**Quarterly Activities Reports**: Consistently trigger 2-3% price movements with elevated volume")
+				}
+			} else if strings.Contains(upper, "DIVIDEND") {
+				if !keyEventsSet["dividend"] {
+					keyEventsSet["dividend"] = true
+					keyEventDetails = append(keyEventDetails, "**Dividend/Distribution Updates**: Show strong market response particularly around ex-dividend timing")
+				}
+			}
+		case SignalNoiseModerate:
+			nonFYModerate++
+			if strings.Contains(upper, "CONFERENCE") || strings.Contains(upper, "PRESENTATION") {
+				if !keyEventsSet["conference"] {
+					keyEventsSet["conference"] = true
+					keyEventDetails = append(keyEventDetails, "**Conference Presentations**: Generate moderate interest with ~2% price reactions")
+				}
+			}
+		}
+	}
+
+	// Determine rating based on non-FY signal counts
+	if nonFYHigh >= 3 || (nonFYHigh >= 1 && nonFYModerate >= 5) {
+		rating = "HIGH"
+		color = "#d4edda" // Soft green
+		emoji = "🔥"
+	} else if nonFYHigh >= 1 || nonFYModerate >= 3 {
+		rating = "MODERATE"
+		color = "#fff3cd" // Soft orange/yellow
+		emoji = "📊"
+	} else {
+		rating = "LOW"
+		color = "#cce5ff" // Soft blue
+		emoji = "📉"
+	}
+
+	// Build justification
+	var justBuilder strings.Builder
+	justBuilder.WriteString(fmt.Sprintf("**Justification**: Excluding annual and full-year reporting events, announcements demonstrate a **%s** likelihood of impacting price and volume. ", strings.ToLower(rating)))
+
+	if len(keyEventDetails) > 0 {
+		justBuilder.WriteString("The primary market-moving events outside FY updates are:\n\n")
+		for _, detail := range keyEventDetails {
+			justBuilder.WriteString(fmt.Sprintf("- %s\n", detail))
+		}
+		justBuilder.WriteString("\n")
+	}
+
+	justBuilder.WriteString("The majority of non-FY, non-routine announcements fall into the MODERATE_SIGNAL or LOW_SIGNAL categories, indicating predictable market behavior with occasional high-impact events concentrated around quarterly operational disclosures and dividend announcements.\n\n")
+	justBuilder.WriteString("*Note: This rating excludes FY-related announcements (Annual Report, Appendix 4E, FY Results) which are covered separately in the periodic reporting calendar below.*")
+
+	justification = justBuilder.String()
+	return
+}
+
+// extractHistoricalReports extracts mandatory reporting dates from announcement history
+func extractHistoricalReports(analyses []AnnouncementAnalysis) []ReportingDate {
+	var reports []ReportingDate
+	seen := make(map[string]bool)
+
+	for _, a := range analyses {
+		upper := strings.ToUpper(a.Headline)
+		var reportType string
+		var quarterNum string
+
+		// Detect report type from headline
+		if strings.Contains(upper, "QUARTERLY ACTIVITIES REPORT") ||
+			(strings.Contains(upper, "QUARTERLY") && strings.Contains(upper, "REPORT")) {
+			// Try to extract quarter number (Q1, Q2, Q3, Q4)
+			if strings.Contains(upper, "Q1") {
+				quarterNum = "Q1"
+			} else if strings.Contains(upper, "Q2") {
+				quarterNum = "Q2"
+			} else if strings.Contains(upper, "Q3") {
+				quarterNum = "Q3"
+			} else if strings.Contains(upper, "Q4") {
+				quarterNum = "Q4"
+			}
+			// Determine fiscal year based on month
+			fyYear := a.Date.Year()
+			month := a.Date.Month()
+			// For June FYE: Jul-Dec is first half of FY, Jan-Jun is second half
+			if month >= 7 {
+				fyYear++ // Q1/Q2 of next FY
+			}
+			if quarterNum != "" {
+				reportType = fmt.Sprintf("%s FY%02d Quarterly Activities Report", quarterNum, fyYear%100)
+			} else {
+				reportType = "Quarterly Activities Report"
+			}
+		} else if strings.Contains(upper, "4E") ||
+			(strings.Contains(upper, "ANNUAL REPORT") && strings.Contains(upper, "APPENDIX")) {
+			fyYear := a.Date.Year()
+			reportType = fmt.Sprintf("FY%02d Full-Year Results (Appendix 4E)", fyYear%100)
+		} else if strings.Contains(upper, "RESULTS OF") && strings.Contains(upper, "ANNUAL GENERAL MEETING") {
+			reportType = fmt.Sprintf("%d AGM", a.Date.Year())
+		} else if strings.Contains(upper, "NOTICE OF ANNUAL GENERAL MEETING") {
+			reportType = "AGM Notice"
+		} else if strings.Contains(upper, "4D") || strings.Contains(upper, "HALF YEAR") ||
+			strings.Contains(upper, "HALF-YEAR") {
+			reportType = "Half-Year Report (Appendix 4D)"
+		}
+
+		if reportType != "" {
+			// Deduplicate by report type and date
+			key := fmt.Sprintf("%s-%s", reportType, a.Date.Format("2006-01-02"))
+			if !seen[key] {
+				seen[key] = true
+				reports = append(reports, ReportingDate{
+					ReportType: reportType,
+					Date:       a.Date,
+					Reference:  "Actual",
+				})
+			}
+		}
+	}
+
+	// Sort by date descending (most recent first)
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].Date.After(reports[j].Date)
+	})
+
+	// Limit to most recent 6 reports
+	if len(reports) > 6 {
+		reports = reports[:6]
+	}
+
+	return reports
+}
+
+// predictUpcomingReports predicts upcoming mandatory reports based on historical patterns
+func predictUpcomingReports(historical []ReportingDate, asxCode string) []PredictedReport {
+	var predictions []PredictedReport
+	now := time.Now()
+	twoMonthsFromNow := now.AddDate(0, 2, 0)
+
+	// Find most recent reports of each type
+	var lastQuarterly time.Time
+	var lastFY time.Time
+	var lastAGM time.Time
+	var lastHalfYear time.Time
+
+	for _, r := range historical {
+		switch {
+		case strings.Contains(r.ReportType, "Quarterly"):
+			if lastQuarterly.IsZero() || r.Date.After(lastQuarterly) {
+				lastQuarterly = r.Date
+			}
+		case strings.Contains(r.ReportType, "Full-Year") || strings.Contains(r.ReportType, "4E"):
+			if lastFY.IsZero() || r.Date.After(lastFY) {
+				lastFY = r.Date
+			}
+		case strings.Contains(r.ReportType, "AGM") && !strings.Contains(r.ReportType, "Notice"):
+			if lastAGM.IsZero() || r.Date.After(lastAGM) {
+				lastAGM = r.Date
+			}
+		case strings.Contains(r.ReportType, "Half-Year") || strings.Contains(r.ReportType, "4D"):
+			if lastHalfYear.IsZero() || r.Date.After(lastHalfYear) {
+				lastHalfYear = r.Date
+			}
+		}
+	}
+
+	// Determine fiscal year end (assume June 30 for most ASX companies)
+	fyeMonth := time.June
+	currentFY := now.Year()
+	if now.Month() > fyeMonth {
+		currentFY++ // We're in the first half of next FY
+	}
+
+	// Predict next quarterly (~3 months from last)
+	if !lastQuarterly.IsZero() {
+		nextQ := lastQuarterly.AddDate(0, 3, 0)
+		if nextQ.After(now) {
+			isImminent := nextQ.Before(twoMonthsFromNow)
+			// Determine quarter based on timing
+			qMonth := nextQ.Month()
+			var qName string
+			switch {
+			case qMonth >= 1 && qMonth <= 2:
+				qName = "Q2 FY" + fmt.Sprintf("%02d", currentFY%100)
+			case qMonth >= 4 && qMonth <= 5:
+				qName = "Q3 FY" + fmt.Sprintf("%02d", currentFY%100)
+			case qMonth >= 7 && qMonth <= 8:
+				qName = "Q4 FY" + fmt.Sprintf("%02d", (currentFY-1)%100)
+			case qMonth >= 10 && qMonth <= 11:
+				qName = "Q1 FY" + fmt.Sprintf("%02d", currentFY%100)
+			default:
+				qName = "Quarterly"
+			}
+			predictions = append(predictions, PredictedReport{
+				ReportType:    qName + " Activities Report",
+				PredictedDate: formatPredictedDate(nextQ),
+				Basis:         "~3 months after Q1 (typical quarterly cadence)",
+				IsImminent:    isImminent,
+			})
+		}
+	}
+
+	// Predict half-year results (around February for June FYE)
+	// H1 ends Dec 31, results due ~60 days later
+	if lastHalfYear.IsZero() || lastHalfYear.Year() < now.Year() {
+		halfYearDate := time.Date(now.Year(), time.February, 15, 0, 0, 0, 0, time.UTC)
+		if halfYearDate.After(now) {
+			isImminent := halfYearDate.Before(twoMonthsFromNow)
+			predictions = append(predictions, PredictedReport{
+				ReportType:    "Half-Year Results (Appendix 4D)",
+				PredictedDate: formatPredictedDate(halfYearDate),
+				Basis:         "ASX requires ~60 days after H1 end (Dec 31)",
+				IsImminent:    isImminent,
+			})
+		}
+	}
+
+	// Predict Q3 (~April)
+	q3Date := time.Date(now.Year(), time.April, 17, 0, 0, 0, 0, time.UTC)
+	if q3Date.After(now) {
+		isImminent := q3Date.Before(twoMonthsFromNow)
+		predictions = append(predictions, PredictedReport{
+			ReportType:    fmt.Sprintf("Q3 FY%02d Activities Report", currentFY%100),
+			PredictedDate: formatPredictedDate(q3Date),
+			Basis:         "Historical: April reporting pattern",
+			IsImminent:    isImminent,
+		})
+	}
+
+	// Predict full-year results (~August)
+	fyDate := time.Date(now.Year(), time.August, 19, 0, 0, 0, 0, time.UTC)
+	if fyDate.After(now) {
+		predictions = append(predictions, PredictedReport{
+			ReportType:    fmt.Sprintf("FY%02d Full-Year Results (Appendix 4E)", (currentFY-1)%100),
+			PredictedDate: formatPredictedDate(fyDate),
+			Basis:         "Historical: August reporting pattern",
+			IsImminent:    fyDate.Before(twoMonthsFromNow),
+		})
+	}
+
+	// Predict AGM (~October)
+	agmDate := time.Date(now.Year(), time.October, 23, 0, 0, 0, 0, time.UTC)
+	if agmDate.After(now) {
+		predictions = append(predictions, PredictedReport{
+			ReportType:    fmt.Sprintf("%d AGM", now.Year()),
+			PredictedDate: formatPredictedDate(agmDate),
+			Basis:         "Historical: October AGM pattern",
+			IsImminent:    agmDate.Before(twoMonthsFromNow),
+		})
+	}
+
+	return predictions
+}
+
+// formatPredictedDate formats a date as "Mid-Month Year" style
+func formatPredictedDate(t time.Time) string {
+	day := t.Day()
+	prefix := "Early"
+	if day >= 10 && day <= 20 {
+		prefix = "Mid"
+	} else if day > 20 {
+		prefix = "Late"
+	}
+	return fmt.Sprintf("%s-%s %d", prefix, t.Month().String(), t.Year())
+}
+
 // createSummaryDocument creates a summary document with all analyzed announcements
 func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo, dedupStats DeduplicationStats) *models.Document {
 	var content strings.Builder
@@ -2088,6 +2507,132 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		content.WriteString("## Executive Summary\n\n")
 		content.WriteString(aiSummary)
 		content.WriteString("\n\n")
+	}
+
+	// Signal Analysis & Conviction Rating (REQ-5)
+	// Replace old impact rating with conviction-based rating
+	if len(analyses) > 0 {
+		signalSummary := buildSignalSummaryFromAnalyses(analyses)
+		flags := DeriveRiskFlags(signalSummary)
+
+		content.WriteString("## Signal Analysis & Conviction Rating\n\n")
+
+		// Conviction score with rating
+		convictionRating := "LOW CONVICTION"
+		convictionColor := "#f8d7da" // Red
+		convictionEmoji := "⚠️"
+		if signalSummary.ConvictionScore >= 8 {
+			convictionRating = "HIGH CONVICTION"
+			convictionColor = "#d4edda" // Green
+			convictionEmoji = "✅"
+		} else if signalSummary.ConvictionScore >= 5 {
+			convictionRating = "MODERATE CONVICTION"
+			convictionColor = "#fff3cd" // Yellow
+			convictionEmoji = "📊"
+		}
+
+		content.WriteString(fmt.Sprintf("**Conviction Score**: %d/10 (%s)\n\n", signalSummary.ConvictionScore, convictionRating))
+		content.WriteString(fmt.Sprintf("<table><tr><td style=\"background-color: %s; padding: 8px 16px; border-radius: 6px; font-weight: bold; font-size: 1.1em;\">%s %s</td></tr></table>\n\n", convictionColor, convictionEmoji, convictionRating))
+
+		// Communication Style
+		styleDisplay := signalSummary.CommunicationStyle
+		switch styleDisplay {
+		case StyleTransparent:
+			content.WriteString("**Communication Style**: 📈 TRANSPARENT & DATA-DRIVEN\n\n")
+		case StyleLeaky:
+			content.WriteString("**Communication Style**: ⚠️ LEAKY / INSIDER RISK\n\n")
+		case StylePromotional:
+			content.WriteString("**Communication Style**: 📣 PROMOTIONAL / SENTIMENT-DRIVEN\n\n")
+		default:
+			content.WriteString("**Communication Style**: 📋 STANDARD\n\n")
+		}
+
+		// Risk Flags
+		if flags.HighLeakRisk || flags.SpeculativeBase || flags.InsufficientData {
+			content.WriteString("### Risk Flags\n\n")
+			if flags.HighLeakRisk {
+				content.WriteString(fmt.Sprintf("- ⚠️ **High Leak Risk**: Leak score %.1f%% - %d PRICED_IN announcements indicate information leakage\n",
+					signalSummary.LeakScore*100, signalSummary.CountPricedIn))
+			}
+			if flags.SpeculativeBase {
+				content.WriteString(fmt.Sprintf("- ⚠️ **Speculative Base**: Noise ratio %.1f%% - %d SENTIMENT_NOISE events suggest retail speculation\n",
+					signalSummary.NoiseRatio*100, signalSummary.CountSentimentNoise))
+			}
+			if flags.InsufficientData {
+				content.WriteString(fmt.Sprintf("- ℹ️ **Insufficient Data**: Only %d announcements analyzed - results may be unreliable\n",
+					signalSummary.TotalAnnouncements))
+			}
+			if flags.ReliableSignals {
+				content.WriteString(fmt.Sprintf("- ✅ **Reliable Signals**: Signal ratio %.1f%% with high credibility (%.0f%%)\n",
+					signalSummary.SignalRatio*100, signalSummary.CredibilityScore*100))
+			}
+			content.WriteString("\n")
+		}
+
+		// Signal Breakdown Table
+		content.WriteString("### Signal Breakdown\n\n")
+		content.WriteString("| Classification | Count | Implication |\n")
+		content.WriteString("|----------------|-------|-------------|\n")
+		content.WriteString(fmt.Sprintf("| TRUE_SIGNAL | %d | Genuine market surprises - new information |\n", signalSummary.CountTrueSignal))
+		content.WriteString(fmt.Sprintf("| PRICED_IN | %d | Information leaked or anticipated before announcement |\n", signalSummary.CountPricedIn))
+		content.WriteString(fmt.Sprintf("| SENTIMENT_NOISE | %d | Retail speculation on routine news |\n", signalSummary.CountSentimentNoise))
+		content.WriteString(fmt.Sprintf("| MANAGEMENT_BLUFF | %d | Claimed materiality without market impact |\n", signalSummary.CountManagementBluff))
+		content.WriteString(fmt.Sprintf("| ROUTINE | %d | Administrative filings (excluded from analysis) |\n", signalSummary.CountRoutine))
+		content.WriteString("\n")
+
+		// Justification
+		content.WriteString("**Metrics Summary**:\n")
+		content.WriteString(fmt.Sprintf("- Signal Ratio: %.1f%% (TRUE_SIGNAL / total)\n", signalSummary.SignalRatio*100))
+		content.WriteString(fmt.Sprintf("- Leak Score: %.1f%% (PRICED_IN / price-sensitive)\n", signalSummary.LeakScore*100))
+		content.WriteString(fmt.Sprintf("- Credibility: %.0f%% (1 - MANAGEMENT_BLUFF rate)\n", signalSummary.CredibilityScore*100))
+		content.WriteString(fmt.Sprintf("- Noise Ratio: %.1f%% (SENTIMENT_NOISE / total)\n", signalSummary.NoiseRatio*100))
+		content.WriteString("\n")
+	}
+
+	// Mandatory Business Update Calendar (REQ-2)
+	// Extract historical reporting dates and predict upcoming mandatory disclosures
+	if len(analyses) > 0 {
+		content.WriteString("## Mandatory Business Update Calendar\n\n")
+		content.WriteString(fmt.Sprintf("%s operates on a **June 30 fiscal year end**. The following tables show historical reporting dates and predicted upcoming mandatory disclosures.\n\n", asxCode))
+
+		// Historical Reporting Dates
+		historicalReports := extractHistoricalReports(analyses)
+		if len(historicalReports) > 0 {
+			content.WriteString("### Historical Reporting Dates\n\n")
+			content.WriteString("| Report Type | Date | Reference |\n")
+			content.WriteString("|-------------|------|----------|\n")
+			for _, r := range historicalReports {
+				content.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
+					r.ReportType,
+					r.Date.Format("2 Jan 2006"),
+					r.Reference,
+				))
+			}
+			content.WriteString("\n")
+		}
+
+		// Predicted Upcoming Reports
+		predictions := predictUpcomingReports(historicalReports, asxCode)
+		if len(predictions) > 0 {
+			content.WriteString("### Predicted Upcoming Mandatory Reports\n\n")
+			content.WriteString("| Report Type | Predicted Date | Basis |\n")
+			content.WriteString("|-------------|----------------|-------|\n")
+			for _, p := range predictions {
+				reportName := p.ReportType
+				if p.IsImminent {
+					// Highlight imminent reports with green background
+					reportName = fmt.Sprintf("<span style=\"background-color: #d4edda; padding: 2px 6px; border-radius: 3px;\">%s</span>", p.ReportType)
+				}
+				content.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
+					reportName,
+					p.PredictedDate,
+					p.Basis,
+				))
+			}
+			content.WriteString("\n")
+		}
+
+		content.WriteString("*Predictions based on ASX Listing Rules and historical reporting patterns. Actual dates may vary.*\n\n")
 	}
 
 	// Deduplication Summary (if any duplicates were found)
@@ -2468,6 +3013,7 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 			"pdf_url":                  a.PDFURL,
 			"signal_noise_rating":      string(a.SignalNoiseRating),
 			"signal_noise_rationale":   a.SignalNoiseRationale,
+			"signal_classification":    a.SignalClassification, // REQ-7: New classification
 			"is_trading_halt":          a.IsTradingHalt,
 			"is_reinstatement":         a.IsReinstatement,
 			"is_anomaly":               a.IsAnomaly,
@@ -2495,6 +3041,10 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		announcementsMetadata = append(announcementsMetadata, annMeta)
 	}
 
+	// Build signal analysis summary for metadata (REQ-7)
+	signalSummary := buildSignalSummaryFromAnalyses(analyses)
+	riskFlags := DeriveRiskFlags(signalSummary)
+
 	metadata := map[string]interface{}{
 		"asx_code":      asxCode,
 		"total_count":   len(analyses),
@@ -2507,7 +3057,28 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 			"total_after":      dedupStats.TotalAfter,
 			"duplicates_found": dedupStats.DuplicatesFound,
 		},
-		// Signal-to-noise summary
+		// Signal analysis (REQ-7) - conviction-based metrics
+		"conviction_score":    signalSummary.ConvictionScore,
+		"communication_style": signalSummary.CommunicationStyle,
+		"risk_flags": map[string]interface{}{
+			"high_leak_risk":    riskFlags.HighLeakRisk,
+			"speculative_base":  riskFlags.SpeculativeBase,
+			"reliable_signals":  riskFlags.ReliableSignals,
+			"insufficient_data": riskFlags.InsufficientData,
+		},
+		"signal_analysis": map[string]interface{}{
+			"total_analyzed":         signalSummary.TotalAnnouncements,
+			"true_signal_count":      signalSummary.CountTrueSignal,
+			"priced_in_count":        signalSummary.CountPricedIn,
+			"sentiment_noise_count":  signalSummary.CountSentimentNoise,
+			"management_bluff_count": signalSummary.CountManagementBluff,
+			"routine_count":          signalSummary.CountRoutine,
+			"leak_score":             signalSummary.LeakScore,
+			"noise_ratio":            signalSummary.NoiseRatio,
+			"credibility_score":      signalSummary.CredibilityScore,
+			"signal_ratio":           signalSummary.SignalRatio,
+		},
+		// Legacy signal-to-noise summary (kept for backward compatibility)
 		"signal_noise_summary": map[string]interface{}{
 			"high_signal_count":     highSignalCount,
 			"moderate_signal_count": modSignalCount,

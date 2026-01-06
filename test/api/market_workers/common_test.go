@@ -162,6 +162,23 @@ var (
 			"documents_created": "number",
 		},
 	}
+
+	// SignalAnalysisSchema for signal_analysis worker
+	SignalAnalysisSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "analysis_date", "summary", "classifications", "flags", "data_source"},
+		OptionalFields: []string{"data_gaps", "period_start", "period_end"},
+		FieldTypes: map[string]string{
+			"ticker":          "string",
+			"analysis_date":   "string",
+			"summary":         "object",
+			"classifications": "array",
+			"flags":           "object",
+			"data_source":     "object",
+		},
+		ArraySchemas: map[string][]string{
+			"classifications": {"date", "title", "classification", "metrics"},
+		},
+	}
 )
 
 // =============================================================================
@@ -696,6 +713,41 @@ func SaveMultiStockOutput(t *testing.T, env *common.TestEnvironment, helper *com
 // =============================================================================
 // Result File Assertions
 // =============================================================================
+
+// AssertSectionConsistency verifies that multiple outputs have consistent section structure
+// This catches schema drift where one run has sections that another is missing
+// Returns true if all sections are consistent, false otherwise
+func AssertSectionConsistency(t *testing.T, content1, content2 string, requiredSections []string) bool {
+	allConsistent := true
+
+	for _, section := range requiredSections {
+		in1 := strings.Contains(content1, section)
+		in2 := strings.Contains(content2, section)
+
+		if in1 && !in2 {
+			t.Errorf("SCHEMA DRIFT: Section '%s' present in first output but MISSING in second output", section)
+			allConsistent = false
+		} else if !in1 && in2 {
+			t.Errorf("SCHEMA DRIFT: Section '%s' MISSING in first output but present in second output", section)
+			allConsistent = false
+		} else if !in1 && !in2 {
+			t.Errorf("SCHEMA FAIL: Required section '%s' MISSING from both outputs", section)
+			allConsistent = false
+		} else {
+			t.Logf("SCHEMA PASS: Section '%s' present in both outputs", section)
+		}
+	}
+
+	return allConsistent
+}
+
+// AnnouncementsRequiredSections defines the sections that must be present in announcements output
+var AnnouncementsRequiredSections = []string{
+	"## Executive Summary",
+	"## Signal Analysis & Conviction Rating", // Updated from "Overall Non-FY Impact Rating"
+	"## Mandatory Business Update Calendar",
+	"### Signal Breakdown", // New required section
+}
 
 // AssertResultFilesExist validates that result files exist with content
 // This function FAILS the test if output files are missing or empty

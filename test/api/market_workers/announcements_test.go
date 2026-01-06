@@ -29,7 +29,7 @@ func TestWorkerAnnouncementsSingle(t *testing.T) {
 
 	// Create job definition
 	defID := fmt.Sprintf("test-announcements-single-%d", time.Now().UnixNano())
-	ticker := "BHP"
+	ticker := "EXR" // Changed from BHP to EXR as benchmark for signal analysis
 
 	body := map[string]interface{}{
 		"id":          defID,
@@ -73,16 +73,27 @@ func TestWorkerAnnouncementsSingle(t *testing.T) {
 	summaryTags := []string{"asx-announcement-summary", strings.ToLower(ticker)}
 	metadata, content := AssertOutputNotEmpty(t, helper, summaryTags)
 
-	// Assert content contains expected sections
+	// Assert content contains expected sections (updated for conviction-based rating)
 	expectedSections := []string{
 		"ASX Announcements Summary",
 		"Relevance Distribution",
+		"Signal Analysis & Conviction Rating", // REQ-5: New conviction-based rating
+		"Mandatory Business Update Calendar",  // REQ-2: Business calendar section
 	}
 	AssertOutputContains(t, content, expectedSections)
 
-	// Assert Signal-to-Noise Analysis section is present
-	if strings.Contains(content, "Signal-to-Noise Analysis") {
-		t.Log("PASS: Signal-to-Noise Analysis section present")
+	// Assert Signal Breakdown section is present (new format)
+	if strings.Contains(content, "Signal Breakdown") {
+		t.Log("PASS: Signal Breakdown section present")
+	}
+
+	// Assert all required sections are present (REQ-3: schema consistency)
+	for _, section := range AnnouncementsRequiredSections {
+		if strings.Contains(content, section) {
+			t.Logf("PASS: Required section '%s' present", section)
+		} else {
+			t.Errorf("FAIL: Required section '%s' MISSING from output", section)
+		}
 	}
 
 	// Assert schema compliance
