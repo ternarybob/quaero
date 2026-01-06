@@ -1151,6 +1151,19 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(marketDataCollectionWorker)
 	a.Logger.Debug().Str("step_type", marketDataCollectionWorker.GetType().String()).Msg("Market Data Collection worker registered")
 
+	// Signal analysis worker - analyzes announcement signal quality
+	// Consumes cached announcements and price data to produce signal analysis
+	signalAnalysisWorker := workers.NewSignalAnalysisWorker(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.ExchangeService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(signalAnalysisWorker)
+	a.Logger.Debug().Str("step_type", signalAnalysisWorker.GetType().String()).Msg("Signal analysis worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize JobDispatcher (mechanical job execution coordinator)

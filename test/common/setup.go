@@ -62,9 +62,15 @@ func getCallerLocation(skip int) string {
 // getTestFileBaseName walks up the call stack to find the *_test.go file
 // and returns its base name without the _test.go suffix.
 // Example: "worker_stock_test.go" -> "worker_stock"
+// Example: Tests in "test/api/market_workers/" with common_test.go -> "market_workers"
 // This provides consistent suite naming based on the test file, not function name.
+// Note: If common_test.go exists in the directory, use directory name to group all tests.
 func getTestFileBaseName() string {
-	// Walk up the call stack looking for a *_test.go file
+	var commonTestDir string
+	var firstTestFile string
+	var firstTestDir string
+
+	// Walk up the call stack looking for *_test.go files
 	for skip := 1; skip < 20; skip++ {
 		_, file, _, ok := runtime.Caller(skip)
 		if !ok {
@@ -76,10 +82,36 @@ func getTestFileBaseName() string {
 
 		// Check if it's a test file
 		if strings.HasSuffix(base, "_test.go") {
-			// Remove _test.go suffix to get suite name
-			suiteName := strings.TrimSuffix(base, "_test.go")
-			return suiteName
+			dir := filepath.Base(filepath.Dir(file))
+
+			// Track common_test.go location - indicates shared helpers
+			if base == "common_test.go" {
+				commonTestDir = dir
+				continue
+			}
+
+			// Remember first non-common test file found
+			if firstTestFile == "" {
+				firstTestFile = strings.TrimSuffix(base, "_test.go")
+				firstTestDir = dir
+			}
 		}
+	}
+
+	// If common_test.go was found in same directory as test file,
+	// use directory name to group all tests together
+	if commonTestDir != "" && firstTestDir == commonTestDir {
+		return commonTestDir
+	}
+
+	// If common_test.go found but test file in different dir, use test file name
+	if firstTestFile != "" {
+		return firstTestFile
+	}
+
+	// Fallback: use directory name from common_test.go location
+	if commonTestDir != "" {
+		return commonTestDir
 	}
 
 	// Fallback if no test file found in stack
