@@ -1628,7 +1628,8 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 		}
 
 		// Apply critical review classification (REQ-1)
-		// Uses ClassifyAnnouncement from signal_analysis_classifier.go
+		// Uses ClassifyAnnouncementWithContent from signal_analysis_classifier.go
+		// Includes headline content analysis for MANAGEMENT_BLUFF detection
 		if analysis.PriceImpact != nil {
 			metrics := ClassificationMetrics{
 				DayOfChange: analysis.PriceImpact.ChangePercent,
@@ -1640,7 +1641,8 @@ func (w *MarketAnnouncementsWorker) analyzeAnnouncements(ctx context.Context, an
 			if isRoutine {
 				category = "ROUTINE"
 			}
-			analysis.SignalClassification = ClassifyAnnouncement(metrics, ann.PriceSensitive, category)
+			// Pass headline for content-based MANAGEMENT_BLUFF detection
+			analysis.SignalClassification = ClassifyAnnouncementWithContent(metrics, ann.PriceSensitive, category, ann.Headline)
 		} else if isRoutine {
 			analysis.SignalClassification = ClassificationRoutine
 		}
@@ -1863,12 +1865,12 @@ func (w *MarketAnnouncementsWorker) calculatePriceImpact(announcementDate time.T
 		if absPreDrift >= 2.0 {
 			hasSignificantPreDrift = true
 			if preAnnouncementDrift > 0 {
-				preDriftInterpretation = fmt.Sprintf("Stock rose %.1f%% in 5 days before announcement", preAnnouncementDrift)
+				preDriftInterpretation = fmt.Sprintf("+%.1f%%", preAnnouncementDrift)
 			} else {
-				preDriftInterpretation = fmt.Sprintf("Stock fell %.1f%% in 5 days before announcement", -preAnnouncementDrift)
+				preDriftInterpretation = fmt.Sprintf("%.1f%%", preAnnouncementDrift)
 			}
 		} else {
-			preDriftInterpretation = "No significant pre-announcement movement detected"
+			preDriftInterpretation = "-"
 		}
 	}
 
@@ -1902,6 +1904,9 @@ type AnnouncementSummaryData struct {
 	PreDriftCount              int
 	PriceSensitiveTotal        int
 	PriceSensitiveWithReaction int
+	ConvictionScore            int
+	LeakScore                  float64
+	CommunicationStyle         string
 	HighSignalAnnouncements    []AnnouncementAnalysis
 }
 
@@ -1914,19 +1919,30 @@ func (w *MarketAnnouncementsWorker) generateAISummary(ctx context.Context, data 
 	// Build prompt with analysis data
 	prompt := w.buildSummaryPrompt(data)
 
-	systemInstruction := `You are a senior financial analyst providing executive summaries of company announcement histories.
-Your summaries should be:
-- Concise (2-3 paragraphs maximum)
-- Focused on actionable investor insights
-- Objective and data-driven
-- Written in third person
+	systemInstruction := `You are a senior financial analyst. Provide an executive summary as a BULLET POINT LIST ONLY.
 
-Key aspects to cover:
-1. ANNOUNCEMENT QUALITY: Are the company's announcements generally informative and market-moving, or mostly routine filings?
-2. PRE-MARKET AWARENESS: Is there evidence of information leakage or insider knowledge based on pre-announcement price movements?
-3. COMPANY COMMUNICATION: What themes emerge from the announcement patterns - transparency, growth signals, compliance focus, etc.?
+STRICT FORMAT - YOU MUST FOLLOW THIS EXACTLY:
+- Start IMMEDIATELY with a bullet point (no tables, no headers, no introductions)
+- Each line MUST start with "- " (dash space)
+- Maximum 5-7 bullet points total
+- Each bullet: 1-2 sentences, objective, third person
+- NO tables, NO headers, NO bold text, NO markdown formatting
 
-Do NOT include any markdown formatting in your response - just plain text paragraphs.`
+Cover these topics (one bullet each):
+- Announcement quality and market impact patterns
+- Pre-announcement price drift observations
+- Communication style and disclosure patterns
+- Key investor implications
+
+WRONG FORMAT (DO NOT DO THIS):
+| Column | Column |
+**Bold text**
+## Headers
+
+CORRECT FORMAT (DO THIS):
+- First insight about the company...
+- Second insight about patterns...
+- Third insight about risks...`
 
 	request := &llm.ContentRequest{
 		Messages: []interfaces.Message{
@@ -2011,10 +2027,38 @@ func (w *MarketAnnouncementsWorker) buildSummaryPrompt(data AnnouncementSummaryD
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("Based on this data, provide a 2-3 paragraph executive summary covering:\n")
-	sb.WriteString("1. The quality of announcements from a buyer/seller perspective\n")
-	sb.WriteString("2. Evidence of pre-market awareness or information leakage\n")
-	sb.WriteString("3. Overall themes in the company's market communication\n")
+	sb.WriteString("Based on this data, provide a Critical Forensic Audit of the company's announcements.\n\n")
+
+	// 1. Tone & Style Directive (Constraint)
+	if data.ConvictionScore < 4 || data.LeakScore > 0.2 {
+		sb.WriteString("CRITICAL INSTRUCTION: The data indicates LOW CONVICTION or HIGH LEAK RISK.\n")
+		sb.WriteString("You MUST NOT use promotional language like 'high-quality', 'proactive', or 'reliable'.\n")
+		sb.WriteString("Act as a short-seller or forensic auditor. Focus on the divergence between Management Narrative and Operational Reality.\n\n")
+	} else {
+		sb.WriteString("Instruction: Provide a balanced, data-driven assessment.\n\n")
+	}
+
+	// 2. Output Format (Table)
+	sb.WriteString("OUTPUT FORMAT:\n")
+	sb.WriteString("Provide a table with the following columns:\n")
+	sb.WriteString("| Focus Area | Management Narrative (The 'Noise') | Operational Reality (The 'Signal') | Critical Assessment |\n")
+	sb.WriteString("|---|---|---|---|\n")
+	sb.WriteString("Row 1: Operational Success (Claims vs Results)\n")
+	sb.WriteString("Row 2: Market Integrity (Leakage & Timing)\n")
+	sb.WriteString("Row 3: Technical Milestones (Drilling/Product vs Market Reaction)\n\n")
+
+	// 3. Narrative Sections
+	sb.WriteString("Then, provide a brief execution summary (2 paragraphs) covering:\n")
+	sb.WriteString("- Strategic Divergence: Does the market sell the news on price-sensitive items?\n")
+	sb.WriteString("- Speculative Patterns: Is the stock driven by technical milestones or retail hype/sentiment?\n")
+
+	// Data context for the AI
+	if data.LeakScore > 0.3 {
+		sb.WriteString(fmt.Sprintf("\nNOTE: Leak Score is %.1f%% (High). Highlight pre-announcement drift.\n", data.LeakScore*100))
+	}
+	if data.PreDriftCount > 0 {
+		sb.WriteString(fmt.Sprintf("NOTE: %d instances of significant pre-announcement drift (>2%%).\n", data.PreDriftCount))
+	}
 
 	return sb.String()
 }
@@ -2467,6 +2511,15 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		}
 	}
 
+	// Calculate signal summary early for AI prompt usage
+	var signalSummary SignalSummary
+	if len(analyses) > 0 {
+		signalSummary = buildSignalSummaryFromAnalyses(analyses)
+	} else {
+		// Default empty summary
+		signalSummary = SignalSummary{ConvictionScore: 5, CommunicationStyle: "STANDARD"}
+	}
+
 	// Generate AI executive summary if provider is available
 	var aiSummary string
 	if w.providerFactory != nil && len(analyses) > 0 {
@@ -2484,6 +2537,10 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 			PriceSensitiveTotal:        priceSensitiveTotal,
 			PriceSensitiveWithReaction: priceSensitiveWithReaction,
 			HighSignalAnnouncements:    highSignalAnnouncements,
+			// New metrics for prompt context
+			ConvictionScore:    signalSummary.ConvictionScore,
+			LeakScore:          signalSummary.LeakScore,
+			CommunicationStyle: signalSummary.CommunicationStyle,
 		}
 		var err error
 		aiSummary, err = w.generateAISummary(ctx, summaryData)
@@ -2512,7 +2569,7 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	// Signal Analysis & Conviction Rating (REQ-5)
 	// Replace old impact rating with conviction-based rating
 	if len(analyses) > 0 {
-		signalSummary := buildSignalSummaryFromAnalyses(analyses)
+		// signalSummary is already calculated above
 		flags := DeriveRiskFlags(signalSummary)
 
 		content.WriteString("## Signal Analysis & Conviction Rating\n\n")
@@ -2540,7 +2597,7 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		case StyleTransparent:
 			content.WriteString("**Communication Style**: 📈 TRANSPARENT & DATA-DRIVEN\n\n")
 		case StyleLeaky:
-			content.WriteString("**Communication Style**: ⚠️ LEAKY / INSIDER RISK\n\n")
+			content.WriteString("**Communication Style**: ⚠️ HIGH PRE-ANNOUNCEMENT DRIFT\n\n")
 		case StylePromotional:
 			content.WriteString("**Communication Style**: 📣 PROMOTIONAL / SENTIMENT-DRIVEN\n\n")
 		default:
@@ -2551,7 +2608,7 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		if flags.HighLeakRisk || flags.SpeculativeBase || flags.InsufficientData {
 			content.WriteString("### Risk Flags\n\n")
 			if flags.HighLeakRisk {
-				content.WriteString(fmt.Sprintf("- ⚠️ **High Leak Risk**: Leak score %.1f%% - %d PRICED_IN announcements indicate information leakage\n",
+				content.WriteString(fmt.Sprintf("- ⚠️ **High Pre-Drift**: Drift score %.1f%% - %d PRICED_IN announcements show significant pre-announcement price movement\n",
 					signalSummary.LeakScore*100, signalSummary.CountPricedIn))
 			}
 			if flags.SpeculativeBase {
@@ -2636,29 +2693,12 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	}
 
 	// Deduplication Summary (if any duplicates were found)
+	// Simplified to just strict counts as requested - no table
 	if dedupStats.DuplicatesFound > 0 {
 		content.WriteString("## Deduplication Summary\n\n")
-		content.WriteString(fmt.Sprintf("**Original Announcements**: %d\n", dedupStats.TotalBefore))
-		content.WriteString(fmt.Sprintf("**After Deduplication**: %d\n", dedupStats.TotalAfter))
-		content.WriteString(fmt.Sprintf("**Duplicates Consolidated**: %d\n\n", dedupStats.DuplicatesFound))
-
-		if len(dedupStats.Groups) > 0 {
-			content.WriteString("| Date | Consolidated Headlines | Count |\n")
-			content.WriteString("|------|----------------------|-------|\n")
-			for _, g := range dedupStats.Groups {
-				// Truncate first headline for display
-				headline := g.Headlines[0]
-				if len(headline) > 40 {
-					headline = headline[:37] + "..."
-				}
-				content.WriteString(fmt.Sprintf("| %s | %s | %d |\n",
-					g.Date.Format("2006-01-02"),
-					headline,
-					g.Count,
-				))
-			}
-			content.WriteString("\n")
-		}
+		content.WriteString(fmt.Sprintf("- **Original Announcements**: %d\n", dedupStats.TotalBefore))
+		content.WriteString(fmt.Sprintf("- **After Deduplication**: %d\n", dedupStats.TotalAfter))
+		content.WriteString(fmt.Sprintf("- **Duplicates Consolidated**: %d\n\n", dedupStats.DuplicatesFound))
 	}
 
 	// Count dividend announcements (not included in AI summary data)
@@ -2712,38 +2752,6 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	}
 	content.WriteString(")\n\n")
 
-	// High Signal Summary Table (quick overview)
-	if highSignalCount > 0 {
-		content.WriteString("### High Signal Announcements\n\n")
-		content.WriteString("| Date | Headline | Price Change | Volume |\n")
-		content.WriteString("|------|----------|--------------|--------|\n")
-		for _, a := range analyses {
-			if a.SignalNoiseRating == SignalNoiseHigh {
-				headline := a.Headline
-				if len(headline) > 45 {
-					headline = headline[:42] + "..."
-				}
-				priceStr := "N/A"
-				volStr := "N/A"
-				if a.PriceImpact != nil {
-					sign := ""
-					if a.PriceImpact.ChangePercent > 0 {
-						sign = "+"
-					}
-					priceStr = fmt.Sprintf("%s%.1f%%", sign, a.PriceImpact.ChangePercent)
-					volStr = fmt.Sprintf("%.1fx", a.PriceImpact.VolumeChangeRatio)
-				}
-				content.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-					a.Date.Format("2006-01-02"),
-					headline,
-					priceStr,
-					volStr,
-				))
-			}
-		}
-		content.WriteString("\n")
-	}
-
 	// Price-Sensitive Accuracy Scoring
 	if priceSensitiveTotal > 0 {
 		accuracy := float64(priceSensitiveWithReaction) / float64(priceSensitiveTotal) * 100
@@ -2767,69 +2775,6 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		content.WriteString("\n")
 	}
 
-	// Pre-Announcement Drift Section (HIGH-SIGNAL ONLY)
-	// Only analyze announcements that are HIGH_SIGNAL and not routine filings
-	// Routine filings (Appendix 3X, 3Y, etc.) are excluded as they don't drive price movement
-	if preDriftCount > 0 {
-		content.WriteString("## Pre-Announcement Movement Analysis (High-Signal Only)\n\n")
-		content.WriteString("*Analysis limited to HIGH_SIGNAL announcements - routine filings excluded as they do not drive price movement.*\n\n")
-
-		// Count unique dates with significant pre-drift for high-signal announcements
-		seenDates := make(map[string]bool)
-		uniqueDateCount := 0
-		for _, a := range analyses {
-			// Only count high-signal, non-routine announcements
-			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift &&
-				a.SignalNoiseRating == SignalNoiseHigh && !a.IsRoutine {
-				dateKey := a.Date.Format("2006-01-02")
-				if !seenDates[dateKey] {
-					seenDates[dateKey] = true
-					uniqueDateCount++
-				}
-			}
-		}
-
-		content.WriteString(fmt.Sprintf("**Trading Days with Significant Pre-Drift (T-5 to T-1 ≥ 2%%)**: %d\n\n", uniqueDateCount))
-		content.WriteString("Pre-announcement price movement may indicate:\n")
-		content.WriteString("- Information leakage before official announcement\n")
-		content.WriteString("- Market anticipation of news\n")
-		content.WriteString("- Insider trading activity (requires further investigation)\n\n")
-
-		// List high-signal announcements with significant pre-drift (deduplicated by date)
-		// Excludes routine filings as they are not market-moving events
-		content.WriteString("| Date | Headline | Pre-Drift | Interpretation |\n")
-		content.WriteString("|------|----------|-----------|----------------|\n")
-		seenDates = make(map[string]bool) // Reset for output loop
-		for _, a := range analyses {
-			// Only show high-signal, non-routine announcements in pre-announcement analysis
-			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift &&
-				a.SignalNoiseRating == SignalNoiseHigh && !a.IsRoutine {
-				dateKey := a.Date.Format("2006-01-02")
-				if seenDates[dateKey] {
-					continue // Skip - already output an announcement for this date
-				}
-				seenDates[dateKey] = true
-
-				headline := a.Headline
-				if len(headline) > 40 {
-					headline = headline[:37] + "..."
-				}
-				sign := ""
-				if a.PriceImpact.PreAnnouncementDrift > 0 {
-					sign = "+"
-				}
-				content.WriteString(fmt.Sprintf("| %s | %s | %s%.1f%% | %s |\n",
-					a.Date.Format("2006-01-02"),
-					headline,
-					sign,
-					a.PriceImpact.PreAnnouncementDrift,
-					a.PriceImpact.PreDriftInterpretation,
-				))
-			}
-		}
-		content.WriteString("\n")
-	}
-
 	// Dividend Announcements Section
 	if dividendCount > 0 {
 		content.WriteString("## Dividend Announcements\n\n")
@@ -2837,31 +2782,94 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 		content.WriteString("*Note: Negative price movement on dividend announcements may be due to ex-dividend adjustment rather than negative market sentiment.*\n\n")
 	}
 
-	// Routine Administrative Announcements Section
+	// Routine Administrative Announcements - simplified list format
 	if routineCount > 0 {
 		content.WriteString("## Routine Administrative Announcements\n\n")
-		content.WriteString(fmt.Sprintf("**Total Routine Announcements**: %d\n\n", routineCount))
-		content.WriteString("*These are standard regulatory filings excluded from signal/noise analysis - not correlated with price/volume movements.*\n\n")
+		content.WriteString(fmt.Sprintf("*%d routine filings excluded from signal analysis:*\n\n", routineCount))
 
-		content.WriteString("| Date | Headline | Type |\n")
-		content.WriteString("|------|----------|------|\n")
+		// Group by routine type for cleaner output
+		routineByType := make(map[string]int)
 		for _, a := range analyses {
 			if a.IsRoutine {
-				headline := a.Headline
-				if len(headline) > 45 {
-					headline = headline[:42] + "..."
-				}
-				content.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
-					a.Date.Format("2006-01-02"),
-					headline,
-					a.RoutineType,
-				))
+				routineByType[a.RoutineType]++
 			}
+		}
+		for routineType, count := range routineByType {
+			content.WriteString(fmt.Sprintf("- **%s**: %d\n", routineType, count))
 		}
 		content.WriteString("\n")
 	}
 
-	// Keyword-based classification summary (legacy)
+	// Consolidated Announcements Analysis Table (High & Moderate signals with full detail)
+	// This is the primary announcements table - ordered by date, last information section before debug
+	if highSignalCount > 0 || modSignalCount > 0 {
+		content.WriteString("## Announcements Analysis\n\n")
+		content.WriteString("*High and Moderate signal announcements with price/volume impact and pre-announcement movement analysis.*\n\n")
+
+		// Collect and sort by date (newest first)
+		var signalAnnouncements []AnnouncementAnalysis
+		for _, a := range analyses {
+			if a.SignalNoiseRating == SignalNoiseHigh || a.SignalNoiseRating == SignalNoiseModerate {
+				signalAnnouncements = append(signalAnnouncements, a)
+			}
+		}
+		sort.Slice(signalAnnouncements, func(i, j int) bool {
+			return signalAnnouncements[i].Date.After(signalAnnouncements[j].Date)
+		})
+
+		// Table header - Pre-Drift column shows percentage with direction
+		content.WriteString("| Announcement | Price Impact | Volume | Pre-Drift | Document |\n")
+		content.WriteString("|--------------|--------------|--------|-----------|----------|\n")
+
+		for _, a := range signalAnnouncements {
+			// Column 1: Consolidated Announcement details with line breaks
+			signalEmoji := "📊"
+			if a.SignalNoiseRating == SignalNoiseHigh {
+				signalEmoji = "🔥"
+			}
+			priceSensitiveStr := "No"
+			if a.PriceSensitive {
+				priceSensitiveStr = "Yes ⚠️"
+			}
+			announcementCell := fmt.Sprintf("**%s**<br>Type: %s<br>Signal: %s %s<br>Price Sensitive: %s",
+				a.Headline, a.Type, signalEmoji, string(a.SignalNoiseRating), priceSensitiveStr)
+
+			// Column 2: Price Impact
+			priceCell := "-"
+			if a.PriceImpact != nil {
+				sign := ""
+				if a.PriceImpact.ChangePercent > 0 {
+					sign = "+"
+				}
+				priceCell = fmt.Sprintf("$%.3f → $%.3f<br>(%s%.1f%%)",
+					a.PriceImpact.PriceBefore, a.PriceImpact.PriceAfter, sign, a.PriceImpact.ChangePercent)
+			}
+
+			// Column 3: Volume
+			volumeCell := "-"
+			if a.PriceImpact != nil {
+				volumeCell = fmt.Sprintf("%.1fx", a.PriceImpact.VolumeChangeRatio)
+			}
+
+			// Column 4: Pre-Drift (uses PreDriftInterpretation which is now shortened)
+			preDriftCell := "-"
+			if a.PriceImpact != nil && a.PriceImpact.HasSignificantPreDrift && a.PriceImpact.PreDriftInterpretation != "" {
+				preDriftCell = a.PriceImpact.PreDriftInterpretation
+			}
+
+			// Column 5: Document link
+			docCell := "-"
+			if a.PDFURL != "" {
+				docCell = fmt.Sprintf("[PDF](%s)", a.PDFURL)
+			}
+
+			content.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+				announcementCell, priceCell, volumeCell, preDriftCell, docCell))
+		}
+		content.WriteString("\n")
+	}
+
+	// Calculate legacy relevance counts for metadata (not displayed in markdown)
 	highCount, mediumCount, lowCount, noiseCount := 0, 0, 0, 0
 	for _, a := range analyses {
 		switch a.RelevanceCategory {
@@ -2873,114 +2881,6 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 			lowCount++
 		case "NOISE":
 			noiseCount++
-		}
-	}
-
-	content.WriteString("## Relevance Distribution\n\n")
-	content.WriteString("| Category | Count | Description |\n")
-	content.WriteString("|----------|-------|-------------|\n")
-	content.WriteString(fmt.Sprintf("| **HIGH** | %d | Price-sensitive, major corporate events |\n", highCount))
-	content.WriteString(fmt.Sprintf("| MEDIUM | %d | Governance, operational updates |\n", mediumCount))
-	content.WriteString(fmt.Sprintf("| LOW | %d | Routine disclosures |\n", lowCount))
-	content.WriteString(fmt.Sprintf("| NOISE | %d | Non-material announcements |\n\n", noiseCount))
-
-	// Announcements table with signal-to-noise column
-	content.WriteString("## Announcements\n\n")
-	content.WriteString("| Date | Headline | Signal | Price Change | Volume |\n")
-	content.WriteString("|------|----------|--------|--------------|--------|\n")
-
-	for _, a := range analyses {
-		// Truncate headline for table
-		headline := a.Headline
-		if len(headline) > 50 {
-			headline = headline[:47] + "..."
-		}
-
-		priceChangeStr := "N/A"
-		volumeStr := "N/A"
-		if a.PriceImpact != nil {
-			sign := ""
-			if a.PriceImpact.ChangePercent > 0 {
-				sign = "+"
-			}
-			priceChangeStr = fmt.Sprintf("%s%.1f%%", sign, a.PriceImpact.ChangePercent)
-			volumeStr = fmt.Sprintf("%.1fx", a.PriceImpact.VolumeChangeRatio)
-		}
-
-		markers := ""
-		if a.PriceSensitive {
-			markers += "⚠️"
-		}
-		if a.IsTradingHalt {
-			markers += "⏸️"
-		}
-		if a.IsReinstatement {
-			markers += "▶️"
-		}
-		if markers != "" {
-			markers = " " + markers
-		}
-
-		content.WriteString(fmt.Sprintf("| %s | %s%s | %s | %s | %s |\n",
-			a.Date.Format("2006-01-02"),
-			headline,
-			markers,
-			string(a.SignalNoiseRating),
-			priceChangeStr,
-			volumeStr,
-		))
-	}
-	content.WriteString("\n")
-	content.WriteString("*Legend: ⚠️ Price-sensitive | ⏸️ Trading Halt | ▶️ Reinstatement*\n\n")
-
-	// High signal detail section
-	if highSignalCount > 0 {
-		content.WriteString("## High Signal Announcements (Detail)\n\n")
-		for _, a := range analyses {
-			if a.SignalNoiseRating == SignalNoiseHigh {
-				content.WriteString(fmt.Sprintf("### %s\n", a.Headline))
-				content.WriteString(fmt.Sprintf("- **Date**: %s\n", a.Date.Format("2 January 2006")))
-				content.WriteString(fmt.Sprintf("- **Type**: %s\n", a.Type))
-				content.WriteString(fmt.Sprintf("- **Price Sensitive**: %v\n", a.PriceSensitive))
-				content.WriteString(fmt.Sprintf("- **Signal Rating**: %s\n", string(a.SignalNoiseRating)))
-				content.WriteString(fmt.Sprintf("- **Rationale**: %s\n", a.SignalNoiseRationale))
-
-				if a.PriceImpact != nil {
-					content.WriteString(fmt.Sprintf("- **Price Before**: $%.2f\n", a.PriceImpact.PriceBefore))
-					content.WriteString(fmt.Sprintf("- **Price After**: $%.2f\n", a.PriceImpact.PriceAfter))
-					content.WriteString(fmt.Sprintf("- **Price Change**: %.2f%%\n", a.PriceImpact.ChangePercent))
-					content.WriteString(fmt.Sprintf("- **Volume Ratio**: %.2fx\n", a.PriceImpact.VolumeChangeRatio))
-				}
-
-				if a.PDFURL != "" {
-					content.WriteString(fmt.Sprintf("- **Document**: [View PDF](%s)\n", a.PDFURL))
-				}
-				content.WriteString("\n")
-			}
-		}
-	}
-
-	// Moderate signal announcements
-	if modSignalCount > 0 {
-		content.WriteString("## Moderate Signal Announcements\n\n")
-		for _, a := range analyses {
-			if a.SignalNoiseRating == SignalNoiseModerate {
-				content.WriteString(fmt.Sprintf("### %s\n", a.Headline))
-				content.WriteString(fmt.Sprintf("- **Date**: %s\n", a.Date.Format("2 January 2006")))
-				content.WriteString(fmt.Sprintf("- **Signal Rating**: %s\n", string(a.SignalNoiseRating)))
-				content.WriteString(fmt.Sprintf("- **Rationale**: %s\n", a.SignalNoiseRationale))
-
-				if a.PriceImpact != nil {
-					content.WriteString(fmt.Sprintf("- **Price Change**: %.2f%% ($%.2f -> $%.2f)\n",
-						a.PriceImpact.ChangePercent, a.PriceImpact.PriceBefore, a.PriceImpact.PriceAfter))
-					content.WriteString(fmt.Sprintf("- **Volume Ratio**: %.2fx\n", a.PriceImpact.VolumeChangeRatio))
-				}
-
-				if a.PDFURL != "" {
-					content.WriteString(fmt.Sprintf("- **Document**: [View PDF](%s)\n", a.PDFURL))
-				}
-				content.WriteString("\n")
-			}
 		}
 	}
 
@@ -3042,7 +2942,7 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	}
 
 	// Build signal analysis summary for metadata (REQ-7)
-	signalSummary := buildSignalSummaryFromAnalyses(analyses)
+	// signalSummary calculated early for prompt
 	riskFlags := DeriveRiskFlags(signalSummary)
 
 	metadata := map[string]interface{}{

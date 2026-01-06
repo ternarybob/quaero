@@ -76,7 +76,7 @@ func TestWorkerAnnouncementsSingle(t *testing.T) {
 	// Assert content contains expected sections (updated for conviction-based rating)
 	expectedSections := []string{
 		"ASX Announcements Summary",
-		"Relevance Distribution",
+		"Announcements Analysis",              // Consolidated signal analysis table
 		"Signal Analysis & Conviction Rating", // REQ-5: New conviction-based rating
 		"Mandatory Business Update Calendar",  // REQ-2: Business calendar section
 	}

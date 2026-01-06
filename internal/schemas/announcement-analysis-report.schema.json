@@ -1,292 +1,344 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "announcement-analysis-report.schema.json",
-  "title": "Announcement Analysis Report Schema",
-  "description": "Multi-stock announcement signal-noise analysis report. Contains individual analyses ordered alphabetically by ticker.",
-  "type": "object",
-  "required": ["analysis_date", "stocks"],
-  "properties": {
-    "analysis_date": {
-      "type": "string",
-      "description": "Date of analysis in YYYY-MM-DD format"
-    },
-    "report_summary": {
-      "type": "string",
-      "description": "Cross-stock summary highlighting comparative insights and common themes"
-    },
-    "stocks": {
-      "type": "array",
-      "description": "Individual stock announcement analyses, ordered alphabetically by ticker",
-      "items": {
-        "type": "object",
-        "required": ["ticker", "analysis_date", "executive_summary", "signal_noise_assessment", "high_signal_announcements"],
-        "properties": {
-          "ticker": {
-            "type": "string",
-            "description": "ASX stock ticker code (e.g., BHP, CBA)"
-          },
-          "company_name": {
-            "type": "string",
-            "description": "Full company name"
-          },
-          "analysis_date": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "announcement-analysis-report.schema.json",
+    "title": "Announcement Analysis Report Schema",
+    "description": "Multi-stock announcement signal-noise analysis report. Contains individual analyses ordered alphabetically by ticker.",
+    "type": "object",
+    "required": [
+        "analysis_date",
+        "stocks"
+    ],
+    "properties": {
+        "analysis_date": {
             "type": "string",
             "description": "Date of analysis in YYYY-MM-DD format"
-          },
-          "analysis_period": {
+        },
+        "report_summary": {
             "type": "string",
-            "description": "Period covered (e.g., '13 months')"
-          },
-          "executive_summary": {
-            "type": "string",
-            "description": "AI-generated executive summary of announcement quality and key findings (2-4 paragraphs)"
-          },
-          "signal_noise_assessment": {
-            "type": "object",
-            "description": "Overall signal-to-noise quality metrics for the company",
-            "required": ["overall_rating", "high_signal_count", "moderate_signal_count", "noise_count", "noise_ratio"],
-            "properties": {
-              "overall_rating": {
-                "type": "string",
-                "enum": ["EXCELLENT", "GOOD", "AVERAGE", "POOR"],
-                "description": "Overall quality of company announcements"
-              },
-              "overall_rating_reasoning": {
-                "type": "string",
-                "description": "Explanation of the overall rating"
-              },
-              "high_signal_count": {
-                "type": "integer",
-                "description": "Number of high-signal announcements"
-              },
-              "moderate_signal_count": {
-                "type": "integer",
-                "description": "Number of moderate-signal announcements"
-              },
-              "low_signal_count": {
-                "type": "integer",
-                "description": "Number of low-signal announcements"
-              },
-              "noise_count": {
-                "type": "integer",
-                "description": "Number of noise announcements"
-              },
-              "total_count": {
-                "type": "integer",
-                "description": "Total number of announcements analyzed"
-              },
-              "noise_ratio": {
-                "type": "number",
-                "description": "Ratio of noise to total announcements (0.0-1.0)"
-              },
-              "price_sensitive_accuracy": {
-                "type": "number",
-                "description": "Percentage of price-sensitive announcements that had market reaction (0-100)"
-              }
-            }
-          },
-          "high_signal_announcements": {
+            "description": "Cross-stock summary highlighting comparative insights and common themes"
+        },
+        "stocks": {
             "type": "array",
-            "description": "High-signal announcements with full details (noise excluded)",
+            "description": "Individual stock announcement analyses, ordered alphabetically by ticker",
             "items": {
-              "type": "object",
-              "required": ["date", "headline", "signal_rating", "rationale"],
-              "properties": {
-                "date": {
-                  "type": "string",
-                  "description": "Announcement date in YYYY-MM-DD format"
-                },
-                "headline": {
-                  "type": "string",
-                  "description": "Full announcement headline"
-                },
-                "type": {
-                  "type": "string",
-                  "description": "ASX announcement type"
-                },
-                "signal_rating": {
-                  "type": "string",
-                  "enum": ["HIGH", "MODERATE"],
-                  "description": "Signal quality rating"
-                },
-                "rationale": {
-                  "type": "string",
-                  "description": "Explanation of why this is a significant announcement"
-                },
-                "price_sensitive": {
-                  "type": "boolean",
-                  "description": "Whether marked as price-sensitive by ASX"
-                },
-                "price_impact": {
-                  "type": "object",
-                  "description": "Price and volume impact data",
-                  "properties": {
-                    "price_change_percent": {
-                      "type": "number",
-                      "description": "Price change percentage on announcement"
+                "type": "object",
+                "required": [
+                    "ticker",
+                    "analysis_date",
+                    "executive_summary",
+                    "signal_noise_assessment",
+                    "announcements"
+                ],
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "ASX stock ticker code (e.g., BHP, CBA)"
                     },
-                    "volume_ratio": {
-                      "type": "number",
-                      "description": "Volume compared to average (e.g., 2.5x)"
+                    "company_name": {
+                        "type": "string",
+                        "description": "Full company name"
                     },
-                    "impact_signal": {
-                      "type": "string",
-                      "description": "Description of market reaction"
+                    "analysis_date": {
+                        "type": "string",
+                        "description": "Date of analysis in YYYY-MM-DD format"
+                    },
+                    "analysis_period": {
+                        "type": "string",
+                        "description": "Period covered (e.g., '13 months')"
+                    },
+                    "executive_summary": {
+                        "type": "string",
+                        "description": "AI-generated executive summary of announcement quality and key findings (2-4 paragraphs)"
+                    },
+                    "signal_noise_assessment": {
+                        "type": "object",
+                        "description": "Overall signal-to-noise quality metrics for the company",
+                        "required": [
+                            "overall_rating",
+                            "high_signal_count",
+                            "moderate_signal_count",
+                            "noise_count",
+                            "noise_ratio"
+                        ],
+                        "properties": {
+                            "overall_rating": {
+                                "type": "string",
+                                "enum": [
+                                    "EXCELLENT",
+                                    "GOOD",
+                                    "AVERAGE",
+                                    "POOR"
+                                ],
+                                "description": "Overall quality of company announcements"
+                            },
+                            "overall_rating_reasoning": {
+                                "type": "string",
+                                "description": "Explanation of the overall rating"
+                            },
+                            "high_signal_count": {
+                                "type": "integer",
+                                "description": "Number of high-signal announcements"
+                            },
+                            "moderate_signal_count": {
+                                "type": "integer",
+                                "description": "Number of moderate-signal announcements"
+                            },
+                            "low_signal_count": {
+                                "type": "integer",
+                                "description": "Number of low-signal announcements"
+                            },
+                            "noise_count": {
+                                "type": "integer",
+                                "description": "Number of noise announcements"
+                            },
+                            "total_count": {
+                                "type": "integer",
+                                "description": "Total number of announcements analyzed"
+                            },
+                            "noise_ratio": {
+                                "type": "number",
+                                "description": "Ratio of noise to total announcements (0.0-1.0)"
+                            },
+                            "price_sensitive_accuracy": {
+                                "type": "number",
+                                "description": "Percentage of price-sensitive announcements that had market reaction (0-100)"
+                            }
+                        }
+                    },
+                    "announcements": {
+                        "type": "array",
+                        "description": "High and Moderate signal announcements with full details",
+                        "items": {
+                            "type": "object",
+                            "required": [
+                                "date",
+                                "headline",
+                                "signal_rating",
+                                "rationale"
+                            ],
+                            "properties": {
+                                "date": {
+                                    "type": "string",
+                                    "description": "Announcement date in YYYY-MM-DD format"
+                                },
+                                "headline": {
+                                    "type": "string",
+                                    "description": "Full announcement headline"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "description": "ASX announcement type"
+                                },
+                                "signal_rating": {
+                                    "type": "string",
+                                    "enum": [
+                                        "HIGH",
+                                        "MODERATE",
+                                        "LOW",
+                                        "ROUTINE",
+                                        "NOISE"
+                                    ],
+                                    "description": "Signal quality rating"
+                                },
+                                "rationale": {
+                                    "type": "string",
+                                    "description": "Explanation of why this is a significant announcement"
+                                },
+                                "price_sensitive": {
+                                    "type": "boolean",
+                                    "description": "Whether marked as price-sensitive by ASX"
+                                },
+                                "price_impact": {
+                                    "type": "object",
+                                    "description": "Price and volume impact data",
+                                    "properties": {
+                                        "price_change_percent": {
+                                            "type": "number",
+                                            "description": "Price change percentage on announcement"
+                                        },
+                                        "volume_ratio": {
+                                            "type": "number",
+                                            "description": "Volume compared to average (e.g., 2.5x)"
+                                        },
+                                        "impact_signal": {
+                                            "type": "string",
+                                            "description": "Description of market reaction"
+                                        }
+                                    }
+                                },
+                                "pdf_url": {
+                                    "type": "string",
+                                    "description": "URL to ASX announcement PDF"
+                                },
+                                "ai_analysis": {
+                                    "type": "string",
+                                    "description": "AI-generated analysis of this announcement's significance and implications (2-3 sentences)"
+                                }
+                            }
+                        }
+                    },
+                    "routine_announcements": {
+                        "type": "array",
+                        "description": "List of routine administrative announcements excluded from signal analysis",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {
+                                    "type": "string"
+                                },
+                                "headline": {
+                                    "type": "string"
+                                },
+                                "type": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "anomalies": {
+                        "type": "array",
+                        "description": "Announcements with unexpected market behavior",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {
+                                    "type": "string",
+                                    "description": "Announcement date"
+                                },
+                                "headline": {
+                                    "type": "string",
+                                    "description": "Announcement headline"
+                                },
+                                "anomaly_type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "NO_REACTION",
+                                        "UNEXPECTED_REACTION"
+                                    ],
+                                    "description": "Type of anomaly detected"
+                                },
+                                "explanation": {
+                                    "type": "string",
+                                    "description": "AI explanation of the anomaly"
+                                }
+                            }
+                        }
+                    },
+                    "pre_announcement_movements": {
+                        "type": "array",
+                        "description": "Announcements with significant pre-announcement price drift",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {
+                                    "type": "string",
+                                    "description": "Announcement date"
+                                },
+                                "headline": {
+                                    "type": "string",
+                                    "description": "Announcement headline"
+                                },
+                                "pre_drift_percent": {
+                                    "type": "number",
+                                    "description": "Price drift percentage T-5 to T-1"
+                                },
+                                "interpretation": {
+                                    "type": "string",
+                                    "description": "Analysis of pre-drift implications"
+                                }
+                            }
+                        }
+                    },
+                    "dividend_announcements": {
+                        "type": "array",
+                        "description": "Dividend-related announcements with context",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {
+                                    "type": "string",
+                                    "description": "Announcement date"
+                                },
+                                "headline": {
+                                    "type": "string",
+                                    "description": "Dividend announcement headline"
+                                },
+                                "notes": {
+                                    "type": "string",
+                                    "description": "Context about dividend"
+                                }
+                            }
+                        }
+                    },
+                    "key_themes": {
+                        "type": "array",
+                        "description": "Key themes identified across announcements",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "sources": {
+                        "type": "object",
+                        "description": "References to data sources used in analysis",
+                        "properties": {
+                            "local": {
+                                "type": "array",
+                                "description": "Local Quaero document references",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string"
+                                        },
+                                        "document_id": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "data": {
+                                "type": "array",
+                                "description": "External API data sources",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "url": {
+                                            "type": "string"
+                                        },
+                                        "data_types": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "web": {
+                                "type": "array",
+                                "description": "Web search sources",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {
+                                            "type": "string"
+                                        },
+                                        "url": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                  }
-                },
-                "pdf_url": {
-                  "type": "string",
-                  "description": "URL to ASX announcement PDF"
-                },
-                "ai_analysis": {
-                  "type": "string",
-                  "description": "AI-generated analysis of this announcement's significance and implications (2-3 sentences)"
                 }
-              }
             }
-          },
-          "anomalies": {
-            "type": "array",
-            "description": "Announcements with unexpected market behavior",
-            "items": {
-              "type": "object",
-              "properties": {
-                "date": {
-                  "type": "string",
-                  "description": "Announcement date"
-                },
-                "headline": {
-                  "type": "string",
-                  "description": "Announcement headline"
-                },
-                "anomaly_type": {
-                  "type": "string",
-                  "enum": ["NO_REACTION", "UNEXPECTED_REACTION"],
-                  "description": "Type of anomaly detected"
-                },
-                "explanation": {
-                  "type": "string",
-                  "description": "AI explanation of the anomaly"
-                }
-              }
-            }
-          },
-          "pre_announcement_movements": {
-            "type": "array",
-            "description": "Announcements with significant pre-announcement price drift",
-            "items": {
-              "type": "object",
-              "properties": {
-                "date": {
-                  "type": "string",
-                  "description": "Announcement date"
-                },
-                "headline": {
-                  "type": "string",
-                  "description": "Announcement headline"
-                },
-                "pre_drift_percent": {
-                  "type": "number",
-                  "description": "Price drift percentage T-5 to T-1"
-                },
-                "interpretation": {
-                  "type": "string",
-                  "description": "Analysis of pre-drift implications"
-                }
-              }
-            }
-          },
-          "dividend_announcements": {
-            "type": "array",
-            "description": "Dividend-related announcements with context",
-            "items": {
-              "type": "object",
-              "properties": {
-                "date": {
-                  "type": "string",
-                  "description": "Announcement date"
-                },
-                "headline": {
-                  "type": "string",
-                  "description": "Dividend announcement headline"
-                },
-                "notes": {
-                  "type": "string",
-                  "description": "Context about dividend"
-                }
-              }
-            }
-          },
-          "key_themes": {
-            "type": "array",
-            "description": "Key themes identified across announcements",
-            "items": {
-              "type": "string"
-            }
-          },
-          "sources": {
-            "type": "object",
-            "description": "References to data sources used in analysis",
-            "properties": {
-              "local": {
-                "type": "array",
-                "description": "Local Quaero document references",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "document_id": {
-                      "type": "string"
-                    }
-                  }
-                }
-              },
-              "data": {
-                "type": "array",
-                "description": "External API data sources",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    },
-                    "data_types": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              },
-              "web": {
-                "type": "array",
-                "description": "Web search sources",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
         }
-      }
     }
-  }
 }
