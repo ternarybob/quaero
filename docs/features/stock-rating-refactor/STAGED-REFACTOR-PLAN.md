@@ -329,28 +329,20 @@ Each reads required documents, calls service, outputs score document.
 
 ---
 
-## Stage 3: Job Definition
+## Stage 3: Template & Job Definition
 
-**Goal:** Create job definition that orchestrates the rating flow.
+**Goal:** Create rating template and job definition that orchestrates the rating flow.
 
 ### Tasks
 
-#### 3.1 Create Rating Job Definition
-- [ ] Create `deployments/common/job-definitions/stock-rating.toml`
+#### 3.1 Create Rating Template
+- [ ] Create `internal/templates/stock-rating.toml`
   ```toml
-  id = "stock-rating"
-  name = "Stock Rating"
-  type = "orchestrator"
-  description = "Rate stocks using investability framework"
-  tags = ["rating", "analysis"]
+  # Stock Rating Template
+  # Type: workflow (defines steps, no config - tickers provided at runtime)
 
-  [config]
-  default_exchange = "ASX"  # Used when ticker has no exchange prefix
-  variables = [
-      { ticker = "GNP" },       # Resolves to ASX.GNP
-      { ticker = "SKS" },       # Resolves to ASX.SKS
-      { ticker = "NYSE.AAPL" }, # Explicit exchange
-  ]
+  type = "workflow"
+  schema_ref = "stock-rating.schema.json"
 
   # Step 1: Collect data (existing workers)
   [step.fetch_fundamentals]
@@ -360,7 +352,7 @@ Each reads required documents, calls service, outputs score document.
 
   [step.fetch_announcements]
   type = "market_announcements"
-  description = "Fetch ASX announcements"
+  description = "Fetch announcements"
   depends = "fetch_fundamentals"
   on_error = "continue"
 
@@ -381,7 +373,7 @@ Each reads required documents, calls service, outputs score document.
   description = "Calculate Capital Discipline Score"
   depends = "fetch_announcements"
 
-  # Step 3: Calculate component scores (only if gate passes)
+  # Step 3: Calculate component scores
   [step.calculate_nfr]
   type = "rating_nfr"
   description = "Calculate Narrative-to-Fact Ratio"
@@ -408,24 +400,46 @@ Each reads required documents, calls service, outputs score document.
   description = "Calculate final investability rating"
   depends = "calculate_bfs,calculate_cds,calculate_nfr,calculate_pps,calculate_vrs,calculate_ob"
   output_tags = ["stock-rating"]
+  ```
 
-  # Step 5: Email report
+#### 3.2 Create Job Definition (Example)
+- [ ] Create `deployments/common/job-definitions/stock-rating-watchlist.toml`
+  ```toml
+  # Stock Rating - Watchlist
+  # Uses stock-rating template with configured tickers
+
+  id = "stock-rating-watchlist"
+  name = "Stock Rating Watchlist"
+  type = "orchestrator"
+  description = "Rate watchlist stocks using investability framework"
+  tags = ["rating", "watchlist"]
+  template = "stock-rating"  # References internal/templates/stock-rating.toml
+
+  [config]
+  default_exchange = "ASX"
+  variables = [
+      { ticker = "GNP" },
+      { ticker = "SKS" },
+      { ticker = "EXR" },
+  ]
+
+  # Optional: Override email settings
   [step.email_report]
   type = "email"
-  description = "Email rating report"
   depends = "calculate_rating"
   to = "user@example.com"
   subject = "Stock Rating Report"
   list_tags = ["stock-rating"]
   ```
 
-#### 3.2 Test Job Execution
+#### 3.3 Test Job Execution
 - [ ] Run job with test tickers
 - [ ] Verify all steps execute in order
 - [ ] Verify documents created with correct tags
 
 ### Deliverables
-- Job definition file
+- Rating template (no config)
+- Example job definition (with config)
 - Working end-to-end flow
 
 ---
