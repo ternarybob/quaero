@@ -1112,6 +1112,8 @@ func (w *MarketAnnouncementsWorker) extractPricesFromDocument(doc *models.Docume
 type FundamentalsFinancialData struct {
 	AnnualData    []FundamentalsFinancialPeriod
 	QuarterlyData []FundamentalsFinancialPeriod
+	MarketCap     int64  // Market capitalization in currency units
+	Sector        string // Industry sector
 }
 
 // FundamentalsFinancialPeriod represents financial data for a single period (matches FinancialPeriodEntry in market_fundamentals_worker.go)
@@ -1241,6 +1243,25 @@ func (w *MarketAnnouncementsWorker) extractFinancialsFromDocument(doc *models.Do
 		}
 	}
 
+	// Extract market_cap from metadata
+	if marketCapRaw, exists := doc.Metadata["market_cap"]; exists {
+		switch v := marketCapRaw.(type) {
+		case float64:
+			result.MarketCap = int64(v)
+		case int64:
+			result.MarketCap = v
+		case int:
+			result.MarketCap = int64(v)
+		}
+	}
+
+	// Extract sector from metadata
+	if sectorRaw, exists := doc.Metadata["sector"]; exists {
+		if v, ok := sectorRaw.(string); ok {
+			result.Sector = v
+		}
+	}
+
 	if len(result.AnnualData) == 0 && len(result.QuarterlyData) == 0 {
 		w.logger.Debug().
 			Str("asx_code", asxCode).
@@ -1252,6 +1273,8 @@ func (w *MarketAnnouncementsWorker) extractFinancialsFromDocument(doc *models.Do
 		Str("asx_code", asxCode).
 		Int("annual_periods", len(result.AnnualData)).
 		Int("quarterly_periods", len(result.QuarterlyData)).
+		Int64("market_cap", result.MarketCap).
+		Str("sector", result.Sector).
 		Msg("Extracted financial data from fundamentals document")
 
 	return result
@@ -2766,9 +2789,12 @@ func (w *MarketAnnouncementsWorker) createMQSSummaryDocument(ctx context.Context
 			"mqs_tier":         string(mqsOutput.ManagementQualityScore.Tier),
 			"mqs_composite":    mqsOutput.ManagementQualityScore.CompositeScore,
 			"mqs_confidence":   string(mqsOutput.ManagementQualityScore.Confidence),
-			"leakage_score":    mqsOutput.ManagementQualityScore.LeakageScore,
-			"conviction_score": mqsOutput.ManagementQualityScore.ConvictionScore,
-			"retention_score":  mqsOutput.ManagementQualityScore.RetentionScore,
+			"leakage_score":    mqsOutput.ManagementQualityScore.LeakageIntegrity,
+			"conviction_score": mqsOutput.ManagementQualityScore.Conviction,
+			"retention_score":  mqsOutput.ManagementQualityScore.Retention,
+			"asset_class":      string(mqsOutput.Meta.AssetClass),
+			"sector":           mqsOutput.Meta.Sector,
+			"market_cap":       mqsOutput.Meta.MarketCap,
 			"announcements":    len(announcements),
 			"trading_days":     len(prices),
 			// Leakage summary

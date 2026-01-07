@@ -48,13 +48,31 @@ const (
 	ToneDataDry      ToneClass = "DATA_DRY"     // primarily numbers and facts
 )
 
+// AssetClass represents market cap classification
+type AssetClass string
+
+const (
+	AssetClassLargeCap AssetClass = "LARGE_CAP" // Market Cap > $10B
+	AssetClassMidCap   AssetClass = "MID_CAP"   // Market Cap $2B-$10B
+	AssetClassSmallCap AssetClass = "SMALL_CAP" // Market Cap < $2B
+)
+
+// EventMateriality represents Strategic vs Routine event classification
+type EventMateriality string
+
+const (
+	EventStrategic EventMateriality = "STRATEGIC" // Earnings, Guidance, M&A, Clinical/Technical milestones (weight 1.0x)
+	EventRoutine   EventMateriality = "ROUTINE"   // Buy-back updates, Admin notices, Appendix 3Ys (weight 0.2x)
+)
+
 // MQSTier represents the overall management quality tier
 type MQSTier string
 
 const (
-	TierOperator        MQSTier = "TIER_1_OPERATOR"         // composite ≥ 0.75 AND leakage ≥ 0.7 AND retention ≥ 0.7
-	TierHonestStruggler MQSTier = "TIER_2_HONEST_STRUGGLER" // composite ≥ 0.50 AND leakage ≥ 0.6
-	TierPromoter        MQSTier = "TIER_3_PROMOTER"         // composite < 0.50 OR leakage < 0.4 OR retention < 0.4
+	TierStitchedAlpha MQSTier = "STITCHED_ALPHA" // High composite with clean leakage and strong retention
+	TierStableSteward MQSTier = "STABLE_STEWARD" // Good composite with acceptable metrics
+	TierPromoter      MQSTier = "PROMOTER"       // Poor metrics or significant leakage
+	TierWeakSignal    MQSTier = "WEAK_SIGNAL"    // Insufficient data or very low scores
 )
 
 // MQSConfidence represents the confidence level based on data availability
@@ -68,6 +86,13 @@ const (
 
 // MQS Output Schema Types
 
+// MQSMeta contains metadata about the analyzed entity
+type MQSMeta struct {
+	AssetClass AssetClass `json:"asset_class"` // LARGE_CAP, MID_CAP, SMALL_CAP
+	Sector     string     `json:"sector"`      // Industry sector
+	MarketCap  int64      `json:"market_cap"`  // Market capitalization in currency units
+}
+
 // MQSOutput is the root output schema for management quality analysis
 type MQSOutput struct {
 	Ticker       string    `json:"ticker"`
@@ -77,6 +102,9 @@ type MQSOutput struct {
 	PeriodStart  time.Time `json:"period_start"`
 	PeriodEnd    time.Time `json:"period_end"`
 
+	// Metadata (asset class, sector)
+	Meta MQSMeta `json:"meta"`
+
 	// Aggregate MQS scores
 	ManagementQualityScore MQSScore `json:"management_quality_score"`
 
@@ -85,7 +113,10 @@ type MQSOutput struct {
 	ConvictionSummary ConvictionSummary `json:"conviction_summary"`
 	RetentionSummary  RetentionSummary  `json:"retention_summary"`
 
-	// Individual announcements
+	// Detailed events with new analysis fields
+	DetailedEvents []MQSDetailedEvent `json:"detailed_events"`
+
+	// Individual announcements (legacy, kept for compatibility)
 	Announcements []MQSAnnouncement `json:"announcements"`
 
 	// High-impact announcements with news links (past 12 months)
@@ -98,14 +129,25 @@ type MQSOutput struct {
 	DataQuality DataQualityInfo `json:"data_quality"`
 }
 
+// MQSDetailedEvent represents an event with detailed analysis per new spec
+type MQSDetailedEvent struct {
+	Date         string           `json:"date"`
+	Headline     string           `json:"headline"`
+	Type         EventMateriality `json:"type"`          // STRATEGIC or ROUTINE
+	ZScore       float64          `json:"z_score"`       // Volume Z-Score
+	PreDriftCAR  float64          `json:"pre_drift_car"` // Cumulative Abnormal Return (5 days prior)
+	Retention10D float64          `json:"retention_10d"` // Price retention at T+10
+	IsLeakage    bool             `json:"is_leakage"`    // True if |CAR| > 2σ
+}
+
 // MQSScore contains the aggregate management quality scores
 type MQSScore struct {
-	LeakageScore    float64       `json:"leakage_score"`
-	ConvictionScore float64       `json:"conviction_score"`
-	RetentionScore  float64       `json:"retention_score"`
-	CompositeScore  float64       `json:"composite_score"`
-	Tier            MQSTier       `json:"tier"`
-	Confidence      MQSConfidence `json:"confidence"`
+	LeakageIntegrity float64       `json:"leakage_integrity"` // Information integrity score (CAR-based)
+	Conviction       float64       `json:"conviction"`        // Volume Z-Score conviction score
+	Retention        float64       `json:"retention"`         // Price retention score
+	CompositeScore   float64       `json:"composite"`         // Weighted composite score
+	Tier             MQSTier       `json:"tier"`
+	Confidence       MQSConfidence `json:"confidence"`
 }
 
 // LeakageSummary contains information integrity metrics

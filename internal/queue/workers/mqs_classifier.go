@@ -194,28 +194,169 @@ func CalculateCompositeMQS(leakage, conviction, retention float64) float64 {
 	return (leakage * 0.33) + (conviction * 0.33) + (retention * 0.34)
 }
 
+// ClassifyAssetClass determines asset class based on market cap
+// Large-Cap: > $10B, Mid-Cap: $2B-$10B, Small-Cap: < $2B
+func ClassifyAssetClass(marketCapUSD int64) AssetClass {
+	const (
+		largeCap = 10_000_000_000 // $10B
+		midCap   = 2_000_000_000  // $2B
+	)
+
+	if marketCapUSD >= largeCap {
+		return AssetClassLargeCap
+	}
+	if marketCapUSD >= midCap {
+		return AssetClassMidCap
+	}
+	return AssetClassSmallCap
+}
+
+// ClassifyEventMateriality determines if an announcement is Strategic or Routine
+// Strategic: Earnings, Guidance, M&A, Clinical/Technical milestones (weight 1.0x)
+// Routine: Buy-back updates, Admin notices, Appendix 3Ys (weight 0.2x)
+func ClassifyEventMateriality(headline, category string) EventMateriality {
+	upper := strings.ToUpper(headline)
+	categoryUpper := strings.ToUpper(category)
+
+	// Strategic patterns
+	strategicPatterns := []string{
+		// Earnings/Financial
+		"RESULT", "EARNINGS", "PROFIT", "REVENUE", "FINANCIAL REPORT",
+		"HALF YEAR", "FULL YEAR", "QUARTERLY", "ANNUAL",
+		"APPENDIX 4D", "APPENDIX 4E", "4D", "4E",
+		// Guidance
+		"GUIDANCE", "FORECAST", "OUTLOOK", "TARGET", "UPGRADE", "DOWNGRADE",
+		// M&A
+		"ACQUISITION", "MERGER", "TAKEOVER", "DISPOSAL", "DIVESTMENT",
+		"SALE OF", "PURCHASE OF",
+		// Clinical/Technical milestones
+		"CLINICAL TRIAL", "PHASE ", "FDA", "TGA", "APPROVAL",
+		"PATENT", "DISCOVERY", "BREAKTHROUGH", "MILESTONE",
+		"RESOURCE ESTIMATE", "RESERVE", "FEASIBILITY",
+		// Capital events
+		"CAPITAL RAISING", "PLACEMENT", "SPP", "RIGHTS ISSUE",
+		"DIVIDEND",
+	}
+
+	for _, pattern := range strategicPatterns {
+		if strings.Contains(upper, pattern) {
+			return EventStrategic
+		}
+	}
+
+	// Routine patterns (explicit check)
+	routinePatterns := []string{
+		"APPENDIX 3Y", "3Y", "CHANGE OF DIRECTOR",
+		"BUY-BACK", "BUYBACK",
+		"ADMINISTRATIVE", "CHANGE OF ADDRESS",
+		"BECOMING A SUBSTANTIAL", "CEASING TO BE A SUBSTANTIAL",
+		"DAILY SHARE BUY-BACK", "SHARE BUY BACK",
+	}
+
+	for _, pattern := range routinePatterns {
+		if strings.Contains(upper, pattern) || strings.Contains(categoryUpper, pattern) {
+			return EventRoutine
+		}
+	}
+
+	// Default based on price sensitivity would be handled by caller
+	// For now, default to Routine if not clearly Strategic
+	return EventRoutine
+}
+
+// CalculateVolumeZScore calculates the volume Z-score for an announcement
+// Z = (V - μ) / σ where μ and σ are 90-day rolling mean and std dev
+func CalculateVolumeZScore(dayVolume int64, mean90Day, stdDev90Day float64) float64 {
+	if stdDev90Day == 0 {
+		return 0
+	}
+	return (float64(dayVolume) - mean90Day) / stdDev90Day
+}
+
+// IsConvictionTriggered determines if an event triggers conviction based on Z-score
+// Trigger: Z > 2.0 (Large-Cap) or Z > 3.0 (Small/Mid-Cap) AND |Price Change| > 1.5%
+func IsConvictionTriggered(zScore float64, priceChangePct float64, assetClass AssetClass) bool {
+	absChange := math.Abs(priceChangePct)
+	if absChange <= 1.5 {
+		return false
+	}
+
+	switch assetClass {
+	case AssetClassLargeCap:
+		return zScore > 2.0
+	default: // Mid-Cap and Small-Cap
+		return zScore > 3.0
+	}
+}
+
+// CalculateCAR calculates Cumulative Abnormal Return for pre-announcement period
+// CAR = sum of daily abnormal returns over the lookback period
+func CalculateCAR(dailyReturns []float64, marketReturns []float64) float64 {
+	if len(dailyReturns) == 0 {
+		return 0
+	}
+
+	car := 0.0
+	for i := 0; i < len(dailyReturns); i++ {
+		marketReturn := 0.0
+		if i < len(marketReturns) {
+			marketReturn = marketReturns[i]
+		}
+		// Abnormal return = actual return - expected (market) return
+		abnormalReturn := dailyReturns[i] - marketReturn
+		car += abnormalReturn
+	}
+	return car
+}
+
+// IsLeakage determines if CAR indicates information leakage
+// Mark as 'Leakage' if |CAR| > 2σ where σ is 20-day rolling volatility
+func IsLeakage(car, volatility20Day float64) bool {
+	if volatility20Day == 0 {
+		return false
+	}
+	return math.Abs(car) > 2*volatility20Day
+}
+
+// CalculateRetentionNew calculates price retention per new spec
+// Retention = (Price_t+10 - Price_t-1) / (Price_t - Price_t-1)
+func CalculateRetentionNew(priceT10, priceTMinus1, priceT float64) float64 {
+	denominator := priceT - priceTMinus1
+	if math.Abs(denominator) < 0.0001 {
+		return 1.0 // No initial change, consider fully retained
+	}
+	return (priceT10 - priceTMinus1) / denominator
+}
+
 // DetermineMQSTier determines the overall tier classification.
 //
 // Tier rules:
-//   - TIER_1_OPERATOR: composite >= 0.75 AND leakage >= 0.7 AND retention >= 0.7
-//   - TIER_2_HONEST_STRUGGLER: composite >= 0.50 AND leakage >= 0.6
-//   - TIER_3_PROMOTER: composite < 0.50 OR leakage < 0.4 OR retention < 0.4
+//   - STITCHED_ALPHA: composite >= 0.75 AND leakage >= 0.7 AND retention >= 0.7
+//   - STABLE_STEWARD: composite >= 0.50 AND leakage >= 0.6
+//   - PROMOTER: leakage < 0.4 OR retention < 0.4
+//   - WEAK_SIGNAL: composite < 0.30 OR insufficient data
 func DetermineMQSTier(composite, leakage, retention float64) MQSTier {
-	// TIER_3_PROMOTER: Any disqualifying factor
-	if composite < 0.50 || leakage < 0.4 || retention < 0.4 {
+	// WEAK_SIGNAL: Very low composite or poor data
+	if composite < 0.30 {
+		return TierWeakSignal
+	}
+
+	// PROMOTER: Any disqualifying factor (leakage or retention issues)
+	if leakage < 0.4 || retention < 0.4 {
 		return TierPromoter
 	}
 
-	// TIER_1_OPERATOR: All criteria met
+	// STITCHED_ALPHA: All criteria met (high quality)
 	if composite >= 0.75 && leakage >= 0.7 && retention >= 0.7 {
-		return TierOperator
+		return TierStitchedAlpha
 	}
 
-	// TIER_2_HONEST_STRUGGLER: Decent composite and clean disclosure
+	// STABLE_STEWARD: Decent composite and clean disclosure
 	if composite >= 0.50 && leakage >= 0.6 {
-		return TierHonestStruggler
+		return TierStableSteward
 	}
 
+	// Default to PROMOTER if not meeting other criteria
 	return TierPromoter
 }
 
