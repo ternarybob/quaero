@@ -2790,8 +2790,10 @@ func (w *MarketAnnouncementsWorker) createMQSSummaryDocument(ctx context.Context
 			"mqs_composite":    mqsOutput.ManagementQualityScore.CompositeScore,
 			"mqs_confidence":   string(mqsOutput.ManagementQualityScore.Confidence),
 			"leakage_score":    mqsOutput.ManagementQualityScore.LeakageIntegrity,
-			"conviction_score": mqsOutput.ManagementQualityScore.Conviction,
-			"retention_score":  mqsOutput.ManagementQualityScore.Retention,
+			"conviction_score": mqsOutput.ManagementQualityScore.InstitutionalConviction,
+			"clarity_score":    mqsOutput.ManagementQualityScore.ClarityIndex,
+			"efficiency_score": mqsOutput.ManagementQualityScore.CommunicationEfficiency,
+			"retention_score":  mqsOutput.ManagementQualityScore.ValueSustainability,
 			"asset_class":      string(mqsOutput.Meta.AssetClass),
 			"sector":           mqsOutput.Meta.Sector,
 			"market_cap":       mqsOutput.Meta.MarketCap,
@@ -2804,13 +2806,22 @@ func (w *MarketAnnouncementsWorker) createMQSSummaryDocument(ctx context.Context
 			// Conviction summary
 			"conviction_institutional_count": mqsOutput.ConvictionSummary.InstitutionalCount,
 			"conviction_retail_hype_count":   mqsOutput.ConvictionSummary.RetailHypeCount,
+			// Clarity summary
+			"clarity_volatility_reduced":   mqsOutput.ClaritySummary.VolatilityReduced,
+			"clarity_volatility_increased": mqsOutput.ClaritySummary.VolatilityIncreased,
+			"clarity_average_index":        mqsOutput.ClaritySummary.AverageClarityIndex,
+			// Efficiency summary
+			"efficiency_high_count":    mqsOutput.EfficiencySummary.HighEfficiencyCount,
+			"efficiency_low_count":     mqsOutput.EfficiencySummary.LowEfficiencyCount,
+			"efficiency_average_ratio": mqsOutput.EfficiencySummary.AverageEfficiency,
 			// Retention summary
 			"retention_positive_count":       mqsOutput.RetentionSummary.PositiveCount,
 			"retention_fade_count":           mqsOutput.RetentionSummary.FadeCount,
 			"retention_over_reaction_count":  mqsOutput.RetentionSummary.OverReactionCount,
 			"retention_sustained_drop_count": mqsOutput.RetentionSummary.SustainedDropCount,
 			"retention_neutral_count":        mqsOutput.RetentionSummary.NeutralCount,
-			"retention_raw_score":            mqsOutput.RetentionSummary.RawScore,
+			"retention_positive_events":      mqsOutput.RetentionSummary.PositiveEvents,
+			"retention_negative_events":      mqsOutput.RetentionSummary.NegativeEvents,
 		},
 	}
 

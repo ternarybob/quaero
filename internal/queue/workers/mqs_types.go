@@ -67,13 +67,13 @@ const (
 )
 
 // MQSTier represents the overall management quality tier
+// Per prompt_2.md: 0.70-1.00 = High-Trust Leader, 0.50-0.69 = Stable Steward, <0.50 = Strategic Risk
 type MQSTier string
 
 const (
-	TierStitchedAlpha MQSTier = "STITCHED_ALPHA" // High composite with clean leakage and strong retention
-	TierStableSteward MQSTier = "STABLE_STEWARD" // Good composite with acceptable metrics
-	TierPromoter      MQSTier = "PROMOTER"       // Poor metrics or significant leakage
-	TierWeakSignal    MQSTier = "WEAK_SIGNAL"    // Insufficient data or very low scores
+	TierHighTrustLeader MQSTier = "HIGH_TRUST_LEADER" // 0.70-1.00: High integrity, low leakage, high efficiency
+	TierStableSteward   MQSTier = "STABLE_STEWARD"    // 0.50-0.69: Generally reliable but occasional issues
+	TierStrategicRisk   MQSTier = "STRATEGIC_RISK"    // <0.50: Low efficiency, frequent leakage, poor resolution
 )
 
 // MQSConfidence represents the confidence level based on data availability
@@ -100,8 +100,12 @@ type MQSOutput struct {
 	Exchange     string    `json:"exchange"`
 	CompanyName  string    `json:"company_name"`
 	AnalysisDate time.Time `json:"analysis_date"`
-	PeriodStart  time.Time `json:"period_start"`
-	PeriodEnd    time.Time `json:"period_end"`
+	PeriodStart  time.Time `json:"period_start"` // Requested period start (36 months ago)
+	PeriodEnd    time.Time `json:"period_end"`   // Requested period end (now)
+
+	// Announcement counts
+	TotalAnnouncements          int `json:"total_announcements"`           // All announcements in period
+	PriceSensitiveAnnouncements int `json:"price_sensitive_announcements"` // Price-sensitive only
 
 	// Metadata (asset class, sector)
 	Meta MQSMeta `json:"meta"`
@@ -109,10 +113,12 @@ type MQSOutput struct {
 	// Aggregate MQS scores
 	ManagementQualityScore MQSScore `json:"management_quality_score"`
 
-	// Component summaries
-	LeakageSummary    LeakageSummary    `json:"leakage_summary"`
-	ConvictionSummary ConvictionSummary `json:"conviction_summary"`
-	RetentionSummary  RetentionSummary  `json:"retention_summary"`
+	// Component summaries (5 measures, 20% each)
+	LeakageSummary    LeakageSummary    `json:"leakage_summary"`    // Information Integrity
+	ConvictionSummary ConvictionSummary `json:"conviction_summary"` // Institutional Conviction
+	ClaritySummary    ClaritySummary    `json:"clarity_summary"`    // Clarity Index (Volatility Resolution)
+	EfficiencySummary EfficiencySummary `json:"efficiency_summary"` // Communication Efficiency
+	RetentionSummary  RetentionSummary  `json:"retention_summary"`  // Value Sustainability
 
 	// Detailed events with new analysis fields
 	DetailedEvents []MQSDetailedEvent `json:"detailed_events"`
@@ -142,13 +148,16 @@ type MQSDetailedEvent struct {
 }
 
 // MQSScore contains the aggregate management quality scores
+// All 5 components contribute equally (20% each) to the composite score
 type MQSScore struct {
-	LeakageIntegrity float64       `json:"leakage_integrity"` // Information integrity score (CAR-based)
-	Conviction       float64       `json:"conviction"`        // Volume Z-Score conviction score
-	Retention        float64       `json:"retention"`         // Price retention score
-	CompositeScore   float64       `json:"composite"`         // Weighted composite score
-	Tier             MQSTier       `json:"tier"`
-	Confidence       MQSConfidence `json:"confidence"`
+	LeakageIntegrity        float64       `json:"leakage_integrity"`        // Information integrity score (CAR-based) - 20%
+	InstitutionalConviction float64       `json:"institutional_conviction"` // Volume Z-Score conviction score - 20%
+	ClarityIndex            float64       `json:"clarity_index"`            // Volatility resolution score - 20%
+	CommunicationEfficiency float64       `json:"communication_efficiency"` // Signal-to-churn ratio - 20%
+	ValueSustainability     float64       `json:"value_sustainability"`     // Price retention score - 20%
+	CompositeScore          float64       `json:"composite"`                // Weighted composite score
+	Tier                    MQSTier       `json:"tier"`
+	Confidence              MQSConfidence `json:"confidence"`
 }
 
 // LeakageSummary contains information integrity metrics
@@ -180,29 +189,86 @@ type ConvictionSummary struct {
 	AverageVolumeRatio   float64           `json:"average_volume_ratio"`
 	InstitutionalRatio   float64           `json:"institutional_ratio"` // institutional / total
 	HighConvictionEvents []ConvictionEvent `json:"high_conviction_events"`
+
+	// VWAP-based metrics (per prompt_3.md)
+	AverageVolumeZScore      float64 `json:"average_volume_z_score"`    // Average Z-score across events
+	AveragePriceVsVWAP       float64 `json:"average_price_vs_vwap"`     // Average price vs VWAP ratio
+	AverageConvictionScore   float64 `json:"average_conviction_score"`  // Average combined conviction score
+	AboveVWAPCount           int     `json:"above_vwap_count"`          // Events where close > VWAP (smart money)
+	HighVolumeAboveVWAPRatio float64 `json:"high_vol_above_vwap_ratio"` // Ratio: (high vol + above VWAP) / total
 }
 
 // ConvictionEvent represents a high conviction announcement
 type ConvictionEvent struct {
-	Date        string  `json:"date"`
-	Headline    string  `json:"headline"`
-	PriceChange float64 `json:"price_change_pct"`
-	VolumeRatio float64 `json:"volume_ratio"`
-	Class       string  `json:"class"`
+	Date            string  `json:"date"`
+	Headline        string  `json:"headline"`
+	PriceChange     float64 `json:"price_change_pct"`
+	VolumeRatio     float64 `json:"volume_ratio"`
+	VolumeZScore    float64 `json:"volume_z_score"`   // Z-score of volume
+	PriceVsVWAP     float64 `json:"price_vs_vwap"`    // Price vs VWAP ratio
+	ConvictionScore float64 `json:"conviction_score"` // Combined score
+	Class           string  `json:"class"`
 }
 
-// RetentionSummary contains price retention metrics
-// Score = (PositiveCount + OverReactionCount - FadeCount - SustainedDropCount) / TotalAnalyzed
-// Range: -1.0 to +1.0, normalized to 0.0-1.0 for composite scoring
+// ClaritySummary contains volatility resolution metrics
+// Formula: Clarity Index = σ_pre / σ_post (15 days before vs 15 days after, excluding Day 0)
+// Score > 1.0 indicates management successfully lowered stock's risk profile
+type ClaritySummary struct {
+	TotalAnalyzed         int            `json:"total_analyzed"`
+	AveragePreVolatility  float64        `json:"average_pre_volatility"`  // σ_pre: 15-day volatility before
+	AveragePostVolatility float64        `json:"average_post_volatility"` // σ_post: 15-day volatility after
+	AverageClarityIndex   float64        `json:"average_clarity_index"`   // Average σ_pre / σ_post
+	VolatilityReduced     int            `json:"volatility_reduced"`      // Count where Index > 1.0
+	VolatilityIncreased   int            `json:"volatility_increased"`    // Count where Index < 1.0
+	ClarityScore          float64        `json:"clarity_score"`           // Normalized score 0.0-1.0
+	HighClarityEvents     []ClarityEvent `json:"high_clarity_events"`     // Best resolution events
+}
+
+// ClarityEvent represents a volatility resolution event
+type ClarityEvent struct {
+	Date           string  `json:"date"`
+	Headline       string  `json:"headline"`
+	PreVolatility  float64 `json:"pre_volatility"`  // σ_pre
+	PostVolatility float64 `json:"post_volatility"` // σ_post
+	ClarityIndex   float64 `json:"clarity_index"`   // σ_pre / σ_post
+}
+
+// EfficiencySummary contains communication efficiency metrics
+// Formula: Efficiency = |Day 0 % ΔPrice| / Volume Z-Score
+// High efficiency = high price move on moderate volume = market trusts immediately
+// Low efficiency = high volume churn for modest move = lack of credibility
+type EfficiencySummary struct {
+	TotalAnalyzed          int               `json:"total_analyzed"`
+	AverageEfficiency      float64           `json:"average_efficiency"`       // Average signal-to-churn ratio
+	HighEfficiencyCount    int               `json:"high_efficiency_count"`    // Events where efficiency > 1.0
+	LowEfficiencyCount     int               `json:"low_efficiency_count"`     // Events where efficiency < 0.5
+	NeutralEfficiencyCount int               `json:"neutral_efficiency_count"` // Events in between
+	EfficiencyScore        float64           `json:"efficiency_score"`         // Normalized score 0.0-1.0
+	HighEfficiencyEvents   []EfficiencyEvent `json:"high_efficiency_events"`   // Best efficiency events
+}
+
+// EfficiencyEvent represents a communication efficiency event
+type EfficiencyEvent struct {
+	Date            string  `json:"date"`
+	Headline        string  `json:"headline"`
+	PriceChangePct  float64 `json:"price_change_pct"` // |Day 0 % ΔPrice|
+	VolumeZScore    float64 `json:"volume_z_score"`   // Volume Z-Score
+	EfficiencyRatio float64 `json:"efficiency_ratio"` // |ΔPrice| / Z-Score
+}
+
+// RetentionSummary contains price retention metrics (Value Sustainability)
+// Score = Positive Events / (Positive Events + Negative Events)
+// Range: 0.0 to 1.0 (ratio of positive to total non-neutral events)
 type RetentionSummary struct {
 	TotalAnalyzed      int         `json:"total_analyzed"`       // Price-sensitive events only
-	NeutralCount       int         `json:"neutral_count"`        // Day-of change < 1% (score: 0)
-	PositiveCount      int         `json:"positive_count"`       // Price rises and holds/continues (score: +1)
-	FadeCount          int         `json:"fade_count"`           // Price rises but fades (score: -1)
-	OverReactionCount  int         `json:"over_reaction_count"`  // Price falls but recovers (score: +1)
-	SustainedDropCount int         `json:"sustained_drop_count"` // Price falls and stays down (score: -1)
-	RawScore           int         `json:"raw_score"`            // Sum of individual scores (+1, 0, -1)
-	RetentionScore     float64     `json:"retention_score"`      // Normalized 0.0-1.0
+	NeutralCount       int         `json:"neutral_count"`        // Day-of change < 1%
+	PositiveCount      int         `json:"positive_count"`       // Price rises and holds/continues
+	FadeCount          int         `json:"fade_count"`           // Price rises but fades
+	OverReactionCount  int         `json:"over_reaction_count"`  // Price falls but recovers
+	SustainedDropCount int         `json:"sustained_drop_count"` // Price falls and stays down
+	PositiveEvents     int         `json:"positive_events"`      // PositiveCount + OverReactionCount
+	NegativeEvents     int         `json:"negative_events"`      // FadeCount + SustainedDropCount
+	RetentionScore     float64     `json:"retention_score"`      // Positive / (Positive + Negative)
 	SignificantFades   []FadeEvent `json:"significant_fades"`    // Worst fade events
 }
 
@@ -310,6 +376,12 @@ type DayOfMetrics struct {
 	Volume         int64   `json:"volume"`
 	PriceChangePct float64 `json:"price_change_pct"`
 	VolumeRatio    float64 `json:"volume_ratio"`
+
+	// Institutional conviction metrics (per prompt_3.md)
+	VolumeZScore    float64 `json:"volume_z_score"`   // Z-score of volume vs 20-day MA
+	VWAP20          float64 `json:"vwap_20"`          // 20-day Volume Weighted Average Price
+	PriceVsVWAP     float64 `json:"price_vs_vwap"`    // (Close - VWAP) / VWAP as ratio
+	ConvictionScore float64 `json:"conviction_score"` // Combined score: (z_score * 0.6) + (price_vs_vwap * 0.4)
 }
 
 // PatternAnalysis contains detected patterns

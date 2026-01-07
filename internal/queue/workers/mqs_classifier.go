@@ -176,9 +176,11 @@ func DetectTone(headline string) ToneClass {
 }
 
 // CalculateCompositeMQS calculates the weighted composite MQS score.
-// Weights: leakage=0.33, conviction=0.33, retention=0.34
-func CalculateCompositeMQS(leakage, conviction, retention float64) float64 {
-	return (leakage * 0.33) + (conviction * 0.33) + (retention * 0.34)
+// All 5 components contribute equally (20% each) per prompt_2.md specification.
+// Parameters: leakage (Information Integrity), conviction (Institutional Conviction),
+// clarity (Clarity Index), efficiency (Communication Efficiency), retention (Value Sustainability)
+func CalculateCompositeMQS(leakage, conviction, clarity, efficiency, retention float64) float64 {
+	return (leakage * 0.20) + (conviction * 0.20) + (clarity * 0.20) + (efficiency * 0.20) + (retention * 0.20)
 }
 
 // ClassifyAssetClass determines asset class based on market cap
@@ -196,6 +198,45 @@ func ClassifyAssetClass(marketCapUSD int64) AssetClass {
 		return AssetClassMidCap
 	}
 	return AssetClassSmallCap
+}
+
+// SegmentBenchmark identifies benchmark indices for segment comparison
+type SegmentBenchmark string
+
+const (
+	BenchmarkASXLargeCapEMA     SegmentBenchmark = "ASX_LARGE_CAP_EMA"     // ASX 20/50 EMA
+	BenchmarkASXMidCapEMA       SegmentBenchmark = "ASX_MID_CAP_EMA"       // ASX 50-200 EMA
+	BenchmarkASXSmallOrdsMedian SegmentBenchmark = "ASX_SMALL_ORDS_MEDIAN" // Small Ords Median
+)
+
+// GetSegmentBenchmark returns the appropriate benchmark index based on market cap
+// Per prompt_3.md: Compare individual stock performance against its specific segment median
+func GetSegmentBenchmark(marketCapUSD int64) SegmentBenchmark {
+	const (
+		largeCap = 10_000_000_000 // $10B+
+		midCap   = 2_000_000_000  // $2B - $10B
+	)
+
+	if marketCapUSD > largeCap {
+		return BenchmarkASXLargeCapEMA
+	}
+	if marketCapUSD > midCap {
+		return BenchmarkASXMidCapEMA
+	}
+	return BenchmarkASXSmallOrdsMedian
+}
+
+// GetVolumeZScoreThreshold returns the appropriate Z-score threshold based on asset class
+// Per prompt_3.md: Small-Cap typically requires Z > 2.0 to filter noise
+func GetVolumeZScoreThreshold(assetClass AssetClass) float64 {
+	switch assetClass {
+	case AssetClassLargeCap:
+		return 1.5 // Lower threshold for large caps (more liquid)
+	case AssetClassMidCap:
+		return 2.0 // Standard threshold
+	default: // Small-Cap
+		return 2.5 // Higher threshold to filter retail noise
+	}
 }
 
 // ClassifyEventMateriality determines if an announcement is Strategic or Routine
@@ -316,35 +357,18 @@ func CalculateRetentionNew(priceT10, priceTMinus1, priceT float64) float64 {
 }
 
 // DetermineMQSTier determines the overall tier classification.
-//
-// Tier rules:
-//   - STITCHED_ALPHA: composite >= 0.75 AND leakage >= 0.7 AND retention >= 0.7
-//   - STABLE_STEWARD: composite >= 0.50 AND leakage >= 0.6
-//   - PROMOTER: leakage < 0.4 OR retention < 0.4
-//   - WEAK_SIGNAL: composite < 0.30 OR insufficient data
+// Per prompt_2.md specification:
+//   - HIGH_TRUST_LEADER: composite >= 0.70 (High integrity, low leakage, high efficiency)
+//   - STABLE_STEWARD: composite >= 0.50 AND < 0.70 (Generally reliable, occasional issues)
+//   - STRATEGIC_RISK: composite < 0.50 (Low efficiency, frequent leakage, poor resolution)
 func DetermineMQSTier(composite, leakage, retention float64) MQSTier {
-	// WEAK_SIGNAL: Very low composite or poor data
-	if composite < 0.30 {
-		return TierWeakSignal
+	if composite >= 0.70 {
+		return TierHighTrustLeader
 	}
-
-	// PROMOTER: Any disqualifying factor (leakage or retention issues)
-	if leakage < 0.4 || retention < 0.4 {
-		return TierPromoter
-	}
-
-	// STITCHED_ALPHA: All criteria met (high quality)
-	if composite >= 0.75 && leakage >= 0.7 && retention >= 0.7 {
-		return TierStitchedAlpha
-	}
-
-	// STABLE_STEWARD: Decent composite and clean disclosure
-	if composite >= 0.50 && leakage >= 0.6 {
+	if composite >= 0.50 {
 		return TierStableSteward
 	}
-
-	// Default to PROMOTER if not meeting other criteria
-	return TierPromoter
+	return TierStrategicRisk
 }
 
 // DetermineConfidence determines confidence level based on announcement count.
