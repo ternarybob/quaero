@@ -160,22 +160,12 @@ Goal → LLM Planner → selects tools → Executor runs → Reviewer validates 
 type = "orchestrator"
 goal = "Rate the stock and explain the investment thesis"
 thinking_level = "MEDIUM"
-
-[[step.orchestrate.available_tools]]
-name = "get_fundamentals"
-worker = "market_fundamentals"
-description = "Fetch stock fundamentals data"
-
-[[step.orchestrate.available_tools]]
-name = "calculate_bfs"
-worker = "rating_bfs"
-description = "Calculate Business Foundation Score (0-2)"
-
-[[step.orchestrate.available_tools]]
-name = "calculate_cds"
-worker = "rating_cds"
-description = "Calculate Capital Discipline Score (0-2)"
-# ... more tools
+available_tools = [
+    { name = "get_fundamentals", worker = "market_fundamentals", description = "Fetch stock fundamentals. REQUIRED params: ticker (string)." },
+    { name = "calculate_bfs", worker = "rating_bfs", description = "Calculate Business Foundation Score (0-2). REQUIRED params: ticker (string)." },
+    { name = "calculate_cds", worker = "rating_cds", description = "Calculate Capital Discipline Score (0-2). REQUIRED params: ticker (string)." },
+    # ... more tools
+]
 ```
 
 **Use when:**
@@ -652,55 +642,18 @@ Follow existing patterns in `test/api/market_workers/common_test.go`.
   output_tags = ["stock-rating"]
 
   # Available tools for LLM to choose from
-  [[step.rate_stock.available_tools]]
-  name = "get_fundamentals"
-  worker = "market_fundamentals"
-  description = "Fetch stock fundamentals (revenue, cash, shares outstanding)"
-
-  [[step.rate_stock.available_tools]]
-  name = "get_announcements"
-  worker = "market_announcements"
-  description = "Fetch ASX announcements for the ticker"
-
-  [[step.rate_stock.available_tools]]
-  name = "get_prices"
-  worker = "market_data"
-  description = "Fetch OHLCV price history"
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_bfs"
-  worker = "rating_bfs"
-  description = "Calculate Business Foundation Score (0-2). Requires fundamentals."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_cds"
-  worker = "rating_cds"
-  description = "Calculate Capital Discipline Score (0-2). Requires fundamentals + announcements."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_nfr"
-  worker = "rating_nfr"
-  description = "Calculate Narrative-to-Fact Ratio (0-1). Requires announcements + prices."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_pps"
-  worker = "rating_pps"
-  description = "Calculate Price Progression Score (0-1). Requires announcements + prices."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_vrs"
-  worker = "rating_vrs"
-  description = "Calculate Volatility Regime Stability (0-1). Requires announcements + prices."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_ob"
-  worker = "rating_ob"
-  description = "Calculate Optionality Bonus (0-1). Requires announcements + BFS score."
-
-  [[step.rate_stock.available_tools]]
-  name = "calculate_rating"
-  worker = "rating_composite"
-  description = "Calculate final rating from all scores. Returns label and investability score."
+  available_tools = [
+      { name = "get_fundamentals", worker = "market_fundamentals", description = "Fetch stock fundamentals including revenue, cash, shares outstanding. Creates document tagged ['stock-data', '<ticker>']. REQUIRED params: ticker (string)." },
+      { name = "get_announcements", worker = "market_announcements", description = "Fetch company announcements with price sensitivity flags. Creates document tagged ['announcement-summary', '<ticker>']. REQUIRED params: ticker (string). OPTIONAL: period (string) - M6, Y1, Y3 (default Y3)." },
+      { name = "get_prices", worker = "market_data", description = "Fetch OHLCV price history. Creates document tagged ['market-data', '<ticker>']. REQUIRED params: ticker (string). OPTIONAL: period (string)." },
+      { name = "calculate_bfs", worker = "rating_bfs", description = "Calculate Business Foundation Score (0-2). Reads stock-data document. REQUIRED params: ticker (string). Returns: score, components, reasoning." },
+      { name = "calculate_cds", worker = "rating_cds", description = "Calculate Capital Discipline Score (0-2). Reads stock-data + announcement-summary documents. REQUIRED params: ticker (string). Returns: score, components, reasoning." },
+      { name = "calculate_nfr", worker = "rating_nfr", description = "Calculate Narrative-to-Fact Ratio (0.0-1.0). Reads announcement-summary + market-data documents. REQUIRED params: ticker (string). Returns: score, components, reasoning." },
+      { name = "calculate_pps", worker = "rating_pps", description = "Calculate Price Progression Score (0.0-1.0). Reads announcement-summary + market-data documents. REQUIRED params: ticker (string). Returns: score, event_details, reasoning." },
+      { name = "calculate_vrs", worker = "rating_vrs", description = "Calculate Volatility Regime Stability (0.0-1.0). Reads announcement-summary + market-data documents. REQUIRED params: ticker (string). Returns: score, components, reasoning." },
+      { name = "calculate_ob", worker = "rating_ob", description = "Calculate Optionality Bonus (0.0, 0.5, or 1.0). Reads announcement-summary + bfs-score documents. REQUIRED params: ticker (string). Returns: score, catalyst_found, timeframe_found, reasoning." },
+      { name = "calculate_rating", worker = "rating_composite", description = "Calculate final investability rating from all component scores. Reads all score documents. REQUIRED params: ticker (string). Returns: label (SPECULATIVE|LOW_ALPHA|WATCHLIST|INVESTABLE|HIGH_CONVICTION), investability (0-100), gate_passed, all_scores." },
+  ]
 
   # Format and email (deterministic, after orchestration)
   [step.format_output]
