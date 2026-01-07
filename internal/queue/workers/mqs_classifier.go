@@ -188,55 +188,10 @@ func DetectTone(headline string) ToneClass {
 	return ToneDataDry
 }
 
-// ClassifySayDo determines the say-do classification based on guidance accuracy and tone.
-// Returns the classification and a score from 0.0 (poor) to 1.0 (excellent).
-//
-// Classification rules:
-//   - OPERATOR: guidance_accuracy >= 95% AND tone is CONSERVATIVE or DATA_DRY
-//   - PROMOTER: guidance_accuracy < 95% AND tone is OPTIMISTIC
-//   - HONEST_STRUGGLER: guidance_accuracy < 90% AND tone is CONSERVATIVE or DATA_DRY
-//   - INSUFFICIENT_DATA: fewer than 2 guidance/results pairs
-func ClassifySayDo(guidanceAccuracy float64, dominantTone ToneClass, matchedPairs int) (SayDoClass, float64) {
-	// INSUFFICIENT_DATA: not enough guidance/results pairs to judge
-	if matchedPairs < 2 {
-		return SayDoInsufficientData, 0.5 // Neutral score
-	}
-
-	isConservative := dominantTone == ToneConservative || dominantTone == ToneDataDry
-	isOptimistic := dominantTone == ToneOptimistic
-
-	// OPERATOR: High accuracy with conservative communication
-	if guidanceAccuracy >= 0.95 && isConservative {
-		score := 0.9 + (guidanceAccuracy-0.95)*2.0 // 0.9-1.0
-		return SayDoOperator, math.Min(1.0, score)
-	}
-
-	// PROMOTER: Low accuracy with optimistic communication
-	if guidanceAccuracy < 0.95 && isOptimistic {
-		score := 0.1 + guidanceAccuracy*0.2 // 0.1-0.3
-		return SayDoPromoter, score
-	}
-
-	// HONEST_STRUGGLER: Poor results but honest communication
-	if guidanceAccuracy < 0.90 && isConservative {
-		score := 0.4 + guidanceAccuracy*0.3 // 0.4-0.67
-		return SayDoHonestStruggler, score
-	}
-
-	// Mixed cases
-	if isConservative {
-		score := 0.5 + guidanceAccuracy*0.4
-		return SayDoOperator, math.Min(0.9, score)
-	}
-
-	score := 0.3 + guidanceAccuracy*0.4
-	return SayDoPromoter, math.Min(0.6, score)
-}
-
 // CalculateCompositeMQS calculates the weighted composite MQS score.
-// Weights: leakage=0.25, conviction=0.25, retention=0.30, say_do=0.20
-func CalculateCompositeMQS(leakage, conviction, retention, sayDo float64) float64 {
-	return (leakage * 0.25) + (conviction * 0.25) + (retention * 0.30) + (sayDo * 0.20)
+// Weights: leakage=0.33, conviction=0.33, retention=0.34
+func CalculateCompositeMQS(leakage, conviction, retention float64) float64 {
+	return (leakage * 0.33) + (conviction * 0.33) + (retention * 0.34)
 }
 
 // DetermineMQSTier determines the overall tier classification.

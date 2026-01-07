@@ -39,16 +39,6 @@ const (
 	RetentionReversed  RetentionClass = "REVERSED"  // ρ < 0 (opposite direction)
 )
 
-// SayDoClass classifies management execution vs guidance
-type SayDoClass string
-
-const (
-	SayDoOperator         SayDoClass = "OPERATOR"          // accuracy >= 95% AND tone is CONSERVATIVE or DATA_DRY
-	SayDoPromoter         SayDoClass = "PROMOTER"          // accuracy < 95% AND tone is OPTIMISTIC
-	SayDoHonestStruggler  SayDoClass = "HONEST_STRUGGLER"  // accuracy < 90% AND tone is CONSERVATIVE or DATA_DRY
-	SayDoInsufficientData SayDoClass = "INSUFFICIENT_DATA" // fewer than 3 guidance/results pairs
-)
-
 // ToneClass classifies announcement language tone
 type ToneClass string
 
@@ -94,7 +84,6 @@ type MQSOutput struct {
 	LeakageSummary    LeakageSummary    `json:"leakage_summary"`
 	ConvictionSummary ConvictionSummary `json:"conviction_summary"`
 	RetentionSummary  RetentionSummary  `json:"retention_summary"`
-	SayDoSummary      SayDoSummary      `json:"say_do_summary"`
 
 	// Individual announcements
 	Announcements []MQSAnnouncement `json:"announcements"`
@@ -114,7 +103,6 @@ type MQSScore struct {
 	LeakageScore    float64       `json:"leakage_score"`
 	ConvictionScore float64       `json:"conviction_score"`
 	RetentionScore  float64       `json:"retention_score"`
-	SayDoScore      float64       `json:"say_do_score"`
 	CompositeScore  float64       `json:"composite_score"`
 	Tier            MQSTier       `json:"tier"`
 	Confidence      MQSConfidence `json:"confidence"`
@@ -179,29 +167,6 @@ type FadeEvent struct {
 	DayOfChange    float64 `json:"day_of_change_pct"`
 	Day10Change    float64 `json:"day_10_change_pct"`
 	RetentionRatio float64 `json:"retention_ratio"`
-}
-
-// SayDoSummary contains guidance vs execution metrics
-type SayDoSummary struct {
-	GuidanceEventsFound int                  `json:"guidance_events_found"`
-	ResultsEventsFound  int                  `json:"results_events_found"`
-	MatchedPairs        int                  `json:"matched_pairs"`
-	GuidanceAccuracy    float64              `json:"guidance_accuracy"`
-	DominantTone        ToneClass            `json:"dominant_tone"`
-	SayDoClass          SayDoClass           `json:"say_do_class"`
-	GuidanceVsActual    []GuidanceComparison `json:"guidance_vs_actual"`
-	FinancialResults    []FinancialResult    `json:"financial_results"` // FY/HY results extracted
-}
-
-// GuidanceComparison represents a guidance vs actual result pair
-type GuidanceComparison struct {
-	GuidanceDate string  `json:"guidance_date"`
-	ResultsDate  string  `json:"results_date"`
-	Metric       string  `json:"metric"`
-	Forecast     string  `json:"forecast"`
-	Actual       string  `json:"actual"`
-	VariancePct  float64 `json:"variance_pct"`
-	Met          bool    `json:"met"`
 }
 
 // FinancialResultType represents the type of financial result

@@ -2769,7 +2769,6 @@ func (w *MarketAnnouncementsWorker) createMQSSummaryDocument(ctx context.Context
 			"leakage_score":    mqsOutput.ManagementQualityScore.LeakageScore,
 			"conviction_score": mqsOutput.ManagementQualityScore.ConvictionScore,
 			"retention_score":  mqsOutput.ManagementQualityScore.RetentionScore,
-			"saydo_score":      mqsOutput.ManagementQualityScore.SayDoScore,
 			"announcements":    len(announcements),
 			"trading_days":     len(prices),
 			// Leakage summary

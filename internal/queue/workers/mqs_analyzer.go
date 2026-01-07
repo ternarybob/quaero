@@ -82,15 +82,12 @@ func (a *MQSAnalyzer) Analyze() *MQSOutput {
 	output.LeakageSummary = a.calculateLeakageSummary(mqsAnnouncements)
 	output.ConvictionSummary = a.calculateConvictionSummary(mqsAnnouncements)
 	output.RetentionSummary = a.calculateRetentionSummary(mqsAnnouncements)
-	sayDoSummary, sayDoScore := a.calculateSayDoSummary()
-	output.SayDoSummary = sayDoSummary
 
-	// Calculate aggregate scores
+	// Calculate aggregate scores (Leakage 33%, Conviction 33%, Retention 34%)
 	output.ManagementQualityScore = a.calculateAggregateScore(
 		output.LeakageSummary,
 		output.ConvictionSummary,
 		output.RetentionSummary,
-		sayDoScore,
 		len(mqsAnnouncements),
 	)
 
@@ -551,110 +548,6 @@ func (a *MQSAnalyzer) calculateRetentionSummary(announcements []MQSAnnouncement)
 	summary.SignificantFades = fades
 
 	return summary
-}
-
-// calculateSayDoSummary analyzes guidance vs execution patterns
-func (a *MQSAnalyzer) calculateSayDoSummary() (SayDoSummary, float64) {
-	summary := SayDoSummary{
-		GuidanceEventsFound: 0,
-		ResultsEventsFound:  0,
-		MatchedPairs:        0,
-		GuidanceAccuracy:    0.5, // Default neutral
-		DominantTone:        ToneDataDry,
-		SayDoClass:          SayDoInsufficientData,
-		GuidanceVsActual:    []GuidanceComparison{},
-		FinancialResults:    []FinancialResult{},
-	}
-
-	// Count guidance and results announcements
-	toneCounts := make(map[ToneClass]int)
-
-	for _, ann := range a.announcements {
-		headline := strings.ToUpper(ann.Headline)
-
-		// Detect guidance announcements
-		if strings.Contains(headline, "GUIDANCE") ||
-			strings.Contains(headline, "FORECAST") ||
-			strings.Contains(headline, "OUTLOOK") ||
-			strings.Contains(headline, "TARGET") ||
-			strings.Contains(headline, "UPGRADE") ||
-			strings.Contains(headline, "DOWNGRADE") ||
-			strings.Contains(headline, "UPDATE") && strings.Contains(headline, "EARNING") {
-			summary.GuidanceEventsFound++
-		}
-
-		// Detect results announcements (broader detection)
-		if strings.Contains(headline, "RESULT") ||
-			strings.Contains(headline, "REPORT") ||
-			strings.Contains(headline, "QUARTERLY") ||
-			strings.Contains(headline, "HALF YEAR") ||
-			strings.Contains(headline, "ANNUAL") ||
-			strings.Contains(headline, "APPENDIX 4C") ||
-			strings.Contains(headline, "APPENDIX 4D") ||
-			strings.Contains(headline, "APPENDIX 4E") ||
-			strings.Contains(headline, "4C") ||
-			strings.Contains(headline, "4D") ||
-			strings.Contains(headline, "4E") {
-			summary.ResultsEventsFound++
-		}
-
-		// Track tone
-		tone := DetectTone(ann.Headline)
-		toneCounts[tone]++
-	}
-
-	// Determine dominant tone
-	maxCount := 0
-	for tone, count := range toneCounts {
-		if count > maxCount {
-			maxCount = count
-			summary.DominantTone = tone
-		}
-	}
-
-	// Extract financial results for the table
-	summary.FinancialResults = a.extractFinancialResults()
-
-	// Estimate matched pairs - use financial results count if higher
-	summary.MatchedPairs = min(summary.GuidanceEventsFound, summary.ResultsEventsFound)
-	if len(summary.FinancialResults) > summary.MatchedPairs {
-		// Each financial result is effectively a "result" that can be matched to guidance
-		summary.MatchedPairs = min(summary.GuidanceEventsFound+len(summary.FinancialResults), summary.ResultsEventsFound)
-	}
-
-	// Calculate guidance accuracy (simplified - based on retention of results announcements)
-	// In a full implementation, this would match specific guidance to results
-	if summary.MatchedPairs >= 2 { // Lowered threshold from 3 to 2
-		// Use retention rate as proxy for guidance accuracy
-		retentionCount := 0
-		for _, ann := range a.announcements {
-			headline := strings.ToUpper(ann.Headline)
-			if strings.Contains(headline, "RESULT") || strings.Contains(headline, "REPORT") ||
-				strings.Contains(headline, "4C") || strings.Contains(headline, "4D") || strings.Contains(headline, "4E") {
-				// Check if this was a "good" result (price held or increased)
-				dayOf := a.calculateDayOf(ann.Date)
-				leadOut := a.calculateLeadOut(ann.Date)
-				if dayOf != nil && leadOut != nil {
-					if leadOut.PriceChangePct >= dayOf.PriceChangePct*0.5 {
-						retentionCount++
-					}
-				}
-			}
-		}
-		if summary.ResultsEventsFound > 0 {
-			summary.GuidanceAccuracy = float64(retentionCount) / float64(summary.ResultsEventsFound)
-		}
-	}
-
-	// Classify say-do
-	sayDoClass, sayDoScore := ClassifySayDo(
-		summary.GuidanceAccuracy,
-		summary.DominantTone,
-		summary.MatchedPairs,
-	)
-	summary.SayDoClass = sayDoClass
-
-	return summary, sayDoScore
 }
 
 // extractFinancialResults identifies and extracts FY/HY results and guidance announcements
@@ -1128,7 +1021,6 @@ func (a *MQSAnalyzer) calculateAggregateScore(
 	leakage LeakageSummary,
 	conviction ConvictionSummary,
 	retention RetentionSummary,
-	sayDoScore float64,
 	announcementCount int,
 ) MQSScore {
 	// Calculate component scores (0-1 scale)
@@ -1136,8 +1028,8 @@ func (a *MQSAnalyzer) calculateAggregateScore(
 	convictionScore := conviction.InstitutionalRatio
 	retentionScore := retention.RetentionRate
 
-	// Calculate composite
-	composite := CalculateCompositeMQS(leakageScore, convictionScore, retentionScore, sayDoScore)
+	// Calculate composite (Leakage 33%, Conviction 33%, Retention 34%)
+	composite := CalculateCompositeMQS(leakageScore, convictionScore, retentionScore)
 
 	// Determine tier
 	tier := DetermineMQSTier(composite, leakageScore, retentionScore)
@@ -1150,7 +1042,6 @@ func (a *MQSAnalyzer) calculateAggregateScore(
 		LeakageScore:    leakageScore,
 		ConvictionScore: convictionScore,
 		RetentionScore:  retentionScore,
-		SayDoScore:      sayDoScore,
 		Tier:            tier,
 		Confidence:      confidence,
 	}
@@ -1418,19 +1309,41 @@ func (output *MQSOutput) GenerateMarkdown() string {
 		sb.WriteString("price retention, or communication style. Exercise caution with announcements.\n\n")
 	}
 
-	// Component Scores Table
+	// Component Scores Table with Calculation Formula
 	sb.WriteString("### Component Scores\n\n")
-	sb.WriteString("| Component | Score | Weight |\n")
-	sb.WriteString("|-----------|-------|--------|\n")
-	sb.WriteString(fmt.Sprintf("| Leakage (Information Integrity) | %.2f | 25%% |\n", output.ManagementQualityScore.LeakageScore))
-	sb.WriteString(fmt.Sprintf("| Conviction (Volume/Price Alignment) | %.2f | 25%% |\n", output.ManagementQualityScore.ConvictionScore))
-	sb.WriteString(fmt.Sprintf("| Retention (Price Sustainability) | %.2f | 30%% |\n", output.ManagementQualityScore.RetentionScore))
-	sb.WriteString(fmt.Sprintf("| Say-Do (Guidance Accuracy) | %.2f | 20%% |\n\n", output.ManagementQualityScore.SayDoScore))
+	sb.WriteString("| Component | Score | Weight | Contribution |\n")
+	sb.WriteString("|-----------|-------|--------|-------------|\n")
+	leakageContrib := output.ManagementQualityScore.LeakageScore * 0.33
+	convictionContrib := output.ManagementQualityScore.ConvictionScore * 0.33
+	retentionContrib := output.ManagementQualityScore.RetentionScore * 0.34
+	sb.WriteString(fmt.Sprintf("| Leakage (Information Integrity) | %.2f | 33%% | %.2f × 0.33 = %.3f |\n",
+		output.ManagementQualityScore.LeakageScore, output.ManagementQualityScore.LeakageScore, leakageContrib))
+	sb.WriteString(fmt.Sprintf("| Conviction (Volume/Price Alignment) | %.2f | 33%% | %.2f × 0.33 = %.3f |\n",
+		output.ManagementQualityScore.ConvictionScore, output.ManagementQualityScore.ConvictionScore, convictionContrib))
+	sb.WriteString(fmt.Sprintf("| Retention (Price Sustainability) | %.2f | 34%% | %.2f × 0.34 = %.3f |\n",
+		output.ManagementQualityScore.RetentionScore, output.ManagementQualityScore.RetentionScore, retentionContrib))
+	sb.WriteString(fmt.Sprintf("| **Composite** | **%.2f** | **100%%** | **%.3f + %.3f + %.3f = %.3f** |\n\n",
+		output.ManagementQualityScore.CompositeScore, leakageContrib, convictionContrib, retentionContrib,
+		leakageContrib+convictionContrib+retentionContrib))
 
-	// Leakage Summary
-	sb.WriteString("## Information Integrity (Leakage Analysis)\n\n")
+	// Calculation Method
+	sb.WriteString("**Calculation Method:**\n")
+	sb.WriteString("```\n")
+	sb.WriteString("Composite = (Leakage × 0.33) + (Conviction × 0.33) + (Retention × 0.34)\n")
+	sb.WriteString("```\n\n")
+
+	// Leakage Summary - include score in heading
+	sb.WriteString(fmt.Sprintf("## Information Integrity (Leakage Analysis) — Score: %.2f\n\n", output.ManagementQualityScore.LeakageScore))
 	sb.WriteString("*Measures abnormal price movement in the 5 days before announcements. ")
 	sb.WriteString("High pre-drift suggests information leakage or insider activity.*\n\n")
+
+	// Calculation explanation - show how Leakage Ratio is derived
+	sb.WriteString("**Calculation:**\n")
+	sb.WriteString(fmt.Sprintf("- Leakage Ratio = High Leakage Events / Total Analyzed = %d / %d = %.2f\n",
+		output.LeakageSummary.HighLeakageCount, output.LeakageSummary.TotalAnalyzed, output.LeakageSummary.LeakageRatio))
+	sb.WriteString(fmt.Sprintf("- Leakage Score = 1.0 - Leakage Ratio = 1.0 - %.2f = **%.2f**\n\n",
+		output.LeakageSummary.LeakageRatio, output.ManagementQualityScore.LeakageScore))
+
 	sb.WriteString(fmt.Sprintf("- **Total Analyzed:** %d announcements\n", output.LeakageSummary.TotalAnalyzed))
 	sb.WriteString(fmt.Sprintf("- **High Leakage Events:** %d (%.1f%%)\n",
 		output.LeakageSummary.HighLeakageCount,
@@ -1453,10 +1366,23 @@ func (output *MQSOutput) GenerateMarkdown() string {
 		sb.WriteString("\n")
 	}
 
-	// Conviction Summary
-	sb.WriteString("## Conviction Analysis\n\n")
+	// Conviction Summary - include score in heading
+	sb.WriteString(fmt.Sprintf("## Conviction Analysis — Score: %.2f\n\n", output.ManagementQualityScore.ConvictionScore))
 	sb.WriteString("*Evaluates volume/price alignment on announcement days. ")
 	sb.WriteString("Institutional conviction shows smart money validation; retail hype suggests speculative interest.*\n\n")
+
+	// Event Type Definitions
+	sb.WriteString("**Event Classifications:**\n")
+	sb.WriteString("- **Institutional Conviction**: Price change > 2% AND volume > 3x average — indicates institutional investors backing the announcement\n")
+	sb.WriteString("- **Retail Hype**: Price change > 5% AND volume < 2x average — speculative interest without institutional backing\n")
+	sb.WriteString("- **Low Interest**: Price change < 1% AND volume < 1x average — minimal market reaction\n\n")
+
+	// Calculation explanation
+	totalConvictionEvents := output.ConvictionSummary.InstitutionalCount + output.ConvictionSummary.RetailHypeCount + output.ConvictionSummary.LowInterestCount
+	sb.WriteString("**Calculation:**\n")
+	sb.WriteString(fmt.Sprintf("- Conviction Score = Institutional Events / Total Events = %d / %d = **%.2f**\n\n",
+		output.ConvictionSummary.InstitutionalCount, totalConvictionEvents, output.ManagementQualityScore.ConvictionScore))
+
 	sb.WriteString(fmt.Sprintf("- **Institutional Conviction Events:** %d (%.1f%%)\n",
 		output.ConvictionSummary.InstitutionalCount,
 		output.ConvictionSummary.InstitutionalRatio*100))
@@ -1464,10 +1390,18 @@ func (output *MQSOutput) GenerateMarkdown() string {
 	sb.WriteString(fmt.Sprintf("- **Low Interest Events:** %d\n", output.ConvictionSummary.LowInterestCount))
 	sb.WriteString(fmt.Sprintf("- **Average Volume Ratio:** %.1fx\n\n", output.ConvictionSummary.AverageVolumeRatio))
 
-	// Retention Summary
-	sb.WriteString("## Price Retention Analysis\n\n")
+	// Retention Summary - include score in heading
+	sb.WriteString(fmt.Sprintf("## Price Retention Analysis — Score: %.2f\n\n", output.ManagementQualityScore.RetentionScore))
 	sb.WriteString("*Measures how well prices hold 10 days after announcements. ")
 	sb.WriteString("High retention indicates market believes in sustainability; fading suggests 'sell the news' behavior.*\n\n")
+
+	// Calculation explanation
+	retentionHeldCount := output.RetentionSummary.AbsorbedCount + output.RetentionSummary.ContinuedCount
+	totalRetentionEvents := retentionHeldCount + output.RetentionSummary.SoldNewsCount + output.RetentionSummary.ReversedCount
+	sb.WriteString("**Calculation:** `Retention Score = (Absorbed + Continued) / Total Events`\n")
+	sb.WriteString(fmt.Sprintf("= (%d + %d) / %d = **%.2f**\n\n",
+		output.RetentionSummary.AbsorbedCount, output.RetentionSummary.ContinuedCount, totalRetentionEvents, output.ManagementQualityScore.RetentionScore))
+
 	sb.WriteString(fmt.Sprintf("- **Absorbed (Price Held):** %d\n", output.RetentionSummary.AbsorbedCount))
 	sb.WriteString(fmt.Sprintf("- **Continued (Price Increased):** %d\n", output.RetentionSummary.ContinuedCount))
 	sb.WriteString(fmt.Sprintf("- **Sold the News:** %d\n", output.RetentionSummary.SoldNewsCount))
@@ -1488,26 +1422,6 @@ func (output *MQSOutput) GenerateMarkdown() string {
 		}
 		sb.WriteString("\n")
 	}
-
-	// Say-Do Summary
-	sb.WriteString("## Say-Do Analysis\n\n")
-	sb.WriteString("*Tracks management's guidance vs actual results. ")
-	sb.WriteString("Compares forward guidance announcements against subsequent financial reports to assess reliability.*\n\n")
-
-	// Classification with explanation
-	classDesc := getSayDoClassDescription(output.SayDoSummary.SayDoClass)
-	sb.WriteString(fmt.Sprintf("- **Classification:** %s — %s\n", output.SayDoSummary.SayDoClass, classDesc))
-
-	// Dominant Tone with explanation
-	toneDesc := getToneDescription(output.SayDoSummary.DominantTone)
-	sb.WriteString(fmt.Sprintf("- **Dominant Tone:** %s — %s\n", output.SayDoSummary.DominantTone, toneDesc))
-
-	sb.WriteString(fmt.Sprintf("- **Guidance Events:** %d\n", output.SayDoSummary.GuidanceEventsFound))
-	sb.WriteString(fmt.Sprintf("- **Results Events:** %d\n", output.SayDoSummary.ResultsEventsFound))
-	sb.WriteString(fmt.Sprintf("- **Matched Pairs:** %d\n", output.SayDoSummary.MatchedPairs))
-	sb.WriteString(fmt.Sprintf("- **Guidance Accuracy:** %.1f%%\n\n", output.SayDoSummary.GuidanceAccuracy*100))
-
-	// NOTE: Financial Results History section removed - this data is now in market_fundamentals worker
 
 	// Pattern Analysis
 	if len(output.Patterns.PRHeavySignals) > 0 || len(output.Patterns.QualitySignals) > 0 {
@@ -1643,35 +1557,5 @@ func formatCurrency(value int64) string {
 		return fmt.Sprintf("%s%.0fK", sign, float64(absValue)/1_000)
 	default:
 		return fmt.Sprintf("%s%d", sign, absValue)
-	}
-}
-
-// getSayDoClassDescription returns a human-readable explanation for Say-Do classification
-func getSayDoClassDescription(class SayDoClass) string {
-	switch class {
-	case SayDoOperator:
-		return "Management delivers on promises with high accuracy (≥95%) and uses conservative, factual communication"
-	case SayDoPromoter:
-		return "Optimistic language paired with lower delivery accuracy (<95%); announcements may overpromise"
-	case SayDoHonestStruggler:
-		return "Conservative communication style but results often fall short (<90% accuracy); genuine effort, inconsistent execution"
-	case SayDoInsufficientData:
-		return "Fewer than 3 guidance/results pairs available; unable to reliably assess execution track record"
-	default:
-		return "Classification pending analysis"
-	}
-}
-
-// getToneDescription returns a human-readable explanation for communication tone
-func getToneDescription(tone ToneClass) string {
-	switch tone {
-	case ToneOptimistic:
-		return "Announcements use superlatives and promotional language (e.g., 'transformational', 'exceptional', 'record-breaking')"
-	case ToneConservative:
-		return "Hedged, cautious language with qualifiers (e.g., 'subject to', 'may', 'expect to'); manages expectations"
-	case ToneDataDry:
-		return "Factual, data-driven communication focused on numbers and metrics with minimal subjective language"
-	default:
-		return "Communication style varies"
 	}
 }
