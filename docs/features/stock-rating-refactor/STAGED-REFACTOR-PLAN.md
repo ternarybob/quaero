@@ -370,14 +370,47 @@ Each reads required documents, calls service, outputs score document.
 
 ### Tasks
 
-#### 3.1 Create Rating Template
+#### 3.1 Create Rating Prompt Template
 - [ ] Create `internal/templates/stock-rating.toml`
   ```toml
-  # Stock Rating Template
-  # Type: workflow (defines steps, no config - tickers provided at runtime)
+  # Stock Rating Prompt Template
+  # Type: prompt (for summary step - generates rating reasoning)
 
-  type = "workflow"
+  type = "prompt"
   schema_ref = "stock-rating.schema.json"
+
+  prompt = """
+  Analyze the collected rating scores and provide investability assessment.
+
+  For each stock with rating data:
+  1. Gate Assessment: Explain BFS and CDS scores
+  2. Component Analysis: Interpret NFR, PPS, VRS, OB scores
+  3. Overall Rating: Justify the investability label
+  4. Key Risks: Highlight concerns from low scores
+
+  Output MUST match the stock-rating.schema.json structure.
+  """
+  ```
+
+#### 3.2 Create Job Definition
+- [ ] Create `deployments/common/job-definitions/stock-rating-watchlist.toml`
+  ```toml
+  # Stock Rating - Watchlist
+  # Rates stocks using investability framework
+
+  id = "stock-rating-watchlist"
+  name = "Stock Rating Watchlist"
+  type = "orchestrator"
+  description = "Rate watchlist stocks using investability framework"
+  tags = ["rating", "watchlist"]
+
+  [config]
+  default_exchange = "ASX"
+  variables = [
+      { ticker = "GNP" },
+      { ticker = "SKS" },
+      { ticker = "EXR" },
+  ]
 
   # Step 1: Collect data (existing workers)
   [step.fetch_fundamentals]
@@ -436,42 +469,26 @@ Each reads required documents, calls service, outputs score document.
   depends = "calculate_bfs,calculate_cds,calculate_nfr,calculate_pps,calculate_vrs,calculate_ob"
   output_tags = ["stock-rating"]
 
-  # Step 5: Format output
+  # Step 5: AI Summary (optional - uses template at step level)
+  [step.summarize]
+  type = "summary"
+  description = "Generate AI summary of ratings"
+  depends = "calculate_rating"
+  template = "stock-rating"  # References internal/templates/stock-rating.toml
+  filter_tags = ["stock-rating"]
+  output_tags = ["stock-rating-summary"]
+
+  # Step 6: Format output
   [step.format_output]
   type = "output_formatter"
   description = "Format ratings for email delivery"
-  depends = "calculate_rating"
+  depends = "summarize"
   on_error = "fail"
-  input_tags = ["stock-rating"]
+  input_tags = ["stock-rating-summary"]
   output_tags = ["email-output"]
   title = "Stock Rating Report"
-  # format = "inline"     # default: inline (markdown converted to HTML in body)
-  # attachment = false    # default: no attachments
-  # style = "body"        # default: body (full content in email)
-  ```
 
-#### 3.2 Create Job Definition (Example)
-- [ ] Create `deployments/common/job-definitions/stock-rating-watchlist.toml`
-  ```toml
-  # Stock Rating - Watchlist
-  # Uses stock-rating template with configured tickers
-
-  id = "stock-rating-watchlist"
-  name = "Stock Rating Watchlist"
-  type = "orchestrator"
-  description = "Rate watchlist stocks using investability framework"
-  tags = ["rating", "watchlist"]
-  template = "stock-rating"  # References internal/templates/stock-rating.toml
-
-  [config]
-  default_exchange = "ASX"
-  variables = [
-      { ticker = "GNP" },
-      { ticker = "SKS" },
-      { ticker = "EXR" },
-  ]
-
-  # Email step - just sends, formatting done by output_formatter
+  # Step 7: Email report
   [step.email_report]
   type = "email"
   description = "Email rating report"
