@@ -274,13 +274,16 @@ Execution:
 - [ ] `CAGR(start, end float64, years float64) float64`
 
 #### 1.8 Unit Tests
+- [ ] Create `internal/services/rating/*_test.go` for each calculation
 - [ ] Test each calculation function with known inputs/outputs
 - [ ] Test edge cases: missing data, zero values, boundary conditions
+- [ ] Pure function tests - no mocks, no external dependencies
 
 ### Deliverables
 - `internal/services/rating/` package
 - Pure calculation functions
-- Unit test coverage >90%
+- Unit tests in same package (`*_test.go`)
+- Coverage >90%
 
 ---
 
@@ -357,9 +360,21 @@ Each reads required documents, calls service, outputs score document.
   ```
 - [ ] Register in worker factory
 
+#### 2.6 Worker API Tests
+- [ ] Create `test/api/market_workers/rating_bfs_test.go`
+- [ ] Create `test/api/market_workers/rating_cds_test.go`
+- [ ] Create `test/api/market_workers/rating_nfr_test.go`
+- [ ] Create `test/api/market_workers/rating_pps_test.go`
+- [ ] Create `test/api/market_workers/rating_vrs_test.go`
+- [ ] Create `test/api/market_workers/rating_ob_test.go`
+- [ ] Create `test/api/market_workers/rating_composite_test.go`
+
+Follow existing patterns in `test/api/market_workers/common_test.go`.
+
 ### Deliverables
 - 7 rating workers
 - Worker registration
+- API tests following existing framework
 - Integration with existing document storage
 
 ---
@@ -567,13 +582,43 @@ The `output_formatter` worker already exists. This stage focuses on:
 
 ---
 
-## Stage 6: Verification
+## Stage 6: Testing & Verification
 
-**Goal:** End-to-end testing against expected outcomes.
+**Goal:** Refactor tests for updated workers and services using existing test framework.
+
+### Testing Framework
+
+Existing test framework in `test/api/market_workers/` - **DO NOT CHANGE**:
+- `common_test.go` - Shared test utilities and helpers
+- `*_test.go` - Individual worker tests
+
+New tests follow the same patterns and conventions.
 
 ### Tasks
 
-#### 6.1 Golden Test Cases
+#### 6.1 Service Unit Tests
+- [ ] Create `internal/services/rating/bfs_test.go`
+- [ ] Create `internal/services/rating/cds_test.go`
+- [ ] Create `internal/services/rating/nfr_test.go`
+- [ ] Create `internal/services/rating/pps_test.go`
+- [ ] Create `internal/services/rating/vrs_test.go`
+- [ ] Create `internal/services/rating/ob_test.go`
+- [ ] Create `internal/services/rating/composite_test.go`
+
+Pure function tests - no dependencies on workers or documents.
+
+#### 6.2 Worker API Tests
+- [ ] Create `test/api/market_workers/rating_bfs_test.go`
+- [ ] Create `test/api/market_workers/rating_cds_test.go`
+- [ ] Create `test/api/market_workers/rating_nfr_test.go`
+- [ ] Create `test/api/market_workers/rating_pps_test.go`
+- [ ] Create `test/api/market_workers/rating_vrs_test.go`
+- [ ] Create `test/api/market_workers/rating_ob_test.go`
+- [ ] Create `test/api/market_workers/rating_composite_test.go`
+
+Follow existing test patterns in `common_test.go`.
+
+#### 6.3 Golden Test Cases
 | Ticker | Expected Label | Gate | Investability |
 |--------|----------------|------|---------------|
 | BHP | LOW_ALPHA | Pass | 40-50 |
@@ -582,17 +627,20 @@ The `output_formatter` worker already exists. This stage focuses on:
 | GNP | INVESTABLE | Pass | 65-75 |
 | SKS | INVESTABLE | Pass | 65-75 |
 
-#### 6.2 Integration Tests
-- [ ] Create `test/api/rating_test.go`
-- [ ] Test each golden case end-to-end
+#### 6.4 Integration Tests
+- [ ] Create `test/api/market_workers/rating_integration_test.go`
+- [ ] Test full job flow with golden tickers
 - [ ] Verify document output schemas
+- [ ] Test concurrent execution with multiple tickers
 
-#### 6.3 Performance
+#### 6.5 Performance
 - [ ] Full rating flow <30s per ticker
 - [ ] Batch processing throughput
 
 ### Deliverables
-- Passing golden tests
+- Service unit tests (>90% coverage)
+- Worker API tests (follow existing patterns)
+- Integration tests with golden cases
 - Performance benchmarks
 
 ---
