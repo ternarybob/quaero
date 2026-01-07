@@ -179,23 +179,25 @@ description = "Calculate Capital Discipline Score (0-2)"
 ```
 
 **Use when:**
-- Workflow varies based on data (e.g., skip scores if gate fails)
+- Need LLM reasoning about results
+- Want explanations for each decision
 - Open-ended analysis tasks
-- Need LLM reasoning about what to do next
 
 ### Pattern Comparison
 
 | Aspect | Deterministic | LLM-Orchestrated |
 |--------|---------------|------------------|
 | Tool selection | Job definition | LLM decides |
-| Predictability | High | Variable |
+| Predictability | High | High (consistent output) |
 | Cost | Lower (no planner calls) | Higher (LLM reasoning) |
-| Flexibility | Fixed workflow | Adaptive |
-| Gate handling | All steps run | Can skip on gate fail |
+| Flexibility | Fixed workflow | Adaptive execution |
+| Reasoning | None | Explains decisions |
+
+**Important:** Both patterns must produce **consistent output**. All scores are always calculated. The difference is in execution flexibility and reasoning, NOT in skipping work.
 
 ### Recommended Approach for Rating
 
-**Hybrid**: Use deterministic steps for data collection and calculation, with optional LLM orchestration for adaptive behavior:
+**Hybrid**: Use deterministic steps for data collection and calculation, with optional LLM orchestration for reasoning:
 
 ```toml
 # Option A: Fully deterministic (simpler, cheaper)
@@ -203,12 +205,12 @@ description = "Calculate Capital Discipline Score (0-2)"
 type = "rating_bfs"
 [step.calculate_cds]
 type = "rating_cds"
-# ... all steps defined
+# ... all steps defined, all always run
 
-# Option B: LLM-orchestrated (adaptive, can skip on gate fail)
+# Option B: LLM-orchestrated (adds reasoning to output)
 [step.orchestrate_rating]
 type = "orchestrator"
-goal = "Calculate rating scores. If gate fails (BFS<1 or CDS<1), skip component scores and return SPECULATIVE label."
+goal = "Calculate all rating scores and explain the results. Always calculate all components for consistent output."
 available_tools = [...]
 ```
 
@@ -638,12 +640,13 @@ Follow existing patterns in `test/api/market_workers/common_test.go`.
   description = "Rate stock using investability framework"
   goal = """
   Rate the stock using the investability framework:
-  1. First fetch fundamentals and announcements data
-  2. Calculate gate scores (BFS, CDS)
-  3. Check gate: if BFS < 1 OR CDS < 1, return SPECULATIVE and STOP
-  4. If gate passes, calculate component scores (NFR, PPS, VRS, OB)
-  5. Calculate composite rating and determine label
-  6. Generate summary report
+  1. Fetch fundamentals, announcements, and price data
+  2. Calculate ALL scores (BFS, CDS, NFR, PPS, VRS, OB) - never skip any
+  3. Calculate composite rating and determine label
+  4. Provide reasoning for each score and the final rating
+  5. Output must be consistent - always include all components
+
+  If gate fails (BFS<1 or CDS<1), still calculate all scores but label as SPECULATIVE.
   """
   thinking_level = "MEDIUM"
   output_tags = ["stock-rating"]
@@ -717,7 +720,8 @@ Follow existing patterns in `test/api/market_workers/common_test.go`.
 #### 3.4 Test Job Execution
 - [ ] Run deterministic job with test tickers
 - [ ] Run orchestrated job with test tickers
-- [ ] Verify gate failure skips component scores (orchestrated only)
+- [ ] Verify both patterns produce identical output structure
+- [ ] Verify all scores calculated even when gate fails
 - [ ] Verify documents created with correct tags
 
 ### Deliverables
