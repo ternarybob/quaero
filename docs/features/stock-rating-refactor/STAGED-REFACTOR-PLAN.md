@@ -66,7 +66,11 @@ This document outlines the staged implementation plan for the stock rating syste
 **Key Principles:**
 - **Services**: Pure calculation logic, stateless, no document awareness
 - **Workers**: Read documents, call services, write output documents
-- **Document-based coupling**: Workers depend on documents, not other workers
+- **Document-based coupling**: Data flows via documents in storage
+- **Worker-to-worker comms**: Allowed but limited to:
+  - Request: context only (ticker or tickers)
+  - Response: document ID(s) only
+  - Actual data read from document storage using returned IDs
 - **No "tools" package**: Workers ARE the orchestrator-callable tools
 
 ---
@@ -242,17 +246,25 @@ This document outlines the staged implementation plan for the stock rating syste
   func (w *RatingBFSWorker) Execute(ctx context.Context, job *QueueJob) error {
       ticker := job.Payload["ticker"].(string)
 
-      // 1. Read document (created by market_fundamentals_worker)
-      doc, err := w.documentStorage.GetDocumentBySource("market_fundamentals",
-          fmt.Sprintf("asx:%s:stock_collector", ticker))
+      // 1. Request document ID from fundamentals worker (context only)
+      docID, err := w.requestDocumentID(ctx, "market_fundamentals", ticker)
+      if err != nil {
+          return err
+      }
 
-      // 2. Transform document to service input
+      // 2. Read document from storage using ID
+      doc, err := w.documentStorage.GetDocument(docID)
+      if err != nil {
+          return err
+      }
+
+      // 3. Transform document to service input
       fundamentals := w.extractFundamentals(doc)
 
-      // 3. Call service (pure function)
+      // 4. Call service (pure function)
       result := rating.CalculateBFS(fundamentals)
 
-      // 4. Save result as document
+      // 5. Save result as document, return document ID
       return w.saveResultDocument(ctx, ticker, result)
   }
   ```
