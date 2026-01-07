@@ -2,778 +2,461 @@
 
 ## Overview
 
-This document outlines the staged implementation plan for replacing the existing worker system with LLM-orchestrated tools. Each stage is designed to be independently testable.
+This document outlines the staged implementation plan for the stock rating system using LLM-orchestrated workers.
 
-**Approach:** Clean-slate implementation. Breaking changes are expected. Old workers and signals code will be deleted upon completion.
-
-**What Gets Deleted:**
-- `internal/signals/` - All existing signal calculations (PBAS, VLI, Regime, etc.)
-- `internal/queue/workers/market_*.go` - Replaced by new tools
-- `internal/queue/workers/signal_*.go` - Replaced by new tools
-- Unused schemas in `internal/schemas/`
-
-**What Gets Kept:**
-- `internal/services/eodhd/` - Data API client (used by new tools)
-- `internal/services/llm/` - LLM provider abstraction
-- `internal/storage/` - BadgerDB storage layer
-- `internal/queue/` - Job queue infrastructure (workers replaced, queue kept)
-- `internal/queue/workers/orchestrator_worker.go` - LLM orchestration framework (reused)
-- `internal/queue/workers/tool_execution_worker.go` - Tool execution wrapper (reused)
-
-**Existing Orchestration (to leverage):**
-The `orchestrator_worker.go` already implements:
-- Planner-Executor-Reviewer loop with LLM reasoning
-- Plan structure with steps, dependencies, params
-- Wave-based execution (parallel within wave, sequential across waves)
-- Tool execution via queue jobs (`JobTypeToolExecution`)
-- Tool lookup from `available_tools` config
-- Result collection and review
-
-New rating tools will be registered as `available_tools` in job definitions.
+**Approach:** Clean-slate implementation. Breaking changes expected. Old code deleted upon completion.
 
 ---
 
-## Stage 1: Foundation
+## Architecture
 
-**Goal:** Establish tool interfaces, types, and package structure.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Job Definition (TOML)                         │
+│  Defines step order, dependencies, available_tools for orchestrator │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                            Workers                                   │
+│         (Queueable steps - read documents, call services)           │
+│                                                                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐     │
+│  │ market_         │  │ market_         │  │ market_data     │     │
+│  │ fundamentals    │  │ announcements   │  │ (existing)      │     │
+│  │ (existing)      │  │ (existing)      │  │                 │     │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘     │
+│           │                    │                    │               │
+│           ▼                    ▼                    ▼               │
+│      [asx-stock-data]    [asx-announcement]   [market-data]        │
+│         documents           documents           documents           │
+│           │                    │                    │               │
+│           └────────────────────┼────────────────────┘               │
+│                                ▼                                    │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                    Rating Workers (NEW)                      │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │   │
+│  │  │ bfs      │ │ cds      │ │ nfr      │ │ pps      │  ...  │   │
+│  │  │ worker   │ │ worker   │ │ worker   │ │ worker   │       │   │
+│  │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘       │   │
+│  │       │            │            │            │              │   │
+│  │       ▼            ▼            ▼            ▼              │   │
+│  │   [bfs-score]  [cds-score]  [nfr-score]  [pps-score]       │   │
+│  │     documents                                               │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                            Services                                  │
+│              (Pure functions - stateless, no documents)             │
+│                                                                      │
+│  internal/services/rating/                                          │
+│  ├── bfs.go      ← CalculateBFS(fundamentals) → BFSResult          │
+│  ├── cds.go      ← CalculateCDS(fundamentals, announcements) → ... │
+│  ├── nfr.go      ← CalculateNFR(announcements, prices) → ...       │
+│  ├── pps.go      ← CalculatePPS(announcements, prices) → ...       │
+│  ├── vrs.go      ← CalculateVRS(announcements, prices) → ...       │
+│  ├── ob.go       ← CalculateOB(announcements, bfsScore) → ...      │
+│  ├── composite.go← CalculateRating(bfs, cds, nfr, pps, vrs, ob) →  │
+│  └── types.go    ← Shared types for rating calculations            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Principles:**
+- **Services**: Pure calculation logic, stateless, no document awareness
+- **Workers**: Read documents, call services, write output documents
+- **Document-based coupling**: Workers depend on documents, not other workers
+- **No "tools" package**: Workers ARE the orchestrator-callable tools
+
+---
+
+## What Gets Deleted
+
+- `internal/signals/` - All existing signal calculations (PBAS, VLI, Regime, etc.)
+- `internal/queue/workers/mqs_*.go` - Move to services (if keeping MQS)
+- Unused schemas in `internal/schemas/`
+
+## What Gets Kept
+
+- `internal/services/eodhd/` - Data API client
+- `internal/services/llm/` - LLM provider abstraction
+- `internal/storage/` - BadgerDB storage layer
+- `internal/queue/` - Job queue infrastructure
+- `internal/queue/workers/orchestrator_worker.go` - LLM orchestration framework
+- `internal/queue/workers/market_fundamentals_worker.go` - Data collection
+- `internal/queue/workers/market_announcements_worker.go` - Data collection
+- `internal/queue/workers/market_data_worker.go` - Data collection
+
+---
+
+## Stage 1: Rating Service
+
+**Goal:** Create pure calculation functions with no document awareness.
 
 ### Tasks
 
-#### 1.1 Create Tool Interface
-- [ ] Create `internal/tools/tool.go`
+#### 1.1 Create Service Package
+- [ ] Create `internal/services/rating/`
+
+#### 1.2 Define Types
+- [ ] Create `internal/services/rating/types.go`
   ```go
-  type Tool interface {
-      Name() string
-      Description() string
-      Category() ToolCategory  // data | gate | score | rating | output
-      InputSchema() json.RawMessage
-      OutputSchema() json.RawMessage
-      Execute(ctx context.Context, input json.RawMessage) (json.RawMessage, error)
+  // Input types (passed from workers)
+  type Fundamentals struct {
+      Ticker                   string
+      CompanyName              string
+      Sector                   string
+      MarketCap                float64
+      SharesOutstandingCurrent int64
+      SharesOutstanding3YAgo   *int64
+      CashBalance              float64
+      QuarterlyCashBurn        float64
+      RevenueTTM               float64
+      IsProfitable             bool
+      HasProducingAsset        bool
   }
 
-  type ToolCategory string
-  const (
-      CategoryData    ToolCategory = "data"
-      CategoryGate    ToolCategory = "gate"
-      CategoryScore   ToolCategory = "score"
-      CategoryRating  ToolCategory = "rating"
-      CategoryOutput  ToolCategory = "output"
-  )
-  ```
-
-#### 1.2 Create Tool Registry
-- [ ] Create `internal/tools/registry.go`
-- [ ] `Register(tool Tool)` - Add tool to registry
-- [ ] `Get(name string) Tool` - Retrieve by name
-- [ ] `List() []Tool` - All registered tools
-- [ ] `ExportForLLM() []LLMToolDefinition` - Export for Claude/Gemini
-
-#### 1.3 Define Core Types
-- [ ] Create `internal/tools/types.go`
-  ```go
-  type Ticker string  // 3-4 char ASX code
-
-  type AnnouncementType string
-  const (
-      TypeTradingHalt  AnnouncementType = "TRADING_HALT"
-      TypeCapitalRaise AnnouncementType = "CAPITAL_RAISE"
-      TypeResults      AnnouncementType = "RESULTS"
-      TypeContract     AnnouncementType = "CONTRACT"
-      TypeOperational  AnnouncementType = "OPERATIONAL"
-      TypeCompliance   AnnouncementType = "COMPLIANCE"
-      TypeOther        AnnouncementType = "OTHER"
-  )
-
-  type RatingLabel string
-  const (
-      LabelSpeculative    RatingLabel = "SPECULATIVE"
-      LabelLowAlpha       RatingLabel = "LOW_ALPHA"
-      LabelWatchlist      RatingLabel = "WATCHLIST"
-      LabelInvestable     RatingLabel = "INVESTABLE"
-      LabelHighConviction RatingLabel = "HIGH_CONVICTION"
-  )
-
   type Announcement struct {
-      Date            time.Time
-      Headline        string
-      Type            AnnouncementType
+      Date             time.Time
+      Headline         string
+      Type             AnnouncementType
       IsPriceSensitive bool
-      URL             string
   }
 
   type PriceBar struct {
-      Date        time.Time
-      Open        float64
-      High        float64
-      Low         float64
-      Close       float64
-      Volume      int64
-      DailyReturn float64  // optional
-      Volatility  float64  // optional, 20-day
+      Date   time.Time
+      Open   float64
+      High   float64
+      Low    float64
+      Close  float64
+      Volume int64
   }
 
-  type Fundamentals struct {
-      Ticker                  Ticker
-      CompanyName             string
-      Sector                  string
-      MarketCap               float64
-      AsOfDate                time.Time
-      SharesOutstandingCurrent int64
-      SharesOutstanding3YAgo   *int64  // nil if unavailable
-      CashBalance             float64
-      QuarterlyCashBurn       float64
-      RevenueTTM              float64
-      IsProfitable            bool
-      HasProducingAsset       bool
-      DataQuality             DataQuality
+  // Output types
+  type BFSResult struct {
+      Score          int     // 0, 1, or 2
+      IndicatorCount int
+      Components     BFSComponents
+      Reasoning      string
   }
 
-  type DataQuality string
-  const (
-      QualityComplete     DataQuality = "COMPLETE"
-      QualityPartial      DataQuality = "PARTIAL"
-      QualityStale        DataQuality = "STALE"
-      QualityInsufficient DataQuality = "INSUFFICIENT"
-  )
+  type CDSResult struct {
+      Score      int // 0, 1, or 2
+      Components CDSComponents
+      Reasoning  string
+  }
+
+  // ... similar for NFR, PPS, VRS, OB, Rating
   ```
 
-#### 1.4 Define Error Types
-- [ ] Create `internal/tools/errors.go`
+#### 1.3 Implement BFS Calculation
+- [ ] Create `internal/services/rating/bfs.go`
   ```go
-  type ToolError struct {
-      Code    ErrorCode
-      Message string
-      Partial json.RawMessage  // partial result if available
-  }
+  func CalculateBFS(f Fundamentals) BFSResult {
+      // Pure function - no document access
+      cashRunway := calculateCashRunway(f.CashBalance, f.QuarterlyCashBurn)
 
-  type ErrorCode string
-  const (
-      ErrTickerNotFound    ErrorCode = "TICKER_NOT_FOUND"
-      ErrInsufficientData  ErrorCode = "INSUFFICIENT_DATA"
-      ErrStaleData         ErrorCode = "STALE_DATA"
-      ErrCalculationError  ErrorCode = "CALCULATION_ERROR"
-      ErrMissingInput      ErrorCode = "MISSING_INPUT"
-      ErrGenerationError   ErrorCode = "GENERATION_ERROR"
-  )
+      indicators := 0
+      if f.RevenueTTM > 10_000_000 { indicators++ }
+      if cashRunway > 18 { indicators++ }
+      if f.HasProducingAsset { indicators++ }
+      if f.IsProfitable { indicators++ }
+
+      score := 0
+      if indicators >= 2 { score = 2 }
+      else if indicators == 1 { score = 1 }
+
+      return BFSResult{Score: score, ...}
+  }
   ```
 
-#### 1.5 Package Structure
-```
-internal/tools/
-├── tool.go              # Tool interface
-├── registry.go          # Tool registration
-├── types.go             # Shared types
-├── errors.go            # Error types
-├── data/                # Stage 2
-├── gate/                # Stage 3
-├── score/               # Stage 4
-├── rating/              # Stage 5
-├── output/              # Stage 6
-└── orchestrator/        # Stage 7
-```
+#### 1.4 Implement CDS Calculation
+- [ ] Create `internal/services/rating/cds.go`
+  ```go
+  func CalculateCDS(f Fundamentals, announcements []Announcement, months int) CDSResult {
+      sharesCagr := calculateSharesCAGR(f.SharesOutstandingCurrent, f.SharesOutstanding3YAgo)
+      haltsPA := countByType(announcements, TypeTradingHalt) / (float64(months) / 12)
+      raisesPA := countByType(announcements, TypeCapitalRaise) / (float64(months) / 12)
 
-### Deliverables
-- Tool interface and registry
-- All shared types
-- Error definitions
-- Package structure
+      // Score logic...
+      return CDSResult{...}
+  }
+  ```
 
----
+#### 1.5 Implement Score Calculations
+- [ ] Create `internal/services/rating/nfr.go` - Narrative-to-Fact Ratio
+- [ ] Create `internal/services/rating/pps.go` - Price Progression Score
+- [ ] Create `internal/services/rating/vrs.go` - Volatility Regime Stability
+- [ ] Create `internal/services/rating/ob.go` - Optionality Bonus
 
-## Stage 2: Data Adapters
-
-**Goal:** Create adapters that read documents from existing workers and transform to rating tool schemas.
-
-Data fetching already exists via job definitions:
-- `market_data` worker → prices, technicals (tags: `market-data`, `<ticker>`)
-- `market_fundamentals` worker → stock data (tags: `asx-stock-data`, `<ticker>`)
-- `market_announcements` worker → announcements (tags: `asx-announcement-summary`, `<ticker>`)
-
-The rating job will call these existing workers first, then adapters transform their output.
-
-### Tasks
-
-#### 2.1 Implement `load_announcements` Adapter
-- [ ] Create `internal/tools/data/announcements.go`
-- [ ] Input: `{ticker}` - reads from document storage
-- [ ] Reads documents tagged `["asx-announcement-summary", "<ticker>"]`
-- [ ] Transforms to rating schema:
-  ```json
-  {
-    "ticker": "GNP",
-    "count": 54,
-    "period_start": "2023-01-07",
-    "period_end": "2026-01-07",
-    "announcements": [
-      {
-        "date": "2025-12-15",
-        "headline": "...",
-        "type": "CONTRACT",
-        "is_price_sensitive": true
+#### 1.6 Implement Composite Rating
+- [ ] Create `internal/services/rating/composite.go`
+  ```go
+  func CalculateRating(bfs BFSResult, cds CDSResult, nfr, pps, vrs, ob *float64) RatingResult {
+      passed := bfs.Score >= 1 && cds.Score >= 1
+      if !passed {
+          return RatingResult{Label: LabelSpeculative, ...}
       }
-    ]
+
+      investability := float64(bfs.Score)*12.5 + float64(cds.Score)*12.5 +
+                       *nfr*25 + *pps*25 + *vrs*15 + *ob*10
+
+      label := determineLabel(investability)
+      return RatingResult{...}
   }
   ```
-- [ ] Classify announcement types from headline keywords:
-  - TRADING_HALT: "trading halt", "suspension"
-  - CAPITAL_RAISE: "placement", "SPP", "rights issue", "capital raise"
-  - RESULTS: "quarterly", "half year", "annual report", "4C", "4D"
-  - CONTRACT: "contract", "agreement", "awarded", "secured"
-  - OPERATIONAL: "update", "progress", "milestone"
-  - COMPLIANCE: "appendix", "change of director"
 
-#### 2.2 Implement `load_prices` Adapter
-- [ ] Create `internal/tools/data/prices.go`
-- [ ] Input: `{ticker}` - reads from document storage
-- [ ] Reads documents tagged `["market-data", "<ticker>"]`
-- [ ] Transforms to rating schema:
-  ```json
-  {
-    "ticker": "GNP",
-    "count": 756,
-    "latest_close": 2.45,
-    "prices": [
-      {"date": "2026-01-07", "open": 2.40, "high": 2.50, "low": 2.38, "close": 2.45, "volume": 125000}
-    ]
-  }
-  ```
-- [ ] Compute derived metrics: daily returns, 20d volatility
+#### 1.7 Math Utilities
+- [ ] Create `internal/services/rating/math.go`
+- [ ] `PriceWindow(prices []PriceBar, date time.Time, before, after int) []PriceBar`
+- [ ] `DailyReturns(prices []PriceBar) []float64`
+- [ ] `Stddev(values []float64) float64`
+- [ ] `CAGR(start, end float64, years float64) float64`
 
-#### 2.3 Implement `load_fundamentals` Adapter
-- [ ] Create `internal/tools/data/fundamentals.go`
-- [ ] Input: `{ticker}` - reads from document storage
-- [ ] Reads documents tagged `["asx-stock-data", "<ticker>"]`
-- [ ] Transforms to rating schema (extracts fields needed for BFS/CDS):
-  ```json
-  {
-    "ticker": "GNP",
-    "company_name": "Genusplus Group Ltd",
-    "sector": "Industrials",
-    "market_cap": 250000000,
-    "shares_outstanding_current": 100000000,
-    "shares_outstanding_3y_ago": 85000000,
-    "cash_balance": 45000000,
-    "quarterly_cash_burn": 2500000,
-    "revenue_ttm": 180000000,
-    "is_profitable": true,
-    "has_producing_asset": true,
-    "data_quality": "COMPLETE"
-  }
-  ```
-- [ ] Map EODHD fields to schema
-- [ ] Infer `has_producing_asset` from sector + revenue
-- [ ] Set `data_quality` based on field completeness
-
-#### 2.4 Document Query Helper
-- [ ] Create `internal/tools/data/query.go`
-- [ ] `FindDocument(tags []string) (*models.Document, error)`
-- [ ] `ParseDocumentJSON(doc *models.Document, target interface{}) error`
-- [ ] Handle missing documents gracefully
-
-#### 2.5 Tests
-- [ ] Test each adapter with sample documents
-- [ ] Verify output schema compliance
-- [ ] Test announcement type classification
+#### 1.8 Unit Tests
+- [ ] Test each calculation function with known inputs/outputs
+- [ ] Test edge cases: missing data, zero values, boundary conditions
 
 ### Deliverables
-- 3 data adapters (read from storage, transform to schema)
-- Document query helper
-- Unit tests
-
-### Note on Job Flow
-The rating job definition will be structured as:
-```
-Step 1: market_fundamentals (existing worker) → creates asx-stock-data docs
-Step 2: market_announcements (existing worker) → creates asx-announcement-summary docs
-Step 3: market_data (existing worker) → creates market-data docs
-Step 4: orchestrator with rating tools → reads docs, calculates scores
-```
+- `internal/services/rating/` package
+- Pure calculation functions
+- Unit test coverage >90%
 
 ---
 
-## Stage 3: Gate Tools
+## Stage 2: Rating Workers
 
-**Goal:** Implement BFS and CDS calculations that determine if a stock passes the rating gate.
-
-### Tasks
-
-#### 3.1 Implement `calculate_bfs` (Business Foundation Score)
-- [ ] Create `internal/tools/gate/bfs.go`
-- [ ] Input: `{fundamentals}`
-- [ ] Output:
-  ```json
-  {
-    "ticker": "GNP",
-    "score": 2,
-    "components": {
-      "revenue_ttm": 45000000,
-      "revenue_passes": true,
-      "cash_runway_months": 24,
-      "cash_runway_passes": true,
-      "has_producing_asset": true,
-      "is_profitable": false
-    },
-    "indicator_count": 3,
-    "reasoning": "3/4 indicators met: revenue >$10M, cash runway >18mo, has producing asset"
-  }
-  ```
-- [ ] Logic:
-  ```
-  cash_runway = cash_balance / abs(quarterly_cash_burn)
-    IF quarterly_cash_burn >= 0: cash_runway = 999 (infinite)
-
-  indicators = count of:
-    - revenue_ttm > 10,000,000
-    - cash_runway > 18
-    - has_producing_asset
-    - is_profitable
-
-  score = 2 if indicators >= 2
-  score = 1 if indicators == 1
-  score = 0 if indicators == 0
-  ```
-
-#### 3.2 Implement `calculate_cds` (Capital Discipline Score)
-- [ ] Create `internal/tools/gate/cds.go`
-- [ ] Input: `{fundamentals, announcements}`
-- [ ] Output:
-  ```json
-  {
-    "ticker": "GNP",
-    "score": 2,
-    "components": {
-      "shares_cagr_3y": 5.2,
-      "trading_halts_total": 3,
-      "trading_halts_per_year": 1.0,
-      "capital_raises_total": 2,
-      "capital_raises_per_year": 0.67
-    },
-    "reasoning": "Low dilution (5.2% CAGR), infrequent halts (1/yr), minimal raises (0.67/yr)"
-  }
-  ```
-- [ ] Logic:
-  ```
-  shares_cagr = ((current / 3y_ago) ^ (1/3) - 1) * 100
-    IF 3y_ago unavailable: shares_cagr = 0 (assume no dilution)
-
-  halts_pa = count(TRADING_HALT) / (months / 12)
-  raises_pa = count(CAPITAL_RAISE) / (months / 12)
-
-  score = 0 if (shares_cagr > 25 OR halts_pa > 4)
-  score = 1 if (shares_cagr > 10 OR halts_pa > 2)
-  score = 2 if (shares_cagr <= 10 AND halts_pa <= 2 AND raises_pa <= 2)
-  ```
-
-#### 3.3 Gate Check Utility
-- [ ] Create `internal/tools/gate/gate.go`
-- [ ] `CheckGate(bfs, cds int) (passed bool, reason string)`
-- [ ] Gate passes when: `bfs >= 1 AND cds >= 1`
-
-#### 3.4 Tests
-- [ ] BFS edge cases: zero revenue, negative cash burn, missing fields
-- [ ] CDS edge cases: no 3y share data, no trading halts
-- [ ] Gate boundary conditions
-
-### Deliverables
-- 2 gate calculation tools
-- Gate check utility
-- Unit tests
-
----
-
-## Stage 4: Score Tools
-
-**Goal:** Implement NFR, PPS, VRS, OB calculations for stocks that pass the gate.
+**Goal:** Create workers that read documents, call services, write output documents.
 
 ### Tasks
 
-#### 4.1 Implement `calculate_nfr` (Narrative-to-Fact Ratio)
-- [ ] Create `internal/tools/score/nfr.go`
-- [ ] Input: `{announcements, prices, sector_index?}`
-- [ ] Output: `{score: 0.0-1.0, components, reasoning}`
-- [ ] Logic:
-  ```
-  FOR each announcement:
-    stock_return = (close[T+2] - close[T-1]) / close[T-1]
-    sector_return = (index[T+2] - index[T-1]) / index[T-1]
-    abnormal_return = stock_return - sector_return
-    IF abs(abnormal_return) > 0.03: impactful++
-
-  nfr = impactful / total
-  ```
-- [ ] Fetch XJO index data for sector return
-- [ ] Handle missing price days (weekends/holidays)
-
-#### 4.2 Implement `calculate_pps` (Price Progression Score)
-- [ ] Create `internal/tools/score/pps.go`
-- [ ] Input: `{announcements, prices}`
-- [ ] Output: `{score: 0.0-1.0, components, event_details[], reasoning}`
-- [ ] Logic:
-  ```
-  FOR each price_sensitive announcement (dedupe by date):
-    pre_low = MIN(closes[T-10 to T-1])
-    post_low = MIN(closes[T+1 to T+10])
-    IF post_low > pre_low: improved++
-
-  pps = improved / total_events
-  ```
-- [ ] Return per-event details for transparency
-
-#### 4.3 Implement `calculate_vrs` (Volatility Regime Stability)
-- [ ] Create `internal/tools/score/vrs.go`
-- [ ] Input: `{announcements, prices}`
-- [ ] Output: `{score: 0.0-1.0, components, reasoning}`
-- [ ] Logic:
-  ```
-  FOR each price_sensitive announcement:
-    vol_pre = stddev(returns[T-15 to T-1])
-    vol_post = stddev(returns[T+1 to T+15])
-    price_change = (close[T+10] - close[T-1]) / close[T-1]
-
-    IF vol_post < vol_pre AND price_change > 0.01: trend_forming++
-    ELSE IF vol_post >= vol_pre AND price_change <= 0.01: destabilising++
-    ELSE: neutral++
-
-  vrs = trend_forming / (trend_forming + destabilising)
-    IF denominator == 0: vrs = 0.5
-  ```
-
-#### 4.4 Implement `calculate_ob` (Optionality Bonus)
-- [ ] Create `internal/tools/score/ob.go`
-- [ ] Input: `{announcements, fundamentals, bfs_score}`
-- [ ] Output: `{score: 0.0|0.5|1.0, components, reasoning}`
-- [ ] Logic:
-  ```
-  IF bfs_score < 1: return 0
-
-  catalyst_keywords = [
-    "drilling commenced", "phase 3", "offtake agreement", "FID",
-    "binding agreement", "first production", "FDA approval",
-    "commercial agreement", "construction commenced"
-  ]
-
-  time_keywords = [
-    "Q1", "Q2", "Q3", "Q4", "2025", "2026", "2027",
-    "expected by", "scheduled for", "targeting", "on track for"
-  ]
-
-  recent = announcements WHERE date > (today - 6 months)
-  has_catalyst = ANY(recent.headline contains catalyst_keywords)
-  has_timeframe = ANY(recent.headline contains time_keywords)
-
-  score = 1.0 if (has_catalyst AND has_timeframe)
-  score = 0.5 if (has_catalyst OR has_timeframe)
-  score = 0.0 otherwise
-  ```
-
-#### 4.5 Shared Utilities
-- [ ] Create `internal/tools/score/math.go`
-- [ ] `PriceWindow(prices, date, before, after)` - Get price slice around date
-- [ ] `Returns(prices)` - Calculate daily returns
-- [ ] `Stddev(values)` - Standard deviation
-- [ ] `MinClose(prices)` - Minimum closing price
-
-#### 4.6 Tests
-- [ ] Each score tool with deterministic test data
-- [ ] Edge cases: no price-sensitive announcements, insufficient history
-- [ ] Verify score bounds (0.0-1.0)
-
-### Deliverables
-- 4 score tools
-- Math utilities
-- Unit tests
-
----
-
-## Stage 5: Rating Tool
-
-**Goal:** Combine gate and score results into final investability rating.
-
-### Tasks
-
-#### 5.1 Implement `calculate_rating`
-- [ ] Create `internal/tools/rating/rating.go`
-- [ ] Input: `{ticker, bfs, cds, nfr?, pps?, vrs?, ob?}`
-- [ ] Output:
-  ```json
-  {
-    "ticker": "GNP",
-    "company_name": "Genusplus Group Ltd",
-    "rated_at": "2026-01-07T10:30:00Z",
-    "gate": {
-      "passed": true,
-      "bfs": 2,
-      "cds": 2
-    },
-    "scores": {
-      "nfr": 0.35,
-      "pps": 0.65,
-      "vrs": 0.52,
-      "ob": 0.5
-    },
-    "investability": 72.5,
-    "label": "INVESTABLE",
-    "component_details": { ... }
-  }
-  ```
-- [ ] Logic:
-  ```
-  passed_gate = (bfs >= 1) AND (cds >= 1)
-
-  IF NOT passed_gate:
-    label = SPECULATIVE
-    investability = null
-  ELSE:
-    investability = (bfs * 12.5) + (cds * 12.5)
-                  + (nfr * 25) + (pps * 25)
-                  + (vrs * 15) + (ob * 10)
-
-    label = HIGH_CONVICTION if investability >= 80
-    label = INVESTABLE      if investability >= 60
-    label = WATCHLIST       if investability >= 40
-    label = LOW_ALPHA       otherwise
-  ```
-
-#### 5.2 Label Descriptions
-- [ ] Create `internal/tools/rating/labels.go`
-- [ ] Add descriptions for report generation:
-  - **SPECULATIVE**: Failed gate - high risk of capital destruction
-  - **LOW_ALPHA**: Passed gate but weak execution signals
-  - **WATCHLIST**: Moderate potential - monitor for improvement
-  - **INVESTABLE**: Strong fundamentals and execution
-  - **HIGH_CONVICTION**: Top-tier opportunity
-
-#### 5.3 Tests
-- [ ] All label threshold boundaries
-- [ ] Gate failure produces SPECULATIVE with null investability
-- [ ] Score weights sum correctly
-
-### Deliverables
-- Rating calculation tool
-- Label definitions
-- Unit tests
-
----
-
-## Stage 6: Output Tools
-
-**Goal:** Generate summaries, markdown reports, and email output.
-
-### Tasks
-
-#### 6.1 Implement `generate_summary`
-- [ ] Create `internal/tools/output/summary.go`
-- [ ] Input: `{ticker, announcements, rating, max_announcements?}`
-- [ ] Output:
-  ```json
-  {
-    "ticker": "GNP",
-    "summary": "GNP secured multiple BESS contracts in Q4, expanding renewable energy exposure. Strong order book visibility through FY26.",
-    "key_events": [
-      {"date": "2025-11-15", "headline": "...", "significance": "..."}
-    ]
-  }
-  ```
-- [ ] Use LLM service for summary generation
-- [ ] Prompt: summarize recent announcements in 2-3 sentences
-
-#### 6.2 Implement `generate_report`
-- [ ] Create `internal/tools/output/report.go`
-- [ ] Input: `{ratings[], summaries[], format, include_components?}`
-- [ ] Formats:
-  - **table**: Quick overview with scores
-  - **detailed**: Full breakdown per ticker
-  - **full**: Table + detailed sections
-- [ ] Use Go `text/template`
-
-#### 6.3 Create Templates
-- [ ] Create `internal/tools/output/templates/`
-- [ ] `table.md.tmpl`:
-  ```markdown
-  # Stock Ratings
-
-  | Ticker | Label | Score | BFS | CDS | NFR | PPS | VRS | OB |
-  |--------|-------|-------|-----|-----|-----|-----|-----|-----|
-  {{range .Ratings}}
-  | {{.Ticker}} | {{.Label}} | {{.Investability | fmt}} | {{.Gate.BFS}} | {{.Gate.CDS}} | ... |
-  {{end}}
-
-  Generated: {{.Timestamp}}
-  ```
-- [ ] `detailed.md.tmpl` - Full single-ticker view
-- [ ] `full.md.tmpl` - Combined
-
-#### 6.4 Implement `generate_email`
-- [ ] Create `internal/tools/output/email.go`
-- [ ] Input: `{report, subject_template?, recipient}`
-- [ ] Output: `{subject, html_body, plain_text_body, recipient}`
-- [ ] Markdown → HTML conversion
-- [ ] Plain text fallback
-
-#### 6.5 Tests
-- [ ] Template rendering
-- [ ] Email HTML output
-- [ ] Summary generation (mock LLM)
-
-### Deliverables
-- 3 output tools
-- Markdown templates
-- Unit tests
-
----
-
-## Stage 7: Orchestration Integration
-
-**Goal:** Register new tools with existing orchestrator and create job definitions.
-
-The orchestrator framework already exists in `orchestrator_worker.go`. This stage focuses on:
-1. Creating tool execution workers for each new tool
-2. Defining job definitions that wire tools together
-3. Testing the integrated flow
-
-### Tasks
-
-#### 7.1 Create Tool Execution Workers
-Each tool needs a worker that the orchestrator can invoke via `JobTypeToolExecution`.
-
-- [ ] Create `internal/queue/workers/rating/` package
-- [ ] `data_worker.go` - Wraps get_announcements, get_prices, get_fundamentals
-- [ ] `gate_worker.go` - Wraps calculate_bfs, calculate_cds
-- [ ] `score_worker.go` - Wraps calculate_nfr, calculate_pps, calculate_vrs, calculate_ob
-- [ ] `rating_worker.go` - Wraps calculate_rating
-- [ ] `output_worker.go` - Wraps generate_summary, generate_report, generate_email
-
-Each worker:
-- Implements `interfaces.JobWorker`
-- Parses params from job payload
-- Calls the corresponding tool from `internal/tools/`
-- Returns result as document or metadata
-
-#### 7.2 Register Workers
-- [ ] Update `internal/queue/workers/registry.go`
-- [ ] Register new workers with `JobTypeToolExecution` handler
-- [ ] Map tool names to worker types:
+#### 2.1 BFS Worker
+- [ ] Create `internal/queue/workers/rating_bfs_worker.go`
   ```go
-  "get_announcements"  → WorkerTypeRatingData
-  "get_prices"         → WorkerTypeRatingData
-  "get_fundamentals"   → WorkerTypeRatingData
-  "calculate_bfs"      → WorkerTypeRatingGate
-  "calculate_cds"      → WorkerTypeRatingGate
-  "calculate_nfr"      → WorkerTypeRatingScore
-  "calculate_pps"      → WorkerTypeRatingScore
-  "calculate_vrs"      → WorkerTypeRatingScore
-  "calculate_ob"       → WorkerTypeRatingScore
-  "calculate_rating"   → WorkerTypeRatingComposite
-  "generate_summary"   → WorkerTypeRatingOutput
-  "generate_report"    → WorkerTypeRatingOutput
-  "generate_email"     → WorkerTypeRatingOutput
+  type RatingBFSWorker struct {
+      documentStorage interfaces.DocumentStorage
+      logger          arbor.ILogger
+  }
+
+  func (w *RatingBFSWorker) Execute(ctx context.Context, job *QueueJob) error {
+      ticker := job.Payload["ticker"].(string)
+
+      // 1. Read document (created by market_fundamentals_worker)
+      doc, err := w.documentStorage.GetDocumentBySource("market_fundamentals",
+          fmt.Sprintf("asx:%s:stock_collector", ticker))
+
+      // 2. Transform document to service input
+      fundamentals := w.extractFundamentals(doc)
+
+      // 3. Call service (pure function)
+      result := rating.CalculateBFS(fundamentals)
+
+      // 4. Save result as document
+      return w.saveResultDocument(ctx, ticker, result)
+  }
   ```
 
-#### 7.3 Create Job Definition
-- [ ] Create `jobs/stock-rating.toml`
+#### 2.2 CDS Worker
+- [ ] Create `internal/queue/workers/rating_cds_worker.go`
+- [ ] Reads: `asx-stock-data` + `asx-announcement-summary` documents
+- [ ] Calls: `rating.CalculateCDS()`
+- [ ] Outputs: `rating-cds` document
+
+#### 2.3 Score Workers
+- [ ] Create `internal/queue/workers/rating_nfr_worker.go`
+- [ ] Create `internal/queue/workers/rating_pps_worker.go`
+- [ ] Create `internal/queue/workers/rating_vrs_worker.go`
+- [ ] Create `internal/queue/workers/rating_ob_worker.go`
+
+Each reads required documents, calls service, outputs score document.
+
+#### 2.4 Composite Rating Worker
+- [ ] Create `internal/queue/workers/rating_composite_worker.go`
+- [ ] Reads: All score documents (`rating-bfs`, `rating-cds`, `rating-nfr`, etc.)
+- [ ] Calls: `rating.CalculateRating()`
+- [ ] Outputs: `stock-rating` document
+
+#### 2.5 Register Workers
+- [ ] Update `internal/models/worker_type.go`:
+  ```go
+  WorkerTypeRatingBFS       WorkerType = "rating_bfs"
+  WorkerTypeRatingCDS       WorkerType = "rating_cds"
+  WorkerTypeRatingNFR       WorkerType = "rating_nfr"
+  WorkerTypeRatingPPS       WorkerType = "rating_pps"
+  WorkerTypeRatingVRS       WorkerType = "rating_vrs"
+  WorkerTypeRatingOB        WorkerType = "rating_ob"
+  WorkerTypeRatingComposite WorkerType = "rating_composite"
+  ```
+- [ ] Register in worker factory
+
+### Deliverables
+- 7 rating workers
+- Worker registration
+- Integration with existing document storage
+
+---
+
+## Stage 3: Job Definition
+
+**Goal:** Create job definition that orchestrates the rating flow.
+
+### Tasks
+
+#### 3.1 Create Rating Job Definition
+- [ ] Create `deployments/common/job-definitions/stock-rating.toml`
   ```toml
-  [job]
+  id = "stock-rating"
   name = "Stock Rating"
+  type = "orchestrator"
   description = "Rate stocks using investability framework"
+  tags = ["rating", "analysis"]
 
   [config]
-  variables = []  # Tickers injected at runtime
+  variables = [
+      { ticker = "GNP" },
+      { ticker = "SKS" },
+  ]
 
-  [[steps]]
-  name = "orchestrate_rating"
-  type = "orchestrator"
+  # Step 1: Collect data (existing workers)
+  [step.fetch_fundamentals]
+  type = "market_fundamentals"
+  description = "Fetch stock fundamentals"
+  on_error = "continue"
 
-  [steps.config]
-  goal = "Rate each stock and generate a report"
-  thinking_level = "MEDIUM"
+  [step.fetch_announcements]
+  type = "market_announcements"
+  description = "Fetch ASX announcements"
+  depends = "fetch_fundamentals"
+  on_error = "continue"
+
+  [step.fetch_prices]
+  type = "market_data"
+  description = "Fetch price data"
+  depends = "fetch_fundamentals"
+  on_error = "continue"
+
+  # Step 2: Calculate gate scores
+  [step.calculate_bfs]
+  type = "rating_bfs"
+  description = "Calculate Business Foundation Score"
+  depends = "fetch_fundamentals"
+
+  [step.calculate_cds]
+  type = "rating_cds"
+  description = "Calculate Capital Discipline Score"
+  depends = "fetch_announcements"
+
+  # Step 3: Calculate component scores (only if gate passes)
+  [step.calculate_nfr]
+  type = "rating_nfr"
+  description = "Calculate Narrative-to-Fact Ratio"
+  depends = "fetch_announcements,fetch_prices"
+
+  [step.calculate_pps]
+  type = "rating_pps"
+  description = "Calculate Price Progression Score"
+  depends = "fetch_announcements,fetch_prices"
+
+  [step.calculate_vrs]
+  type = "rating_vrs"
+  description = "Calculate Volatility Regime Stability"
+  depends = "fetch_announcements,fetch_prices"
+
+  [step.calculate_ob]
+  type = "rating_ob"
+  description = "Calculate Optionality Bonus"
+  depends = "fetch_announcements,calculate_bfs"
+
+  # Step 4: Composite rating
+  [step.calculate_rating]
+  type = "rating_composite"
+  description = "Calculate final investability rating"
+  depends = "calculate_bfs,calculate_cds,calculate_nfr,calculate_pps,calculate_vrs,calculate_ob"
   output_tags = ["stock-rating"]
 
-  [[steps.config.available_tools]]
-  name = "get_announcements"
-  worker = "rating_data"
-  description = "Fetch ASX announcements for a ticker"
-
-  [[steps.config.available_tools]]
-  name = "get_prices"
-  worker = "rating_data"
-  description = "Fetch OHLCV price data for a ticker"
-
-  # ... (all 13 tools)
+  # Step 5: Email report
+  [step.email_report]
+  type = "email"
+  description = "Email rating report"
+  depends = "calculate_rating"
+  to = "user@example.com"
+  subject = "Stock Rating Report"
+  list_tags = ["stock-rating"]
   ```
 
-#### 7.4 Update Orchestrator Planner Prompt
-- [ ] Add rating-specific guidance to `plannerSystemPrompt`
-- [ ] Document tool dependencies:
-  - Data tools run first (parallel)
-  - Gate tools depend on data tools
-  - Score tools depend on data tools AND gate pass
-  - Rating tool depends on all scores
-  - Output tools depend on rating
-
-#### 7.5 Integration Tests
-- [ ] Full flow: "Rate GNP" → markdown report
-- [ ] Batch: "Rate GNP, SKS, EXR"
-- [ ] Gate failure handling (early exit)
-- [ ] Verify document tagging for downstream consumers
+#### 3.2 Test Job Execution
+- [ ] Run job with test tickers
+- [ ] Verify all steps execute in order
+- [ ] Verify documents created with correct tags
 
 ### Deliverables
-- Tool execution workers
-- Worker registration
 - Job definition file
-- Integration tests
+- Working end-to-end flow
 
 ---
 
-## Stage 8: Cleanup
+## Stage 4: Output & Reporting
 
-**Goal:** Remove old code and verify system integrity.
+**Goal:** Generate formatted reports from rating documents.
 
 ### Tasks
 
-#### 8.1 Delete Old Signals
-- [ ] Delete `internal/signals/` directory entirely:
-  - `pbas.go`, `vli.go`, `regime.go`, `cooked.go`
-  - `rs.go`, `quality.go`, `justified.go`
-  - `computer.go`, `types.go`
+#### 4.1 Report Generator Worker
+- [ ] Create `internal/queue/workers/rating_report_worker.go`
+- [ ] Reads: All `stock-rating` documents
+- [ ] Generates: Markdown report with table + details
+- [ ] Outputs: `rating-report` document
 
-#### 8.2 Delete Old Workers
-- [ ] Delete from `internal/queue/workers/`:
-  - `market_data_worker.go`
-  - `market_fundamentals_worker.go`
-  - `market_announcements_worker.go`
-  - `market_signal_worker.go`
-  - `market_assessor_worker.go`
-  - `signal_analysis_worker.go`
-  - `signal_analysis_classifier.go`
-  - `market_base.go` (if no longer needed)
+#### 4.2 Report Templates
+- [ ] Create `internal/templates/rating/`
+- [ ] `table.md.tmpl` - Summary table
+- [ ] `detailed.md.tmpl` - Per-ticker breakdown
 
-#### 8.3 Delete Unused Schemas
-- [ ] Review `internal/schemas/`
-- [ ] Delete schemas not used by new tools
+#### 4.3 LLM Summary (Optional)
+- [ ] Add summary generation to report worker
+- [ ] Use LLM service to summarize key announcements
 
-#### 8.4 Update Imports
-- [ ] Find all imports of deleted packages
-- [ ] Update or remove dependent code
+### Deliverables
+- Report generation worker
+- Markdown templates
+- Email-ready output
 
-#### 8.5 Verification
+---
+
+## Stage 5: Cleanup
+
+**Goal:** Remove old code, verify system integrity.
+
+### Tasks
+
+#### 5.1 Delete Old Signals
+- [ ] Delete `internal/signals/` directory
+
+#### 5.2 Move MQS to Services
+- [ ] Move `mqs_analyzer.go` logic to `internal/services/mqs/`
+- [ ] Move `mqs_classifier.go` logic to `internal/services/mqs/`
+- [ ] Move `mqs_types.go` to `internal/services/mqs/`
+- [ ] Update workers to call service
+
+#### 5.3 Verify Build
 - [ ] All tests pass
 - [ ] No orphaned imports
-- [ ] Application builds cleanly
+- [ ] Clean build
 
 ### Deliverables
 - Clean codebase
-- No dead code
 - Passing build
 
 ---
 
-## Stage 9: Verification
+## Stage 6: Verification
 
 **Goal:** End-to-end testing against expected outcomes.
 
 ### Tasks
 
-#### 9.1 Golden Test Cases
+#### 6.1 Golden Test Cases
 | Ticker | Expected Label | Gate | Investability |
 |--------|----------------|------|---------------|
 | BHP | LOW_ALPHA | Pass | 40-50 |
@@ -782,14 +465,12 @@ Each worker:
 | GNP | INVESTABLE | Pass | 65-75 |
 | SKS | INVESTABLE | Pass | 65-75 |
 
-#### 9.2 Integration Tests
-- [ ] Create `tests/integration/rating_test.go`
-- [ ] Test each golden case
-- [ ] Verify output schemas
-- [ ] Verify report generation
+#### 6.2 Integration Tests
+- [ ] Create `test/api/rating_test.go`
+- [ ] Test each golden case end-to-end
+- [ ] Verify document output schemas
 
-#### 9.3 Performance
-- [ ] Benchmark tool execution
+#### 6.3 Performance
 - [ ] Full rating flow <30s per ticker
 - [ ] Batch processing throughput
 
@@ -802,34 +483,28 @@ Each worker:
 ## Implementation Order
 
 ```
-Stage 1: Foundation          ─── Types, interfaces, registry
+Stage 1: Rating Service      ─── Pure calculation functions
           ↓
-Stage 2: Data Adapters       ─── load_announcements, load_prices, load_fundamentals
+Stage 2: Rating Workers      ─── Document I/O, call services
           ↓
-Stage 3: Gate Tools          ─── calculate_bfs, calculate_cds
+Stage 3: Job Definition      ─── Wire workers together
           ↓
-Stage 4: Score Tools         ─── calculate_nfr, calculate_pps, calculate_vrs, calculate_ob
+Stage 4: Output & Reporting  ─── Generate reports
           ↓
-Stage 5: Rating Tool         ─── calculate_rating
+Stage 5: Cleanup             ─── Delete old code, move MQS
           ↓
-Stage 6: Output Tools        ─── generate_summary, generate_report, generate_email
-          ↓
-Stage 7: Orchestration       ─── Register tools with existing orchestrator
-          ↓
-Stage 8: Cleanup             ─── Delete old code
-          ↓
-Stage 9: Verification        ─── Golden tests, benchmarks
+Stage 6: Verification        ─── Golden tests, benchmarks
 ```
 
 ## Success Criteria
 
 - [ ] All golden test cases pass
 - [ ] Full rating flow <30s per ticker
-- [ ] Schema validation 100% compliant
+- [ ] Clean separation: services (pure) / workers (I/O)
 - [ ] No dead code remaining
 - [ ] Clean build with no warnings
 
 ---
 
-*Document Version: 2.0*
+*Document Version: 3.0*
 *Created: 2026-01-07*
