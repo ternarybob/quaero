@@ -180,67 +180,114 @@ internal/tools/
 
 ---
 
-## Stage 2: Data Tools
+## Stage 2: Data Adapters
 
-**Goal:** Implement data fetching tools using existing EODHD/ASX services.
+**Goal:** Create adapters that read documents from existing workers and transform to rating tool schemas.
+
+Data fetching already exists via job definitions:
+- `market_data` worker → prices, technicals (tags: `market-data`, `<ticker>`)
+- `market_fundamentals` worker → stock data (tags: `asx-stock-data`, `<ticker>`)
+- `market_announcements` worker → announcements (tags: `asx-announcement-summary`, `<ticker>`)
+
+The rating job will call these existing workers first, then adapters transform their output.
 
 ### Tasks
 
-#### 2.1 Implement `get_announcements`
+#### 2.1 Implement `load_announcements` Adapter
 - [ ] Create `internal/tools/data/announcements.go`
-- [ ] Input: `{ticker, months, types[]}`
-- [ ] Output:
+- [ ] Input: `{ticker}` - reads from document storage
+- [ ] Reads documents tagged `["asx-announcement-summary", "<ticker>"]`
+- [ ] Transforms to rating schema:
   ```json
   {
     "ticker": "GNP",
     "count": 54,
     "period_start": "2023-01-07",
     "period_end": "2026-01-07",
-    "announcements": [...]
+    "announcements": [
+      {
+        "date": "2025-12-15",
+        "headline": "...",
+        "type": "CONTRACT",
+        "is_price_sensitive": true
+      }
+    ]
   }
   ```
-- [ ] Classify announcements by type (headline keyword matching)
-- [ ] Use existing Markit Digital API via `internal/services/`
+- [ ] Classify announcement types from headline keywords:
+  - TRADING_HALT: "trading halt", "suspension"
+  - CAPITAL_RAISE: "placement", "SPP", "rights issue", "capital raise"
+  - RESULTS: "quarterly", "half year", "annual report", "4C", "4D"
+  - CONTRACT: "contract", "agreement", "awarded", "secured"
+  - OPERATIONAL: "update", "progress", "milestone"
+  - COMPLIANCE: "appendix", "change of director"
 
-#### 2.2 Implement `get_prices`
+#### 2.2 Implement `load_prices` Adapter
 - [ ] Create `internal/tools/data/prices.go`
-- [ ] Input: `{ticker, months, include_derived}`
-- [ ] Output:
+- [ ] Input: `{ticker}` - reads from document storage
+- [ ] Reads documents tagged `["market-data", "<ticker>"]`
+- [ ] Transforms to rating schema:
   ```json
   {
     "ticker": "GNP",
     "count": 756,
-    "period_start": "2023-01-07",
-    "period_end": "2026-01-07",
     "latest_close": 2.45,
-    "prices": [...]
+    "prices": [
+      {"date": "2026-01-07", "open": 2.40, "high": 2.50, "low": 2.38, "close": 2.45, "volume": 125000}
+    ]
   }
   ```
-- [ ] Compute derived metrics if requested (daily returns, 20d volatility)
-- [ ] Use existing EODHD service
+- [ ] Compute derived metrics: daily returns, 20d volatility
 
-#### 2.3 Implement `get_fundamentals`
+#### 2.3 Implement `load_fundamentals` Adapter
 - [ ] Create `internal/tools/data/fundamentals.go`
-- [ ] Input: `{ticker}`
-- [ ] Output: `Fundamentals` struct as JSON
-- [ ] Map EODHD consolidated data to schema
-- [ ] Determine `has_producing_asset` from sector/description
+- [ ] Input: `{ticker}` - reads from document storage
+- [ ] Reads documents tagged `["asx-stock-data", "<ticker>"]`
+- [ ] Transforms to rating schema (extracts fields needed for BFS/CDS):
+  ```json
+  {
+    "ticker": "GNP",
+    "company_name": "Genusplus Group Ltd",
+    "sector": "Industrials",
+    "market_cap": 250000000,
+    "shares_outstanding_current": 100000000,
+    "shares_outstanding_3y_ago": 85000000,
+    "cash_balance": 45000000,
+    "quarterly_cash_burn": 2500000,
+    "revenue_ttm": 180000000,
+    "is_profitable": true,
+    "has_producing_asset": true,
+    "data_quality": "COMPLETE"
+  }
+  ```
+- [ ] Map EODHD fields to schema
+- [ ] Infer `has_producing_asset` from sector + revenue
 - [ ] Set `data_quality` based on field completeness
 
-#### 2.4 Add Caching
-- [ ] Create `internal/tools/data/cache.go`
-- [ ] Cache key: `tool:{name}:{ticker}:{hash(params)}`
-- [ ] TTL based on exchange trading hours
-- [ ] Use existing BadgerDB storage
+#### 2.4 Document Query Helper
+- [ ] Create `internal/tools/data/query.go`
+- [ ] `FindDocument(tags []string) (*models.Document, error)`
+- [ ] `ParseDocumentJSON(doc *models.Document, target interface{}) error`
+- [ ] Handle missing documents gracefully
 
 #### 2.5 Tests
-- [ ] Unit tests with mocked API responses
+- [ ] Test each adapter with sample documents
 - [ ] Verify output schema compliance
+- [ ] Test announcement type classification
 
 ### Deliverables
-- 3 data tools
-- Caching layer
+- 3 data adapters (read from storage, transform to schema)
+- Document query helper
 - Unit tests
+
+### Note on Job Flow
+The rating job definition will be structured as:
+```
+Step 1: market_fundamentals (existing worker) → creates asx-stock-data docs
+Step 2: market_announcements (existing worker) → creates asx-announcement-summary docs
+Step 3: market_data (existing worker) → creates market-data docs
+Step 4: orchestrator with rating tools → reads docs, calculates scores
+```
 
 ---
 
@@ -757,7 +804,7 @@ Each worker:
 ```
 Stage 1: Foundation          ─── Types, interfaces, registry
           ↓
-Stage 2: Data Tools          ─── get_announcements, get_prices, get_fundamentals
+Stage 2: Data Adapters       ─── load_announcements, load_prices, load_fundamentals
           ↓
 Stage 3: Gate Tools          ─── calculate_bfs, calculate_cds
           ↓
