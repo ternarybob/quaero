@@ -98,7 +98,7 @@ func TestWorkerFundamentalsSingle(t *testing.T) {
 	}
 
 	// Save output
-	if err := SaveWorkerOutput(t, env, helper, tags, 1); err != nil {
+	if err := SaveWorkerOutput(t, env, helper, tags, ticker); err != nil {
 		t.Logf("Warning: failed to save worker output: %v", err)
 	}
 	AssertResultFilesExist(t, env, 1)
@@ -208,8 +208,14 @@ func TestWorkerFundamentalsMulti(t *testing.T) {
 		isValid := ValidateSchema(t, metadata, FundamentalsSchema)
 		assert.True(t, isValid, "Output for %s should comply with schema", code)
 
+		// Save output with ticker code (e.g., output_BHP.md)
+		SaveWorkerOutput(t, env, helper, tags, code)
+
 		t.Logf("PASS: Validated output for %s", code)
 	}
+
+	// Assert result files exist for all tickers
+	AssertResultFilesExist(t, env, len(testCodes))
 
 	// Check for service errors
 	AssertNoServiceErrors(t, env)

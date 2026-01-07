@@ -62,24 +62,21 @@ func (w *MarketCompetitorWorker) GetType() models.WorkerType {
 
 // Init performs initialization for the competitor analysis step.
 // Validates config and resolves API key.
+// Supports both step config and job-level variables for ticker configuration
 func (w *MarketCompetitorWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for competitor_analysis")
+		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract target ASX code (required)
-	asxCode, ok := stepConfig["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return nil, fmt.Errorf("asx_code is required in step config")
+	// Collect tickers - supports both step config and job-level variables
+	tickers := collectTickersWithJobDef(stepConfig, jobDef)
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config or job variables")
 	}
-	asxCode = strings.ToUpper(asxCode)
 
-	// Extract prompt for competitor identification
-	prompt, _ := stepConfig["prompt"].(string)
-	if prompt == "" {
-		prompt = fmt.Sprintf("Identify the top 3-5 ASX-listed competitors for %s", asxCode)
-	}
+	// Extract prompt template for competitor identification
+	promptTemplate, _ := stepConfig["prompt"].(string)
 
 	// Get API key from step config
 	var apiKey string
@@ -121,27 +118,41 @@ func (w *MarketCompetitorWorker) Init(ctx context.Context, step models.JobStep, 
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Str("asx_code", asxCode).
-		Str("prompt", prompt).
+		Int("ticker_count", len(tickers)).
 		Msg("Competitor analysis worker initialized")
 
+	// Create work items for each ticker
+	workItems := make([]interfaces.WorkItem, len(tickers))
+	for i, ticker := range tickers {
+		workItems[i] = interfaces.WorkItem{
+			ID:   ticker.Code,
+			Name: fmt.Sprintf("Analyze competitors for %s", ticker.String()),
+			Type: "market_competitor",
+			Config: map[string]interface{}{
+				"asx_code": ticker.Code,
+				"period":   period,
+			},
+		}
+	}
+
 	return &interfaces.WorkerInitResult{
-		WorkItems:            []interfaces.WorkItem{},
-		TotalCount:           0,                                   // Will be determined after LLM call
-		Strategy:             interfaces.ProcessingStrategyInline, // Execute inline
+		WorkItems:            workItems,
+		TotalCount:           len(tickers),
+		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"asx_code":    asxCode,
-			"prompt":      prompt,
-			"api_key":     apiKey,
-			"output_tags": outputTags,
-			"period":      period,
-			"step_config": stepConfig,
+			"tickers":         tickers,
+			"prompt_template": promptTemplate,
+			"api_key":         apiKey,
+			"output_tags":     outputTags,
+			"period":          period,
+			"step_config":     stepConfig,
 		},
 	}, nil
 }
 
 // CreateJobs uses LLM to identify competitors, then fetches stock data inline.
+// Supports multiple target tickers - processes each sequentially.
 func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
@@ -151,21 +162,68 @@ func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.Job
 		}
 	}
 
-	asxCode, _ := initResult.Metadata["asx_code"].(string)
-	prompt, _ := initResult.Metadata["prompt"].(string)
+	// Get tickers from metadata
+	tickers, _ := initResult.Metadata["tickers"].([]common.Ticker)
+	promptTemplate, _ := initResult.Metadata["prompt_template"].(string)
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 	outputTags, _ := initResult.Metadata["output_tags"].([]string)
 	period, _ := initResult.Metadata["period"].(string)
 
+	// Log overall step start
+	tickerCount := len(tickers)
+	if w.jobMgr != nil {
+		tickerStrs := make([]string, tickerCount)
+		for i, t := range tickers {
+			tickerStrs[i] = t.String()
+		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Analyzing competitors for %d tickers: %s", tickerCount, strings.Join(tickerStrs, ", ")))
+	}
+
+	// Process each target ticker sequentially
+	var lastErr error
+	successCount := 0
+	for _, ticker := range tickers {
+		err := w.processTicker(ctx, ticker.Code, promptTemplate, apiKey, outputTags, period, stepID, jobDef)
+		if err != nil {
+			w.logger.Error().Err(err).Str("ticker", ticker.String()).Msg("Failed to analyze competitors")
+			lastErr = err
+			// Continue with next ticker (on_error = "continue" behavior)
+			continue
+		}
+		successCount++
+	}
+
+	// Log overall completion
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Completed %d/%d target tickers successfully", successCount, tickerCount))
+	}
+
+	// Return error only if ALL tickers failed
+	if successCount == 0 && lastErr != nil {
+		return "", fmt.Errorf("all target tickers failed, last error: %w", lastErr)
+	}
+
+	return stepID, nil
+}
+
+// processTicker analyzes competitors for a single target ticker
+func (w *MarketCompetitorWorker) processTicker(ctx context.Context, asxCode, promptTemplate, apiKey string, outputTags []string, period, stepID string, jobDef models.JobDefinition) error {
 	w.logger.Info().
 		Str("phase", "run").
-		Str("step_name", step.Name).
 		Str("asx_code", asxCode).
 		Str("step_id", stepID).
-		Msg("Starting competitor analysis")
+		Msg("Starting competitor analysis for ticker")
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Analyzing competitors for ASX:%s", asxCode))
+	}
+
+	// Build prompt for this ticker
+	prompt := promptTemplate
+	if prompt == "" {
+		prompt = fmt.Sprintf("Identify the top 3-5 ASX-listed competitors for %s", asxCode)
 	}
 
 	// Step 1: Use LLM to identify competitors
@@ -173,17 +231,17 @@ func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.Job
 	if err != nil {
 		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to identify competitors")
 		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to identify competitors: %v", err))
+			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("ASX:%s - Failed to identify competitors: %v", asxCode, err))
 		}
-		return "", fmt.Errorf("failed to identify competitors: %w", err)
+		return fmt.Errorf("failed to identify competitors for %s: %w", asxCode, err)
 	}
 
 	if len(competitors) == 0 {
 		w.logger.Warn().Str("asx_code", asxCode).Msg("No competitors identified")
 		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "warn", "No competitors identified by LLM")
+			w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("ASX:%s - No competitors identified by LLM", asxCode))
 		}
-		return stepID, nil
+		return nil // Not an error - just no competitors found
 	}
 
 	w.logger.Info().
@@ -192,11 +250,11 @@ func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.Job
 		Msg("Competitors identified, fetching stock data")
 
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Identified %d competitors: %s", len(competitors), strings.Join(competitors, ", ")))
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Identified %d competitors: %s", asxCode, len(competitors), strings.Join(competitors, ", ")))
 	}
 
 	// Step 2: Fetch stock data for each competitor inline using MarketFundamentalsWorker
-	successCount := 0
+	fetchSuccessCount := 0
 	for _, competitorCode := range competitors {
 		err := w.fetchCompetitorStockData(ctx, competitorCode, period, outputTags, stepID, jobDef)
 		if err != nil {
@@ -206,21 +264,21 @@ func (w *MarketCompetitorWorker) CreateJobs(ctx context.Context, step models.Job
 			}
 			continue
 		}
-		successCount++
+		fetchSuccessCount++
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetched stock data for ASX:%s", competitorCode))
 		}
 	}
 
-	if successCount == 0 {
-		return "", fmt.Errorf("failed to fetch any competitor stock data")
+	if fetchSuccessCount == 0 && len(competitors) > 0 {
+		return fmt.Errorf("failed to fetch any competitor stock data for %s", asxCode)
 	}
 
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: fetched stock data for %d/%d competitors", successCount, len(competitors)))
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Completed: fetched stock data for %d/%d competitors", asxCode, fetchSuccessCount, len(competitors)))
 	}
 
-	return stepID, nil
+	return nil
 }
 
 // fetchCompetitorStockData fetches stock data for a single competitor using MarketFundamentalsWorker
@@ -397,15 +455,9 @@ func (w *MarketCompetitorWorker) ReturnsChildJobs() bool {
 }
 
 // ValidateConfig validates step configuration
+// Config can be nil if tickers will be provided via job-level variables.
 func (w *MarketCompetitorWorker) ValidateConfig(step models.JobStep) error {
-	if step.Config == nil {
-		return fmt.Errorf("competitor_analysis step requires config")
-	}
-
-	asxCode, ok := step.Config["asx_code"].(string)
-	if !ok || asxCode == "" {
-		return fmt.Errorf("competitor_analysis step requires 'asx_code' in config")
-	}
-
+	// Config is optional - tickers can come from job-level variables
+	// Full validation happens in Init() when we have access to jobDef
 	return nil
 }

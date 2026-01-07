@@ -80,7 +80,7 @@ func TestWorkerDataCollectionSingle(t *testing.T) {
 	AssertNonZeroStockData(t, metadata)
 
 	// Save actual stock data output (REQ-1, REQ-4)
-	SaveWorkerOutput(t, env, helper, stockDataTags, 1)
+	SaveWorkerOutput(t, env, helper, stockDataTags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -247,7 +247,7 @@ func TestWorkerDataCollectionAllWorkers(t *testing.T) {
 	AssertNonZeroStockData(t, metadata)
 
 	// Save actual stock data output (REQ-1, REQ-4)
-	SaveWorkerOutput(t, env, helper, stockDataTags, 1)
+	SaveWorkerOutput(t, env, helper, stockDataTags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 

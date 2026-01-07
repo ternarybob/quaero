@@ -86,7 +86,7 @@ func TestWorkerAssessorSingle(t *testing.T) {
 		t.Logf("PASS: Assessment score is %.2f", score)
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -108,7 +108,7 @@ func TestWorkerAssessorMulti(t *testing.T) {
 
 	stocks := []string{"BHP", "CSL"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-assessor-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -147,7 +147,7 @@ func TestWorkerAssessorMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, AssessorSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated assessment for %s", stock)
 		})
 	}

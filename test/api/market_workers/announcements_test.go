@@ -73,18 +73,19 @@ func TestWorkerAnnouncementsSingle(t *testing.T) {
 	summaryTags := []string{"asx-announcement-summary", strings.ToLower(ticker)}
 	metadata, content := AssertOutputNotEmpty(t, helper, summaryTags)
 
-	// Assert content contains expected sections (updated for conviction-based rating)
+	// Assert content contains expected sections (MQS Framework)
 	expectedSections := []string{
-		"ASX Announcements Summary",
-		"Announcements Analysis",              // Consolidated signal analysis table
-		"Signal Analysis & Conviction Rating", // REQ-5: New conviction-based rating
-		"Mandatory Business Update Calendar",  // REQ-2: Business calendar section
+		"Management Quality Score Analysis",
+		"Management Quality Score",
+		"Information Integrity",
+		"Conviction Analysis",
+		"Price Retention Analysis",
 	}
 	AssertOutputContains(t, content, expectedSections)
 
-	// Assert Signal Breakdown section is present (new format)
-	if strings.Contains(content, "Signal Breakdown") {
-		t.Log("PASS: Signal Breakdown section present")
+	// Assert MQS tier is present
+	if strings.Contains(content, "TIER_1_OPERATOR") || strings.Contains(content, "TIER_2_HONEST_STRUGGLER") || strings.Contains(content, "TIER_3_PROMOTER") {
+		t.Log("PASS: MQS Tier classification present")
 	}
 
 	// Assert all required sections are present (REQ-3: schema consistency)
@@ -96,56 +97,44 @@ func TestWorkerAnnouncementsSingle(t *testing.T) {
 		}
 	}
 
-	// Assert schema compliance
+	// Assert schema compliance (MQS Framework)
 	isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
-	assert.True(t, isValid, "Output should comply with announcements schema")
+	assert.True(t, isValid, "Output should comply with MQS announcements schema")
 
-	// Assert required fields
-	AssertMetadataHasFields(t, metadata, []string{"asx_code", "total_count"})
+	// Assert required MQS fields
+	AssertMetadataHasFields(t, metadata, []string{"ticker", "mqs_tier", "mqs_composite", "announcements"})
 
-	// Validate announcements array
-	if announcements, ok := metadata["announcements"].([]interface{}); ok {
-		assert.Greater(t, len(announcements), 0, "Should have announcements")
-		t.Logf("PASS: Found %d announcements", len(announcements))
-
-		// Validate first announcement has required fields
-		if len(announcements) > 0 {
-			if firstAnn, ok := announcements[0].(map[string]interface{}); ok {
-				requiredFields := []string{"date", "headline", "relevance_category"}
-				for _, field := range requiredFields {
-					if _, exists := firstAnn[field]; exists {
-						t.Logf("PASS: Announcement has field '%s'", field)
-					} else {
-						t.Errorf("FAIL: Announcement missing field '%s'", field)
-					}
-				}
-
-				// Validate relevance category is valid
-				if category, ok := firstAnn["relevance_category"].(string); ok {
-					validCategories := []string{"HIGH", "MEDIUM", "LOW", "NOISE"}
-					isValidCategory := false
-					for _, vc := range validCategories {
-						if category == vc {
-							isValidCategory = true
-							break
-						}
-					}
-					assert.True(t, isValidCategory, "relevance_category should be HIGH, MEDIUM, LOW, or NOISE")
-				}
+	// Validate MQS tier is valid
+	if tier, ok := metadata["mqs_tier"].(string); ok {
+		validTiers := []string{"TIER_1_OPERATOR", "TIER_2_HONEST_STRUGGLER", "TIER_3_PROMOTER"}
+		isValidTier := false
+		for _, vt := range validTiers {
+			if tier == vt {
+				isValidTier = true
+				break
 			}
 		}
+		assert.True(t, isValidTier, "mqs_tier should be TIER_1_OPERATOR, TIER_2_HONEST_STRUGGLER, or TIER_3_PROMOTER")
+		t.Logf("PASS: MQS tier is '%s'", tier)
 	}
 
-	// Validate count fields
-	countFields := []string{"total_count", "high_count", "medium_count", "low_count", "noise_count"}
-	for _, field := range countFields {
+	// Validate MQS composite score is in valid range
+	if composite, ok := metadata["mqs_composite"].(float64); ok {
+		assert.GreaterOrEqual(t, composite, 0.0, "mqs_composite should be >= 0")
+		assert.LessOrEqual(t, composite, 1.0, "mqs_composite should be <= 1")
+		t.Logf("PASS: MQS composite score is %.2f", composite)
+	}
+
+	// Validate MQS component scores
+	componentFields := []string{"leakage_score", "conviction_score", "retention_score", "saydo_score"}
+	for _, field := range componentFields {
 		if _, exists := metadata[field]; exists {
-			t.Logf("PASS: Summary has count field '%s'", field)
+			t.Logf("PASS: MQS has component field '%s'", field)
 		}
 	}
 
 	// Save output
-	SaveWorkerOutput(t, env, helper, summaryTags, 1)
+	SaveWorkerOutput(t, env, helper, summaryTags, ticker)
 	AssertResultFilesExist(t, env, 1)
 
 	// Check for service errors
@@ -170,7 +159,7 @@ func TestWorkerAnnouncementsMulti(t *testing.T) {
 	// Test stocks - run as subtests for better isolation
 	stocks := []string{"BHP", "CSL", "GNP", "EXR"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-announcements-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -193,7 +182,7 @@ func TestWorkerAnnouncementsMulti(t *testing.T) {
 			}
 
 			// Save job definition for first stock only
-			if i == 0 {
+			if stock == stocks[0] {
 				SaveJobDefinition(t, env, body)
 			}
 
@@ -226,7 +215,7 @@ func TestWorkerAnnouncementsMulti(t *testing.T) {
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
 			// Save output
-			SaveWorkerOutput(t, env, helper, summaryTags, i+1)
+			SaveWorkerOutput(t, env, helper, summaryTags, stock)
 
 			t.Logf("PASS: Validated announcements for %s", stock)
 		})

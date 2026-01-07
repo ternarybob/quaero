@@ -1,0 +1,81 @@
+# Competitor Watchlist
+# =========================================================================
+# Analyzes competitors for a watchlist of stocks using AI and emails
+# a proforma summary with links to each report in Quaero.
+#
+# WORKFLOW:
+# 1. Analyze Competitors: For each ticker, identify and fetch competitor data
+# 2. Email Report: Send proforma email listing documents with Quaero links
+#
+# TICKERS: EXR, GNP, SKS, TWR
+# OUTPUT TAG: competitor-analysis
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "competitor-watchlist"
+name = "Competitor Analysis Watchlist"
+type = "orchestrator"
+description = "Analyzes ASX-listed competitors for watchlist stocks"
+tags = ["competitor", "watchlist", "email"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Quaero"
+version = "1.0"
+created = "2026-01-07"
+updated = "2026-01-07"
+purpose = "Competitor analysis report for watchlist stocks"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+# Ticker list - add/remove as needed
+variables = [
+    { ticker = "EXR" },
+    { ticker = "GNP" },
+    { ticker = "SKS" },
+    { ticker = "TWR" },
+]
+
+# =========================================================================
+# Step 1: Analyze Competitors (per ticker)
+# =========================================================================
+# Uses AI to identify competitors and fetches their stock data
+# Creates documents tagged ['competitor-analysis', '<ticker>']
+# Requires Gemini API key
+
+[step.analyze_competitors]
+type = "market_competitor"
+description = "Identify and analyze competitors for each watchlist stock"
+on_error = "continue"
+api_key = "{gemini_api_key}"
+period = "Y1"
+output_tags = ["competitor-analysis"]
+
+# =========================================================================
+# Step 2: Email Report
+# =========================================================================
+# Sends proforma email with document links (not full content)
+# Documents are listed with links to view in Quaero
+
+[step.email_report]
+type = "email"
+description = "Email competitor analysis report with document links"
+depends = "analyze_competitors"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Competitor Analysis - Watchlist Summary"
+style = "proforma"
+list_tags = ["competitor-analysis"]
+base_url = "http://localhost:18080"

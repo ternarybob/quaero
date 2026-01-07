@@ -878,13 +878,29 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
+	// Create data providers for inter-worker data sharing
+	fundamentalsProvider := workers.NewFundamentalsProvider(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		a.Config.Jobs.Debug,
+	)
+	priceProvider := workers.NewPriceProvider(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+
 	// Register Market Announcements worker (company announcements via Markit API)
 	marketAnnouncementsWorker := workers.NewMarketAnnouncementsWorker(
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 		a.Config.Jobs.Debug,
 		a.ProviderFactory,
+		fundamentalsProvider,
+		priceProvider,
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")

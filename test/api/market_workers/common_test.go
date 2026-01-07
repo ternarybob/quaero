@@ -54,18 +54,17 @@ var (
 		},
 	}
 
-	// AnnouncementsSchema for market_announcements worker
+	// AnnouncementsSchema for market_announcements worker (MQS Framework)
 	AnnouncementsSchema = WorkerSchema{
-		RequiredFields: []string{"asx_code", "announcements", "total_count"},
-		OptionalFields: []string{"high_count", "medium_count", "low_count", "noise_count"},
+		RequiredFields: []string{"ticker", "mqs_tier", "mqs_composite", "announcements"},
+		OptionalFields: []string{"leakage_score", "conviction_score", "retention_score", "saydo_score", "mqs_confidence"},
 		FieldTypes: map[string]string{
-			"asx_code":      "string",
-			"announcements": "array",
-			"total_count":   "number",
+			"ticker":        "string",
+			"mqs_tier":      "string",
+			"mqs_composite": "number",
+			"announcements": "number",
 		},
-		ArraySchemas: map[string][]string{
-			"announcements": {"date", "headline", "relevance_category"},
-		},
+		ArraySchemas: map[string][]string{},
 	}
 
 	// DataSchema for market_data worker
@@ -447,7 +446,8 @@ func CombineMultiStockResults(results []MultiStockResult) (map[string]interface{
 // =============================================================================
 
 // SaveWorkerOutput saves worker output to results directory
-func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, tags []string, runNumber int) error {
+// tickerCode is used as suffix for output files (e.g., output_BHP.md)
+func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, tags []string, tickerCode string) error {
 	resultsDir := env.GetResultsDir()
 	if resultsDir == "" {
 		return fmt.Errorf("results directory not available")
@@ -489,9 +489,9 @@ func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 		t.Logf("Saved output.md to: %s", mdPath)
 	}
 
-	// Save numbered output
-	numberedMdPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber))
-	os.WriteFile(numberedMdPath, []byte(doc.ContentMarkdown), 0644)
+	// Save ticker-named output (e.g., output_BHP.md)
+	tickerMdPath := filepath.Join(resultsDir, fmt.Sprintf("output_%s.md", strings.ToUpper(tickerCode)))
+	os.WriteFile(tickerMdPath, []byte(doc.ContentMarkdown), 0644)
 
 	// Save output.json
 	if doc.Metadata != nil {
@@ -504,10 +504,10 @@ func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 			}
 		}
 
-		// Save numbered JSON
-		numberedJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+		// Save ticker-named JSON (e.g., output_BHP.json)
+		tickerJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%s.json", strings.ToUpper(tickerCode)))
 		if data, err := json.MarshalIndent(doc.Metadata, "", "  "); err == nil {
-			os.WriteFile(numberedJsonPath, data, 0644)
+			os.WriteFile(tickerJsonPath, data, 0644)
 		}
 	}
 
@@ -741,12 +741,13 @@ func AssertSectionConsistency(t *testing.T, content1, content2 string, requiredS
 	return allConsistent
 }
 
-// AnnouncementsRequiredSections defines the sections that must be present in announcements output
+// AnnouncementsRequiredSections defines the sections that must be present in announcements output (MQS Framework)
 var AnnouncementsRequiredSections = []string{
-	"## Executive Summary",
-	"## Signal Analysis & Conviction Rating", // Updated from "Overall Non-FY Impact Rating"
-	"## Mandatory Business Update Calendar",
-	"### Signal Breakdown", // New required section
+	"## Management Quality Score",
+	"## Information Integrity (Leakage Analysis)",
+	"## Conviction Analysis",
+	"## Price Retention Analysis",
+	"## Say-Do Analysis",
 }
 
 // AssertResultFilesExist validates that result files exist with content

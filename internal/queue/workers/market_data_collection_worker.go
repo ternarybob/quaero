@@ -81,10 +81,16 @@ func NewMarketDataCollectionWorker(
 	// Note: announcementsWorker gets nil providerFactory as AI summary is not needed in collection mode
 	// API keys are resolved at runtime from KV store by each worker
 	fundamentalsWorker := NewMarketFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
-	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, logger, jobMgr, debugEnabled, nil)
 	marketDataWorker := NewMarketDataWorker(documentStorage, kvStorage, logger, jobMgr)
 	directorInterestWorker := NewMarketDirectorInterestWorker(documentStorage, logger, jobMgr)
 	competitorWorker := NewMarketCompetitorWorker(documentStorage, kvStorage, jobMgr, logger, debugEnabled)
+
+	// Create data providers for inter-worker data sharing
+	fundamentalsProvider := NewFundamentalsProvider(documentStorage, kvStorage, logger, debugEnabled)
+	priceProvider := NewPriceProvider(documentStorage, kvStorage, logger)
+
+	// Create announcements worker with data providers
+	announcementsWorker := NewMarketAnnouncementsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled, nil, fundamentalsProvider, priceProvider)
 
 	return &MarketDataCollectionWorker{
 		BaseMarketWorker:       baseWorker,

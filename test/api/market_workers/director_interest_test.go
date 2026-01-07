@@ -89,7 +89,7 @@ func TestWorkerDirectorInterestSingle(t *testing.T) {
 		}
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -108,7 +108,7 @@ func TestWorkerDirectorInterestMulti(t *testing.T) {
 
 	stocks := []string{"BHP", "CSL", "GNP"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-director-interest-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -149,7 +149,7 @@ func TestWorkerDirectorInterestMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, DirectorInterestSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated director_interest for %s", stock)
 		})
 	}

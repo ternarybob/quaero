@@ -9,10 +9,12 @@ package workers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"regexp"
 	"sort"
 	"strconv"
@@ -22,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/eodhd"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -59,12 +62,15 @@ type yahooChartResponse struct {
 // MarketAnnouncementsWorker fetches ASX company announcements and stores them as documents.
 // This worker executes synchronously (no child jobs).
 type MarketAnnouncementsWorker struct {
-	documentStorage interfaces.DocumentStorage
-	logger          arbor.ILogger
-	jobMgr          *queue.Manager
-	httpClient      *http.Client
-	debugEnabled    bool
-	providerFactory *llm.ProviderFactory
+	documentStorage      interfaces.DocumentStorage
+	kvStorage            interfaces.KeyValueStorage
+	logger               arbor.ILogger
+	jobMgr               *queue.Manager
+	httpClient           *http.Client
+	debugEnabled         bool
+	providerFactory      *llm.ProviderFactory
+	fundamentalsProvider interfaces.FundamentalsDataProvider
+	priceProvider        interfaces.PriceDataProvider
 }
 
 // Compile-time assertion: MarketAnnouncementsWorker implements DefinitionWorker interface
@@ -179,20 +185,26 @@ type asxAPIResponse struct {
 // NewMarketAnnouncementsWorker creates a new ASX announcements worker
 func NewMarketAnnouncementsWorker(
 	documentStorage interfaces.DocumentStorage,
+	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
 	providerFactory *llm.ProviderFactory,
+	fundamentalsProvider interfaces.FundamentalsDataProvider,
+	priceProvider interfaces.PriceDataProvider,
 ) *MarketAnnouncementsWorker {
 	return &MarketAnnouncementsWorker{
 		documentStorage: documentStorage,
+		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		debugEnabled:    debugEnabled,
-		providerFactory: providerFactory,
+		debugEnabled:         debugEnabled,
+		providerFactory:      providerFactory,
+		fundamentalsProvider: fundamentalsProvider,
+		priceProvider:        priceProvider,
 	}
 }
 
@@ -277,7 +289,8 @@ func (w *MarketAnnouncementsWorker) Init(ctx context.Context, step models.JobSte
 	}
 
 	// Extract limit (optional, max announcements to fetch per ticker)
-	limit := 50 // Default
+	// Default 100 to capture ~2 years of reporting cycles for Say-Do analysis
+	limit := 100 // Default
 	if l, ok := stepConfig["limit"].(float64); ok {
 		limit = int(l)
 	} else if l, ok := stepConfig["limit"].(int); ok {
@@ -525,22 +538,22 @@ func (w *MarketAnnouncementsWorker) processOneTicker(ctx context.Context, asxCod
 		Int("skipped", skippedCount).
 		Msg("ASX announcements analyzed and filtered")
 
-	// Create and save summary document (contains ALL deduplicated announcements)
-	summaryDoc := w.createSummaryDocument(ctx, analyses, asxCode, jobDef, stepID, outputTags, debug, dedupStats)
-	if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
-		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to save summary document")
+	// Create and save MQS summary document (new MQS framework)
+	mqsSummaryDoc := w.createMQSSummaryDocument(ctx, announcements, priceData, asxCode, jobDef, stepID, outputTags, debug)
+	if err := w.documentStorage.SaveDocument(mqsSummaryDoc); err != nil {
+		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to save MQS summary document")
 	} else {
 		w.logger.Info().
 			Str("asx_code", asxCode).
-			Int("announcements_in_summary", len(analyses)).
-			Msg("Saved announcement summary document")
+			Int("announcements_in_summary", len(announcements)).
+			Msg("Saved MQS announcement summary document")
 	}
 
 	// Log completion for UI
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Completed ASX:%s - %d total (%d HIGH, %d MEDIUM saved as docs, %d LOW/NOISE in summary only)",
-				asxCode, len(analyses), highCount, mediumCount, lowCount+noiseCount))
+			fmt.Sprintf("Completed ASX:%s - %d announcements analyzed with MQS framework",
+				asxCode, len(announcements)))
 	}
 
 	return nil
@@ -1009,36 +1022,35 @@ func (w *MarketAnnouncementsWorker) fetchHistoricalPrices(ctx context.Context, a
 	return w.fetchPricesFromYahoo(ctx, asxCode, period)
 }
 
-// getPricesFromStockDataDocument retrieves OHLCV data from an existing stock data document.
-// Looks for market_fundamentals documents created by MarketFundamentalsWorker.
+// getPricesFromStockDataDocument retrieves OHLCV data from the fundamentals document.
+// Uses the FundamentalsDataProvider to get cached data or generate fresh data on-demand.
 // Returns the historical_prices array from document metadata if available.
 func (w *MarketAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.Context, asxCode string) ([]OHLCV, error) {
-	upperCode := strings.ToUpper(asxCode)
+	// Use fundamentals provider to get document (with on-demand generation if needed)
+	if w.fundamentalsProvider == nil {
+		return nil, fmt.Errorf("fundamentals provider not configured")
+	}
 
-	// Look for market_fundamentals document (created by MarketFundamentalsWorker)
-	sourceType := "market_fundamentals"
-	sourceID := fmt.Sprintf("asx:%s:stock_collector", upperCode)
-
-	doc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+	ticker := fmt.Sprintf("ASX:%s", strings.ToUpper(asxCode))
+	result, err := w.fundamentalsProvider.GetFundamentals(ctx, ticker)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stock data document: %w", err)
+		return nil, fmt.Errorf("failed to get fundamentals data: %w", err)
 	}
-	if doc == nil {
-		return nil, fmt.Errorf("no market_fundamentals document found for %s", asxCode)
+	if result.Document == nil {
+		return nil, fmt.Errorf("no fundamentals document available for %s", asxCode)
 	}
 
-	// Check if document is fresh enough (within 24 hours)
-	if doc.LastSynced != nil {
-		if time.Since(*doc.LastSynced) > 24*time.Hour {
-			w.logger.Warn().
-				Str("asx_code", asxCode).
-				Str("last_synced", doc.LastSynced.Format("2006-01-02 15:04")).
-				Msg("Stock data document is stale (>24h), using Yahoo Finance fallback")
-			return nil, fmt.Errorf("stock data document is stale")
-		}
-	}
+	w.logger.Debug().
+		Str("asx_code", asxCode).
+		Str("status", string(result.Status)).
+		Msg("Retrieved fundamentals document via provider")
 
 	// Extract historical_prices from metadata
+	return w.extractPricesFromDocument(result.Document)
+}
+
+// extractPricesFromDocument extracts OHLCV data from a document's metadata.
+func (w *MarketAnnouncementsWorker) extractPricesFromDocument(doc *models.Document) ([]OHLCV, error) {
 	histPrices, ok := doc.Metadata["historical_prices"].([]interface{})
 	if !ok || len(histPrices) == 0 {
 		return nil, fmt.Errorf("no historical_prices in document metadata")
@@ -1094,6 +1106,215 @@ func (w *MarketAnnouncementsWorker) getPricesFromStockDataDocument(ctx context.C
 	})
 
 	return prices, nil
+}
+
+// FundamentalsFinancialData holds annual and quarterly financial data from the fundamentals document
+type FundamentalsFinancialData struct {
+	AnnualData    []FundamentalsFinancialPeriod
+	QuarterlyData []FundamentalsFinancialPeriod
+}
+
+// FundamentalsFinancialPeriod represents financial data for a single period (matches FinancialPeriodEntry in market_fundamentals_worker.go)
+type FundamentalsFinancialPeriod struct {
+	EndDate         string  // Date string in YYYY-MM-DD format
+	PeriodType      string  // "annual" or "quarterly"
+	TotalRevenue    int64   // Revenue in currency units
+	GrossProfit     int64   // Gross profit
+	OperatingIncome int64   // Operating income
+	NetIncome       int64   // Net income (profit/loss)
+	EBITDA          int64   // EBITDA
+	TotalAssets     int64   // Total assets
+	TotalLiab       int64   // Total liabilities
+	TotalEquity     int64   // Total equity
+	OperatingCF     int64   // Operating cash flow
+	FreeCF          int64   // Free cash flow
+	GrossMargin     float64 // Gross margin percentage
+	NetMargin       float64 // Net margin percentage
+}
+
+// getFinancialsFromFundamentalsDocument retrieves annual/quarterly financial data via the FundamentalsDataProvider.
+// Uses the provider to get cached data or generate fresh data on-demand.
+// Returns nil if no document found or no financial data available.
+func (w *MarketAnnouncementsWorker) getFinancialsFromFundamentalsDocument(ctx context.Context, asxCode string) *FundamentalsFinancialData {
+	// Use fundamentals provider to get document (with on-demand generation if needed)
+	if w.fundamentalsProvider == nil {
+		w.logger.Debug().
+			Str("asx_code", asxCode).
+			Msg("Fundamentals provider not configured")
+		return nil
+	}
+
+	ticker := fmt.Sprintf("ASX:%s", strings.ToUpper(asxCode))
+	result, err := w.fundamentalsProvider.GetFundamentals(ctx, ticker)
+	if err != nil {
+		w.logger.Debug().
+			Str("asx_code", asxCode).
+			Err(err).
+			Msg("Failed to get fundamentals data via provider")
+		return nil
+	}
+	if result.Document == nil {
+		return nil
+	}
+
+	w.logger.Debug().
+		Str("asx_code", asxCode).
+		Str("status", string(result.Status)).
+		Msg("Retrieved fundamentals document via provider")
+
+	return w.extractFinancialsFromDocument(result.Document, asxCode)
+}
+
+// extractFinancialsFromDocument extracts financial data from a document's metadata.
+func (w *MarketAnnouncementsWorker) extractFinancialsFromDocument(doc *models.Document, asxCode string) *FundamentalsFinancialData {
+	result := &FundamentalsFinancialData{}
+
+	// Extract annual_data from metadata - handle both []interface{} and []FinancialPeriodEntry types
+	if annualRaw, exists := doc.Metadata["annual_data"]; exists {
+		switch annualData := annualRaw.(type) {
+		case []interface{}:
+			for _, entry := range annualData {
+				if period := parseFundamentalsFinancialPeriod(entry); period != nil {
+					result.AnnualData = append(result.AnnualData, *period)
+				}
+			}
+		case []FinancialPeriodEntry:
+			for _, entry := range annualData {
+				result.AnnualData = append(result.AnnualData, FundamentalsFinancialPeriod{
+					EndDate:         entry.EndDate,
+					PeriodType:      entry.PeriodType,
+					TotalRevenue:    entry.TotalRevenue,
+					GrossProfit:     entry.GrossProfit,
+					OperatingIncome: entry.OperatingIncome,
+					NetIncome:       entry.NetIncome,
+					EBITDA:          entry.EBITDA,
+					TotalAssets:     entry.TotalAssets,
+					TotalLiab:       entry.TotalLiab,
+					TotalEquity:     entry.TotalEquity,
+					OperatingCF:     entry.OperatingCF,
+					FreeCF:          entry.FreeCF,
+					GrossMargin:     entry.GrossMargin,
+					NetMargin:       entry.NetMargin,
+				})
+			}
+		default:
+			w.logger.Debug().
+				Str("asx_code", asxCode).
+				Str("type", fmt.Sprintf("%T", annualRaw)).
+				Msg("Unexpected type for annual_data in fundamentals document")
+		}
+	}
+
+	// Extract quarterly_data from metadata - handle both []interface{} and []FinancialPeriodEntry types
+	if quarterlyRaw, exists := doc.Metadata["quarterly_data"]; exists {
+		switch quarterlyData := quarterlyRaw.(type) {
+		case []interface{}:
+			for _, entry := range quarterlyData {
+				if period := parseFundamentalsFinancialPeriod(entry); period != nil {
+					result.QuarterlyData = append(result.QuarterlyData, *period)
+				}
+			}
+		case []FinancialPeriodEntry:
+			for _, entry := range quarterlyData {
+				result.QuarterlyData = append(result.QuarterlyData, FundamentalsFinancialPeriod{
+					EndDate:         entry.EndDate,
+					PeriodType:      entry.PeriodType,
+					TotalRevenue:    entry.TotalRevenue,
+					GrossProfit:     entry.GrossProfit,
+					OperatingIncome: entry.OperatingIncome,
+					NetIncome:       entry.NetIncome,
+					EBITDA:          entry.EBITDA,
+					TotalAssets:     entry.TotalAssets,
+					TotalLiab:       entry.TotalLiab,
+					TotalEquity:     entry.TotalEquity,
+					OperatingCF:     entry.OperatingCF,
+					FreeCF:          entry.FreeCF,
+					GrossMargin:     entry.GrossMargin,
+					NetMargin:       entry.NetMargin,
+				})
+			}
+		default:
+			w.logger.Debug().
+				Str("asx_code", asxCode).
+				Str("type", fmt.Sprintf("%T", quarterlyRaw)).
+				Msg("Unexpected type for quarterly_data in fundamentals document")
+		}
+	}
+
+	if len(result.AnnualData) == 0 && len(result.QuarterlyData) == 0 {
+		w.logger.Debug().
+			Str("asx_code", asxCode).
+			Msg("No annual/quarterly data in fundamentals document")
+		return nil
+	}
+
+	w.logger.Debug().
+		Str("asx_code", asxCode).
+		Int("annual_periods", len(result.AnnualData)).
+		Int("quarterly_periods", len(result.QuarterlyData)).
+		Msg("Extracted financial data from fundamentals document")
+
+	return result
+}
+
+// parseFundamentalsFinancialPeriod parses a single period entry from document metadata
+func parseFundamentalsFinancialPeriod(entry interface{}) *FundamentalsFinancialPeriod {
+	m, ok := entry.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	period := &FundamentalsFinancialPeriod{}
+
+	if v, ok := m["end_date"].(string); ok {
+		period.EndDate = v
+	}
+	if v, ok := m["period_type"].(string); ok {
+		period.PeriodType = v
+	}
+	if v, ok := m["total_revenue"].(float64); ok {
+		period.TotalRevenue = int64(v)
+	}
+	if v, ok := m["gross_profit"].(float64); ok {
+		period.GrossProfit = int64(v)
+	}
+	if v, ok := m["operating_income"].(float64); ok {
+		period.OperatingIncome = int64(v)
+	}
+	if v, ok := m["net_income"].(float64); ok {
+		period.NetIncome = int64(v)
+	}
+	if v, ok := m["ebitda"].(float64); ok {
+		period.EBITDA = int64(v)
+	}
+	if v, ok := m["total_assets"].(float64); ok {
+		period.TotalAssets = int64(v)
+	}
+	if v, ok := m["total_liabilities"].(float64); ok {
+		period.TotalLiab = int64(v)
+	}
+	if v, ok := m["total_equity"].(float64); ok {
+		period.TotalEquity = int64(v)
+	}
+	if v, ok := m["operating_cash_flow"].(float64); ok {
+		period.OperatingCF = int64(v)
+	}
+	if v, ok := m["free_cash_flow"].(float64); ok {
+		period.FreeCF = int64(v)
+	}
+	if v, ok := m["gross_margin"].(float64); ok {
+		period.GrossMargin = v
+	}
+	if v, ok := m["net_margin"].(float64); ok {
+		period.NetMargin = v
+	}
+
+	// Only return if we have at least some data
+	if period.EndDate == "" {
+		return nil
+	}
+
+	return period
 }
 
 // fetchPricesFromYahoo is the fallback that fetches directly from Yahoo Finance API.
@@ -2461,7 +2682,151 @@ func formatPredictedDate(t time.Time) string {
 	return fmt.Sprintf("%s-%s %d", prefix, t.Month().String(), t.Year())
 }
 
-// createSummaryDocument creates a summary document with all analyzed announcements
+// createMQSSummaryDocument creates a summary document using the new MQS framework
+func (w *MarketAnnouncementsWorker) createMQSSummaryDocument(ctx context.Context, announcements []ASXAnnouncement, prices []OHLCV, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo) *models.Document {
+	startTime := time.Now()
+
+	// Create MQS analyzer
+	analyzer := NewMQSAnalyzer(announcements, prices, asxCode, "ASX")
+
+	// Fetch fundamentals data via provider (with on-demand generation if needed)
+	fundamentals := w.getFinancialsFromFundamentalsDocument(ctx, asxCode)
+	if fundamentals != nil {
+		analyzer.SetFundamentals(fundamentals)
+		w.logger.Debug().
+			Str("asx_code", asxCode).
+			Int("annual_periods", len(fundamentals.AnnualData)).
+			Int("quarterly_periods", len(fundamentals.QuarterlyData)).
+			Msg("Loaded EODHD fundamentals for MQS analysis")
+	}
+
+	// Fetch EODHD news for matching with high-impact announcements
+	newsItems, err := w.fetchEODHDNews(ctx, asxCode)
+	if err != nil {
+		w.logger.Warn().Err(err).Str("asx_code", asxCode).Msg("Failed to fetch EODHD news")
+	} else if len(newsItems) > 0 {
+		analyzer.SetNews(newsItems)
+		w.logger.Debug().
+			Str("asx_code", asxCode).
+			Int("news_count", len(newsItems)).
+			Msg("Loaded EODHD news for high-impact announcement matching")
+	}
+
+	// Run analysis (will enrich financial results with EODHD data if available)
+	mqsOutput := analyzer.Analyze()
+
+	// Download and store PDFs for high-impact announcements
+	if len(mqsOutput.HighImpactAnnouncements) > 0 {
+		mqsOutput.HighImpactAnnouncements = w.downloadAndStoreHighImpactPDFs(ctx, mqsOutput.HighImpactAnnouncements, asxCode)
+	}
+
+	// Generate markdown content
+	markdownContent := mqsOutput.GenerateMarkdown()
+
+	// Add worker debug info
+	debug.Complete()
+	markdownContent += "\n\n---\n\n"
+	markdownContent += debug.ToMarkdown()
+
+	// Update data quality with processing time
+	mqsOutput.DataQuality.ProcessingDurationMs = time.Since(startTime).Milliseconds()
+
+	// Create document
+	now := time.Now()
+	docID := fmt.Sprintf("mqs-%s-%s", strings.ToLower(asxCode), now.Format("20060102-150405"))
+
+	// Build tags - same pattern as legacy summary document for test compatibility
+	tags := []string{"asx-announcement-summary", strings.ToLower(asxCode)}
+	tags = append(tags, fmt.Sprintf("date:%s", now.Format("2006-01-02")))
+	if jobDef != nil && len(jobDef.Tags) > 0 {
+		tags = append(tags, jobDef.Tags...)
+	}
+	tags = append(tags, outputTags...)
+	// Apply cache tags from context
+	cacheTags := queue.GetCacheTagsFromContext(ctx)
+	if len(cacheTags) > 0 {
+		tags = append(tags, cacheTags...)
+	}
+
+	doc := &models.Document{
+		ID:              docID,
+		Title:           fmt.Sprintf("MQS Analysis: ASX:%s", strings.ToUpper(asxCode)),
+		ContentMarkdown: markdownContent,
+		SourceType:      "market_announcements_mqs",
+		SourceID:        fmt.Sprintf("asx:%s:mqs", strings.ToLower(asxCode)),
+		Tags:            tags,
+		CreatedAt:       now,
+		LastSynced:      &now,
+		Metadata: map[string]interface{}{
+			"ticker":           mqsOutput.Ticker,
+			"exchange":         mqsOutput.Exchange,
+			"analysis_date":    mqsOutput.AnalysisDate.Format(time.RFC3339),
+			"period_start":     mqsOutput.PeriodStart.Format("2006-01-02"),
+			"period_end":       mqsOutput.PeriodEnd.Format("2006-01-02"),
+			"mqs_tier":         string(mqsOutput.ManagementQualityScore.Tier),
+			"mqs_composite":    mqsOutput.ManagementQualityScore.CompositeScore,
+			"mqs_confidence":   string(mqsOutput.ManagementQualityScore.Confidence),
+			"leakage_score":    mqsOutput.ManagementQualityScore.LeakageScore,
+			"conviction_score": mqsOutput.ManagementQualityScore.ConvictionScore,
+			"retention_score":  mqsOutput.ManagementQualityScore.RetentionScore,
+			"saydo_score":      mqsOutput.ManagementQualityScore.SayDoScore,
+			"announcements":    len(announcements),
+			"trading_days":     len(prices),
+			// Leakage summary
+			"leakage_high_count":  mqsOutput.LeakageSummary.HighLeakageCount,
+			"leakage_tight_count": mqsOutput.LeakageSummary.TightShipCount,
+			"leakage_ratio":       mqsOutput.LeakageSummary.LeakageRatio,
+			// Conviction summary
+			"conviction_institutional_count": mqsOutput.ConvictionSummary.InstitutionalCount,
+			"conviction_retail_hype_count":   mqsOutput.ConvictionSummary.RetailHypeCount,
+			// Retention summary
+			"retention_absorbed_count": mqsOutput.RetentionSummary.AbsorbedCount,
+			"retention_sold_count":     mqsOutput.RetentionSummary.SoldNewsCount,
+			"retention_rate":           mqsOutput.RetentionSummary.RetentionRate,
+		},
+	}
+
+	// Add high-impact announcements to metadata (past 12 months with significant market reaction)
+	if len(mqsOutput.HighImpactAnnouncements) > 0 {
+		highImpactList := make([]map[string]interface{}, 0, len(mqsOutput.HighImpactAnnouncements))
+		for _, ann := range mqsOutput.HighImpactAnnouncements {
+			highImpactList = append(highImpactList, map[string]interface{}{
+				"date":             ann.Date,
+				"headline":         ann.Headline,
+				"type":             ann.Type,
+				"price_sensitive":  ann.PriceSensitive,
+				"price_change_pct": ann.PriceChangePct,
+				"volume_ratio":     ann.VolumeRatio,
+				"day10_change_pct": ann.Day10ChangePct,
+				"retention_ratio":  ann.RetentionRatio,
+				"impact_rating":    ann.ImpactRating,
+				"pdf_url":          ann.PDFURL,
+				"document_key":     ann.DocumentKey,
+				"news_link":        ann.NewsLink,
+				"news_title":       ann.NewsTitle,
+				"news_source":      ann.NewsSource,
+				"sentiment":        ann.Sentiment,
+				"pdf_storage_key":  ann.PDFStorageKey,
+				"pdf_downloaded":   ann.PDFDownloaded,
+				"pdf_size_bytes":   ann.PDFSizeBytes,
+			})
+		}
+		doc.Metadata["high_impact_announcements"] = highImpactList
+	}
+
+	// Add job reference if available
+	if jobDef != nil {
+		doc.Metadata["job_id"] = jobDef.ID
+		doc.Metadata["job_name"] = jobDef.Name
+	}
+	if parentJobID != "" {
+		doc.Metadata["parent_job_id"] = parentJobID
+	}
+
+	return doc
+}
+
+// createSummaryDocument creates a summary document with all analyzed announcements (LEGACY)
 func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, analyses []AnnouncementAnalysis, asxCode string, jobDef *models.JobDefinition, parentJobID string, outputTags []string, debug *WorkerDebugInfo, dedupStats DeduplicationStats) *models.Document {
 	var content strings.Builder
 
@@ -3027,4 +3392,332 @@ func (w *MarketAnnouncementsWorker) createSummaryDocument(ctx context.Context, a
 	}
 
 	return doc
+}
+
+// =============================================================================
+// Financial Metrics Extraction via LLM
+// =============================================================================
+
+// extractFinancialMetrics fetches PDF content for financial result announcements
+// and uses LLM to extract structured business metrics
+// NOTE: Currently disabled - ASX PDFs require license agreement acceptance and
+// are embedded in iframes, making automated extraction complex. The Financial
+// Results History table still provides valuable market reaction data.
+func (w *MarketAnnouncementsWorker) extractFinancialMetrics(ctx context.Context, results []FinancialResult, maxResults int) {
+	// PDF extraction is currently disabled due to ASX website complexity:
+	// 1. ASX requires license agreement acceptance before showing PDFs
+	// 2. PDFs are embedded in iframes, not directly accessible
+	// 3. Would require chromedp automation + PDF text extraction library
+	//
+	// The Financial Results History table still provides valuable data:
+	// - Market reaction (Beat/Miss/Met based on price movement)
+	// - Day-of and Day+10 price changes
+	// - Volume ratios
+	// - YoY trend indicators
+	//
+	// For detailed financial metrics (Revenue, Profit, EBITDA), users should
+	// review the PDF announcements directly via the provided links.
+	w.logger.Debug().
+		Int("results_count", len(results)).
+		Msg("Financial metrics extraction disabled - ASX PDFs require manual review")
+}
+
+// NOTE: PDF extraction functions (fetchAnnouncementContent, extractMetricsWithLLM,
+// parseFinancialMetricsJSON) have been removed. ASX PDFs require license agreement
+// acceptance and are embedded in iframes, making automated extraction complex.
+// The Financial Results History table still provides valuable market reaction data.
+// For detailed financial metrics, users should review PDF announcements directly.
+
+// fetchEODHDNews fetches news articles from EODHD API for the given ticker.
+// Returns news items from the past 12 months for matching with high-impact announcements.
+func (w *MarketAnnouncementsWorker) fetchEODHDNews(ctx context.Context, asxCode string) ([]EODHDNewsItem, error) {
+	if w.kvStorage == nil {
+		w.logger.Debug().Msg("kvStorage is nil, skipping EODHD news fetch")
+		return nil, nil
+	}
+
+	// Get EODHD API key
+	apiKey, err := common.ResolveAPIKey(ctx, w.kvStorage, "eodhd_api_key", "")
+	if err != nil || apiKey == "" {
+		w.logger.Debug().Err(err).Msg("EODHD API key not available, skipping news fetch")
+		return nil, nil
+	}
+
+	// Create EODHD client
+	eodhdClient := eodhd.NewClient(apiKey, eodhd.WithLogger(w.logger))
+
+	// Fetch news for past 12 months
+	to := time.Now()
+	from := to.AddDate(-1, 0, 0)
+	symbol := fmt.Sprintf("%s.AU", strings.ToUpper(asxCode))
+
+	news, err := eodhdClient.GetNews(ctx, []string{symbol},
+		eodhd.WithDateRange(from, to),
+		eodhd.WithLimit(100),
+	)
+	if err != nil {
+		w.logger.Warn().Err(err).Str("symbol", symbol).Msg("Failed to fetch EODHD news")
+		return nil, err
+	}
+
+	// Convert to internal type
+	result := make([]EODHDNewsItem, 0, len(news))
+	for _, item := range news {
+		sentiment := "neutral"
+		if item.Sentiment != nil {
+			if item.Sentiment.Pos > item.Sentiment.Neg && item.Sentiment.Pos > 0.3 {
+				sentiment = "positive"
+			} else if item.Sentiment.Neg > item.Sentiment.Pos && item.Sentiment.Neg > 0.3 {
+				sentiment = "negative"
+			}
+		}
+
+		result = append(result, EODHDNewsItem{
+			Date:      item.Date,
+			Title:     item.Title,
+			Content:   item.Content,
+			Link:      item.Link,
+			Symbols:   item.Symbols,
+			Tags:      item.Tags,
+			Sentiment: sentiment,
+		})
+	}
+
+	w.logger.Debug().
+		Str("asx_code", asxCode).
+		Int("news_count", len(result)).
+		Msg("Fetched EODHD news for announcement matching")
+
+	return result, nil
+}
+
+// matchNewsToAnnouncement attempts to find a matching EODHD news article for an announcement.
+// Matches based on date proximity and headline similarity.
+func (w *MarketAnnouncementsWorker) matchNewsToAnnouncement(announcement ASXAnnouncement, newsItems []EODHDNewsItem) *EODHDNewsItem {
+	if len(newsItems) == 0 {
+		return nil
+	}
+
+	// Look for news within 2 days of announcement
+	for i := range newsItems {
+		item := &newsItems[i]
+		daysDiff := announcement.Date.Sub(item.Date).Hours() / 24
+		if daysDiff < -2 || daysDiff > 2 {
+			continue
+		}
+
+		// Check for headline similarity (simple substring match)
+		headlineLower := strings.ToLower(announcement.Headline)
+		titleLower := strings.ToLower(item.Title)
+
+		// Check if key words from announcement appear in news title
+		words := strings.Fields(headlineLower)
+		matchCount := 0
+		for _, word := range words {
+			if len(word) > 3 && strings.Contains(titleLower, word) {
+				matchCount++
+			}
+		}
+
+		// If at least 2 significant words match, consider it a match
+		if matchCount >= 2 {
+			return item
+		}
+
+		// Also check if news title contains the announcement headline or vice versa
+		if strings.Contains(titleLower, headlineLower) || strings.Contains(headlineLower, titleLower) {
+			return item
+		}
+	}
+
+	return nil
+}
+
+// downloadASXPDF downloads a PDF from ASX using a two-step cookie strategy.
+// ASX uses a Web Application Firewall (WAF) that requires:
+// 1. First visiting the redirect/HTML page to get session cookies
+// 2. Then requesting the actual PDF with those cookies
+// Returns the PDF content as bytes, or an error if download fails.
+func (w *MarketAnnouncementsWorker) downloadASXPDF(ctx context.Context, pdfURL string, documentKey string) ([]byte, error) {
+	if pdfURL == "" {
+		return nil, fmt.Errorf("empty PDF URL")
+	}
+
+	// Create a cookie jar to store session data
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+
+	// Create a client with the cookie jar
+	client := &http.Client{
+		Jar:     jar,
+		Timeout: 60 * time.Second,
+	}
+
+	// Step 1: Visit the redirect/HTML page first to get session cookies
+	// The pdfURL is typically in format: https://www.asx.com.au/asx/v2/statistics/displayAnnouncement.do?display=pdf&idsId=XXXXX
+	initReq, err := http.NewRequestWithContext(ctx, "GET", pdfURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create init request: %w", err)
+	}
+
+	// Set browser-like headers to bypass WAF
+	initReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	initReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	initReq.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	initReq.Header.Set("Referer", "https://www.asx.com.au/")
+
+	initResp, err := client.Do(initReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session cookies: %w", err)
+	}
+	initResp.Body.Close()
+
+	w.logger.Debug().
+		Str("pdf_url", pdfURL).
+		Int("init_status", initResp.StatusCode).
+		Msg("ASX PDF: Got session cookies")
+
+	// Step 2: Now request the actual PDF using the same client (with cookies)
+	// Construct the direct PDF URL from the document key
+	// Format: https://announcements.asx.com.au/asxpdf/YYYYMMDD/pdf/DOCUMENTKEY.pdf
+	// We need to extract the date from the original URL or use the document key
+
+	// Try the direct PDF URL first
+	directPDFURL := fmt.Sprintf("https://announcements.asx.com.au/asxpdf/%s.pdf", documentKey)
+
+	pdfReq, err := http.NewRequestWithContext(ctx, "GET", directPDFURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PDF request: %w", err)
+	}
+
+	// Set browser-like headers
+	pdfReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	pdfReq.Header.Set("Accept", "application/pdf,*/*")
+	pdfReq.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	pdfReq.Header.Set("Referer", "https://www.asx.com.au/")
+
+	pdfResp, err := client.Do(pdfReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download PDF: %w", err)
+	}
+	defer pdfResp.Body.Close()
+
+	if pdfResp.StatusCode != http.StatusOK {
+		// Try the original URL as fallback
+		pdfReq2, _ := http.NewRequestWithContext(ctx, "GET", pdfURL, nil)
+		pdfReq2.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		pdfReq2.Header.Set("Accept", "application/pdf,*/*")
+		pdfReq2.Header.Set("Referer", "https://www.asx.com.au/")
+
+		pdfResp2, err := client.Do(pdfReq2)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download PDF (fallback): %w", err)
+		}
+		defer pdfResp2.Body.Close()
+
+		if pdfResp2.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("PDF download failed with status %d", pdfResp2.StatusCode)
+		}
+
+		pdfContent, err := io.ReadAll(pdfResp2.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read PDF content: %w", err)
+		}
+
+		return pdfContent, nil
+	}
+
+	pdfContent, err := io.ReadAll(pdfResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PDF content: %w", err)
+	}
+
+	w.logger.Debug().
+		Str("document_key", documentKey).
+		Int("pdf_size", len(pdfContent)).
+		Msg("ASX PDF: Downloaded successfully")
+
+	return pdfContent, nil
+}
+
+// downloadAndStoreHighImpactPDFs downloads PDFs for high-impact announcements and stores them in KV storage.
+// Returns the updated announcements with PDF storage keys.
+func (w *MarketAnnouncementsWorker) downloadAndStoreHighImpactPDFs(ctx context.Context, announcements []HighImpactAnnouncement, asxCode string) []HighImpactAnnouncement {
+	if w.kvStorage == nil {
+		w.logger.Debug().Msg("kvStorage is nil, skipping PDF downloads")
+		return announcements
+	}
+
+	// Limit to first 10 high-impact announcements to avoid excessive downloads
+	maxDownloads := 10
+	downloadCount := 0
+
+	for i := range announcements {
+		if downloadCount >= maxDownloads {
+			break
+		}
+
+		ann := &announcements[i]
+		if ann.PDFURL == "" || ann.DocumentKey == "" {
+			continue
+		}
+
+		// Create storage key
+		storageKey := fmt.Sprintf("pdf:%s:%s", strings.ToLower(asxCode), ann.DocumentKey)
+
+		// Check if already downloaded
+		existingPDF, err := w.kvStorage.Get(ctx, storageKey)
+		if err == nil && existingPDF != "" {
+			ann.PDFStorageKey = storageKey
+			ann.PDFDownloaded = true
+			w.logger.Debug().
+				Str("storage_key", storageKey).
+				Msg("PDF already in storage, skipping download")
+			continue
+		}
+
+		// Download PDF
+		pdfContent, err := w.downloadASXPDF(ctx, ann.PDFURL, ann.DocumentKey)
+		if err != nil {
+			w.logger.Warn().
+				Err(err).
+				Str("document_key", ann.DocumentKey).
+				Str("headline", ann.Headline).
+				Msg("Failed to download PDF")
+			continue
+		}
+
+		// Store as base64 in KV storage
+		base64Content := base64.StdEncoding.EncodeToString(pdfContent)
+		description := fmt.Sprintf("ASX PDF: %s - %s", ann.Date, ann.Headline)
+
+		if err := w.kvStorage.Set(ctx, storageKey, base64Content, description); err != nil {
+			w.logger.Warn().
+				Err(err).
+				Str("storage_key", storageKey).
+				Msg("Failed to store PDF in KV storage")
+			continue
+		}
+
+		ann.PDFStorageKey = storageKey
+		ann.PDFDownloaded = true
+		ann.PDFSizeBytes = int64(len(pdfContent))
+		downloadCount++
+
+		w.logger.Info().
+			Str("storage_key", storageKey).
+			Int64("size_bytes", ann.PDFSizeBytes).
+			Str("headline", ann.Headline).
+			Msg("PDF downloaded and stored")
+	}
+
+	w.logger.Info().
+		Str("asx_code", asxCode).
+		Int("downloaded", downloadCount).
+		Int("total_high_impact", len(announcements)).
+		Msg("PDF download complete")
+
+	return announcements
 }

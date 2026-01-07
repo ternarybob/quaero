@@ -80,7 +80,7 @@ func TestWorkerMacroAll(t *testing.T) {
 		t.Logf("PASS: Found %d macro data points", len(dataPoints))
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, "MACRO")
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -143,7 +143,7 @@ func TestWorkerMacroRBA(t *testing.T) {
 		assert.Equal(t, "rba_cash_rate", dataType, "data_type should be rba_cash_rate")
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, "RBA")
 	AssertNoServiceErrors(t, env)
 
 	t.Log("PASS: market_macro RBA test completed")

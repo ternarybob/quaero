@@ -112,7 +112,7 @@ func TestWorkerPortfolioSingle(t *testing.T) {
 		t.Logf("PASS: Found %d portfolio holdings", len(holdings))
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -218,7 +218,7 @@ func TestWorkerPortfolioMulti(t *testing.T) {
 		t.Logf("PASS: Found %d holdings (expected %d)", len(holdings), len(stocks))
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, "MULTI")
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 

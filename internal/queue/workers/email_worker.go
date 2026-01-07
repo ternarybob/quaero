@@ -266,8 +266,29 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		}
 	}
 
+	// Build attachments from documents
+	var attachments []mailer.Attachment
+	if len(bodyResult.attachments) > 0 {
+		for _, doc := range bodyResult.attachments {
+			if doc == nil || doc.ContentMarkdown == "" {
+				continue
+			}
+			// Create safe filename from document title
+			filename := sanitizeAttachmentFilename(doc.Title) + ".md"
+			attachments = append(attachments, mailer.Attachment{
+				Filename:    filename,
+				ContentType: "text/markdown; charset=utf-8",
+				Content:     []byte(doc.ContentMarkdown),
+			})
+		}
+		w.logger.Info().Int("attachment_count", len(attachments)).Msg("Attaching documents to email")
+	}
+
 	var err error
-	if htmlBody != "" {
+	if len(attachments) > 0 {
+		w.logger.Debug().Int("attachments", len(attachments)).Msg("Sending email with attachments")
+		err = w.mailerService.SendEmailWithAttachments(ctx, to, subject, htmlBody, body, attachments)
+	} else if htmlBody != "" {
 		w.logger.Debug().Msg("Sending HTML email")
 		err = w.mailerService.SendHTMLEmail(ctx, to, subject, htmlBody, body)
 	} else {
@@ -323,10 +344,11 @@ func (w *EmailWorker) ValidateConfig(step models.JobStep) error {
 
 // emailBodyResult contains the resolved email body and source document info
 type emailBodyResult struct {
-	textBody   string
-	htmlBody   string
-	sourceDoc  *models.Document // The document used as email body (if any)
-	sourceTags []string         // Tags used to find the source document
+	textBody    string
+	htmlBody    string
+	sourceDoc   *models.Document   // The document used as email body (if any)
+	sourceTags  []string           // Tags used to find the source document
+	attachments []*models.Document // Documents to attach as markdown files
 }
 
 // jobErrorInfo contains information about job errors for error reporting
@@ -354,6 +376,11 @@ func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]int
 // resolveBodyWithSource determines the email body and returns source document info
 func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[string]interface{}) emailBodyResult {
 	var result emailBodyResult
+
+	// Check for proforma style - creates simple email with document list and links
+	if style, ok := stepConfig["style"].(string); ok && style == "proforma" {
+		return w.resolveProformaBody(ctx, stepConfig)
+	}
 
 	// Direct body text (markdown is converted to HTML)
 	if body, ok := stepConfig["body"].(string); ok && body != "" {
@@ -465,6 +492,185 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 			}
 		}
 	}
+
+	return result
+}
+
+// resolveProformaBody creates a proforma-style email body with document list and links
+// instead of embedding full document content. Documents are listed with Quaero links.
+// Config options:
+//   - list_tags: array of tags to find documents (required for proforma)
+//   - base_url: base URL for Quaero document links (default: http://localhost:port)
+//   - title: optional title for the email body
+func (w *EmailWorker) resolveProformaBody(ctx context.Context, stepConfig map[string]interface{}) emailBodyResult {
+	var result emailBodyResult
+
+	// Get base URL for document links
+	baseURL := fmt.Sprintf("http://%s:%d", w.serverHost, w.serverPort)
+	if configBaseURL, ok := stepConfig["base_url"].(string); ok && configBaseURL != "" {
+		baseURL = configBaseURL
+	}
+
+	// Get title (optional)
+	title := "Quaero Documents"
+	if t, ok := stepConfig["title"].(string); ok && t != "" {
+		title = t
+	}
+
+	// Get subject to use as alternative title
+	if subject, ok := stepConfig["subject"].(string); ok && subject != "" && title == "Quaero Documents" {
+		title = subject
+	}
+
+	// Collect tags from list_tags config
+	var listTags []string
+	if tagsRaw, ok := stepConfig["list_tags"]; ok {
+		switch v := tagsRaw.(type) {
+		case string:
+			if v != "" {
+				listTags = []string{v}
+			}
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					listTags = append(listTags, s)
+				}
+			}
+		case []string:
+			listTags = v
+		}
+	}
+
+	// Also use body_from_tag if list_tags not specified
+	if len(listTags) == 0 {
+		if tag, ok := stepConfig["body_from_tag"].(string); ok && tag != "" {
+			listTags = []string{tag}
+		}
+	}
+
+	// Also use input tags if available
+	if len(listTags) == 0 {
+		if inputRaw, ok := stepConfig["input"]; ok {
+			switch v := inputRaw.(type) {
+			case string:
+				if v != "" {
+					listTags = []string{v}
+				}
+			case []interface{}:
+				for _, item := range v {
+					if s, ok := item.(string); ok && s != "" {
+						listTags = append(listTags, s)
+					}
+				}
+			case []string:
+				listTags = v
+			}
+		}
+	}
+
+	if len(listTags) == 0 {
+		w.logger.Warn().Msg("Proforma email style requires list_tags, body_from_tag, or input to specify which documents to list")
+		result.textBody = "No documents found to list."
+		result.htmlBody = w.wrapInEmailTemplate("<p>No documents found to list.</p>")
+		return result
+	}
+
+	w.logger.Debug().Strs("list_tags", listTags).Msg("Finding documents for proforma email")
+
+	// Find all documents matching the tags
+	var documents []*models.Document
+	for _, tag := range listTags {
+		opts := interfaces.SearchOptions{
+			Tags:     []string{tag},
+			Limit:    50,
+			OrderBy:  "created_at",
+			OrderDir: "desc",
+		}
+		results, err := w.searchService.Search(ctx, "", opts)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("tag", tag).Msg("Error searching for documents")
+			continue
+		}
+		for _, searchResult := range results {
+			if doc, err := w.documentStorage.GetDocument(searchResult.ID); err == nil && doc != nil {
+				documents = append(documents, doc)
+			}
+		}
+	}
+
+	// Deduplicate by ID
+	seen := make(map[string]bool)
+	var uniqueDocs []*models.Document
+	for _, doc := range documents {
+		if !seen[doc.ID] {
+			seen[doc.ID] = true
+			uniqueDocs = append(uniqueDocs, doc)
+		}
+	}
+	documents = uniqueDocs
+
+	if len(documents) == 0 {
+		w.logger.Warn().Strs("tags", listTags).Msg("No documents found for proforma email")
+		result.textBody = "No documents found matching the specified tags."
+		result.htmlBody = w.wrapInEmailTemplate("<p>No documents found matching the specified tags.</p>")
+		return result
+	}
+
+	w.logger.Info().Int("count", len(documents)).Msg("Found documents for proforma email")
+
+	// Build proforma email content
+	var textBuilder strings.Builder
+	var htmlBuilder strings.Builder
+
+	// Text version
+	textBuilder.WriteString(title + "\n")
+	textBuilder.WriteString(strings.Repeat("=", len(title)) + "\n\n")
+	textBuilder.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format("2006-01-02 15:04")))
+	textBuilder.WriteString(fmt.Sprintf("Documents: %d\n\n", len(documents)))
+
+	for i, doc := range documents {
+		link := fmt.Sprintf("%s/documents?document_id=%s", baseURL, doc.ID)
+		textBuilder.WriteString(fmt.Sprintf("%d. %s\n", i+1, doc.Title))
+		textBuilder.WriteString(fmt.Sprintf("   Link: %s\n\n", link))
+	}
+
+	// HTML version
+	htmlBuilder.WriteString(fmt.Sprintf(`<h2 style="color: #333; margin-bottom: 10px;">%s</h2>`, title))
+	htmlBuilder.WriteString(fmt.Sprintf(`<p style="color: #666; font-size: 12px; margin-bottom: 20px;">Generated: %s | Documents: %d</p>`, time.Now().Format("2006-01-02 15:04"), len(documents)))
+
+	htmlBuilder.WriteString(`<table style="width: 100%; border-collapse: collapse; margin-top: 15px;">`)
+	htmlBuilder.WriteString(`<thead><tr style="background-color: #f5f5f5;">`)
+	htmlBuilder.WriteString(`<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">#</th>`)
+	htmlBuilder.WriteString(`<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Document</th>`)
+	htmlBuilder.WriteString(`<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Link</th>`)
+	htmlBuilder.WriteString(`</tr></thead><tbody>`)
+
+	for i, doc := range documents {
+		link := fmt.Sprintf("%s/documents?document_id=%s", baseURL, doc.ID)
+		rowStyle := ""
+		if i%2 == 1 {
+			rowStyle = ` style="background-color: #fafafa;"`
+		}
+		htmlBuilder.WriteString(fmt.Sprintf(`<tr%s>`, rowStyle))
+		htmlBuilder.WriteString(fmt.Sprintf(`<td style="padding: 8px; border-bottom: 1px solid #eee;">%d</td>`, i+1))
+		htmlBuilder.WriteString(fmt.Sprintf(`<td style="padding: 8px; border-bottom: 1px solid #eee;">%s</td>`, doc.Title))
+		htmlBuilder.WriteString(fmt.Sprintf(`<td style="padding: 8px; border-bottom: 1px solid #eee;"><a href="%s" style="color: #0066cc;">View in Quaero</a></td>`, link))
+		htmlBuilder.WriteString(`</tr>`)
+	}
+
+	htmlBuilder.WriteString(`</tbody></table>`)
+
+	result.textBody = textBuilder.String()
+	result.htmlBody = w.wrapInEmailTemplate(htmlBuilder.String())
+
+	// Store first document as source for reference
+	if len(documents) > 0 {
+		result.sourceDoc = documents[0]
+		result.sourceTags = listTags
+	}
+
+	// Attach all documents as markdown files
+	result.attachments = documents
 
 	return result
 }
@@ -1562,4 +1768,49 @@ func (w *EmailWorker) saveEmailToDir(saveDir, stepID, subject, textBody, htmlBod
 	}
 
 	return nil
+}
+
+// sanitizeAttachmentFilename creates a safe filename from a document title
+// Removes or replaces characters that are unsafe for filenames
+func sanitizeAttachmentFilename(title string) string {
+	if title == "" {
+		return "document"
+	}
+
+	// Replace common problematic characters
+	replacer := strings.NewReplacer(
+		"/", "-",
+		"\\", "-",
+		":", "-",
+		"*", "",
+		"?", "",
+		"\"", "",
+		"<", "",
+		">", "",
+		"|", "-",
+		"\n", " ",
+		"\r", "",
+		"\t", " ",
+	)
+	safe := replacer.Replace(title)
+
+	// Collapse multiple spaces/dashes
+	for strings.Contains(safe, "  ") {
+		safe = strings.ReplaceAll(safe, "  ", " ")
+	}
+	for strings.Contains(safe, "--") {
+		safe = strings.ReplaceAll(safe, "--", "-")
+	}
+
+	// Trim and limit length
+	safe = strings.TrimSpace(safe)
+	if len(safe) > 100 {
+		safe = safe[:100]
+	}
+
+	if safe == "" {
+		return "document"
+	}
+
+	return safe
 }

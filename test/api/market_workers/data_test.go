@@ -103,7 +103,7 @@ func TestWorkerDataSingle(t *testing.T) {
 		}
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, "BHP")
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -125,7 +125,7 @@ func TestWorkerDataMulti(t *testing.T) {
 
 	stocks := []string{"BHP", "CSL", "GNP"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-data-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -165,7 +165,7 @@ func TestWorkerDataMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, DataSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated market_data for %s", stock)
 		})
 	}
