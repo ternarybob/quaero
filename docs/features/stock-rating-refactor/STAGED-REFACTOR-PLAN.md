@@ -114,6 +114,41 @@ Workers and services should handle both formats using `common.ParseTicker()`.
 
 ---
 
+## Concurrent Execution
+
+When a job defines multiple tickers as variables, the template executes **concurrently** for each ticker:
+
+```
+Job: stock-rating-watchlist
+Config: variables = [GNP, SKS, EXR]
+
+Execution:
+┌─────────────────────────────────────────────────────────┐
+│                    CONCURRENT                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
+│  │ GNP         │  │ SKS         │  │ EXR         │    │
+│  │ ─────────── │  │ ─────────── │  │ ─────────── │    │
+│  │ fetch_fund  │  │ fetch_fund  │  │ fetch_fund  │    │
+│  │     ↓       │  │     ↓       │  │     ↓       │    │
+│  │ fetch_ann   │  │ fetch_ann   │  │ fetch_ann   │    │
+│  │     ↓       │  │     ↓       │  │     ↓       │    │
+│  │ calc_bfs    │  │ calc_bfs    │  │ calc_bfs    │    │
+│  │     ↓       │  │     ↓       │  │     ↓       │    │
+│  │ calc_rating │  │ calc_rating │  │ calc_rating │    │
+│  └─────────────┘  └─────────────┘  └─────────────┘    │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+                    [All complete]
+                          ↓
+                   email_report (aggregates all ratings)
+```
+
+- Each ticker runs the full template workflow independently
+- Steps within a ticker respect `depends` ordering
+- Final aggregation steps (e.g., email_report) wait for all tickers to complete
+
+---
+
 ## Stage 1: Rating Service
 
 **Goal:** Create pure calculation functions with no document awareness.
