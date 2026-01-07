@@ -979,6 +979,19 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(marketConsolidateWorker)
 	a.Logger.Debug().Str("step_type", marketConsolidateWorker.GetType().String()).Msg("Market Consolidate worker registered")
 
+	// Register Output Formatter worker (prepares output documents for email delivery)
+	outputFormatterWorker := workers.NewOutputFormatterWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+		a.Config.Server.Host,
+		a.Config.Server.Port,
+	)
+	a.StepManager.RegisterWorker(outputFormatterWorker)
+	a.Logger.Debug().Str("step_type", outputFormatterWorker.GetType().String()).Msg("Output Formatter worker registered")
+
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
 	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(
 		a.StorageManager.DocumentStorage(),

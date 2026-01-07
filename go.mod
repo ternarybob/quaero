@@ -11,6 +11,7 @@ require (
 	github.com/dgraph-io/badger/v4 v4.9.0
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/google/go-github/v57 v57.0.0
 	github.com/google/uuid v1.6.0
