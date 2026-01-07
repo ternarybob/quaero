@@ -114,9 +114,109 @@ Workers and services should handle both formats using `common.ParseTicker()`.
 
 ---
 
+## Execution Patterns
+
+Two patterns for orchestrating workers:
+
+### Pattern 1: Deterministic Job Steps
+
+Steps defined in job definition, executed in order. **No LLM decision-making** for tool selection.
+
+```
+Job Definition → Workers execute in dependency order → LLM only for summary
+```
+
+```toml
+# Each step is a deterministic worker - LLM does NOT choose these
+[step.fetch_fundamentals]
+type = "market_fundamentals"
+
+[step.calculate_bfs]
+type = "rating_bfs"
+depends = "fetch_fundamentals"
+
+# LLM only used here - generates narrative from collected data
+[step.summarize]
+type = "summary"
+template = "stock-rating"
+filter_tags = ["stock-rating"]
+```
+
+**Use when:**
+- Workflow is predictable and well-defined
+- All steps known in advance
+- Maximum reliability and reproducibility
+
+### Pattern 2: LLM-Orchestrated Tool Selection
+
+LLM Planner decides which tools to call based on goal. Uses `orchestrator_worker.go`.
+
+```
+Goal → LLM Planner → selects tools → Executor runs → Reviewer validates → repeat
+```
+
+```toml
+[step.orchestrate]
+type = "orchestrator"
+goal = "Rate the stock and explain the investment thesis"
+thinking_level = "MEDIUM"
+
+[[step.orchestrate.available_tools]]
+name = "get_fundamentals"
+worker = "market_fundamentals"
+description = "Fetch stock fundamentals data"
+
+[[step.orchestrate.available_tools]]
+name = "calculate_bfs"
+worker = "rating_bfs"
+description = "Calculate Business Foundation Score (0-2)"
+
+[[step.orchestrate.available_tools]]
+name = "calculate_cds"
+worker = "rating_cds"
+description = "Calculate Capital Discipline Score (0-2)"
+# ... more tools
+```
+
+**Use when:**
+- Workflow varies based on data (e.g., skip scores if gate fails)
+- Open-ended analysis tasks
+- Need LLM reasoning about what to do next
+
+### Pattern Comparison
+
+| Aspect | Deterministic | LLM-Orchestrated |
+|--------|---------------|------------------|
+| Tool selection | Job definition | LLM decides |
+| Predictability | High | Variable |
+| Cost | Lower (no planner calls) | Higher (LLM reasoning) |
+| Flexibility | Fixed workflow | Adaptive |
+| Gate handling | All steps run | Can skip on gate fail |
+
+### Recommended Approach for Rating
+
+**Hybrid**: Use deterministic steps for data collection and calculation, with optional LLM orchestration for adaptive behavior:
+
+```toml
+# Option A: Fully deterministic (simpler, cheaper)
+[step.calculate_bfs]
+type = "rating_bfs"
+[step.calculate_cds]
+type = "rating_cds"
+# ... all steps defined
+
+# Option B: LLM-orchestrated (adaptive, can skip on gate fail)
+[step.orchestrate_rating]
+type = "orchestrator"
+goal = "Calculate rating scores. If gate fails (BFS<1 or CDS<1), skip component scores and return SPECULATIVE label."
+available_tools = [...]
+```
+
+---
+
 ## Concurrent Execution
 
-When a job defines multiple tickers as variables, the template executes **concurrently** for each ticker:
+When a job defines multiple tickers as variables, the workflow executes **concurrently** for each ticker:
 
 ```
 Job: stock-rating-watchlist
@@ -514,15 +614,117 @@ Follow existing patterns in `test/api/market_workers/common_test.go`.
   subject = "Stock Rating Report"
   ```
 
-#### 3.3 Test Job Execution
-- [ ] Run job with test tickers
-- [ ] Verify all steps execute in order
+#### 3.3 Alternative: LLM-Orchestrated Job Definition
+- [ ] Create `deployments/common/job-definitions/stock-rating-orchestrated.toml`
+  ```toml
+  # Stock Rating - LLM Orchestrated
+  # LLM decides tool order, can skip scores if gate fails
+
+  id = "stock-rating-orchestrated"
+  name = "Stock Rating (Orchestrated)"
+  type = "orchestrator"
+  description = "LLM-orchestrated stock rating with adaptive workflow"
+  tags = ["rating", "orchestrated"]
+
+  [config]
+  default_exchange = "ASX"
+  variables = [
+      { ticker = "GNP" },
+  ]
+
+  # Single orchestrator step - LLM plans and executes
+  [step.rate_stock]
+  type = "orchestrator"
+  description = "Rate stock using investability framework"
+  goal = """
+  Rate the stock using the investability framework:
+  1. First fetch fundamentals and announcements data
+  2. Calculate gate scores (BFS, CDS)
+  3. Check gate: if BFS < 1 OR CDS < 1, return SPECULATIVE and STOP
+  4. If gate passes, calculate component scores (NFR, PPS, VRS, OB)
+  5. Calculate composite rating and determine label
+  6. Generate summary report
+  """
+  thinking_level = "MEDIUM"
+  output_tags = ["stock-rating"]
+
+  # Available tools for LLM to choose from
+  [[step.rate_stock.available_tools]]
+  name = "get_fundamentals"
+  worker = "market_fundamentals"
+  description = "Fetch stock fundamentals (revenue, cash, shares outstanding)"
+
+  [[step.rate_stock.available_tools]]
+  name = "get_announcements"
+  worker = "market_announcements"
+  description = "Fetch ASX announcements for the ticker"
+
+  [[step.rate_stock.available_tools]]
+  name = "get_prices"
+  worker = "market_data"
+  description = "Fetch OHLCV price history"
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_bfs"
+  worker = "rating_bfs"
+  description = "Calculate Business Foundation Score (0-2). Requires fundamentals."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_cds"
+  worker = "rating_cds"
+  description = "Calculate Capital Discipline Score (0-2). Requires fundamentals + announcements."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_nfr"
+  worker = "rating_nfr"
+  description = "Calculate Narrative-to-Fact Ratio (0-1). Requires announcements + prices."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_pps"
+  worker = "rating_pps"
+  description = "Calculate Price Progression Score (0-1). Requires announcements + prices."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_vrs"
+  worker = "rating_vrs"
+  description = "Calculate Volatility Regime Stability (0-1). Requires announcements + prices."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_ob"
+  worker = "rating_ob"
+  description = "Calculate Optionality Bonus (0-1). Requires announcements + BFS score."
+
+  [[step.rate_stock.available_tools]]
+  name = "calculate_rating"
+  worker = "rating_composite"
+  description = "Calculate final rating from all scores. Returns label and investability score."
+
+  # Format and email (deterministic, after orchestration)
+  [step.format_output]
+  type = "output_formatter"
+  depends = "rate_stock"
+  input_tags = ["stock-rating"]
+  output_tags = ["email-output"]
+  title = "Stock Rating Report"
+
+  [step.email_report]
+  type = "email"
+  depends = "format_output"
+  to = "user@example.com"
+  subject = "Stock Rating Report"
+  ```
+
+#### 3.4 Test Job Execution
+- [ ] Run deterministic job with test tickers
+- [ ] Run orchestrated job with test tickers
+- [ ] Verify gate failure skips component scores (orchestrated only)
 - [ ] Verify documents created with correct tags
 
 ### Deliverables
-- Rating template (no config)
-- Example job definition (with config)
-- Working end-to-end flow
+- Rating prompt template
+- Deterministic job definition
+- LLM-orchestrated job definition (alternative)
+- Working end-to-end flow for both patterns
 
 ---
 
