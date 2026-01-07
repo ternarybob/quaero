@@ -54,18 +54,17 @@ var (
 		},
 	}
 
-	// AnnouncementsSchema for market_announcements worker
+	// AnnouncementsSchema for market_announcements worker (MQS Framework)
 	AnnouncementsSchema = WorkerSchema{
-		RequiredFields: []string{"asx_code", "announcements", "total_count"},
-		OptionalFields: []string{"high_count", "medium_count", "low_count", "noise_count"},
+		RequiredFields: []string{"ticker", "mqs_tier", "mqs_composite", "announcements"},
+		OptionalFields: []string{"leakage_score", "conviction_score", "retention_score", "saydo_score", "mqs_confidence"},
 		FieldTypes: map[string]string{
-			"asx_code":      "string",
-			"announcements": "array",
-			"total_count":   "number",
+			"ticker":        "string",
+			"mqs_tier":      "string",
+			"mqs_composite": "number",
+			"announcements": "number",
 		},
-		ArraySchemas: map[string][]string{
-			"announcements": {"date", "headline", "relevance_category"},
-		},
+		ArraySchemas: map[string][]string{},
 	}
 
 	// DataSchema for market_data worker
@@ -447,7 +446,8 @@ func CombineMultiStockResults(results []MultiStockResult) (map[string]interface{
 // =============================================================================
 
 // SaveWorkerOutput saves worker output to results directory
-func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, tags []string, runNumber int) error {
+// tickerCode is used as suffix for output files (e.g., output_BHP.md)
+func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, tags []string, tickerCode string) error {
 	resultsDir := env.GetResultsDir()
 	if resultsDir == "" {
 		return fmt.Errorf("results directory not available")
@@ -489,9 +489,9 @@ func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 		t.Logf("Saved output.md to: %s", mdPath)
 	}
 
-	// Save numbered output
-	numberedMdPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.md", runNumber))
-	os.WriteFile(numberedMdPath, []byte(doc.ContentMarkdown), 0644)
+	// Save ticker-named output (e.g., output_BHP.md)
+	tickerMdPath := filepath.Join(resultsDir, fmt.Sprintf("output_%s.md", strings.ToUpper(tickerCode)))
+	os.WriteFile(tickerMdPath, []byte(doc.ContentMarkdown), 0644)
 
 	// Save output.json
 	if doc.Metadata != nil {
@@ -504,10 +504,10 @@ func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 			}
 		}
 
-		// Save numbered JSON
-		numberedJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
+		// Save ticker-named JSON (e.g., output_BHP.json)
+		tickerJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%s.json", strings.ToUpper(tickerCode)))
 		if data, err := json.MarshalIndent(doc.Metadata, "", "  "); err == nil {
-			os.WriteFile(numberedJsonPath, data, 0644)
+			os.WriteFile(tickerJsonPath, data, 0644)
 		}
 	}
 
@@ -741,12 +741,13 @@ func AssertSectionConsistency(t *testing.T, content1, content2 string, requiredS
 	return allConsistent
 }
 
-// AnnouncementsRequiredSections defines the sections that must be present in announcements output
+// AnnouncementsRequiredSections defines the sections that must be present in announcements output (MQS Framework)
 var AnnouncementsRequiredSections = []string{
-	"## Executive Summary",
-	"## Signal Analysis & Conviction Rating", // Updated from "Overall Non-FY Impact Rating"
-	"## Mandatory Business Update Calendar",
-	"### Signal Breakdown", // New required section
+	"## Management Quality Score",
+	"## Information Integrity (Leakage Analysis)",
+	"## Conviction Analysis",
+	"## Price Retention Analysis",
+	"## Say-Do Analysis",
 }
 
 // AssertResultFilesExist validates that result files exist with content
@@ -781,5 +782,300 @@ func AssertResultFilesExist(t *testing.T, env *common.TestEnvironment, runNumber
 	numberedJsonPath := filepath.Join(resultsDir, fmt.Sprintf("output_%d.json", runNumber))
 	if numberedJsonInfo, numberedJsonErr := os.Stat(numberedJsonPath); numberedJsonErr == nil {
 		t.Logf("PASS: output_%d.json exists (%d bytes)", runNumber, numberedJsonInfo.Size())
+	}
+}
+
+// =============================================================================
+// WorkerResult Validation Helpers
+// =============================================================================
+
+// WorkerResult mirrors interfaces.WorkerResult for test parsing
+type WorkerResult struct {
+	DocumentsCreated int                      `json:"documents_created"`
+	DocumentIDs      []string                 `json:"document_ids"`
+	Tags             []string                 `json:"tags"`
+	SourceType       string                   `json:"source_type"`
+	SourceIDs        []string                 `json:"source_ids"`
+	Errors           []string                 `json:"errors"`
+	ByTicker         map[string]*TickerResult `json:"by_ticker"`
+}
+
+// TickerResult mirrors interfaces.TickerResult for test parsing
+type TickerResult struct {
+	DocumentsCreated int      `json:"documents_created"`
+	DocumentIDs      []string `json:"document_ids"`
+	Tags             []string `json:"tags"`
+}
+
+// GetJobWorkerResult retrieves the worker_result from job metadata.
+// For manager jobs, it looks up the first step job ID from step_job_ids and queries that.
+// For step jobs, it queries the step job directly.
+func GetJobWorkerResult(t *testing.T, helper *common.HTTPTestHelper, jobID string) *WorkerResult {
+	resp, err := helper.GET("/api/jobs/" + jobID)
+	if err != nil {
+		t.Logf("Failed to get job %s: %v", jobID, err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Get job returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var job struct {
+		Type     string                 `json:"type"`
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := helper.ParseJSONResponse(resp, &job); err != nil {
+		t.Logf("Failed to parse job response: %v", err)
+		return nil
+	}
+
+	if job.Metadata == nil {
+		t.Logf("Job %s has no metadata", jobID)
+		return nil
+	}
+
+	// If this is a manager job, look up the step job ID and query that instead
+	if job.Type == "manager" {
+		stepJobIDs, ok := job.Metadata["step_job_ids"].(map[string]interface{})
+		if !ok || len(stepJobIDs) == 0 {
+			// Some manager jobs might store result directly if they do logic themselves
+			// But usually they delegate. Let's check if worker_result exists directly first.
+			if _, ok := job.Metadata["worker_result"]; ok {
+				// Fall through to parse worker_result
+			} else {
+				t.Logf("Manager job %s has no step_job_ids in metadata", jobID)
+				return nil
+			}
+		} else {
+			// Get the first step job ID (for single-step jobs) or specific one if known
+			// This logic tries to pick a likely candidate.
+			var firstStepJobID string
+			for _, stepID := range stepJobIDs {
+				if id, ok := stepID.(string); ok {
+					firstStepJobID = id
+					break
+				}
+			}
+			if firstStepJobID != "" {
+				// t.Logf("Querying step job %s for worker_result (manager job: %s)", firstStepJobID, jobID)
+				return GetJobWorkerResult(t, helper, firstStepJobID)
+			}
+		}
+	}
+
+	workerResultRaw, ok := job.Metadata["worker_result"].(map[string]interface{})
+	if !ok {
+		t.Logf("Job %s has no worker_result in metadata", jobID)
+		return nil
+	}
+
+	result := &WorkerResult{}
+
+	if v, ok := workerResultRaw["documents_created"].(float64); ok {
+		result.DocumentsCreated = int(v)
+	}
+
+	if v, ok := workerResultRaw["document_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.DocumentIDs = append(result.DocumentIDs, s)
+			}
+		}
+	}
+
+	if v, ok := workerResultRaw["tags"].([]interface{}); ok {
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				result.Tags = append(result.Tags, s)
+			}
+		}
+	}
+
+	if v, ok := workerResultRaw["source_type"].(string); ok {
+		result.SourceType = v
+	}
+
+	if v, ok := workerResultRaw["source_ids"].([]interface{}); ok {
+		for _, id := range v {
+			if s, ok := id.(string); ok {
+				result.SourceIDs = append(result.SourceIDs, s)
+			}
+		}
+	}
+
+	if v, ok := workerResultRaw["errors"].([]interface{}); ok {
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				result.Errors = append(result.Errors, s)
+			}
+		}
+	}
+
+	// Parse by_ticker if present
+	if byTicker, ok := workerResultRaw["by_ticker"].(map[string]interface{}); ok {
+		result.ByTicker = make(map[string]*TickerResult)
+		for ticker, tickerData := range byTicker {
+			if tickerMap, ok := tickerData.(map[string]interface{}); ok {
+				tr := &TickerResult{}
+				if v, ok := tickerMap["documents_created"].(float64); ok {
+					tr.DocumentsCreated = int(v)
+				}
+				if v, ok := tickerMap["document_ids"].([]interface{}); ok {
+					for _, id := range v {
+						if s, ok := id.(string); ok {
+							tr.DocumentIDs = append(tr.DocumentIDs, s)
+						}
+					}
+				}
+				if v, ok := tickerMap["tags"].([]interface{}); ok {
+					for _, tag := range v {
+						if s, ok := tag.(string); ok {
+							tr.Tags = append(tr.Tags, s)
+						}
+					}
+				}
+				result.ByTicker[ticker] = tr
+			}
+		}
+	}
+
+	return result
+}
+
+// ValidateWorkerResult validates that a WorkerResult contains expected documents
+func ValidateWorkerResult(t *testing.T, helper *common.HTTPTestHelper, resultsDir string, result *WorkerResult, expectedCount int, requiredTags []string) bool {
+	if result == nil {
+		t.Error("WorkerResult is nil - worker did not return result")
+		return false
+	}
+
+	// Save WorkerResult for debugging
+	resultPath := filepath.Join(resultsDir, "worker_result.json")
+	if data, err := json.MarshalIndent(result, "", "  "); err == nil {
+		if err := os.WriteFile(resultPath, data, 0644); err != nil {
+			t.Logf("Warning: failed to save worker_result.json: %v", err)
+		}
+	}
+
+	// Check for errors in result
+	if len(result.Errors) > 0 {
+		t.Errorf("WorkerResult contains %d errors: %v", len(result.Errors), result.Errors)
+		return false
+	}
+
+	// Validate document count
+	if result.DocumentsCreated < expectedCount {
+		t.Errorf("Expected at least %d documents, got %d", expectedCount, result.DocumentsCreated)
+		return false
+	}
+	t.Logf("WorkerResult: %d documents created", result.DocumentsCreated)
+
+	// Validate document IDs
+	if len(result.DocumentIDs) < expectedCount {
+		t.Errorf("Expected at least %d document IDs, got %d", expectedCount, len(result.DocumentIDs))
+		return false
+	}
+
+	// Validate required tags are present
+	for _, reqTag := range requiredTags {
+		found := false
+		for _, tag := range result.Tags {
+			if tag == reqTag {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Required tag '%s' not found in result tags: %v", reqTag, result.Tags)
+			return false
+		}
+	}
+
+	// Validate documents exist in storage by querying with tags
+	if len(result.Tags) > 0 {
+		// Query documents using first two tags (usually "ticker-signals" and stock code)
+		queryTags := result.Tags
+		if len(queryTags) > 2 {
+			queryTags = queryTags[:2] // Limit to first 2 tags for query
+		}
+		tagStr := strings.Join(queryTags, ",")
+
+		resp, err := helper.GET("/api/documents?tags=" + tagStr + "&limit=10")
+		if err != nil {
+			t.Errorf("Failed to query documents with tags %s: %v", tagStr, err)
+			return false
+		}
+		defer resp.Body.Close()
+
+		var docsResult struct {
+			Documents []struct {
+				ID string `json:"id"`
+			} `json:"documents"`
+		}
+		if err := helper.ParseJSONResponse(resp, &docsResult); err != nil {
+			t.Errorf("Failed to parse documents response: %v", err)
+			return false
+		}
+
+		if len(docsResult.Documents) < expectedCount {
+			t.Errorf("Expected at least %d documents in storage with tags %v, found %d",
+				expectedCount, queryTags, len(docsResult.Documents))
+			return false
+		}
+		t.Logf("Verified %d documents exist in storage with tags %v", len(docsResult.Documents), queryTags)
+	}
+
+	return true
+}
+
+// GetJobLogs retrieves job logs and checks for errors
+func GetJobLogs(t *testing.T, helper *common.HTTPTestHelper, jobID string) ([]string, []string) {
+	var infoLogs, errorLogs []string
+
+	resp, err := helper.GET("/api/jobs/" + jobID + "/logs?limit=100")
+	if err != nil {
+		t.Logf("Failed to get job logs: %v", err)
+		return infoLogs, errorLogs
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("Get job logs returned status %d", resp.StatusCode)
+		return infoLogs, errorLogs
+	}
+
+	var logs struct {
+		Logs []struct {
+			Level   string `json:"level"`
+			Message string `json:"message"`
+		} `json:"logs"`
+	}
+	if err := helper.ParseJSONResponse(resp, &logs); err != nil {
+		t.Logf("Failed to parse logs response: %v", err)
+		return infoLogs, errorLogs
+	}
+
+	for _, log := range logs.Logs {
+		if log.Level == "error" {
+			errorLogs = append(errorLogs, log.Message)
+		} else {
+			infoLogs = append(infoLogs, log.Message)
+		}
+	}
+
+	return infoLogs, errorLogs
+}
+
+// AssertNoJobErrors fails the test if job logs contain errors
+func AssertNoJobErrors(t *testing.T, helper *common.HTTPTestHelper, jobID, jobName string) {
+	_, errorLogs := GetJobLogs(t, helper, jobID)
+	if len(errorLogs) > 0 {
+		t.Errorf("%s job %s had %d errors:", jobName, jobID, len(errorLogs))
+		for i, errLog := range errorLogs {
+			t.Errorf("  Error %d: %s", i+1, errLog)
+		}
 	}
 }

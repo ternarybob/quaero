@@ -43,20 +43,46 @@ For each stock in the collected data, generate a complete analysis following the
    - LOW SIGNAL: Routine notices, standard filings, generic presentations (exclude from output)
    - NOISE: Registry changes, duplicate announcements, cleansing notices (exclude from output)
 
-2. **Executive Summary**: 2-4 paragraphs on company announcement quality
+2. **Executive Summary**:
+   - Act as a forensic auditor. Prioritize Operational Reality over Management Narrative.
+   - If Noise Ratio > 0.3 or Leak Score > 0.2, DO NOT use positive adjectives like "strong", "proactive", or "reliable".
+   - Highlight ANY divergence between price-sensitive labels and actual market reaction (Bluffs).
 
-3. **Signal-Noise Assessment**:
+3. **Critical Assessment Table**:
+   - Insert a markdown table with columns: Focus Area | Management Narrative | Operational Reality | Critical Assessment
+   - Rows: Operational Success, Market Integrity, Technical Milestones.
+
+4. **Strategic Divergence**:
+   - Identify instances where the market "sold the news" on price-sensitive items.
+   - Analyze if the stock is driven by technical milestones or retail hype.
+
+5. **Signal-Noise Assessment**:
    - overall_rating: EXCELLENT (<0.3 noise), GOOD (0.3-0.5), AVERAGE (0.5-0.7), POOR (>0.7)
    - Counts for high/moderate/low/noise
    - noise_ratio calculation
 
-4. **High Signal Announcements**: Full details for each HIGH or MODERATE announcement
+6. **Announcements Analysis**:
+   - Create a SINGLE table 'Announcements' containing HIGH and MODERATE signal announcements.
+   - Do NOT create separate tables for High/Moderate. Consolidate them.
+   - Columns: Date | Type | Headline | Signal | Rationale & Price Impact
+   - Include detailed analysis within the table rows (multiline okay if needed).
+   - "Signal" column should be HIGH or MODERATE.
+   - "Rationale & Price Impact" should explain the significance and cite price/volume movement.
+   - Sort by date descending.
+
+7. **Routine Announcements**:
+   - Provide a separate "Routine Administrative Announcements" section.
+   - List routine items (Appendix 3Y, etc.) as a bulleted list with brief summaries (Date - Headline).
+   - Do NOT include these in the main Announcements table.
+   - Deduplication: Provide a simple count summary (e.g., '15 announcements consolidated to 12'), do not list them.
    - Sort by date descending (most recent first)
    - Include rationale, price impact, AI analysis
 
-5. **Anomalies**: Unexpected market reactions
+7. **Anomalies**: Unexpected market reactions
 
-6. **Pre-Announcement Movements**: Significant price drift before announcements
+8. **Pre-Announcement Movements**:
+   - Flag all instances of Pre-Drift > 5% as "High Probability Information Leakage".
+   - Highlight significant price drift before announcements.
 
 7. **Dividend Announcements**: With context and notes
 

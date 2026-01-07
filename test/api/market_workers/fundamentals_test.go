@@ -13,7 +13,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ternarybob/quaero/test/common"
 )
 
 // TestWorkerFundamentalsSingle tests single stock processing
@@ -99,7 +98,7 @@ func TestWorkerFundamentalsSingle(t *testing.T) {
 	}
 
 	// Save output
-	if err := SaveWorkerOutput(t, env, helper, tags, 1); err != nil {
+	if err := SaveWorkerOutput(t, env, helper, tags, ticker); err != nil {
 		t.Logf("Warning: failed to save worker output: %v", err)
 	}
 	AssertResultFilesExist(t, env, 1)
@@ -170,7 +169,7 @@ func TestWorkerFundamentalsMulti(t *testing.T) {
 	// === ASSERTIONS ===
 
 	// Get the WorkerResult to validate by_ticker format
-	workerResult := getWorkerResultFromJob(t, helper, jobID)
+	workerResult := GetJobWorkerResult(t, helper, jobID)
 	if workerResult != nil {
 		// Validate by_ticker field exists
 		require.NotNil(t, workerResult.ByTicker, "WorkerResult must have by_ticker field")
@@ -209,123 +208,17 @@ func TestWorkerFundamentalsMulti(t *testing.T) {
 		isValid := ValidateSchema(t, metadata, FundamentalsSchema)
 		assert.True(t, isValid, "Output for %s should comply with schema", code)
 
+		// Save output with ticker code (e.g., output_BHP.md)
+		SaveWorkerOutput(t, env, helper, tags, code)
+
 		t.Logf("PASS: Validated output for %s", code)
 	}
+
+	// Assert result files exist for all tickers
+	AssertResultFilesExist(t, env, len(testCodes))
 
 	// Check for service errors
 	AssertNoServiceErrors(t, env)
 
 	t.Log("PASS: market_fundamentals multi-stock test completed")
-}
-
-// =============================================================================
-// Helper Types and Functions
-// =============================================================================
-
-// WorkerResult mirrors the WorkerResult structure for test parsing
-type WorkerResult struct {
-	DocumentsCreated int                      `json:"documents_created"`
-	DocumentIDs      []string                 `json:"document_ids"`
-	Tags             []string                 `json:"tags"`
-	SourceType       string                   `json:"source_type"`
-	ByTicker         map[string]*TickerResult `json:"by_ticker"`
-}
-
-// TickerResult mirrors TickerResult for test parsing
-type TickerResult struct {
-	DocumentsCreated int      `json:"documents_created"`
-	DocumentIDs      []string `json:"document_ids"`
-	Tags             []string `json:"tags"`
-}
-
-// getWorkerResultFromJob retrieves WorkerResult from job metadata
-func getWorkerResultFromJob(t *testing.T, helper *common.HTTPTestHelper, jobID string) *WorkerResult {
-	resp, err := helper.GET("/api/jobs/" + jobID)
-	if err != nil {
-		t.Logf("Failed to get job %s: %v", jobID, err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	var job struct {
-		Type     string                 `json:"type"`
-		Metadata map[string]interface{} `json:"metadata"`
-	}
-	if err := helper.ParseJSONResponse(resp, &job); err != nil {
-		t.Logf("Failed to parse job response: %v", err)
-		return nil
-	}
-
-	if job.Metadata == nil {
-		return nil
-	}
-
-	// For manager job, find the step job
-	if job.Type == "manager" {
-		stepJobIDs, ok := job.Metadata["step_job_ids"].(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		fetchJobID, ok := stepJobIDs["fetch-stock-data"].(string)
-		if !ok {
-			return nil
-		}
-		return getWorkerResultDirect(t, helper, fetchJobID)
-	}
-
-	return getWorkerResultDirect(t, helper, jobID)
-}
-
-// getWorkerResultDirect gets WorkerResult from a specific job's metadata
-func getWorkerResultDirect(t *testing.T, helper *common.HTTPTestHelper, jobID string) *WorkerResult {
-	resp, err := helper.GET("/api/jobs/" + jobID)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	var job struct {
-		Metadata map[string]interface{} `json:"metadata"`
-	}
-	if err := helper.ParseJSONResponse(resp, &job); err != nil {
-		return nil
-	}
-
-	if job.Metadata == nil {
-		return nil
-	}
-
-	workerResultRaw, ok := job.Metadata["worker_result"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	result := &WorkerResult{}
-
-	if v, ok := workerResultRaw["documents_created"].(float64); ok {
-		result.DocumentsCreated = int(v)
-	}
-
-	// Parse by_ticker if present
-	if byTicker, ok := workerResultRaw["by_ticker"].(map[string]interface{}); ok {
-		result.ByTicker = make(map[string]*TickerResult)
-		for ticker, tickerData := range byTicker {
-			if tickerMap, ok := tickerData.(map[string]interface{}); ok {
-				tr := &TickerResult{}
-				if v, ok := tickerMap["documents_created"].(float64); ok {
-					tr.DocumentsCreated = int(v)
-				}
-				if v, ok := tickerMap["document_ids"].([]interface{}); ok {
-					for _, id := range v {
-						if s, ok := id.(string); ok {
-							tr.DocumentIDs = append(tr.DocumentIDs, s)
-						}
-					}
-				}
-				result.ByTicker[ticker] = tr
-			}
-		}
-	}
-
-	return result
 }

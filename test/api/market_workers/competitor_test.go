@@ -87,7 +87,7 @@ func TestWorkerCompetitorSingle(t *testing.T) {
 		}
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -109,7 +109,7 @@ func TestWorkerCompetitorMulti(t *testing.T) {
 
 	stocks := []string{"BHP", "RIO"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-competitor-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -148,7 +148,7 @@ func TestWorkerCompetitorMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, CompetitorSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated competitor analysis for %s", stock)
 		})
 	}

@@ -174,6 +174,13 @@ func New(cfg *common.Config, logger arbor.ILogger, configPaths ...string) (*App,
 		Logger:      logger,
 	}
 
+	// Apply market defaults from config
+	// This sets the default exchange for ParseTicker when no exchange prefix is provided
+	if cfg.Markets.Default != "" {
+		common.SetDefaultExchange(cfg.Markets.Default)
+		logger.Info().Str("default_exchange", cfg.Markets.Default).Msg("[STARTUP] Markets: default exchange configured")
+	}
+
 	// Initialize database
 	if err := app.initDatabase(); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
@@ -878,13 +885,29 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
+	// Create data providers for inter-worker data sharing
+	fundamentalsProvider := workers.NewFundamentalsProvider(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		a.Config.Jobs.Debug,
+	)
+	priceProvider := workers.NewPriceProvider(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+
 	// Register Market Announcements worker (company announcements via Markit API)
 	marketAnnouncementsWorker := workers.NewMarketAnnouncementsWorker(
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 		a.Config.Jobs.Debug,
 		a.ProviderFactory,
+		fundamentalsProvider,
+		priceProvider,
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
@@ -962,6 +985,19 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(marketConsolidateWorker)
 	a.Logger.Debug().Str("step_type", marketConsolidateWorker.GetType().String()).Msg("Market Consolidate worker registered")
+
+	// Register Output Formatter worker (prepares output documents for email delivery)
+	outputFormatterWorker := workers.NewOutputFormatterWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+		a.Config.Server.Host,
+		a.Config.Server.Port,
+	)
+	a.StepManager.RegisterWorker(outputFormatterWorker)
+	a.Logger.Debug().Str("step_type", outputFormatterWorker.GetType().String()).Msg("Output Formatter worker registered")
 
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
 	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(

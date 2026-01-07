@@ -30,6 +30,13 @@ type Config struct {
 	UseTLS   bool   `json:"smtp_use_tls"`
 }
 
+// Attachment represents an email attachment
+type Attachment struct {
+	Filename    string // Filename for the attachment
+	ContentType string // MIME type (e.g., "text/markdown", "text/plain")
+	Content     []byte // Raw content bytes
+}
+
 // Service provides email sending functionality using user's SMTP credentials
 type Service struct {
 	kvStorage interfaces.KeyValueStorage
@@ -216,6 +223,98 @@ func (s *Service) SendHTMLEmail(ctx context.Context, to, subject, htmlBody, text
 	}
 
 	// Plain SMTP
+	return smtp.SendMail(addr, auth, config.From, []string{to}, []byte(msg.String()))
+}
+
+// SendEmailWithAttachments sends an email with HTML/text body and file attachments
+func (s *Service) SendEmailWithAttachments(ctx context.Context, to, subject, htmlBody, textBody string, attachments []Attachment) error {
+	if len(attachments) == 0 {
+		// No attachments, use standard method
+		return s.SendHTMLEmail(ctx, to, subject, htmlBody, textBody)
+	}
+
+	config, err := s.GetConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get mail config: %w", err)
+	}
+
+	if config.Host == "" {
+		return fmt.Errorf("SMTP host not configured")
+	}
+
+	if config.Username == "" || config.Password == "" {
+		return fmt.Errorf("SMTP credentials not configured")
+	}
+
+	if config.From == "" {
+		return fmt.Errorf("from email not configured")
+	}
+
+	// Generate boundaries for multipart message
+	mixedBoundary := generateBoundary()
+	altBoundary := generateBoundary()
+
+	// Build email message
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", config.FromName, config.From))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	msg.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=\"%s\"\r\n", mixedBoundary))
+	msg.WriteString("\r\n")
+
+	// Body part (multipart/alternative for HTML + text)
+	msg.WriteString(fmt.Sprintf("--%s\r\n", mixedBoundary))
+	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", altBoundary))
+	msg.WriteString("\r\n")
+
+	// Plain text part
+	if textBody != "" {
+		msg.WriteString(fmt.Sprintf("--%s\r\n", altBoundary))
+		msg.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString("\r\n")
+		msg.WriteString(encodeBase64WithLineBreaks(textBody))
+		msg.WriteString("\r\n")
+	}
+
+	// HTML part
+	if htmlBody != "" {
+		msg.WriteString(fmt.Sprintf("--%s\r\n", altBoundary))
+		msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString("\r\n")
+		msg.WriteString(encodeBase64WithLineBreaks(htmlBody))
+		msg.WriteString("\r\n")
+	}
+
+	msg.WriteString(fmt.Sprintf("--%s--\r\n", altBoundary))
+
+	// Attachments
+	for _, att := range attachments {
+		msg.WriteString(fmt.Sprintf("--%s\r\n", mixedBoundary))
+		contentType := att.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		msg.WriteString(fmt.Sprintf("Content-Type: %s; name=\"%s\"\r\n", contentType, att.Filename))
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n", att.Filename))
+		msg.WriteString("\r\n")
+		msg.WriteString(encodeBase64WithLineBreaks(string(att.Content)))
+		msg.WriteString("\r\n")
+	}
+
+	msg.WriteString(fmt.Sprintf("--%s--\r\n", mixedBoundary))
+
+	// Connect and send
+	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+
+	if config.UseTLS {
+		return s.sendWithTLS(addr, auth, config.From, to, msg.String())
+	}
+
 	return smtp.SendMail(addr, auth, config.From, []string{to}, []byte(msg.String()))
 }
 

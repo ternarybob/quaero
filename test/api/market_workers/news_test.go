@@ -76,7 +76,7 @@ func TestWorkerNewsSingle(t *testing.T) {
 	isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
 	assert.True(t, isValid, "Output should comply with schema")
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, "BHP")
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -98,7 +98,7 @@ func TestWorkerNewsMulti(t *testing.T) {
 
 	stocks := []string{"BHP", "CSL", "GNP"}
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-news-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -140,7 +140,7 @@ func TestWorkerNewsMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated market_news for %s", stock)
 		})
 	}

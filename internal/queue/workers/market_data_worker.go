@@ -103,16 +103,17 @@ func (w *MarketDataWorker) GetType() models.WorkerType {
 }
 
 // Init initializes the market data worker
+// Supports both step config and job-level variables for ticker configuration
 func (w *MarketDataWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for market_data")
+		stepConfig = make(map[string]interface{})
 	}
 
-	// Parse ticker (supports both "ticker" and legacy "asx_code")
-	ticker := parseTicker(stepConfig)
-	if ticker.Code == "" {
-		return nil, fmt.Errorf("ticker or asx_code is required in step config")
+	// Collect tickers - supports both step config and job-level variables
+	tickers := collectTickersWithJobDef(stepConfig, jobDef)
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config or job variables")
 	}
 
 	// Period for historical data (default Y1 = 12 months)
@@ -124,29 +125,31 @@ func (w *MarketDataWorker) Init(ctx context.Context, step models.JobStep, jobDef
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Str("ticker", ticker.String()).
+		Int("ticker_count", len(tickers)).
 		Str("period", period).
 		Msg("Market data worker initialized")
 
-	return &interfaces.WorkerInitResult{
-		WorkItems: []interfaces.WorkItem{
-			{
-				ID:   ticker.String(),
-				Name: fmt.Sprintf("Fetch %s market data", ticker.String()),
-				Type: "market_data",
-				Config: map[string]interface{}{
-					"ticker": ticker.String(),
-					"period": period,
-				},
+	// Create work items for each ticker
+	workItems := make([]interfaces.WorkItem, len(tickers))
+	for i, ticker := range tickers {
+		workItems[i] = interfaces.WorkItem{
+			ID:   ticker.String(),
+			Name: fmt.Sprintf("Fetch %s market data", ticker.String()),
+			Type: "market_data",
+			Config: map[string]interface{}{
+				"ticker": ticker.String(),
+				"period": period,
 			},
-		},
-		TotalCount:           1,
+		}
+	}
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(tickers),
 		Strategy:             interfaces.ProcessingStrategyInline,
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"ticker":      ticker.String(),
-			"exchange":    ticker.Exchange,
-			"code":        ticker.Code,
+			"tickers":     tickers,
 			"period":      period,
 			"step_config": stepConfig,
 		},
@@ -154,6 +157,7 @@ func (w *MarketDataWorker) Init(ctx context.Context, step models.JobStep, jobDef
 }
 
 // CreateJobs fetches market data and stores as document
+// Supports multiple tickers - processes each sequentially
 func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
@@ -163,11 +167,10 @@ func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		}
 	}
 
-	tickerStr, _ := initResult.Metadata["ticker"].(string)
+	// Get tickers from metadata
+	tickers, _ := initResult.Metadata["tickers"].([]common.Ticker)
 	period, _ := initResult.Metadata["period"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
-
-	ticker := common.ParseTicker(tickerStr)
 
 	// Check cache settings
 	cacheHours := 24
@@ -179,6 +182,61 @@ func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		forceRefresh = fr
 	}
 
+	// Extract output_tags
+	var outputTags []string
+	if stepConfig != nil {
+		if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok && tagStr != "" {
+					outputTags = append(outputTags, tagStr)
+				}
+			}
+		} else if tags, ok := stepConfig["output_tags"].([]string); ok {
+			outputTags = tags
+		}
+	}
+
+	// Log overall step start
+	tickerCount := len(tickers)
+	if w.jobMgr != nil {
+		tickerStrs := make([]string, tickerCount)
+		for i, t := range tickers {
+			tickerStrs[i] = t.String()
+		}
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Processing %d tickers: %s", tickerCount, strings.Join(tickerStrs, ", ")))
+	}
+
+	// Process each ticker sequentially
+	var lastErr error
+	successCount := 0
+	for _, ticker := range tickers {
+		err := w.processTicker(ctx, ticker, period, cacheHours, forceRefresh, &jobDef, stepID, outputTags)
+		if err != nil {
+			w.logger.Error().Err(err).Str("ticker", ticker.String()).Msg("Failed to process ticker")
+			lastErr = err
+			// Continue with next ticker (on_error = "continue" behavior)
+			continue
+		}
+		successCount++
+	}
+
+	// Log overall completion
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info",
+			fmt.Sprintf("Completed %d/%d tickers successfully", successCount, tickerCount))
+	}
+
+	// Return error only if ALL tickers failed
+	if successCount == 0 && lastErr != nil {
+		return "", fmt.Errorf("all tickers failed, last error: %w", lastErr)
+	}
+
+	return stepID, nil
+}
+
+// processTicker processes a single ticker and saves the document
+func (w *MarketDataWorker) processTicker(ctx context.Context, ticker common.Ticker, period string, cacheHours int, forceRefresh bool, jobDef *models.JobDefinition, stepID string, outputTags []string) error {
 	// Build source identifiers
 	sourceType := "market_data"
 	sourceID := ticker.SourceID("market_data")
@@ -198,14 +256,13 @@ func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 						fmt.Sprintf("%s - Using cached data (last synced: %s)",
 							ticker.String(), existingDoc.LastSynced.Format("2006-01-02 15:04")))
 				}
-				return stepID, nil
+				return nil
 			}
 		}
 	}
 
 	w.logger.Info().
 		Str("phase", "run").
-		Str("step_name", step.Name).
 		Str("ticker", ticker.String()).
 		Str("period", period).
 		Msg("Fetching market data via EODHD")
@@ -221,31 +278,17 @@ func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed to fetch market data: %v", err))
 		}
-		return "", fmt.Errorf("failed to fetch market data: %w", err)
+		return fmt.Errorf("failed to fetch market data: %w", err)
 	}
 
 	// Calculate technical indicators
 	w.calculateMarketTechnicals(marketData)
 
-	// Extract output_tags
-	var outputTags []string
-	if stepConfig != nil {
-		if tags, ok := stepConfig["output_tags"].([]interface{}); ok {
-			for _, tag := range tags {
-				if tagStr, ok := tag.(string); ok && tagStr != "" {
-					outputTags = append(outputTags, tagStr)
-				}
-			}
-		} else if tags, ok := stepConfig["output_tags"].([]string); ok {
-			outputTags = tags
-		}
-	}
-
 	// Create and save document
-	doc := w.createMarketDocument(ctx, marketData, &jobDef, stepID, outputTags)
+	doc := w.createMarketDocument(ctx, marketData, jobDef, stepID, outputTags)
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
 		w.logger.Warn().Err(err).Msg("Failed to save market data document")
-		return "", fmt.Errorf("failed to save market data: %w", err)
+		return fmt.Errorf("failed to save market data: %w", err)
 	}
 
 	w.logger.Info().
@@ -260,7 +303,7 @@ func (w *MarketDataWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 				ticker.String(), marketData.LastPrice, marketData.TrendSignal, marketData.SMA20))
 	}
 
-	return stepID, nil
+	return nil
 }
 
 // ReturnsChildJobs returns false
@@ -269,14 +312,10 @@ func (w *MarketDataWorker) ReturnsChildJobs() bool {
 }
 
 // ValidateConfig validates step configuration
+// Config can be nil if tickers will be provided via job-level variables.
 func (w *MarketDataWorker) ValidateConfig(step models.JobStep) error {
-	if step.Config == nil {
-		return fmt.Errorf("market_data step requires config")
-	}
-	ticker := parseTicker(step.Config)
-	if ticker.Code == "" {
-		return fmt.Errorf("market_data step requires 'ticker' or 'asx_code' in config")
-	}
+	// Config is optional - tickers can come from job-level variables
+	// Full validation happens in Init() when we have access to jobDef
 	return nil
 }
 

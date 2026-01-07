@@ -166,12 +166,21 @@ func (w *MarketConsolidateWorker) CreateJobs(ctx context.Context, step models.Jo
 		title = t
 	}
 
+	// Extract format option: split|combined (default: combined)
+	// - combined: merge all documents into a single output document
+	// - split: keep documents separate (pass through without merging)
+	format := "combined"
+	if f, ok := stepConfig["format"].(string); ok && f != "" {
+		format = strings.ToLower(f)
+	}
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("step_name", step.Name).
 		Str("step_id", stepID).
 		Strs("input_tags", inputTags).
 		Strs("output_tags", outputTags).
+		Str("format", format).
 		Msg("Starting document consolidation")
 
 	// Log step start for UI
@@ -236,7 +245,53 @@ func (w *MarketConsolidateWorker) CreateJobs(ctx context.Context, step models.Jo
 		return docsWithTickers[i].ticker < docsWithTickers[j].ticker
 	})
 
-	// Concatenate content
+	// Build output tags
+	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
+	finalTags := append(outputTags, dateTag)
+
+	// Handle split format: add output tags to existing documents without merging
+	if format == "split" {
+		var tickers []string
+		for _, dwt := range docsWithTickers {
+			if dwt.ticker != "" {
+				tickers = append(tickers, dwt.ticker)
+			}
+
+			// Add output tags to existing document
+			existingTags := make(map[string]bool)
+			for _, t := range dwt.doc.Tags {
+				existingTags[t] = true
+			}
+			for _, t := range finalTags {
+				if !existingTags[t] {
+					dwt.doc.Tags = append(dwt.doc.Tags, t)
+				}
+			}
+			dwt.doc.UpdatedAt = time.Now()
+
+			// Save updated document
+			if err := w.documentStorage.SaveDocument(dwt.doc); err != nil {
+				w.logger.Warn().Err(err).Str("doc_id", dwt.doc.ID).Msg("Failed to update document tags")
+			}
+		}
+
+		w.logger.Info().
+			Int("doc_count", len(docsWithTickers)).
+			Strs("tickers", tickers).
+			Strs("added_tags", finalTags).
+			Msg("Split format: added output tags to existing documents")
+
+		if w.jobMgr != nil {
+			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf(
+				"Split format: tagged %d documents with %v (tickers: %s)",
+				len(docsWithTickers), outputTags, strings.Join(tickers, ", "),
+			))
+		}
+
+		return "", nil
+	}
+
+	// Combined format (default): merge all documents into single output
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
 	sb.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM MST")))
@@ -255,10 +310,6 @@ func (w *MarketConsolidateWorker) CreateJobs(ctx context.Context, step models.Jo
 			sb.WriteString("\n\n---\n\n")
 		}
 	}
-
-	// Build output tags
-	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	finalTags := append(outputTags, dateTag)
 
 	// Create consolidated document
 	consolidatedDoc := &models.Document{

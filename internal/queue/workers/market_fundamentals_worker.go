@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,9 +39,19 @@ func parseTicker(config map[string]interface{}) common.Ticker {
 	return common.Ticker{}
 }
 
-// collectTickers collects all tickers from config, supporting both single and multiple formats.
+// collectTickers collects all tickers from step config only.
 // Supports: ticker, asx_code (single) and tickers, asx_codes (array).
+// For job-level variables support, use collectTickersWithJobDef instead.
 func collectTickers(config map[string]interface{}) []common.Ticker {
+	return collectTickersWithJobDef(config, models.JobDefinition{})
+}
+
+// collectTickersWithJobDef collects all tickers from both step config and job-level variables.
+// Sources (in order of priority):
+//  1. Step config: ticker, asx_code (single)
+//  2. Step config: tickers, asx_codes (array)
+//  3. Job-level: config.variables = [{ ticker = "..." }, { asx_code = "..." }, ...]
+func collectTickersWithJobDef(stepConfig map[string]interface{}, jobDef models.JobDefinition) []common.Ticker {
 	var tickers []common.Ticker
 	seen := make(map[string]bool)
 
@@ -51,25 +62,47 @@ func collectTickers(config map[string]interface{}) []common.Ticker {
 		}
 	}
 
-	// Single ticker (legacy)
-	if t := parseTicker(config); t.Code != "" {
-		addTicker(t)
-	}
+	// Source 1: Single ticker from step config (legacy)
+	if stepConfig != nil {
+		if t := parseTicker(stepConfig); t.Code != "" {
+			addTicker(t)
+		}
 
-	// Array of tickers
-	if tickerArray, ok := config["tickers"].([]interface{}); ok {
-		for _, v := range tickerArray {
-			if s, ok := v.(string); ok && s != "" {
-				addTicker(common.ParseTicker(s))
+		// Source 2: Array of tickers from step config
+		if tickerArray, ok := stepConfig["tickers"].([]interface{}); ok {
+			for _, v := range tickerArray {
+				if s, ok := v.(string); ok && s != "" {
+					addTicker(common.ParseTicker(s))
+				}
+			}
+		}
+
+		// Array of asx_codes (legacy) from step config
+		if codeArray, ok := stepConfig["asx_codes"].([]interface{}); ok {
+			for _, v := range codeArray {
+				if s, ok := v.(string); ok && s != "" {
+					addTicker(common.ParseTicker(s))
+				}
 			}
 		}
 	}
 
-	// Array of asx_codes (legacy)
-	if codeArray, ok := config["asx_codes"].([]interface{}); ok {
-		for _, v := range codeArray {
-			if s, ok := v.(string); ok && s != "" {
-				addTicker(common.ParseTicker(s))
+	// Source 3: Job-level variables (multiple tickers)
+	if jobDef.Config != nil {
+		if vars, ok := jobDef.Config["variables"].([]interface{}); ok {
+			for _, v := range vars {
+				varMap, ok := v.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				// Try "ticker" key (e.g., "ASX:GNP" or "GNP")
+				if ticker, ok := varMap["ticker"].(string); ok && ticker != "" {
+					addTicker(common.ParseTicker(ticker))
+				}
+				// Try "asx_code" key
+				if asxCode, ok := varMap["asx_code"].(string); ok && asxCode != "" {
+					addTicker(common.ParseTicker(asxCode))
+				}
 			}
 		}
 	}
@@ -504,13 +537,13 @@ func (w *MarketFundamentalsWorker) GetType() models.WorkerType {
 func (w *MarketFundamentalsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for market_fundamentals")
+		stepConfig = make(map[string]interface{})
 	}
 
-	// Collect tickers - supports both single and multiple formats
-	tickers := collectTickers(stepConfig)
+	// Collect tickers - supports both step config and job-level variables
+	tickers := collectTickersWithJobDef(stepConfig, jobDef)
 	if len(tickers) == 0 {
-		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config")
+		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config or job variables")
 	}
 
 	// Period for historical data (default Y2 = 24 months)
@@ -771,15 +804,10 @@ func (w *MarketFundamentalsWorker) ReturnsChildJobs() bool {
 }
 
 // ValidateConfig validates step configuration
+// Config can be nil if tickers will be provided via job-level variables.
 func (w *MarketFundamentalsWorker) ValidateConfig(step models.JobStep) error {
-	if step.Config == nil {
-		return fmt.Errorf("market_fundamentals step requires config")
-	}
-	// Must have either ticker/asx_code (single) or tickers/asx_codes (multiple)
-	tickers := collectTickers(step.Config)
-	if len(tickers) == 0 {
-		return fmt.Errorf("market_fundamentals step requires 'ticker', 'asx_code', 'tickers', or 'asx_codes' in config")
-	}
+	// Config is optional - tickers can come from job-level variables
+	// Full validation happens in Init() when we have access to jobDef
 	return nil
 }
 
@@ -1017,6 +1045,46 @@ func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancia
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(incomeYears)))
 
+	// Log financial data availability for debugging
+	w.logger.Debug().
+		Int("yearly_income_statements", len(financials.IncomeStatement.Yearly)).
+		Int("quarterly_income_statements", len(financials.IncomeStatement.Quarterly)).
+		Int("yearly_balance_sheets", len(financials.BalanceSheet.Yearly)).
+		Int("yearly_cash_flows", len(financials.CashFlow.Yearly)).
+		Msg("EODHD financial statements availability")
+
+	// Helper function to extract numeric value from interface{}
+	// EODHD API may return values as float64, string, or nil
+	extractNumber := func(data map[string]interface{}, key string) int64 {
+		if data == nil {
+			return 0
+		}
+		val, exists := data[key]
+		if !exists || val == nil {
+			return 0
+		}
+		switch v := val.(type) {
+		case float64:
+			return int64(v)
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case string:
+			// Try to parse string as number
+			if v == "" || v == "None" || v == "null" {
+				return 0
+			}
+			f, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return 0
+			}
+			return int64(f)
+		default:
+			return 0
+		}
+	}
+
 	// Process yearly financial data
 	for _, year := range incomeYears {
 		incomeData := financials.IncomeStatement.Yearly[year]
@@ -1028,45 +1096,21 @@ func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancia
 			PeriodType: "annual",
 		}
 
-		// Income statement
-		if v, ok := incomeData["totalRevenue"].(float64); ok {
-			entry.TotalRevenue = int64(v)
-		}
-		if v, ok := incomeData["grossProfit"].(float64); ok {
-			entry.GrossProfit = int64(v)
-		}
-		if v, ok := incomeData["operatingIncome"].(float64); ok {
-			entry.OperatingIncome = int64(v)
-		}
-		if v, ok := incomeData["netIncome"].(float64); ok {
-			entry.NetIncome = int64(v)
-		}
-		if v, ok := incomeData["ebitda"].(float64); ok {
-			entry.EBITDA = int64(v)
-		}
+		// Income statement - use extractNumber for robust type handling
+		entry.TotalRevenue = extractNumber(incomeData, "totalRevenue")
+		entry.GrossProfit = extractNumber(incomeData, "grossProfit")
+		entry.OperatingIncome = extractNumber(incomeData, "operatingIncome")
+		entry.NetIncome = extractNumber(incomeData, "netIncome")
+		entry.EBITDA = extractNumber(incomeData, "ebitda")
 
 		// Balance sheet
-		if balanceData != nil {
-			if v, ok := balanceData["totalAssets"].(float64); ok {
-				entry.TotalAssets = int64(v)
-			}
-			if v, ok := balanceData["totalLiab"].(float64); ok {
-				entry.TotalLiab = int64(v)
-			}
-			if v, ok := balanceData["totalStockholderEquity"].(float64); ok {
-				entry.TotalEquity = int64(v)
-			}
-		}
+		entry.TotalAssets = extractNumber(balanceData, "totalAssets")
+		entry.TotalLiab = extractNumber(balanceData, "totalLiab")
+		entry.TotalEquity = extractNumber(balanceData, "totalStockholderEquity")
 
 		// Cash flow
-		if cashflowData != nil {
-			if v, ok := cashflowData["totalCashFromOperatingActivities"].(float64); ok {
-				entry.OperatingCF = int64(v)
-			}
-			if v, ok := cashflowData["freeCashFlow"].(float64); ok {
-				entry.FreeCF = int64(v)
-			}
-		}
+		entry.OperatingCF = extractNumber(cashflowData, "totalCashFromOperatingActivities")
+		entry.FreeCF = extractNumber(cashflowData, "freeCashFlow")
 
 		// Calculate margins
 		if entry.TotalRevenue > 0 {
@@ -1077,7 +1121,7 @@ func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancia
 		data.AnnualData = append(data.AnnualData, entry)
 	}
 
-	// Process quarterly financial data
+	// Process quarterly financial data - limit to 20 quarters (5 years)
 	quarterKeys := make([]string, 0, len(financials.IncomeStatement.Quarterly))
 	for qtr := range financials.IncomeStatement.Quarterly {
 		quarterKeys = append(quarterKeys, qtr)
@@ -1085,7 +1129,7 @@ func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancia
 	sort.Sort(sort.Reverse(sort.StringSlice(quarterKeys)))
 
 	for i, qtr := range quarterKeys {
-		if i >= 8 { // Limit to last 8 quarters
+		if i >= 20 { // Limit to last 20 quarters (5 years)
 			break
 		}
 		incomeData := financials.IncomeStatement.Quarterly[qtr]
@@ -1095,18 +1139,11 @@ func (w *MarketFundamentalsWorker) parseEODHDFinancials(financials eodhdFinancia
 			PeriodType: "quarterly",
 		}
 
-		if v, ok := incomeData["totalRevenue"].(float64); ok {
-			entry.TotalRevenue = int64(v)
-		}
-		if v, ok := incomeData["grossProfit"].(float64); ok {
-			entry.GrossProfit = int64(v)
-		}
-		if v, ok := incomeData["operatingIncome"].(float64); ok {
-			entry.OperatingIncome = int64(v)
-		}
-		if v, ok := incomeData["netIncome"].(float64); ok {
-			entry.NetIncome = int64(v)
-		}
+		// Use extractNumber for robust type handling
+		entry.TotalRevenue = extractNumber(incomeData, "totalRevenue")
+		entry.GrossProfit = extractNumber(incomeData, "grossProfit")
+		entry.OperatingIncome = extractNumber(incomeData, "operatingIncome")
+		entry.NetIncome = extractNumber(incomeData, "netIncome")
 
 		if entry.TotalRevenue > 0 {
 			entry.GrossMargin = float64(entry.GrossProfit) / float64(entry.TotalRevenue) * 100
@@ -1589,6 +1626,9 @@ func (w *MarketFundamentalsWorker) createDocument(ctx context.Context, data *Sto
 	content.WriteString(fmt.Sprintf("| Revenue 3Y CAGR | %.1f%% |\n", data.RevenueCAGR3Y))
 	content.WriteString(fmt.Sprintf("| Revenue 5Y CAGR | %.1f%% |\n\n", data.RevenueCAGR5Y))
 
+	// YoY Financial Performance Table (annual data with derived ratios)
+	w.writeFinancialPerformanceTable(&content, data)
+
 	// Historical Prices (last 20 entries for readability, full data in metadata)
 	if len(data.HistoricalPrices) > 0 {
 		content.WriteString("## Historical Prices (Last 24 Months)\n\n")
@@ -1628,6 +1668,7 @@ func (w *MarketFundamentalsWorker) createDocument(ctx context.Context, data *Sto
 
 	// Build metadata - full structured data
 	metadata := map[string]interface{}{
+		"symbol":              data.Symbol, // For schema compliance
 		"ticker":              ticker.String(),
 		"asx_code":            ticker.Code, // Keep for backwards compatibility
 		"exchange":            ticker.Exchange,
@@ -1710,7 +1751,13 @@ func (w *MarketFundamentalsWorker) createDocument(ctx context.Context, data *Sto
 	if len(data.UpgradeDowngrades) > 0 {
 		metadata["upgrade_downgrades"] = data.UpgradeDowngrades
 	}
-	// Note: annual_data and quarterly_data removed - obtained via company announcements
+	// Annual and quarterly financial data from EODHD - used by market_announcements worker
+	if len(data.AnnualData) > 0 {
+		metadata["annual_data"] = data.AnnualData
+	}
+	if len(data.QuarterlyData) > 0 {
+		metadata["quarterly_data"] = data.QuarterlyData
+	}
 	if len(data.HistoricalPrices) > 0 {
 		metadata["historical_prices"] = data.HistoricalPrices
 	}
@@ -1774,4 +1821,238 @@ func (w *MarketFundamentalsWorker) formatLargeNumber(n int64) string {
 		return fmt.Sprintf("%.2fM", float64(n)/1e6)
 	}
 	return w.formatNumber(n)
+}
+
+// writeFinancialPerformanceTable generates a comprehensive YoY financial performance table
+// similar to EODHD's financial summary presentation
+func (w *MarketFundamentalsWorker) writeFinancialPerformanceTable(content *strings.Builder, data *StockCollectorData) {
+	if len(data.AnnualData) == 0 && len(data.QuarterlyData) == 0 {
+		return
+	}
+
+	// Combine annual and half-year data for the table
+	// We'll show up to 10 periods (mix of annual and quarterly)
+	type periodData struct {
+		EndDate         string
+		PeriodLabel     string
+		TotalRevenue    int64
+		GrossProfit     int64
+		OperatingIncome int64
+		NetIncome       int64
+		EBITDA          int64
+		TotalAssets     int64
+		TotalEquity     int64
+		GrossMargin     float64
+		OperatingMargin float64
+		NetMargin       float64
+		ROE             float64
+		ROA             float64
+	}
+
+	periods := make([]periodData, 0, 10)
+
+	// Add annual data first (most important)
+	for i, a := range data.AnnualData {
+		if i >= 8 { // Limit to 8 annual periods
+			break
+		}
+		label := a.EndDate[:7] // YYYY-MM format for label
+		pd := periodData{
+			EndDate:         a.EndDate,
+			PeriodLabel:     label,
+			TotalRevenue:    a.TotalRevenue,
+			GrossProfit:     a.GrossProfit,
+			OperatingIncome: a.OperatingIncome,
+			NetIncome:       a.NetIncome,
+			EBITDA:          a.EBITDA,
+			TotalAssets:     a.TotalAssets,
+			TotalEquity:     a.TotalEquity,
+			GrossMargin:     a.GrossMargin,
+			NetMargin:       a.NetMargin,
+		}
+		// Calculate operating margin
+		if a.TotalRevenue > 0 {
+			pd.OperatingMargin = float64(a.OperatingIncome) / float64(a.TotalRevenue) * 100
+		}
+		// Calculate ROE and ROA
+		if a.TotalEquity > 0 {
+			pd.ROE = float64(a.NetIncome) / float64(a.TotalEquity) * 100
+		}
+		if a.TotalAssets > 0 {
+			pd.ROA = float64(a.NetIncome) / float64(a.TotalAssets) * 100
+		}
+		periods = append(periods, pd)
+	}
+
+	if len(periods) < 2 {
+		return // Need at least 2 periods for YoY comparison
+	}
+
+	content.WriteString("## Financial Performance (Year-over-Year)\n\n")
+	content.WriteString("*Financial data sourced from EODHD. Values in millions (M) or billions (B).*\n\n")
+
+	// Build header row with period labels
+	content.WriteString("| Metric |")
+	for _, p := range periods {
+		content.WriteString(fmt.Sprintf(" %s |", p.PeriodLabel))
+	}
+	content.WriteString("\n|--------|")
+	for range periods {
+		content.WriteString("--------|")
+	}
+	content.WriteString("\n")
+
+	// Revenue row
+	content.WriteString("| Revenue |")
+	for _, p := range periods {
+		content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.TotalRevenue)))
+	}
+	content.WriteString("\n")
+
+	// Revenue YoY row
+	content.WriteString("| Revenue YoY |")
+	for i, p := range periods {
+		if i < len(periods)-1 && periods[i+1].TotalRevenue > 0 {
+			yoy := (float64(p.TotalRevenue) - float64(periods[i+1].TotalRevenue)) / float64(periods[i+1].TotalRevenue) * 100
+			content.WriteString(fmt.Sprintf(" %.1f%% |", yoy))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Gross Profit row
+	content.WriteString("| Gross Profit |")
+	for _, p := range periods {
+		content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.GrossProfit)))
+	}
+	content.WriteString("\n")
+
+	// Operating Income row
+	content.WriteString("| Operating Income |")
+	for _, p := range periods {
+		content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.OperatingIncome)))
+	}
+	content.WriteString("\n")
+
+	// Net Income row
+	content.WriteString("| Net Income |")
+	for _, p := range periods {
+		content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.NetIncome)))
+	}
+	content.WriteString("\n")
+
+	// Net Income YoY row
+	content.WriteString("| Net Income YoY |")
+	for i, p := range periods {
+		if i < len(periods)-1 && periods[i+1].NetIncome != 0 {
+			yoy := (float64(p.NetIncome) - float64(periods[i+1].NetIncome)) / math.Abs(float64(periods[i+1].NetIncome)) * 100
+			content.WriteString(fmt.Sprintf(" %.1f%% |", yoy))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// EBITDA row
+	content.WriteString("| EBITDA |")
+	for _, p := range periods {
+		if p.EBITDA > 0 {
+			content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.EBITDA)))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Separator for ratios
+	content.WriteString("| **Profitability** |")
+	for range periods {
+		content.WriteString(" |")
+	}
+	content.WriteString("\n")
+
+	// Gross Margin row
+	content.WriteString("| Gross Margin |")
+	for _, p := range periods {
+		if p.GrossMargin > 0 {
+			content.WriteString(fmt.Sprintf(" %.1f%% |", p.GrossMargin))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Operating Margin row
+	content.WriteString("| Operating Margin |")
+	for _, p := range periods {
+		if p.OperatingMargin > 0 {
+			content.WriteString(fmt.Sprintf(" %.1f%% |", p.OperatingMargin))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Net Margin row
+	content.WriteString("| Net Margin |")
+	for _, p := range periods {
+		if p.TotalRevenue > 0 {
+			content.WriteString(fmt.Sprintf(" %.1f%% |", p.NetMargin))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// ROE row
+	content.WriteString("| Return on Equity |")
+	for _, p := range periods {
+		if p.ROE != 0 {
+			content.WriteString(fmt.Sprintf(" %.1f%% |", p.ROE))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// ROA row
+	content.WriteString("| Return on Assets |")
+	for _, p := range periods {
+		if p.ROA != 0 {
+			content.WriteString(fmt.Sprintf(" %.1f%% |", p.ROA))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Separator for balance sheet
+	content.WriteString("| **Balance Sheet** |")
+	for range periods {
+		content.WriteString(" |")
+	}
+	content.WriteString("\n")
+
+	// Total Assets row
+	content.WriteString("| Total Assets |")
+	for _, p := range periods {
+		if p.TotalAssets > 0 {
+			content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.TotalAssets)))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n")
+
+	// Total Equity row
+	content.WriteString("| Total Equity |")
+	for _, p := range periods {
+		if p.TotalEquity > 0 {
+			content.WriteString(fmt.Sprintf(" %s |", w.formatLargeNumber(p.TotalEquity)))
+		} else {
+			content.WriteString(" - |")
+		}
+	}
+	content.WriteString("\n\n")
 }

@@ -5,6 +5,11 @@ import (
 )
 
 func TestParseTicker(t *testing.T) {
+	// Ensure default exchange is ASX for these tests
+	originalDefault := DefaultExchange
+	DefaultExchange = "ASX"
+	defer func() { DefaultExchange = originalDefault }()
+
 	tests := []struct {
 		input        string
 		wantExchange string
@@ -12,11 +17,17 @@ func TestParseTicker(t *testing.T) {
 		wantString   string
 		wantEODHD    string
 	}{
-		// Exchange-qualified format
+		// Exchange-qualified format with colon separator
 		{"ASX:GNP", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
 		{"ASX:BCN", "ASX", "BCN", "ASX:BCN", "BCN.AU"},
 		{"NYSE:AAPL", "NYSE", "AAPL", "NYSE:AAPL", "AAPL.US"},
 		{"NASDAQ:MSFT", "NASDAQ", "MSFT", "NASDAQ:MSFT", "MSFT.US"},
+
+		// Exchange-qualified format with dot separator (EXCHANGE.CODE)
+		{"ASX.GNP", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
+		{"ASX.BCN", "ASX", "BCN", "ASX:BCN", "BCN.AU"},
+		{"NYSE.AAPL", "NYSE", "AAPL", "NYSE:AAPL", "AAPL.US"},
+		{"NASDAQ.MSFT", "NASDAQ", "MSFT", "NASDAQ:MSFT", "MSFT.US"},
 
 		// Legacy format (no exchange - defaults to ASX)
 		{"GNP", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
@@ -24,10 +35,12 @@ func TestParseTicker(t *testing.T) {
 
 		// Case normalization
 		{"asx:gnp", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
+		{"asx.gnp", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
 		{"gnp", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
 
 		// Whitespace handling
 		{"  ASX:GNP  ", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
+		{"  ASX.GNP  ", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
 		{"  GNP  ", "ASX", "GNP", "ASX:GNP", "GNP.AU"},
 
 		// Empty input

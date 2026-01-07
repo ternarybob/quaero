@@ -1,0 +1,100 @@
+# Announcements Watchlist
+# =========================================================================
+# Fetches ASX announcements for a watchlist of stocks, consolidates,
+# and emails the consolidated report.
+#
+# WORKFLOW:
+# 1. Fetch Announcements: For each ticker, fetch ASX announcements
+# 2. Consolidate: Merge all announcement summaries into single document
+# 3. Email Report: Send consolidated report via email
+#
+# TICKERS: EXR, GNP, SKS, TWR
+# OUTPUT TAG: announcements-consolidated
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "announcements-watchlist"
+name = "Announcements Watchlist"
+type = "orchestrator"
+description = "Fetches and consolidates ASX announcements for watchlist stocks"
+tags = ["announcements", "watchlist", "email"]
+schedule = ""
+timeout = "1h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-05"
+updated = "2026-01-05"
+purpose = "Consolidated announcements report for watchlist stocks"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+# Ticker list - add/remove as needed
+variables = [
+    { ticker = "ASX.EXR" },
+    { ticker = "ASX.GNP" },
+    { ticker = "ASX.SKS" },
+    { ticker = "ASX.TWR" },
+    { ticker = "ASX.BHP" },
+    { ticker = "ASX.CSL" },
+]
+
+# =========================================================================
+# Step 1: Fetch Announcements (per ticker)
+# =========================================================================
+# Fetches ASX announcements for each stock using MarketAnnouncementsWorker
+# Creates documents tagged ['asx-announcement-summary', '<ticker>']
+
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch ASX announcements for each watchlist stock"
+on_error = "continue"
+
+# =========================================================================
+# Step 2: Format Output
+# =========================================================================
+# Prepares output document for email delivery
+# Collects documents by input_tags, formats with email instructions
+# Options:
+#   format = "inline|pdf|html|markdown" (default: inline)
+#   attachment = true|false (default: false)
+#   style = "proforma|body" (default: body)
+
+[step.format_output]
+type = "output_formatter"
+description = "Format announcement summaries for email"
+depends = "fetch_announcements"
+on_error = "fail"
+input_tags = ["asx-announcement-summary"]
+output_tags = ["email-output"]
+title = "ASX Announcements - Watchlist Summary"
+# base_url = "http://localhost:18080"  # optional: defaults to configured server URL
+# format = "inline"     # default: inline (markdown converted to HTML in body)
+# attachment = false    # default: no attachments
+# style = "body"        # default: body (full content in email)
+
+# =========================================================================
+# Step 3: Email Report
+# =========================================================================
+# Sends email based on output_formatter document instructions
+# Reads format, attachment, style from output_formatter document frontmatter
+
+[step.email_report]
+type = "email"
+description = "Email consolidated announcements report"
+depends = "format_output"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "ASX Announcements - Watchlist Summary"

@@ -420,13 +420,13 @@ func (w *WorkerDebugInfo) ToMarkdown() string {
 	var sb strings.Builder
 	sb.WriteString("\n---\n")
 	sb.WriteString("## Worker Debug Info\n\n")
-	sb.WriteString(fmt.Sprintf("**Worker Type**: %s\n", w.WorkerType))
+	sb.WriteString(fmt.Sprintf("**Worker Type**: %s  \n", w.WorkerType))
 	if w.Ticker != "" {
-		sb.WriteString(fmt.Sprintf("**Ticker**: %s\n", w.Ticker))
+		sb.WriteString(fmt.Sprintf("**Ticker**: %s  \n", w.Ticker))
 	}
-	sb.WriteString(fmt.Sprintf("**Started**: %s\n", w.StartedAt.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("**Started**: %s  \n", w.StartedAt.Format(time.RFC3339)))
 	if !w.CompletedAt.IsZero() {
-		sb.WriteString(fmt.Sprintf("**Completed**: %s\n", w.CompletedAt.Format(time.RFC3339)))
+		sb.WriteString(fmt.Sprintf("**Completed**: %s  \n", w.CompletedAt.Format(time.RFC3339)))
 	}
 	sb.WriteString("\n")
 

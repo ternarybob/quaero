@@ -120,7 +120,7 @@ func TestWorkerSignalSingle(t *testing.T) {
 		}
 	}
 
-	SaveWorkerOutput(t, env, helper, tags, 1)
+	SaveWorkerOutput(t, env, helper, tags, ticker)
 	AssertResultFilesExist(t, env, 1)
 	AssertNoServiceErrors(t, env)
 
@@ -171,7 +171,7 @@ func TestWorkerSignalMulti(t *testing.T) {
 
 	t.Log("Market data prepared for all stocks, running signal tests")
 
-	for i, stock := range stocks {
+	for _, stock := range stocks {
 		t.Run(stock, func(t *testing.T) {
 			defID := fmt.Sprintf("test-signal-%s-%d", strings.ToLower(stock), time.Now().UnixNano())
 
@@ -210,7 +210,7 @@ func TestWorkerSignalMulti(t *testing.T) {
 			isValid := ValidateSchema(t, metadata, SignalSchema)
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
-			SaveWorkerOutput(t, env, helper, tags, i+1)
+			SaveWorkerOutput(t, env, helper, tags, stock)
 			t.Logf("PASS: Validated signal for %s", stock)
 		})
 	}
