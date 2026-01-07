@@ -174,6 +174,13 @@ func New(cfg *common.Config, logger arbor.ILogger, configPaths ...string) (*App,
 		Logger:      logger,
 	}
 
+	// Apply market defaults from config
+	// This sets the default exchange for ParseTicker when no exchange prefix is provided
+	if cfg.Markets.Default != "" {
+		common.SetDefaultExchange(cfg.Markets.Default)
+		logger.Info().Str("default_exchange", cfg.Markets.Default).Msg("[STARTUP] Markets: default exchange configured")
+	}
+
 	// Initialize database
 	if err := app.initDatabase(); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)

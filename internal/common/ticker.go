@@ -35,18 +35,34 @@ var IndexCodeToEODHD = map[string]string{
 	"XAO": "AORD", // All Ordinaries
 }
 
+// DefaultExchange is the default exchange used when parsing tickers without an exchange prefix.
+// Can be overridden via [markets] default config in TOML.
+var DefaultExchange = "ASX"
+
+// SetDefaultExchange sets the default exchange for parsing tickers.
+// Called during app initialization from config.
+func SetDefaultExchange(exchange string) {
+	if exchange != "" {
+		DefaultExchange = strings.ToUpper(exchange)
+	}
+}
+
 // ParseTicker parses an exchange-qualified ticker string.
 // Supports formats:
-//   - "ASX:GNP" -> Exchange="ASX", Code="GNP"
-//   - "GNP" -> Exchange="ASX" (default), Code="GNP"
-//   - "gnp" -> Exchange="ASX", Code="GNP" (normalized to uppercase)
+//   - "ASX:GNP" -> Exchange="ASX", Code="GNP" (colon separator)
+//   - "ASX.GNP" -> Exchange="ASX", Code="GNP" (dot separator)
+//   - "GNP" -> Exchange=DefaultExchange (default), Code="GNP"
+//   - "gnp" -> Exchange=DefaultExchange, Code="GNP" (normalized to uppercase)
+//
+// Note: EODHD uses CODE.EXCHANGE (e.g., "GNP.AU"), while our format uses EXCHANGE.CODE.
+// Use EODHDSymbol() to convert to EODHD format.
 func ParseTicker(ticker string) Ticker {
 	ticker = strings.TrimSpace(ticker)
 	if ticker == "" {
 		return Ticker{}
 	}
 
-	// Check for exchange prefix
+	// Check for exchange prefix with colon separator (EXCHANGE:CODE)
 	if idx := strings.Index(ticker, ":"); idx > 0 {
 		exchange := strings.ToUpper(ticker[:idx])
 		code := strings.ToUpper(ticker[idx+1:])
@@ -57,9 +73,24 @@ func ParseTicker(ticker string) Ticker {
 		}
 	}
 
-	// No exchange prefix - default to ASX
+	// Check for exchange prefix with dot separator (EXCHANGE.CODE)
+	// Only match if the prefix is a known exchange to avoid conflicts with codes containing dots
+	if idx := strings.Index(ticker, "."); idx > 0 {
+		possibleExchange := strings.ToUpper(ticker[:idx])
+		// Check if this is a known exchange
+		if _, ok := ExchangeToSuffix[possibleExchange]; ok {
+			code := strings.ToUpper(ticker[idx+1:])
+			return Ticker{
+				Exchange: possibleExchange,
+				Code:     code,
+				Raw:      ticker,
+			}
+		}
+	}
+
+	// No exchange prefix - use default exchange
 	return Ticker{
-		Exchange: "ASX",
+		Exchange: DefaultExchange,
 		Code:     strings.ToUpper(ticker),
 		Raw:      ticker,
 	}

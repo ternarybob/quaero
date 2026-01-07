@@ -297,3 +297,23 @@ extensions = [".md"]      # File extensions to scan (markdown by default)
 # crawl_progress = "1s"   # Uncomment to override default
 # job_spawn = "500ms"     # Uncomment to override default
 
+# =============================================================================
+# Markets Configuration
+# =============================================================================
+# Configure default market/exchange settings for ticker parsing.
+#
+# Ticker Format Support:
+# - "ASX:GNP" or "ASX.GNP" -> Exchange="ASX", Code="GNP" (explicit exchange)
+# - "GNP" -> Exchange=default, Code="GNP" (uses default exchange below)
+#
+# EODHD Transposition:
+# Our format: EXCHANGE.CODE (e.g., "ASX.GNP") or EXCHANGE:CODE (e.g., "ASX:GNP")
+# EODHD format: CODE.SUFFIX (e.g., "GNP.AU")
+# The EODHDSymbol() method handles this conversion automatically.
+#
+# Default: ASX (Australian Securities Exchange)
+# Env var: QUAERO_MARKETS_DEFAULT
+
+[markets]
+default = "ASX"  # Default exchange when ticker has no prefix
+

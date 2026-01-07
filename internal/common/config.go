@@ -36,6 +36,12 @@ type Config struct {
 	Gemini          GeminiConfig       `toml:"gemini"`
 	Claude          ClaudeConfig       `toml:"claude"`
 	LLM             LLMConfig          `toml:"llm"`
+	Markets         MarketsConfig      `toml:"markets"` // Market defaults configuration
+}
+
+// MarketsConfig contains default market/exchange settings
+type MarketsConfig struct {
+	Default string `toml:"default"` // Default exchange for tickers without prefix (e.g., "ASX", "NYSE")
 }
 
 type ServerConfig struct {
@@ -330,6 +336,9 @@ func NewDefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			DefaultProvider: LLMProviderGemini, // Default to Gemini for backward compatibility
+		},
+		Markets: MarketsConfig{
+			Default: "ASX", // Default to ASX for backward compatibility
 		},
 	}
 }
