@@ -94,6 +94,26 @@ This document outlines the staged implementation plan for the stock rating syste
 
 ---
 
+## Ticker Format
+
+Tickers are exchange-agnostic. Format:
+- `ASX.EXR` - Explicit exchange prefix
+- `EXR` - Uses default exchange from job config
+
+Default exchange configured in job definition:
+```toml
+[config]
+default_exchange = "ASX"
+variables = [
+    { ticker = "EXR" },      # Resolves to ASX.EXR
+    { ticker = "NYSE.AAPL" }, # Explicit exchange
+]
+```
+
+Workers and services should handle both formats using `common.ParseTicker()`.
+
+---
+
 ## Stage 1: Rating Service
 
 **Goal:** Create pure calculation functions with no document awareness.
@@ -271,7 +291,7 @@ This document outlines the staged implementation plan for the stock rating syste
 
 #### 2.2 CDS Worker
 - [ ] Create `internal/queue/workers/rating_cds_worker.go`
-- [ ] Reads: `asx-stock-data` + `asx-announcement-summary` documents
+- [ ] Reads: `stock-data` + `announcement-summary` documents
 - [ ] Calls: `rating.CalculateCDS()`
 - [ ] Outputs: `rating-cds` document
 
@@ -325,9 +345,11 @@ Each reads required documents, calls service, outputs score document.
   tags = ["rating", "analysis"]
 
   [config]
+  default_exchange = "ASX"  # Used when ticker has no exchange prefix
   variables = [
-      { ticker = "GNP" },
-      { ticker = "SKS" },
+      { ticker = "GNP" },       # Resolves to ASX.GNP
+      { ticker = "SKS" },       # Resolves to ASX.SKS
+      { ticker = "NYSE.AAPL" }, # Explicit exchange
   ]
 
   # Step 1: Collect data (existing workers)
