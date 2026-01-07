@@ -435,6 +435,19 @@ Each reads required documents, calls service, outputs score document.
   description = "Calculate final investability rating"
   depends = "calculate_bfs,calculate_cds,calculate_nfr,calculate_pps,calculate_vrs,calculate_ob"
   output_tags = ["stock-rating"]
+
+  # Step 5: Format output
+  [step.format_output]
+  type = "output_formatter"
+  description = "Format ratings for email delivery"
+  depends = "calculate_rating"
+  on_error = "fail"
+  input_tags = ["stock-rating"]
+  output_tags = ["email-output"]
+  title = "Stock Rating Report"
+  # format = "inline"     # default: inline (markdown converted to HTML in body)
+  # attachment = false    # default: no attachments
+  # style = "body"        # default: body (full content in email)
   ```
 
 #### 3.2 Create Job Definition (Example)
@@ -458,13 +471,15 @@ Each reads required documents, calls service, outputs score document.
       { ticker = "EXR" },
   ]
 
-  # Optional: Override email settings
+  # Email step - just sends, formatting done by output_formatter
   [step.email_report]
   type = "email"
-  depends = "calculate_rating"
+  description = "Email rating report"
+  depends = "format_output"
+  always_run = true
+  on_error = "fail"
   to = "user@example.com"
   subject = "Stock Rating Report"
-  list_tags = ["stock-rating"]
   ```
 
 #### 3.3 Test Job Execution
@@ -481,29 +496,31 @@ Each reads required documents, calls service, outputs score document.
 
 ## Stage 4: Output & Reporting
 
-**Goal:** Generate formatted reports from rating documents.
+**Goal:** Configure output formatting for rating documents.
+
+The `output_formatter` worker already exists. This stage focuses on:
+1. Ensuring rating documents have correct structure for formatting
+2. Creating rating-specific templates if needed
 
 ### Tasks
 
-#### 4.1 Report Generator Worker
-- [ ] Create `internal/queue/workers/rating_report_worker.go`
-- [ ] Reads: All `stock-rating` documents
-- [ ] Generates: Markdown report with table + details
-- [ ] Outputs: `rating-report` document
+#### 4.1 Rating Document Structure
+- [ ] Ensure `rating_composite_worker` outputs markdown-compatible content
+- [ ] Include summary table in document body
+- [ ] Include per-ticker details
 
-#### 4.2 Report Templates
-- [ ] Create `internal/templates/rating/`
-- [ ] `table.md.tmpl` - Summary table
-- [ ] `detailed.md.tmpl` - Per-ticker breakdown
+#### 4.2 Report Templates (Optional)
+- [ ] Create `internal/templates/stock-rating-report.toml` if custom formatting needed
+- [ ] Otherwise, use default `output_formatter` behavior
 
-#### 4.3 LLM Summary (Optional)
-- [ ] Add summary generation to report worker
-- [ ] Use LLM service to summarize key announcements
+#### 4.3 Verify Email Flow
+- [ ] Test `format_output` step collects `stock-rating` documents
+- [ ] Test `email_report` step sends formatted output
+- [ ] Verify HTML rendering in email
 
 ### Deliverables
-- Report generation worker
-- Markdown templates
-- Email-ready output
+- Rating documents formatted for output_formatter
+- Working email flow
 
 ---
 
