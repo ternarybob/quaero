@@ -82,54 +82,41 @@ func ClassifyConviction(dayOfChangePct, volumeRatio float64) (ConvictionClass, f
 	return ConvictionMixed, score
 }
 
-// ClassifyRetention determines retention classification based on price sustainability.
-// Returns the classification and a score from 0.0 (poor) to 1.0 (excellent).
+// ClassifyRetention determines retention classification based on announcement day direction
+// and 10-day follow-through. Returns the classification and an individual score (-1, 0, or +1).
 //
-// retention_ratio (ρ) = day_10_change / day_of_change
 // Classification rules:
-//   - ABSORBED: 0.7 ≤ ρ ≤ 1.3 -> 0.7-0.9
-//   - CONTINUED: ρ > 1.3 -> 0.9-1.0
-//   - SOLD_NEWS: ρ < 0.5 -> 0.1-0.3
-//   - REVERSED: ρ < 0 (opposite direction) -> 0.0-0.2
+//   - NEUTRAL: |day_of_change| < 1% -> score 0
+//   - POSITIVE: day_of > 0 AND day_10 >= day_of * 0.5 (held/continued) -> score +1
+//   - FADE: day_of > 0 AND day_10 < day_of * 0.5 (price faded) -> score -1
+//   - OVER_REACTION: day_of < 0 AND day_10 >= day_of * 0.5 (recovered) -> score +1
+//   - SUSTAINED_DROP: day_of < 0 AND day_10 < day_of * 0.5 (stayed down) -> score -1
 func ClassifyRetention(dayOfChangePct, day10ChangePct float64) (RetentionClass, float64) {
-	// Handle zero day-of change (spec: set retention_ratio = 1.0)
-	if math.Abs(dayOfChangePct) < 0.01 {
-		return RetentionAbsorbed, 0.8 // No change to retain, neutral score
+	// NEUTRAL: Day-of change less than 1% - no significant move
+	if math.Abs(dayOfChangePct) < 1.0 {
+		return RetentionNeutral, 0.0
 	}
 
-	retentionRatio := day10ChangePct / dayOfChangePct
-
-	// REVERSED: Price went opposite direction
-	if retentionRatio < 0 {
-		// Score 0.0-0.2 based on severity
-		score := math.Max(0.0, 0.2+retentionRatio*0.1)
-		return RetentionReversed, math.Max(0.0, score)
+	// Price ROSE on announcement day
+	if dayOfChangePct > 0 {
+		// Check if price held (at least 50% of the gain retained)
+		if day10ChangePct >= dayOfChangePct*0.5 {
+			// POSITIVE: Price rose and held/continued
+			return RetentionPositive, 1.0
+		}
+		// FADE: Price rose but didn't hold
+		return RetentionFade, -1.0
 	}
 
-	// SOLD_NEWS: Gained but then gave back most of it
-	if retentionRatio < 0.5 {
-		// Score 0.1-0.3
-		score := 0.1 + retentionRatio*0.4
-		return RetentionSoldNews, score
+	// Price FELL on announcement day (dayOfChangePct < 0)
+	// Check if price recovered (day10 is less negative or positive)
+	// Recovery means day_10 >= day_of * 0.5 (i.e., recovered at least half the drop)
+	if day10ChangePct >= dayOfChangePct*0.5 {
+		// OVER_REACTION: Market over-reacted, price recovered
+		return RetentionOverReaction, 1.0
 	}
-
-	// ABSORBED: Maintained the move (0.7 ≤ ρ ≤ 1.3)
-	if retentionRatio >= 0.7 && retentionRatio <= 1.3 {
-		// Score 0.7-0.9
-		score := 0.7 + math.Min(0.2, (retentionRatio-0.7)*0.33)
-		return RetentionAbsorbed, score
-	}
-
-	// CONTINUED: Price continued in same direction beyond initial move
-	if retentionRatio > 1.3 {
-		// Score 0.9-1.0
-		score := 0.9 + math.Min(0.1, (retentionRatio-1.3)*0.1)
-		return RetentionContinued, math.Min(1.0, score)
-	}
-
-	// Fallback for 0.5 ≤ ρ < 0.7 - partial retention
-	score := 0.3 + retentionRatio*0.5
-	return RetentionSoldNews, math.Min(0.5, score)
+	// SUSTAINED_DROP: Price fell and stayed down
+	return RetentionSustainedDrop, -1.0
 }
 
 // DetectTone analyzes announcement headline for language tone.

@@ -29,14 +29,15 @@ const (
 	ConvictionMixed         ConvictionClass = "MIXED"                    // Everything else
 )
 
-// RetentionClass classifies price sustainability
+// RetentionClass classifies price sustainability based on announcement day direction
 type RetentionClass string
 
 const (
-	RetentionAbsorbed  RetentionClass = "ABSORBED"  // 0.7 ≤ ρ ≤ 1.3
-	RetentionContinued RetentionClass = "CONTINUED" // ρ > 1.3
-	RetentionSoldNews  RetentionClass = "SOLD_NEWS" // ρ < 0.5
-	RetentionReversed  RetentionClass = "REVERSED"  // ρ < 0 (opposite direction)
+	RetentionNeutral       RetentionClass = "NEUTRAL"        // Day-of change < 1% - no significant move (0)
+	RetentionPositive      RetentionClass = "POSITIVE"       // Price rises on announcement AND holds/continues (+1)
+	RetentionFade          RetentionClass = "FADE"           // Price rises on announcement BUT doesn't hold (-1)
+	RetentionOverReaction  RetentionClass = "OVER_REACTION"  // Price falls on announcement BUT recovers (+1)
+	RetentionSustainedDrop RetentionClass = "SUSTAINED_DROP" // Price falls on announcement AND stays down (-1)
 )
 
 // ToneClass classifies announcement language tone
@@ -163,10 +164,10 @@ type LeakageSummary struct {
 
 // LeakageIncident represents a significant pre-announcement drift event
 type LeakageIncident struct {
-	Date        string  `json:"date"`
-	Headline    string  `json:"headline"`
-	PreDriftPct float64 `json:"pre_drift_pct"`
-	Direction   string  `json:"direction"` // ALIGNED or OPPOSING
+	Date           string  `json:"date"`
+	Headline       string  `json:"headline"`
+	PreDriftPct    float64 `json:"pre_drift_pct"`
+	PriceSensitive bool    `json:"price_sensitive"` // ASX price-sensitive flag
 }
 
 // ConvictionSummary contains institutional conviction metrics
@@ -191,15 +192,18 @@ type ConvictionEvent struct {
 }
 
 // RetentionSummary contains price retention metrics
+// Score = (PositiveCount + OverReactionCount - FadeCount - SustainedDropCount) / TotalAnalyzed
+// Range: -1.0 to +1.0, normalized to 0.0-1.0 for composite scoring
 type RetentionSummary struct {
-	TotalAnalyzed         int         `json:"total_analyzed"`
-	AbsorbedCount         int         `json:"absorbed_count"`
-	SoldNewsCount         int         `json:"sold_news_count"`
-	ContinuedCount        int         `json:"continued_count"`
-	ReversedCount         int         `json:"reversed_count"`
-	AverageRetentionRatio float64     `json:"average_retention_ratio"`
-	RetentionRate         float64     `json:"retention_rate"` // (absorbed + continued) / total
-	SignificantFades      []FadeEvent `json:"significant_fades"`
+	TotalAnalyzed      int         `json:"total_analyzed"`       // Price-sensitive events only
+	NeutralCount       int         `json:"neutral_count"`        // Day-of change < 1% (score: 0)
+	PositiveCount      int         `json:"positive_count"`       // Price rises and holds/continues (score: +1)
+	FadeCount          int         `json:"fade_count"`           // Price rises but fades (score: -1)
+	OverReactionCount  int         `json:"over_reaction_count"`  // Price falls but recovers (score: +1)
+	SustainedDropCount int         `json:"sustained_drop_count"` // Price falls and stays down (score: -1)
+	RawScore           int         `json:"raw_score"`            // Sum of individual scores (+1, 0, -1)
+	RetentionScore     float64     `json:"retention_score"`      // Normalized 0.0-1.0
+	SignificantFades   []FadeEvent `json:"significant_fades"`    // Worst fade events
 }
 
 // FadeEvent represents a significant price fade after announcement
@@ -209,6 +213,7 @@ type FadeEvent struct {
 	DayOfChange    float64 `json:"day_of_change_pct"`
 	Day10Change    float64 `json:"day_10_change_pct"`
 	RetentionRatio float64 `json:"retention_ratio"`
+	PriceSensitive bool    `json:"price_sensitive"` // ASX price-sensitive flag
 }
 
 // FinancialResultType represents the type of financial result

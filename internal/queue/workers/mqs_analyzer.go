@@ -404,31 +404,104 @@ func (a *MQSAnalyzer) calculate30DayMAVolume(refDate time.Time) int64 {
 	return totalVolume / int64(count)
 }
 
-// calculateLeakageSummary aggregates leakage metrics across all announcements
+// deduplicateByDate returns one announcement per date (the most significant one by price change)
+// Same-day announcements should be counted as 1 for leakage analysis since we can't
+// attribute the pre-drift to individual announcements without reading content
+func deduplicateByDate(announcements []MQSAnnouncement) []MQSAnnouncement {
+	// Group by date, keeping the most significant announcement (highest price change)
+	byDate := make(map[string]*MQSAnnouncement)
+
+	for i := range announcements {
+		ann := &announcements[i]
+		if existing, ok := byDate[ann.Date]; ok {
+			// Keep the one with higher absolute price change
+			if math.Abs(ann.DayOf.PriceChangePct) > math.Abs(existing.DayOf.PriceChangePct) {
+				byDate[ann.Date] = ann
+			}
+		} else {
+			byDate[ann.Date] = ann
+		}
+	}
+
+	// Convert back to slice
+	result := make([]MQSAnnouncement, 0, len(byDate))
+	for _, ann := range byDate {
+		result = append(result, *ann)
+	}
+
+	// Sort by date descending (newest first)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Date > result[j].Date
+	})
+
+	return result
+}
+
+// filterPriceSensitive returns only price-sensitive announcements
+func filterPriceSensitive(announcements []MQSAnnouncement) []MQSAnnouncement {
+	var result []MQSAnnouncement
+	for _, ann := range announcements {
+		if ann.PriceSensitive {
+			result = append(result, ann)
+		}
+	}
+	return result
+}
+
+// filterSignificantMoves returns announcements with significant price/volume movement
+// Uses market cap-based thresholds from assetClass field
+func (a *MQSAnalyzer) filterSignificantMoves(announcements []MQSAnnouncement) []MQSAnnouncement {
+	// Determine threshold based on asset class
+	priceThreshold := 3.0  // Default for small-cap
+	volumeThreshold := 2.0 // Volume ratio threshold
+
+	switch a.assetClass {
+	case AssetClassLargeCap:
+		priceThreshold = 1.5 // Large-caps move less but moves are more significant
+	case AssetClassMidCap:
+		priceThreshold = 2.0
+	case AssetClassSmallCap:
+		priceThreshold = 3.0
+	}
+
+	var result []MQSAnnouncement
+	for _, ann := range announcements {
+		// Include if price-sensitive OR has significant price OR volume movement
+		hasSignificantPrice := math.Abs(ann.DayOf.PriceChangePct) >= priceThreshold
+		hasSignificantVolume := ann.DayOf.VolumeRatio >= volumeThreshold
+
+		if ann.PriceSensitive || hasSignificantPrice || hasSignificantVolume {
+			result = append(result, ann)
+		}
+	}
+	return result
+}
+
+// calculateLeakageSummary aggregates leakage metrics across price-sensitive announcements
+// Deduplicates by date and focuses on price-sensitive announcements
 func (a *MQSAnalyzer) calculateLeakageSummary(announcements []MQSAnnouncement) LeakageSummary {
+	// Focus on price-sensitive announcements and deduplicate by date
+	filtered := filterPriceSensitive(announcements)
+	filtered = deduplicateByDate(filtered)
+
 	summary := LeakageSummary{
-		TotalAnalyzed: len(announcements),
+		TotalAnalyzed: len(filtered),
 		WorstLeakages: []LeakageIncident{},
 	}
 
 	var totalPreDrift float64
 	var leakages []LeakageIncident
 
-	for _, ann := range announcements {
+	// Use filtered announcements (price-sensitive, deduplicated by date)
+	for _, ann := range filtered {
 		switch ann.LeakageClass {
 		case LeakageHigh:
 			summary.HighLeakageCount++
-			// Determine direction alignment
-			direction := "ALIGNED"
-			if (ann.LeadIn.PriceChangePct > 0 && ann.DayOf.PriceChangePct < 0) ||
-				(ann.LeadIn.PriceChangePct < 0 && ann.DayOf.PriceChangePct > 0) {
-				direction = "OPPOSING"
-			}
 			leakages = append(leakages, LeakageIncident{
-				Date:        ann.Date,
-				Headline:    ann.Headline,
-				PreDriftPct: ann.LeadIn.PriceChangePct,
-				Direction:   direction,
+				Date:           ann.Date,
+				Headline:       ann.Headline,
+				PreDriftPct:    ann.LeadIn.PriceChangePct,
+				PriceSensitive: ann.PriceSensitive,
 			})
 		case LeakageTight:
 			summary.TightShipCount++
@@ -438,9 +511,9 @@ func (a *MQSAnalyzer) calculateLeakageSummary(announcements []MQSAnnouncement) L
 		totalPreDrift += math.Abs(ann.LeadIn.PriceChangePct)
 	}
 
-	if len(announcements) > 0 {
-		summary.AveragePreDriftPct = totalPreDrift / float64(len(announcements))
-		summary.LeakageRatio = float64(summary.HighLeakageCount) / float64(len(announcements))
+	if len(filtered) > 0 {
+		summary.AveragePreDriftPct = totalPreDrift / float64(len(filtered))
+		summary.LeakageRatio = float64(summary.HighLeakageCount) / float64(len(filtered))
 	}
 
 	// Sort leakages by magnitude and take top 5
@@ -501,60 +574,73 @@ func (a *MQSAnalyzer) calculateConvictionSummary(announcements []MQSAnnouncement
 	return summary
 }
 
-// calculateRetentionSummary aggregates retention metrics
+// calculateRetentionSummary aggregates retention metrics for price-sensitive announcements only.
+// Deduplicates by date and calculates a score based on:
+//   - Positive (+1): Price rises and holds/continues
+//   - Fade (-1): Price rises but doesn't hold
+//   - Over-reaction (+1): Price falls but recovers
+//   - Sustained Drop (-1): Price falls and stays down
+//   - Neutral (0): Day-of change < 1%
+//
+// Score = (Positive + OverReaction - Fade - SustainedDrop) / TotalAnalyzed
+// Normalized to 0.0-1.0 range for composite scoring
 func (a *MQSAnalyzer) calculateRetentionSummary(announcements []MQSAnnouncement) RetentionSummary {
+	// Focus on price-sensitive announcements only, then deduplicate by date
+	filtered := filterPriceSensitive(announcements)
+	filtered = deduplicateByDate(filtered)
+
 	summary := RetentionSummary{
-		TotalAnalyzed:    len(announcements),
+		TotalAnalyzed:    len(filtered),
 		SignificantFades: []FadeEvent{},
 	}
 
-	var totalRetention float64
 	var fades []FadeEvent
-	analyzedCount := 0
 
-	for _, ann := range announcements {
-		// Skip if no meaningful day-of change
-		if math.Abs(ann.DayOf.PriceChangePct) < 0.01 {
-			continue
-		}
-
-		analyzedCount++
-		retentionRatio := ann.LeadOut.PriceChangePct / ann.DayOf.PriceChangePct
-		totalRetention += retentionRatio
-
+	for _, ann := range filtered {
 		switch ann.RetentionClass {
-		case RetentionAbsorbed:
-			summary.AbsorbedCount++
-		case RetentionContinued:
-			summary.ContinuedCount++
-		case RetentionSoldNews:
-			summary.SoldNewsCount++
+		case RetentionNeutral:
+			summary.NeutralCount++
+			// Neutral contributes 0 to raw score
+		case RetentionPositive:
+			summary.PositiveCount++
+			summary.RawScore++
+		case RetentionFade:
+			summary.FadeCount++
+			summary.RawScore--
+			// Track fade events for display
+			retentionRatio := 0.0
+			if math.Abs(ann.DayOf.PriceChangePct) > 0.01 {
+				retentionRatio = ann.LeadOut.PriceChangePct / ann.DayOf.PriceChangePct
+			}
 			fades = append(fades, FadeEvent{
 				Date:           ann.Date,
 				Headline:       ann.Headline,
 				DayOfChange:    ann.DayOf.PriceChangePct,
 				Day10Change:    ann.LeadOut.PriceChangePct,
 				RetentionRatio: retentionRatio,
+				PriceSensitive: ann.PriceSensitive,
 			})
-		case RetentionReversed:
-			summary.ReversedCount++
-			fades = append(fades, FadeEvent{
-				Date:           ann.Date,
-				Headline:       ann.Headline,
-				DayOfChange:    ann.DayOf.PriceChangePct,
-				Day10Change:    ann.LeadOut.PriceChangePct,
-				RetentionRatio: retentionRatio,
-			})
+		case RetentionOverReaction:
+			summary.OverReactionCount++
+			summary.RawScore++
+		case RetentionSustainedDrop:
+			summary.SustainedDropCount++
+			summary.RawScore--
 		}
 	}
 
-	summary.TotalAnalyzed = analyzedCount
-	if analyzedCount > 0 {
-		summary.AverageRetentionRatio = totalRetention / float64(analyzedCount)
-		summary.RetentionRate = float64(summary.AbsorbedCount+summary.ContinuedCount) / float64(analyzedCount)
+	// Calculate normalized score: raw score / total non-neutral events
+	// Range: -1.0 to +1.0, then normalize to 0.0-1.0
+	nonNeutralCount := summary.TotalAnalyzed - summary.NeutralCount
+	if nonNeutralCount > 0 {
+		// Raw score ranges from -nonNeutralCount to +nonNeutralCount
+		// Normalize: (rawScore + nonNeutralCount) / (2 * nonNeutralCount)
+		summary.RetentionScore = (float64(summary.RawScore) + float64(nonNeutralCount)) / (2.0 * float64(nonNeutralCount))
+	} else {
+		summary.RetentionScore = 0.5 // Neutral if no significant events
 	}
 
-	// Take top 5 worst fades
+	// Take top 5 worst fades (sorted by retention ratio, lowest first)
 	sort.Slice(fades, func(i, j int) bool {
 		return fades[i].RetentionRatio < fades[j].RetentionRatio
 	})
@@ -1042,7 +1128,7 @@ func (a *MQSAnalyzer) calculateAggregateScore(
 	// Calculate component scores (0-1 scale)
 	leakageScore := 1.0 - leakage.LeakageRatio // Lower leakage = higher score
 	convictionScore := conviction.InstitutionalRatio
-	retentionScore := retention.RetentionRate
+	retentionScore := retention.RetentionScore // Already normalized 0.0-1.0
 
 	// Calculate composite (Leakage 33%, Conviction 33%, Retention 34%)
 	composite := CalculateCompositeMQS(leakageScore, convictionScore, retentionScore)
@@ -1237,13 +1323,14 @@ func (a *MQSAnalyzer) detectPatterns(announcements []MQSAnnouncement) PatternAna
 
 	// Check for quality signals
 	tightShipCount := 0
-	absorbedCount := 0
+	positiveRetentionCount := 0
 	for _, ann := range announcements {
 		if ann.LeakageClass == LeakageTight {
 			tightShipCount++
 		}
-		if ann.RetentionClass == RetentionAbsorbed || ann.RetentionClass == RetentionContinued {
-			absorbedCount++
+		// Positive retention: price held/continued or recovered from over-reaction
+		if ann.RetentionClass == RetentionPositive || ann.RetentionClass == RetentionOverReaction {
+			positiveRetentionCount++
 		}
 	}
 
@@ -1251,7 +1338,7 @@ func (a *MQSAnalyzer) detectPatterns(announcements []MQSAnnouncement) PatternAna
 		if float64(tightShipCount)/float64(len(announcements)) > 0.7 {
 			patterns.QualitySignals = append(patterns.QualitySignals, "Consistently tight information control")
 		}
-		if float64(absorbedCount)/float64(len(announcements)) > 0.7 {
+		if float64(positiveRetentionCount)/float64(len(announcements)) > 0.7 {
 			patterns.QualitySignals = append(patterns.QualitySignals, "Strong price retention after announcements")
 		}
 	}
@@ -1484,42 +1571,42 @@ func (output *MQSOutput) GenerateMarkdown() string {
 	sb.WriteString("Composite = (Leakage × 0.33) + (Conviction × 0.33) + (Retention × 0.34)\n")
 	sb.WriteString("```\n\n")
 
-	// Leakage Summary - include score in heading
-	sb.WriteString(fmt.Sprintf("## Information Integrity (CAR-Based Leakage Analysis) — Score: %.2f\n\n", output.ManagementQualityScore.LeakageIntegrity))
+	// Leakage Summary - include score in heading with "higher is better"
+	sb.WriteString(fmt.Sprintf("## Information Integrity (CAR-Based Leakage Analysis) — Score: %.2f *(higher is better)*\n\n", output.ManagementQualityScore.LeakageIntegrity))
 	sb.WriteString("*Measures Cumulative Abnormal Return (CAR) in the 5 days before Strategic announcements. ")
 	sb.WriteString("Leakage is flagged when |CAR| > 2σ (20-day rolling volatility).*\n\n")
 
+	// List all values used in calculation FIRST
+	sb.WriteString("**Input Values:**\n")
+	sb.WriteString(fmt.Sprintf("- Total Strategic Events: %d\n", output.LeakageSummary.TotalAnalyzed))
+	sb.WriteString(fmt.Sprintf("- High Leakage Events (|CAR| > 2σ): %d\n", output.LeakageSummary.HighLeakageCount))
+	sb.WriteString(fmt.Sprintf("- Tight Ship Events: %d\n", output.LeakageSummary.TightShipCount))
+	sb.WriteString(fmt.Sprintf("- Average Pre-Drift CAR: %.1f%%\n\n", output.LeakageSummary.AveragePreDriftPct))
+
 	// Calculation explanation - show how Leakage Ratio is derived
 	sb.WriteString("**Calculation:**\n")
-	sb.WriteString(fmt.Sprintf("- Leakage Ratio = High Leakage Events / Total Strategic = %d / %d = %.2f\n",
+	sb.WriteString(fmt.Sprintf("- Leakage Ratio = High Leakage Events / Total Strategic Events = %d / %d = %.2f\n",
 		output.LeakageSummary.HighLeakageCount, output.LeakageSummary.TotalAnalyzed, output.LeakageSummary.LeakageRatio))
 	sb.WriteString(fmt.Sprintf("- Leakage Score = 1.0 - Leakage Ratio = 1.0 - %.2f = **%.2f**\n\n",
 		output.LeakageSummary.LeakageRatio, output.ManagementQualityScore.LeakageIntegrity))
 
-	sb.WriteString(fmt.Sprintf("- **Total Strategic Events:** %d announcements\n", output.LeakageSummary.TotalAnalyzed))
-	sb.WriteString(fmt.Sprintf("- **High Leakage Events (|CAR| > 2σ):** %d (%.1f%%)\n",
-		output.LeakageSummary.HighLeakageCount,
-		output.LeakageSummary.LeakageRatio*100))
-	sb.WriteString(fmt.Sprintf("- **Tight Ship Events:** %d\n", output.LeakageSummary.TightShipCount))
-	sb.WriteString(fmt.Sprintf("- **Average Pre-Drift CAR:** %.1f%%\n\n", output.LeakageSummary.AveragePreDriftPct))
-
 	if len(output.LeakageSummary.WorstLeakages) > 0 {
 		sb.WriteString("### Notable Pre-Announcement Drift Events\n\n")
-		sb.WriteString("| Date | Headline | Pre-Drift CAR | Direction |\n")
-		sb.WriteString("|------|----------|---------------|----------|\n")
+		sb.WriteString("| Date | Headline | Pre-Drift CAR |\n")
+		sb.WriteString("|------|----------|---------------|\n")
 		for _, leak := range output.LeakageSummary.WorstLeakages {
 			headline := leak.Headline
 			if len(headline) > 50 {
 				headline = headline[:47] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("| %s | %s | %+.1f%% | %s |\n",
-				leak.Date, headline, leak.PreDriftPct, leak.Direction))
+			sb.WriteString(fmt.Sprintf("| %s | %s | %+.1f%% |\n",
+				leak.Date, headline, leak.PreDriftPct))
 		}
 		sb.WriteString("\n")
 	}
 
-	// Conviction Summary - include score in heading
-	sb.WriteString(fmt.Sprintf("## Conviction Analysis (Volume Z-Score) — Score: %.2f\n\n", output.ManagementQualityScore.Conviction))
+	// Conviction Summary - include score in heading with "higher is better"
+	sb.WriteString(fmt.Sprintf("## Conviction Analysis (Volume Z-Score) — Score: %.2f *(higher is better)*\n\n", output.ManagementQualityScore.Conviction))
 	sb.WriteString("*Evaluates volume Z-score on announcement days. ")
 	sb.WriteString("Trigger: Z > 2.0 (Large-Cap) or Z > 3.0 (Small/Mid-Cap) AND |Price Change| > 1.5%.*\n\n")
 
@@ -1529,36 +1616,52 @@ func (output *MQSOutput) GenerateMarkdown() string {
 	sb.WriteString("- **Retail Hype**: High price change with low volume Z-Score — speculative interest without institutional backing\n")
 	sb.WriteString("- **Low Interest**: Low Z-Score and minimal price change — minimal market reaction\n\n")
 
-	// Calculation explanation
+	// List all values used in calculation FIRST
 	totalConvictionEvents := output.ConvictionSummary.InstitutionalCount + output.ConvictionSummary.RetailHypeCount + output.ConvictionSummary.LowInterestCount
+	sb.WriteString("**Input Values:**\n")
+	sb.WriteString(fmt.Sprintf("- Institutional Conviction Events (Triggered): %d\n", output.ConvictionSummary.InstitutionalCount))
+	sb.WriteString(fmt.Sprintf("- Retail Hype Events: %d\n", output.ConvictionSummary.RetailHypeCount))
+	sb.WriteString(fmt.Sprintf("- Low Interest Events: %d\n", output.ConvictionSummary.LowInterestCount))
+	sb.WriteString(fmt.Sprintf("- **Total Events: %d** (%d + %d + %d)\n", totalConvictionEvents,
+		output.ConvictionSummary.InstitutionalCount, output.ConvictionSummary.RetailHypeCount, output.ConvictionSummary.LowInterestCount))
+	sb.WriteString(fmt.Sprintf("- Average Volume Ratio: %.1fx\n\n", output.ConvictionSummary.AverageVolumeRatio))
+
+	// Calculation explanation
 	sb.WriteString("**Calculation:**\n")
-	sb.WriteString(fmt.Sprintf("- Conviction Score = Triggered Events / Total Strategic = %d / %d = **%.2f**\n\n",
+	sb.WriteString(fmt.Sprintf("- Conviction Score = Triggered Events / Total Events = %d / %d = **%.2f**\n\n",
 		output.ConvictionSummary.InstitutionalCount, totalConvictionEvents, output.ManagementQualityScore.Conviction))
 
-	sb.WriteString(fmt.Sprintf("- **Institutional Conviction Events:** %d (%.1f%%)\n",
-		output.ConvictionSummary.InstitutionalCount,
-		output.ConvictionSummary.InstitutionalRatio*100))
-	sb.WriteString(fmt.Sprintf("- **Retail Hype Events:** %d\n", output.ConvictionSummary.RetailHypeCount))
-	sb.WriteString(fmt.Sprintf("- **Low Interest Events:** %d\n", output.ConvictionSummary.LowInterestCount))
-	sb.WriteString(fmt.Sprintf("- **Average Volume Ratio:** %.1fx\n\n", output.ConvictionSummary.AverageVolumeRatio))
+	// Retention Summary - include score in heading with "higher is better"
+	sb.WriteString(fmt.Sprintf("## Price Retention Analysis — Score: %.2f *(higher is better)*\n\n", output.ManagementQualityScore.Retention))
+	sb.WriteString("*Price-sensitive announcements only. Measures price action at T+10 relative to announcement day.*\n\n")
 
-	// Retention Summary - include score in heading
-	sb.WriteString(fmt.Sprintf("## Price Retention Analysis — Score: %.2f\n\n", output.ManagementQualityScore.Retention))
-	sb.WriteString("*Measures price retention at T+10 using formula: Retention = (Price_t+10 - Price_t-1) / (Price_t - Price_t-1). ")
-	sb.WriteString("Score = Mean of Retention for Strategic events with impact > 1%.*\n\n")
+	sb.WriteString("**Scoring Rules:**\n")
+	sb.WriteString("- **Positive (+1)**: Price rises on announcement AND holds/continues at T+10\n")
+	sb.WriteString("- **Fade (-1)**: Price rises on announcement BUT doesn't hold at T+10\n")
+	sb.WriteString("- **Over-reaction Recovery (+1)**: Price falls on announcement BUT recovers at T+10\n")
+	sb.WriteString("- **Sustained Drop (-1)**: Price falls on announcement AND stays down at T+10\n")
+	sb.WriteString("- **Neutral (0)**: Day-of price change < 1%\n\n")
+
+	// List all values used in calculation FIRST
+	positiveCount := output.RetentionSummary.PositiveCount + output.RetentionSummary.OverReactionCount
+	negativeCount := output.RetentionSummary.FadeCount + output.RetentionSummary.SustainedDropCount
+	nonNeutralCount := positiveCount + negativeCount
+
+	sb.WriteString("**Input Values:**\n")
+	sb.WriteString(fmt.Sprintf("- Total Price-Sensitive Events: %d\n", output.RetentionSummary.TotalAnalyzed))
+	sb.WriteString(fmt.Sprintf("- Positive (rose and held): %d (+1 each)\n", output.RetentionSummary.PositiveCount))
+	sb.WriteString(fmt.Sprintf("- Over-reaction Recovery (fell, recovered): %d (+1 each)\n", output.RetentionSummary.OverReactionCount))
+	sb.WriteString(fmt.Sprintf("- Fade (rose, didn't hold): %d (-1 each)\n", output.RetentionSummary.FadeCount))
+	sb.WriteString(fmt.Sprintf("- Sustained Drop (fell, stayed down): %d (-1 each)\n", output.RetentionSummary.SustainedDropCount))
+	sb.WriteString(fmt.Sprintf("- Neutral (< 1%% move): %d (0 each)\n", output.RetentionSummary.NeutralCount))
+	sb.WriteString(fmt.Sprintf("- **Raw Score: %d** (%d positive - %d negative)\n\n",
+		output.RetentionSummary.RawScore, positiveCount, negativeCount))
 
 	// Calculation explanation
-	retentionHeldCount := output.RetentionSummary.AbsorbedCount + output.RetentionSummary.ContinuedCount
-	totalRetentionEvents := retentionHeldCount + output.RetentionSummary.SoldNewsCount + output.RetentionSummary.ReversedCount
-	sb.WriteString("**Calculation:** `Retention Score = (Absorbed + Continued) / Total Events`\n")
-	sb.WriteString(fmt.Sprintf("= (%d + %d) / %d = **%.2f**\n\n",
-		output.RetentionSummary.AbsorbedCount, output.RetentionSummary.ContinuedCount, totalRetentionEvents, output.ManagementQualityScore.Retention))
-
-	sb.WriteString(fmt.Sprintf("- **Absorbed (Price Held):** %d\n", output.RetentionSummary.AbsorbedCount))
-	sb.WriteString(fmt.Sprintf("- **Continued (Price Increased):** %d\n", output.RetentionSummary.ContinuedCount))
-	sb.WriteString(fmt.Sprintf("- **Sold the News:** %d\n", output.RetentionSummary.SoldNewsCount))
-	sb.WriteString(fmt.Sprintf("- **Reversed:** %d\n", output.RetentionSummary.ReversedCount))
-	sb.WriteString(fmt.Sprintf("- **Retention Rate:** %.1f%%\n\n", output.RetentionSummary.RetentionRate*100))
+	sb.WriteString("**Calculation:**\n")
+	sb.WriteString(fmt.Sprintf("- Non-neutral Events: %d\n", nonNeutralCount))
+	sb.WriteString(fmt.Sprintf("- Normalized Score = (RawScore + NonNeutral) / (2 × NonNeutral) = (%d + %d) / (2 × %d) = **%.2f**\n\n",
+		output.RetentionSummary.RawScore, nonNeutralCount, nonNeutralCount, output.ManagementQualityScore.Retention))
 
 	if len(output.RetentionSummary.SignificantFades) > 0 {
 		sb.WriteString("### Significant Price Fades\n\n")
@@ -1599,8 +1702,8 @@ func (output *MQSOutput) GenerateMarkdown() string {
 		sb.WriteString("## High-Impact Announcements (Past 12 Months)\n\n")
 		sb.WriteString("Announcements with significant market reaction AND minimal price fade (retention ≥50%).\n\n")
 
-		sb.WriteString("| Date | Headline | Day-Of Δ | Day+10 Δ | Retention | Volume | Link |\n")
-		sb.WriteString("|------|----------|----------|----------|-----------|--------|------|\n")
+		sb.WriteString("| Date | PS | Headline | Day-Of Δ | Day+10 Δ | Retention | Volume | Link |\n")
+		sb.WriteString("|------|:--:|----------|----------|----------|-----------|--------|------|\n")
 
 		// Group announcements by date
 		currentDate := ""
@@ -1611,6 +1714,12 @@ func (output *MQSOutput) GenerateMarkdown() string {
 					// Add a visual separator between date groups (empty row not valid in markdown tables)
 				}
 				currentDate = ann.Date
+			}
+
+			// Price-sensitive indicator (check mark)
+			psStr := ""
+			if ann.PriceSensitive {
+				psStr = "✓"
 			}
 
 			// Format day-of price change with color (soft green/red)
@@ -1654,10 +1763,12 @@ func (output *MQSOutput) GenerateMarkdown() string {
 				headline = headline[:42] + "..."
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
-				ann.Date, headline, dayOfStr, day10Str, retentionStr, volumeStr, linkStr))
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+				ann.Date, psStr, headline, dayOfStr, day10Str, retentionStr, volumeStr, linkStr))
 		}
 		sb.WriteString("\n")
+
+		sb.WriteString("*PS = Price Sensitive (ASX marked)*\n\n")
 
 		// Add summary
 		sb.WriteString(fmt.Sprintf("*Showing %d high-impact announcements with minimal price fade.*\n\n", len(output.HighImpactAnnouncements)))
