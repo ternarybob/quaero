@@ -17,6 +17,19 @@ This document outlines the staged implementation plan for replacing the existing
 - `internal/services/llm/` - LLM provider abstraction
 - `internal/storage/` - BadgerDB storage layer
 - `internal/queue/` - Job queue infrastructure (workers replaced, queue kept)
+- `internal/queue/workers/orchestrator_worker.go` - LLM orchestration framework (reused)
+- `internal/queue/workers/tool_execution_worker.go` - Tool execution wrapper (reused)
+
+**Existing Orchestration (to leverage):**
+The `orchestrator_worker.go` already implements:
+- Planner-Executor-Reviewer loop with LLM reasoning
+- Plan structure with steps, dependencies, params
+- Wave-based execution (parallel within wave, sequential across waves)
+- Tool execution via queue jobs (`JobTypeToolExecution`)
+- Tool lookup from `available_tools` config
+- Result collection and review
+
+New rating tools will be registered as `available_tools` in job definitions.
 
 ---
 
@@ -562,53 +575,104 @@ internal/tools/
 
 ---
 
-## Stage 7: Orchestration
+## Stage 7: Orchestration Integration
 
-**Goal:** Enable LLM-driven orchestration of the full rating flow.
+**Goal:** Register new tools with existing orchestrator and create job definitions.
+
+The orchestrator framework already exists in `orchestrator_worker.go`. This stage focuses on:
+1. Creating tool execution workers for each new tool
+2. Defining job definitions that wire tools together
+3. Testing the integrated flow
 
 ### Tasks
 
-#### 7.1 Tool Schema Export
-- [ ] Create `internal/tools/export.go`
-- [ ] `ExportForClaude() []ClaudeToolDef`
-- [ ] `ExportForGemini() []GeminiFunctionDef`
-- [ ] Include descriptions, input/output schemas
+#### 7.1 Create Tool Execution Workers
+Each tool needs a worker that the orchestrator can invoke via `JobTypeToolExecution`.
 
-#### 7.2 Implement Orchestrator
-- [ ] Create `internal/tools/orchestrator/orchestrator.go`
-- [ ] Accept: "Rate GNP" or "Rate GNP, SKS, EXR"
-- [ ] Parse ticker(s) from request
-- [ ] Execute tool sequence:
-  1. Parallel: get_announcements, get_prices, get_fundamentals
-  2. Parallel: calculate_bfs, calculate_cds
-  3. Gate check → early exit if failed
-  4. Parallel: calculate_nfr, calculate_pps, calculate_vrs, calculate_ob
-  5. calculate_rating
-  6. generate_summary
-  7. generate_report
+- [ ] Create `internal/queue/workers/rating/` package
+- [ ] `data_worker.go` - Wraps get_announcements, get_prices, get_fundamentals
+- [ ] `gate_worker.go` - Wraps calculate_bfs, calculate_cds
+- [ ] `score_worker.go` - Wraps calculate_nfr, calculate_pps, calculate_vrs, calculate_ob
+- [ ] `rating_worker.go` - Wraps calculate_rating
+- [ ] `output_worker.go` - Wraps generate_summary, generate_report, generate_email
 
-#### 7.3 Tool Executor
-- [ ] Create `internal/tools/orchestrator/executor.go`
-- [ ] Parse LLM tool call requests
-- [ ] Route to registered tools
-- [ ] Validate inputs/outputs
-- [ ] Return results to LLM
+Each worker:
+- Implements `interfaces.JobWorker`
+- Parses params from job payload
+- Calls the corresponding tool from `internal/tools/`
+- Returns result as document or metadata
 
-#### 7.4 Queue Integration
-- [ ] Create `internal/queue/workers/rating_worker.go`
-- [ ] Job payload: `{tickers: [], format: "detailed"}`
-- [ ] Execute orchestrator
-- [ ] Store results
+#### 7.2 Register Workers
+- [ ] Update `internal/queue/workers/registry.go`
+- [ ] Register new workers with `JobTypeToolExecution` handler
+- [ ] Map tool names to worker types:
+  ```go
+  "get_announcements"  → WorkerTypeRatingData
+  "get_prices"         → WorkerTypeRatingData
+  "get_fundamentals"   → WorkerTypeRatingData
+  "calculate_bfs"      → WorkerTypeRatingGate
+  "calculate_cds"      → WorkerTypeRatingGate
+  "calculate_nfr"      → WorkerTypeRatingScore
+  "calculate_pps"      → WorkerTypeRatingScore
+  "calculate_vrs"      → WorkerTypeRatingScore
+  "calculate_ob"       → WorkerTypeRatingScore
+  "calculate_rating"   → WorkerTypeRatingComposite
+  "generate_summary"   → WorkerTypeRatingOutput
+  "generate_report"    → WorkerTypeRatingOutput
+  "generate_email"     → WorkerTypeRatingOutput
+  ```
+
+#### 7.3 Create Job Definition
+- [ ] Create `jobs/stock-rating.toml`
+  ```toml
+  [job]
+  name = "Stock Rating"
+  description = "Rate stocks using investability framework"
+
+  [config]
+  variables = []  # Tickers injected at runtime
+
+  [[steps]]
+  name = "orchestrate_rating"
+  type = "orchestrator"
+
+  [steps.config]
+  goal = "Rate each stock and generate a report"
+  thinking_level = "MEDIUM"
+  output_tags = ["stock-rating"]
+
+  [[steps.config.available_tools]]
+  name = "get_announcements"
+  worker = "rating_data"
+  description = "Fetch ASX announcements for a ticker"
+
+  [[steps.config.available_tools]]
+  name = "get_prices"
+  worker = "rating_data"
+  description = "Fetch OHLCV price data for a ticker"
+
+  # ... (all 13 tools)
+  ```
+
+#### 7.4 Update Orchestrator Planner Prompt
+- [ ] Add rating-specific guidance to `plannerSystemPrompt`
+- [ ] Document tool dependencies:
+  - Data tools run first (parallel)
+  - Gate tools depend on data tools
+  - Score tools depend on data tools AND gate pass
+  - Rating tool depends on all scores
+  - Output tools depend on rating
 
 #### 7.5 Integration Tests
 - [ ] Full flow: "Rate GNP" → markdown report
 - [ ] Batch: "Rate GNP, SKS, EXR"
-- [ ] Gate failure handling
+- [ ] Gate failure handling (early exit)
+- [ ] Verify document tagging for downstream consumers
 
 ### Deliverables
-- Orchestrator
-- Tool executor
-- Queue worker
+- Tool execution workers
+- Worker registration
+- Job definition file
 - Integration tests
 
 ---
@@ -703,7 +767,7 @@ Stage 5: Rating Tool         ─── calculate_rating
           ↓
 Stage 6: Output Tools        ─── generate_summary, generate_report, generate_email
           ↓
-Stage 7: Orchestration       ─── LLM integration, queue worker
+Stage 7: Orchestration       ─── Register tools with existing orchestrator
           ↓
 Stage 8: Cleanup             ─── Delete old code
           ↓
