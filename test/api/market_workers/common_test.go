@@ -54,15 +54,19 @@ var (
 		},
 	}
 
-	// AnnouncementsSchema for market_announcements worker (MQS Framework)
+	// AnnouncementsSchema for processing_announcements worker (Signal Classification)
 	AnnouncementsSchema = WorkerSchema{
-		RequiredFields: []string{"ticker", "mqs_tier", "mqs_composite", "announcements"},
-		OptionalFields: []string{"leakage_score", "conviction_score", "retention_score", "saydo_score", "mqs_confidence"},
+		RequiredFields: []string{"ticker", "total_count", "high_relevance_count"},
+		OptionalFields: []string{"medium_relevance_count", "low_relevance_count", "noise_count", "mqs_scores", "announcements", "exchange", "period", "processed_at"},
 		FieldTypes: map[string]string{
-			"ticker":        "string",
-			"mqs_tier":      "string",
-			"mqs_composite": "number",
-			"announcements": "number",
+			"ticker":                 "string",
+			"total_count":            "number",
+			"high_relevance_count":   "number",
+			"medium_relevance_count": "number",
+			"low_relevance_count":    "number",
+			"noise_count":            "number",
+			"mqs_scores":             "object",
+			"announcements":          "array",
 		},
 		ArraySchemas: map[string][]string{},
 	}
@@ -122,13 +126,91 @@ var (
 		},
 	}
 
-	// SignalSchema for market_signal worker
-	SignalSchema = WorkerSchema{
-		RequiredFields: []string{"ticker", "signals"},
-		OptionalFields: []string{"regime", "pbas", "vli", "computed_at"},
+	// BFSSchema for rating_bfs worker - Business Foundation Score
+	BFSSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "indicator_count", "components", "reasoning"},
+		OptionalFields: []string{"calculated_at"},
 		FieldTypes: map[string]string{
-			"ticker":  "string",
-			"signals": "object",
+			"ticker":          "string",
+			"score":           "number", // 0, 1, or 2
+			"indicator_count": "number",
+			"components":      "object",
+			"reasoning":       "string",
+		},
+	}
+
+	// CDSSchema for rating_cds worker - Capital Discipline Score
+	CDSSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+		OptionalFields: []string{"calculated_at", "analysis_period_months"},
+		FieldTypes: map[string]string{
+			"ticker":     "string",
+			"score":      "number", // 0, 1, or 2
+			"components": "object",
+			"reasoning":  "string",
+		},
+	}
+
+	// NFRSchema for rating_nfr worker - Narrative-to-Fact Ratio
+	NFRSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+		OptionalFields: []string{"calculated_at"},
+		FieldTypes: map[string]string{
+			"ticker":     "string",
+			"score":      "number", // 0.0 to 1.0
+			"components": "object",
+			"reasoning":  "string",
+		},
+	}
+
+	// PPSSchema for rating_pps worker - Price Progression Score
+	PPSSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "reasoning"},
+		OptionalFields: []string{"calculated_at", "event_details"},
+		FieldTypes: map[string]string{
+			"ticker":        "string",
+			"score":         "number", // 0.0 to 1.0
+			"event_details": "array",
+			"reasoning":     "string",
+		},
+	}
+
+	// VRSSchema for rating_vrs worker - Volatility Regime Stability
+	VRSSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+		OptionalFields: []string{"calculated_at"},
+		FieldTypes: map[string]string{
+			"ticker":     "string",
+			"score":      "number", // 0.0 to 1.0
+			"components": "object",
+			"reasoning":  "string",
+		},
+	}
+
+	// OBSchema for rating_ob worker - Optionality Bonus
+	OBSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "score", "catalyst_found", "timeframe_found", "reasoning"},
+		OptionalFields: []string{"calculated_at"},
+		FieldTypes: map[string]string{
+			"ticker":          "string",
+			"score":           "number", // 0.0, 0.5, or 1.0
+			"catalyst_found":  "boolean",
+			"timeframe_found": "boolean",
+			"reasoning":       "string",
+		},
+	}
+
+	// RatingCompositeSchema for rating_composite worker - Final investability rating
+	RatingCompositeSchema = WorkerSchema{
+		RequiredFields: []string{"ticker", "label", "gate_passed", "scores"},
+		OptionalFields: []string{"calculated_at", "reasoning", "investability"},
+		FieldTypes: map[string]string{
+			"ticker":        "string",
+			"label":         "string", // SPECULATIVE|LOW_ALPHA|WATCHLIST|INVESTABLE|HIGH_CONVICTION
+			"investability": "number", // 0-100 or null if gate failed
+			"gate_passed":   "boolean",
+			"scores":        "object", // All component scores
+			"reasoning":     "string",
 		},
 	}
 
@@ -280,13 +362,14 @@ func AssertOutputNotEmpty(t *testing.T, helper *common.HTTPTestHelper, tags []st
 
 	doc := result.Documents[0]
 
-	// Assert output.md (content_markdown) is not empty
-	assert.NotEmpty(t, doc.ContentMarkdown, "output.md (content_markdown) must not be empty")
+	// Assert output.md (content_markdown) is not empty - CRITICAL: use require to fail immediately
+	require.NotEmpty(t, doc.ContentMarkdown, "FAIL: output.md (content_markdown) must not be empty - worker produced no content")
+	require.Greater(t, len(doc.ContentMarkdown), 10, "FAIL: output.md content too short (%d bytes) - worker likely failed", len(doc.ContentMarkdown))
 	t.Logf("PASS: output.md has %d bytes", len(doc.ContentMarkdown))
 
-	// Assert output.json (metadata) is not empty
-	assert.NotNil(t, doc.Metadata, "output.json (metadata) must not be nil")
-	assert.Greater(t, len(doc.Metadata), 0, "output.json (metadata) must not be empty")
+	// Assert output.json (metadata) is not empty - CRITICAL: use require to fail immediately
+	require.NotNil(t, doc.Metadata, "FAIL: output.json (metadata) must not be nil - worker produced no metadata")
+	require.Greater(t, len(doc.Metadata), 0, "FAIL: output.json (metadata) must not be empty - worker produced no metadata fields")
 	t.Logf("PASS: output.json has %d fields", len(doc.Metadata))
 
 	return doc.Metadata, doc.ContentMarkdown
@@ -511,6 +594,37 @@ func SaveWorkerOutput(t *testing.T, env *common.TestEnvironment, helper *common.
 		}
 	}
 
+	return nil
+}
+
+// SaveSchemaDefinition saves the schema definition to results directory
+// This allows external verification that output matches the expected schema
+func SaveSchemaDefinition(t *testing.T, env *common.TestEnvironment, schema WorkerSchema, schemaName string) error {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		return fmt.Errorf("results directory not available")
+	}
+
+	// Convert schema to JSON-serializable format
+	schemaDoc := map[string]interface{}{
+		"schema_name":     schemaName,
+		"required_fields": schema.RequiredFields,
+		"optional_fields": schema.OptionalFields,
+		"field_types":     schema.FieldTypes,
+		"array_schemas":   schema.ArraySchemas,
+	}
+
+	schemaPath := filepath.Join(resultsDir, "schema.json")
+	data, err := json.MarshalIndent(schemaDoc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema definition: %w", err)
+	}
+
+	if err := os.WriteFile(schemaPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write schema definition: %w", err)
+	}
+
+	t.Logf("Saved schema definition to: %s", schemaPath)
 	return nil
 }
 
@@ -741,13 +855,85 @@ func AssertSectionConsistency(t *testing.T, content1, content2 string, requiredS
 	return allConsistent
 }
 
-// AnnouncementsRequiredSections defines the sections that must be present in announcements output (MQS Framework)
+// AnnouncementsRequiredSections defines the sections that must be present in announcements output (Signal Classification)
 var AnnouncementsRequiredSections = []string{
-	"## Management Quality Score",
-	"## Information Integrity (Leakage Analysis)",
-	"## Conviction Analysis",
-	"## Price Retention Analysis",
-	"## Say-Do Analysis",
+	"Signal Quality Metrics",
+	"Announcements",
+}
+
+// =============================================================================
+// Rating Business Rule Validators
+// =============================================================================
+
+// ValidGateScores - BFS and CDS must be 0, 1, or 2
+var ValidGateScores = []float64{0, 1, 2}
+
+// ValidOBScores - OB must be 0.0, 0.5, or 1.0
+var ValidOBScores = []float64{0.0, 0.5, 1.0}
+
+// ValidRatingLabels - Enum values for rating label
+var ValidRatingLabels = []string{
+	"SPECULATIVE",
+	"LOW_ALPHA",
+	"WATCHLIST",
+	"INVESTABLE",
+	"HIGH_CONVICTION",
+}
+
+// AssertGateScore validates BFS/CDS score is 0, 1, or 2
+func AssertGateScore(t *testing.T, score float64, fieldName string) {
+	t.Helper()
+	valid := score == 0 || score == 1 || score == 2
+	assert.True(t, valid, "%s must be 0, 1, or 2, got %v", fieldName, score)
+}
+
+// AssertComponentScore validates NFR/PPS/VRS score is 0.0 to 1.0
+func AssertComponentScore(t *testing.T, score float64, fieldName string) {
+	t.Helper()
+	assert.GreaterOrEqual(t, score, 0.0, "%s must be >= 0.0", fieldName)
+	assert.LessOrEqual(t, score, 1.0, "%s must be <= 1.0", fieldName)
+}
+
+// AssertOBScore validates OB score is 0.0, 0.5, or 1.0
+func AssertOBScore(t *testing.T, score float64) {
+	t.Helper()
+	valid := score == 0.0 || score == 0.5 || score == 1.0
+	assert.True(t, valid, "OB score must be 0.0, 0.5, or 1.0, got %v", score)
+}
+
+// AssertRatingLabel validates label is valid enum value
+func AssertRatingLabel(t *testing.T, label string) {
+	t.Helper()
+	valid := false
+	for _, v := range ValidRatingLabels {
+		if label == v {
+			valid = true
+			break
+		}
+	}
+	assert.True(t, valid, "Invalid rating label: %s", label)
+}
+
+// AssertInvestabilityScore validates investability is 0-100 or nil (if gate failed)
+func AssertInvestabilityScore(t *testing.T, score interface{}, gatePassed bool) {
+	t.Helper()
+	if !gatePassed {
+		// Score can be nil or zero when gate fails
+		if score == nil {
+			return
+		}
+		if s, ok := score.(float64); ok && s == 0 {
+			return
+		}
+		// Allow nil representation in JSON
+		return
+	}
+	if s, ok := score.(float64); ok {
+		assert.GreaterOrEqual(t, s, 0.0, "Investability must be >= 0")
+		assert.LessOrEqual(t, s, 100.0, "Investability must be <= 100")
+	} else if score != nil {
+		t.Errorf("Investability must be a number, got %T", score)
+	}
 }
 
 // AssertResultFilesExist validates that result files exist with content
@@ -783,6 +969,28 @@ func AssertResultFilesExist(t *testing.T, env *common.TestEnvironment, runNumber
 	if numberedJsonInfo, numberedJsonErr := os.Stat(numberedJsonPath); numberedJsonErr == nil {
 		t.Logf("PASS: output_%d.json exists (%d bytes)", runNumber, numberedJsonInfo.Size())
 	}
+
+	// Check schema.json exists (informational - not fatal, as not all tests save schema)
+	schemaPath := filepath.Join(resultsDir, "schema.json")
+	if schemaInfo, schemaErr := os.Stat(schemaPath); schemaErr == nil {
+		t.Logf("PASS: schema.json exists (%d bytes)", schemaInfo.Size())
+	}
+}
+
+// AssertSchemaFileExists validates that schema.json exists and is non-empty
+// Call this after SaveSchemaDefinition to verify the schema was saved
+func AssertSchemaFileExists(t *testing.T, env *common.TestEnvironment) {
+	resultsDir := env.GetResultsDir()
+	if resultsDir == "" {
+		t.Fatal("FAIL: Results directory not available")
+		return
+	}
+
+	schemaPath := filepath.Join(resultsDir, "schema.json")
+	info, err := os.Stat(schemaPath)
+	require.NoError(t, err, "FAIL: schema.json must exist at %s", schemaPath)
+	require.Greater(t, info.Size(), int64(0), "FAIL: schema.json must not be empty")
+	t.Logf("PASS: schema.json exists (%d bytes)", info.Size())
 }
 
 // =============================================================================

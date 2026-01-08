@@ -1,6 +1,16 @@
 ---
 name: 3agents-tdd
 description: TDD enforcement - tests are IMMUTABLE, fix code until tests pass. Sequential execution with full restart on fix. Output captured to files to prevent context overflow.
+context: fork
+allowed-tools:
+  - Read
+  - Edit
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - Task
+  - TodoWrite
 ---
 
 Execute: $ARGUMENTS
@@ -81,19 +91,24 @@ echo "Created workdir: $WORKDIR"
 
 ## CONTEXT MANAGEMENT
 
-**TDD iterations accumulate context fast. Compact aggressively.**
+**Auto-compacting is instant** (Claude Code 2.0.64+). Manual compaction rarely needed.
 
-### Compaction Rules
-- **MANDATORY compaction points** marked with `⟲ COMPACT`
-- Run `/compact` at each marked point - do NOT skip
-- If `/compact` fails: press Escape twice, move up, retry
-- If still failing: `/clear` and restart with test file path
+### Automatic Context Optimization
+- Output truncation: Commands auto-truncate to 30K chars with file path reference
+- Forked context: This skill runs with `context: fork` for isolation
+- Background agents: Use `run_in_background: true` if running parallel analysis
 
 ### Recovery Protocol
 If context is lost mid-iteration:
 1. Read `$WORKDIR/tdd_state.md` for current state
 2. Re-read the test file to extract requirements
 3. Resume PHASE 3 loop from recorded iteration
+4. Use `TaskOutput(task_id)` to retrieve any background agent results
+
+### Background Task Management
+- **Ctrl+B**: Background all running foreground tasks (unified)
+- **TaskOutput**: Check on background agents with `block: false`
+- **KillShell**: Terminate stuck background tasks if needed
 
 ### Output Limits (CRITICAL)
 | Output Type | Max Lines in Context | Action |
@@ -104,16 +119,13 @@ If context is lost mid-iteration:
 | File reads | 500 | Use grep/head/tail for large files |
 | Build output | 50 | Capture full to file, show summary |
 
+**Note:** Claude Code 2.1.0+ auto-truncates to 30K chars with file path reference. Explicit capture still recommended for structured logging.
+
 ## WORKFLOW
 
-### PHASE 0: RESET CONTEXT
+### PHASE 0: SETUP
 
----
-### ⟲ COMPACT POINT: START
-
-**Run `/compact` before starting.** Clear context for maximum iteration headroom.
-
----
+Context is automatically optimized via `context: fork`. Proceed directly to setup.
 
 ### PHASE 1: SETUP & UNDERSTAND
 
@@ -346,23 +358,10 @@ extract_failure() {
 - Details: <what was changed or documented>
 ````
 
----
-### ⟲ COMPACT POINT: AFTER EACH ITERATION
-
-**Run `/compact` after completing each iteration fix.**
-
-Include in compact summary:
-- Current iteration number
-- Tests passed so far
-- Current failure being addressed
-- Log file locations
-
-Recovery context:
-- Read: `$WORKDIR/tdd_state.md`
+### Recovery Context (if needed)
+- State: Read `$WORKDIR/tdd_state.md`
 - Misaligned tests: Check `$WORKDIR/test_issues.md`
 - Last error: `tail -30 $WORKDIR/logs/test_iter*.log | tail -1` (most recent)
-
----
 
 ### PHASE 4: COMPLETE (MANDATORY)
 
@@ -475,13 +474,6 @@ fi
 The `common.CopyTDDSummary()` function in Go tests will also copy `summary.md` automatically,
 but the full workdir copy above includes all artifacts (tdd_state.md, test_issues.md, logs/, etc.).
 
----
-### ⟲ COMPACT POINT: TASK COMPLETE
-
-**Run `/compact` at completion.** Clean slate for next task.
-
----
-
 ## FORBIDDEN (AUTO-FAIL)
 
 | Action | Result |
@@ -509,6 +501,26 @@ but the full workdir copy above includes all artifacts (tdd_state.md, test_issue
 | Remove unused functions | If not tested with current behavior, not needed |
 | Document test as misaligned | Tests expecting deprecated behavior need updating |
 | Read log files with tail/head/grep | Bounded output extraction |
+
+## TASK TOOL USAGE
+
+**Default Model: Opus 4.5** (`model: opus`) - Preferred for all agents for maximum quality and reasoning depth.
+
+| Task | Agent Config |
+|------|--------------|
+| Explore codebase for patterns | `Task(subagent_type: Explore, model: opus)` |
+| Analyze test failures | `Task(subagent_type: general-purpose, model: opus)` |
+| Implement code fixes | `Task(subagent_type: general-purpose, model: opus)` |
+| Research architecture docs | `Task(subagent_type: Explore, model: opus)` |
+
+**Parallel analysis example:**
+```
+# Analyze multiple test failures in parallel
+Task(subagent_type: general-purpose, model: opus, run_in_background: true)
+  prompt: "Analyze TestFirst failure from $WORKDIR/logs/test_iter0.log"
+Task(subagent_type: general-purpose, model: opus, run_in_background: true)
+  prompt: "Analyze TestSecond failure from $WORKDIR/logs/test_iter0.log"
+```
 
 ## MISALIGNED TEST HANDLING
 
@@ -586,13 +598,16 @@ if currentStatus != expectedStatus {
 }
 ````
 
-## COMPACTION SUMMARY
+## CONTEXT OPTIMIZATION SUMMARY
 
-| Point | When | Why |
-|-------|------|-----|
-| Start | Phase 0 | Maximum headroom for iterations |
-| After each iteration | During Phase 3 | Prevent accumulation |
-| Complete | Phase 4 | Clean slate for next task |
+**Auto-compacting is instant** (Claude Code 2.0.64+). The following are handled automatically:
+
+| Feature | How It Works |
+|---------|--------------|
+| Forked context | `context: fork` in frontmatter isolates this skill |
+| Output truncation | Commands auto-truncate to 30K chars with file reference |
+| Background agents | Use `run_in_background: true` for parallel work |
+| Task recovery | Use `TaskOutput(task_id)` to retrieve background results |
 
 ## WORKDIR ARTIFACTS (MANDATORY)
 

@@ -53,16 +53,28 @@ variables = [
 # =========================================================================
 # Step 1: Fetch Announcements (per ticker)
 # =========================================================================
-# Fetches ASX announcements for each stock using MarketAnnouncementsWorker
-# Creates documents tagged ['asx-announcement-summary', '<ticker>']
+# Fetches raw ASX announcements for each stock using MarketAnnouncementsWorker
+# Creates documents tagged ['asx-announcement-raw', '<ticker>']
 
 [step.fetch_announcements]
 type = "market_announcements"
-description = "Fetch ASX announcements for each watchlist stock"
+description = "Fetch raw ASX announcements for each watchlist stock"
 on_error = "continue"
 
 # =========================================================================
-# Step 2: Format Output
+# Step 2: Process Announcements
+# =========================================================================
+# Processes raw announcements: classification, signal-noise analysis, price impact
+# Creates documents tagged ['asx-announcement-summary', '<ticker>']
+
+[step.process_announcements]
+type = "processing_announcements"
+description = "Classify and analyze announcements"
+depends = "fetch_announcements"
+on_error = "continue"
+
+# =========================================================================
+# Step 3: Format Output
 # =========================================================================
 # Prepares output document for email delivery
 # Collects documents by input_tags, formats with email instructions
@@ -74,7 +86,7 @@ on_error = "continue"
 [step.format_output]
 type = "output_formatter"
 description = "Format announcement summaries for email"
-depends = "fetch_announcements"
+depends = "process_announcements"
 on_error = "fail"
 input_tags = ["asx-announcement-summary"]
 output_tags = ["email-output"]
@@ -85,7 +97,7 @@ title = "ASX Announcements - Watchlist Summary"
 # style = "body"        # default: body (full content in email)
 
 # =========================================================================
-# Step 3: Email Report
+# Step 4: Email Report
 # =========================================================================
 # Sends email based on output_formatter document instructions
 # Reads format, attachment, style from output_formatter document frontmatter

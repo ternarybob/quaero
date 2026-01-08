@@ -8,6 +8,79 @@ This document outlines the staged implementation plan for the stock rating syste
 
 ---
 
+## CRITICAL: Market Worker Separation of Concerns
+
+The market workers must be separated into three distinct responsibilities:
+
+### 1. Data Collection Workers (market_*)
+**Purpose:** Fetch raw data from external APIs and store as documents.
+**No Processing:** Must NOT include analysis, classification, or scoring logic.
+
+| Worker | Responsibility | Output |
+|--------|---------------|--------|
+| `market_fundamentals` | Fetch stock fundamentals from EODHD | `[asx-stock-data, {ticker}]` |
+| `market_announcements` | Fetch raw announcements from ASX API | `[asx-announcement-raw, {ticker}]` |
+| `market_data` | Fetch OHLCV price history from EODHD | `[market-data, {ticker}]` |
+
+### 2. Processing Workers (processing_* or rating_*)
+**Purpose:** Read raw data documents, apply analysis/classification, write enriched documents.
+**Pure calculation:** Business logic only, no external API calls.
+
+| Worker | Responsibility | Input | Output |
+|--------|---------------|-------|--------|
+| `processing_announcements` | Classify announcements (relevance, signal-to-noise) | `asx-announcement-raw` | `[asx-announcement-summary, {ticker}]` |
+| `rating_bfs` | Calculate Business Foundation Score | `asx-stock-data` | `[rating-bfs, {ticker}]` |
+| `rating_cds` | Calculate Capital Discipline Score | `asx-stock-data`, `asx-announcement-summary` | `[rating-cds, {ticker}]` |
+| ... | | | |
+
+### 3. Summary Workers
+**Purpose:** Aggregate multiple documents into consolidated reports.
+
+| Worker | Responsibility |
+|--------|---------------|
+| `output_formatter` | Collect documents by tags, format for delivery |
+| `email` | Send formatted output via email |
+
+### Current Problem: market_announcements_worker.go
+
+The current `market_announcements_worker.go` violates separation of concerns by mixing:
+- **Data Collection:** Fetching announcements from Markit Digital API and ASX HTML ✅
+- **Processing:** (SHOULD BE SEPARATE)
+  - `classifyRelevance()` - keyword-based relevance classification
+  - `calculateSignalNoiseRating()` - signal-to-noise analysis
+  - `PriceImpactData` - price impact correlation
+  - `analyzeAnnouncements()` - full analysis pipeline
+  - MQS (Management Quality Score) calculations
+
+### Required Refactor
+
+1. **Slim down `market_announcements_worker.go`:**
+   - Keep ONLY: API fetching, HTML scraping, raw document storage
+   - Remove: All classification, analysis, and scoring logic
+   - Output: Raw announcement data only (date, headline, type, PDF URL, price-sensitive flag)
+
+2. **Create `processing_announcements_worker.go`:**
+   - Reads: Raw announcement documents
+   - Applies: Relevance classification, signal-to-noise analysis, price impact
+   - Outputs: Enriched announcement summary document
+
+3. **Update job definitions:**
+   ```toml
+   # announcements-watchlist.toml - Data collection only
+   [step.fetch_announcements]
+   type = "market_announcements"  # Raw data only
+
+   # stock-rating-watchlist.toml - Full pipeline
+   [step.fetch_announcements]
+   type = "market_announcements"  # Raw data
+
+   [step.process_announcements]
+   type = "processing_announcements"  # Classification & analysis
+   depends = "fetch_announcements"
+   ```
+
+---
+
 ## Architecture
 
 ```
@@ -72,6 +145,156 @@ This document outlines the staged implementation plan for the stock rating syste
   - Response: document ID(s) only
   - Actual data read from document storage using returned IDs
 - **No "tools" package**: Workers ARE the orchestrator-callable tools
+
+---
+
+## Market Interface for Worker-to-Worker Communication
+
+Rating workers need data from market workers. To maintain separation of concerns and consistent data flow:
+
+### Interface Definition
+
+```go
+// MarketDocumentProvider enables rating workers to request document IDs from market workers.
+// This is the only allowed form of worker-to-worker communication.
+//
+// Protocol:
+//   - Request: ticker(s) only (context)
+//   - Response: document ID(s) only
+//   - Data: caller reads from document storage using returned IDs
+type MarketDocumentProvider interface {
+    // GetDocumentID returns the document ID for a single ticker.
+    // If document doesn't exist or is stale, fetches fresh data first.
+    // Returns (docID, nil) on success, ("", error) on failure.
+    GetDocumentID(ctx context.Context, ticker string) (string, error)
+
+    // GetDocumentIDs returns document IDs for multiple tickers.
+    // Returns map[ticker]docID. Missing/failed tickers have empty string values.
+    GetDocumentIDs(ctx context.Context, tickers []string) (map[string]string, error)
+}
+```
+
+Location: `internal/interfaces/market_provider.go`
+
+### Implementations
+
+Each market worker implements `MarketDocumentProvider`:
+
+| Worker | SourceType | SourceID Format | Document Tags |
+|--------|------------|-----------------|---------------|
+| `market_fundamentals` | `market_fundamentals` | `{exchange}:{code}:stock_collector` | `ticker:{code}`, `source_type:market_fundamentals` |
+| `market_announcements` | `asx_announcement_summary` | `{exchange}:{code}:announcement_summary` | `ticker:{code}`, `source_type:market_announcements` |
+| `market_data` | `market_data` | `{exchange}:{code}:market_data` | `ticker:{code}`, `source_type:market_data` |
+
+### Usage in Rating Workers
+
+```go
+// RatingBFSWorker depends on fundamentals data
+type RatingBFSWorker struct {
+    fundamentalsProvider MarketDocumentProvider  // Injected at creation
+    documentStorage      interfaces.DocumentStorage
+    logger               arbor.ILogger
+}
+
+func (w *RatingBFSWorker) Execute(ctx context.Context, job *QueueJob) error {
+    ticker := job.Payload["ticker"].(string)
+
+    // 1. Request document ID (context only - just the ticker)
+    docID, err := w.fundamentalsProvider.GetDocumentID(ctx, ticker)
+    if err != nil {
+        return fmt.Errorf("fundamentals not available: %w", err)
+    }
+
+    // 2. Read document from storage using returned ID
+    doc, err := w.documentStorage.GetDocument(docID)
+    if err != nil {
+        return fmt.Errorf("failed to read fundamentals doc: %w", err)
+    }
+
+    // 3. Extract data for service call
+    fundamentals := w.extractFundamentals(doc)
+
+    // 4. Call pure service function
+    result := rating.CalculateBFS(fundamentals)
+
+    // 5. Save result as document
+    return w.saveResultDocument(ctx, ticker, result)
+}
+```
+
+### Batch Processing
+
+For workers that need multiple data sources:
+
+```go
+// RatingCDSWorker needs fundamentals AND announcements
+func (w *RatingCDSWorker) Execute(ctx context.Context, job *QueueJob) error {
+    ticker := job.Payload["ticker"].(string)
+
+    // Request both document IDs (can be parallelized)
+    fundDocID, err := w.fundamentalsProvider.GetDocumentID(ctx, ticker)
+    if err != nil {
+        return err
+    }
+    annDocID, err := w.announcementsProvider.GetDocumentID(ctx, ticker)
+    if err != nil {
+        return err
+    }
+
+    // Read both documents
+    fundDoc, _ := w.documentStorage.GetDocument(fundDocID)
+    annDoc, _ := w.documentStorage.GetDocument(annDocID)
+
+    // Extract and calculate
+    fundamentals := w.extractFundamentals(fundDoc)
+    announcements := w.extractAnnouncements(annDoc)
+    result := rating.CalculateCDS(fundamentals, announcements, 36) // 3 years
+
+    return w.saveResultDocument(ctx, ticker, result)
+}
+```
+
+### Multi-Ticker Requests
+
+For batch job processing:
+
+```go
+// Process multiple tickers at once
+tickers := []string{"ASX.GNP", "ASX.SKS", "ASX.EXR"}
+docIDs, err := w.fundamentalsProvider.GetDocumentIDs(ctx, tickers)
+if err != nil {
+    return err
+}
+
+for ticker, docID := range docIDs {
+    if docID == "" {
+        w.logger.Warn().Str("ticker", ticker).Msg("no fundamentals available")
+        continue
+    }
+    doc, _ := w.documentStorage.GetDocument(docID)
+    // Process...
+}
+```
+
+### Provider Factory
+
+Providers are created via factory to ensure proper dependency injection:
+
+```go
+// MarketProviderFactory creates MarketDocumentProvider instances
+type MarketProviderFactory interface {
+    CreateFundamentalsProvider() MarketDocumentProvider
+    CreateAnnouncementsProvider() MarketDocumentProvider
+    CreatePriceDataProvider() MarketDocumentProvider
+}
+```
+
+### Implementation Notes
+
+1. **Caching**: Providers use `BaseMarketWorker` for cache-aware document retrieval
+2. **Staleness**: If document is stale, provider triggers refresh before returning ID
+3. **Errors**: Return error only for unrecoverable failures; missing data returns empty string
+4. **Thread Safety**: Providers must be safe for concurrent use
 
 ---
 
@@ -149,16 +372,17 @@ filter_tags = ["stock-rating"]
 
 ### Pattern 2: LLM-Orchestrated Tool Selection
 
-LLM Planner decides which tools to call based on goal. Uses `orchestrator_worker.go`.
+LLM Planner decides which tools to call based on prompt. Uses `orchestrator_worker.go`.
 
 ```
-Goal → LLM Planner → selects tools → Executor runs → Reviewer validates → repeat
+Prompt → LLM Planner → selects tools → Executor runs → Reviewer validates → repeat
 ```
 
 ```toml
 [step.orchestrate]
 type = "orchestrator"
-goal = "Rate the stock and explain the investment thesis"
+prompt = "Rate the stock and explain the investment thesis"
+model = "sonnet"  # Options: haiku, sonnet, opus
 thinking_level = "MEDIUM"
 available_tools = [
     { name = "get_fundamentals", worker = "market_fundamentals", description = "Fetch stock fundamentals. REQUIRED params: ticker (string)." },
@@ -200,7 +424,8 @@ type = "rating_cds"
 # Option B: LLM-orchestrated (adds reasoning to output)
 [step.orchestrate_rating]
 type = "orchestrator"
-goal = "Calculate all rating scores and explain the results. Always calculate all components for consistent output."
+prompt = "Calculate all rating scores and explain the results. Always calculate all components for consistent output."
+model = "sonnet"
 available_tools = [...]
 ```
 
@@ -238,6 +463,114 @@ Execution:
 - Each ticker runs the full template workflow independently
 - Steps within a ticker respect `depends` ordering
 - Final aggregation steps (e.g., email_report) wait for all tickers to complete
+
+---
+
+## Stage 0: Market Worker Separation (PREREQUISITE)
+
+**Goal:** Separate data collection from processing in market workers.
+
+This stage MUST be completed before Stage 1. The market_announcements_worker currently mixes data collection with analysis/classification logic, violating separation of concerns.
+
+### Tasks
+
+#### 0.1 Create Announcement Processing Service
+- [ ] Create `internal/services/announcements/` package
+- [ ] Move classification logic from worker to service:
+  ```go
+  // internal/services/announcements/types.go
+  type RawAnnouncement struct {
+      Date           time.Time
+      Headline       string
+      Type           string
+      PDFURL         string
+      DocumentKey    string
+      PriceSensitive bool
+  }
+
+  type ProcessedAnnouncement struct {
+      RawAnnouncement
+      RelevanceCategory    string  // HIGH, MEDIUM, LOW, NOISE
+      RelevanceReason      string
+      SignalNoiseRating    string  // HIGH_SIGNAL, MODERATE_SIGNAL, LOW_SIGNAL, NOISE, ROUTINE
+      SignalNoiseRationale string
+      PriceImpact          *PriceImpactData
+  }
+  ```
+
+- [ ] Create `internal/services/announcements/classify.go`:
+  ```go
+  // ClassifyRelevance returns relevance category based on keywords
+  func ClassifyRelevance(headline string, annType string) (category, reason string)
+
+  // CalculateSignalNoise analyzes market impact
+  func CalculateSignalNoise(ann RawAnnouncement, priceData []PriceBar) SignalNoiseResult
+
+  // CalculatePriceImpact correlates announcement with price movement
+  func CalculatePriceImpact(ann RawAnnouncement, prices []PriceBar) *PriceImpactData
+  ```
+
+#### 0.2 Refactor market_announcements_worker.go
+- [ ] Remove ALL processing logic from `market_announcements_worker.go`:
+  - Delete `classifyRelevance()` function
+  - Delete `calculateSignalNoiseRating()` function
+  - Delete `analyzeAnnouncements()` function
+  - Delete `PriceImpactData` calculation
+  - Delete MQS-related calculations
+- [ ] Change output document tag from `asx-announcement-summary` to `asx-announcement-raw`
+- [ ] Store raw announcements only (no analysis fields)
+- [ ] Remove dependencies on `priceProvider` and `fundamentalsProvider`
+- [ ] Target file size: <500 lines (currently ~1800 lines)
+
+#### 0.3 Create processing_announcements_worker.go
+- [ ] Create new worker `internal/queue/workers/processing_announcements_worker.go`
+- [ ] Implements `DefinitionWorker` interface
+- [ ] Worker type: `WorkerTypeProcessingAnnouncements = "processing_announcements"`
+- [ ] Reads: `asx-announcement-raw` documents
+- [ ] Calls: `announcements.ClassifyRelevance()`, `announcements.CalculateSignalNoise()`
+- [ ] Outputs: `asx-announcement-summary` documents (enriched with analysis)
+
+#### 0.4 Update Job Definitions
+- [ ] Update `announcements-watchlist.toml`:
+  - Step 1: `market_announcements` (raw data only)
+  - Step 2: `processing_announcements` (classification) - depends on step 1
+  - Step 3: `output_formatter` - depends on step 2
+  - Step 4: `email` - depends on step 3
+
+- [ ] Update `stock-rating-watchlist.toml`:
+  - Add `processing_announcements` step after `fetch_announcements`
+  - Update rating worker dependencies to use processed data
+
+#### 0.5 Register New Worker
+- [ ] Add `WorkerTypeProcessingAnnouncements` to `internal/models/worker_type.go`
+- [ ] Register in `internal/app/app.go`
+
+#### 0.6 Update Tests
+- [ ] Update tests for slimmed-down `market_announcements_worker`
+- [ ] Create tests for `processing_announcements_worker`
+- [ ] Create unit tests for `internal/services/announcements/`
+
+### Deliverables
+- Pure data collection in `market_announcements_worker.go` (<500 lines)
+- Processing logic in `internal/services/announcements/`
+- New `processing_announcements_worker.go` for classification
+- Updated job definitions with proper step dependencies
+- All existing tests passing
+
+### Verification
+```bash
+# market_announcements_worker should be pure data collection
+grep -c "classifyRelevance\|SignalNoise\|PriceImpact" internal/queue/workers/market_announcements_worker.go
+# Expected: 0
+
+# New service should have the processing logic
+ls internal/services/announcements/*.go
+# Expected: types.go, classify.go
+
+# New worker should exist
+ls internal/queue/workers/processing_announcements_worker.go
+# Expected: file exists
+```
 
 ---
 
@@ -628,7 +961,8 @@ Follow existing patterns in `test/api/market_workers/common_test.go`.
   [step.rate_stock]
   type = "orchestrator"
   description = "Rate stock using investability framework"
-  goal = """
+  model = "sonnet"  # Options: haiku, sonnet, opus
+  prompt = """
   Rate the stock using the investability framework:
   1. Fetch fundamentals, announcements, and price data
   2. Calculate ALL scores (BFS, CDS, NFR, PPS, VRS, OB) - never skip any
@@ -743,85 +1077,430 @@ The `output_formatter` worker already exists. This stage focuses on:
 
 ## Stage 6: Testing & Verification
 
-**Goal:** Refactor tests for updated workers and services using existing test framework.
+**Goal:** Create tests for rating workers using existing test framework patterns. Configuration changes only - no test infrastructure changes.
 
-### Testing Framework
+### Testing Framework Reference
 
-Existing test framework in `test/api/market_workers/` - **DO NOT CHANGE**:
-- `common_test.go` - Shared test utilities and helpers
+Existing test framework in `test/api/market_workers/` - **DO NOT CHANGE STRUCTURE**:
+- `common_test.go` - Shared utilities, schemas, helpers
 - `*_test.go` - Individual worker tests
 
-New tests follow the same patterns and conventions.
+**Pattern Reference:** Use existing tests as templates:
+- `fundamentals_test.go` - Single worker, schema validation
+- `announcements_test.go` - Worker with business rules (MQS scores)
+- `data_collection_test.go` - Multi-step job, aggregation
 
-### Tasks
+---
 
-#### 6.1 Service Unit Tests
-- [ ] Create `internal/services/rating/bfs_test.go`
-- [ ] Create `internal/services/rating/cds_test.go`
-- [ ] Create `internal/services/rating/nfr_test.go`
-- [ ] Create `internal/services/rating/pps_test.go`
-- [ ] Create `internal/services/rating/vrs_test.go`
-- [ ] Create `internal/services/rating/ob_test.go`
-- [ ] Create `internal/services/rating/composite_test.go`
+### 6.1 Remove Redundant Tests
 
-Pure function tests - no dependencies on workers or documents.
+Delete tests for removed signal workers:
+- [ ] Delete `test/api/market_workers/signal_test.go` (market_signal worker removed)
+- [ ] Delete `test/api/market_workers/signal_computer_test.go` (signal_computer worker removed)
 
-#### 6.2 Worker API Tests
-- [ ] Create `test/api/market_workers/rating_bfs_test.go`
+These workers are replaced by the rating system.
+
+---
+
+### 6.2 Add Rating WorkerSchemas to common_test.go
+
+Add schema definitions following existing pattern in `common_test.go`:
+
+```go
+// Rating Worker Schemas - add to common_test.go
+
+// BFSSchema - Business Foundation Score
+var BFSSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "indicator_count", "components", "reasoning"},
+    OptionalFields: []string{"calculated_at"},
+    FieldTypes: map[string]string{
+        "ticker":          "string",
+        "score":           "number",  // 0, 1, or 2
+        "indicator_count": "number",
+        "components":      "object",
+        "reasoning":       "string",
+    },
+}
+
+// CDSSchema - Capital Discipline Score
+var CDSSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+    OptionalFields: []string{"calculated_at", "analysis_period_months"},
+    FieldTypes: map[string]string{
+        "ticker":     "string",
+        "score":      "number",  // 0, 1, or 2
+        "components": "object",
+        "reasoning":  "string",
+    },
+}
+
+// NFRSchema - Narrative-to-Fact Ratio
+var NFRSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+    OptionalFields: []string{"calculated_at"},
+    FieldTypes: map[string]string{
+        "ticker":     "string",
+        "score":      "number",  // 0.0 to 1.0
+        "components": "object",
+        "reasoning":  "string",
+    },
+}
+
+// PPSSchema - Price Progression Score
+var PPSSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "event_details", "reasoning"},
+    OptionalFields: []string{"calculated_at"},
+    FieldTypes: map[string]string{
+        "ticker":        "string",
+        "score":         "number",  // 0.0 to 1.0
+        "event_details": "array",
+        "reasoning":     "string",
+    },
+}
+
+// VRSSchema - Volatility Regime Stability
+var VRSSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "components", "reasoning"},
+    OptionalFields: []string{"calculated_at"},
+    FieldTypes: map[string]string{
+        "ticker":     "string",
+        "score":      "number",  // 0.0 to 1.0
+        "components": "object",
+        "reasoning":  "string",
+    },
+}
+
+// OBSchema - Optionality Bonus
+var OBSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "score", "catalyst_found", "timeframe_found", "reasoning"},
+    OptionalFields: []string{"calculated_at"},
+    FieldTypes: map[string]string{
+        "ticker":          "string",
+        "score":           "number",  // 0.0, 0.5, or 1.0
+        "catalyst_found":  "boolean",
+        "timeframe_found": "boolean",
+        "reasoning":       "string",
+    },
+}
+
+// RatingCompositeSchema - Final investability rating
+var RatingCompositeSchema = WorkerSchema{
+    RequiredFields: []string{"ticker", "label", "investability", "gate_passed", "scores"},
+    OptionalFields: []string{"calculated_at", "reasoning"},
+    FieldTypes: map[string]string{
+        "ticker":        "string",
+        "label":         "string",  // SPECULATIVE|LOW_ALPHA|WATCHLIST|INVESTABLE|HIGH_CONVICTION
+        "investability": "number",  // 0-100 or null if gate failed
+        "gate_passed":   "boolean",
+        "scores":        "object",  // All component scores
+        "reasoning":     "string",
+    },
+}
+```
+
+---
+
+### 6.3 Add Business Rule Validators to common_test.go
+
+```go
+// Rating business rule validators - add to common_test.go
+
+// ValidGateScores - BFS and CDS must be 0, 1, or 2
+var ValidGateScores = []float64{0, 1, 2}
+
+// ValidOBScores - OB must be 0.0, 0.5, or 1.0
+var ValidOBScores = []float64{0.0, 0.5, 1.0}
+
+// ValidRatingLabels - Enum values for rating label
+var ValidRatingLabels = []string{
+    "SPECULATIVE",
+    "LOW_ALPHA",
+    "WATCHLIST",
+    "INVESTABLE",
+    "HIGH_CONVICTION",
+}
+
+// AssertGateScore validates BFS/CDS score is 0, 1, or 2
+func AssertGateScore(t *testing.T, score float64, fieldName string) {
+    t.Helper()
+    valid := score == 0 || score == 1 || score == 2
+    assert.True(t, valid, "%s must be 0, 1, or 2, got %v", fieldName, score)
+}
+
+// AssertComponentScore validates NFR/PPS/VRS score is 0.0 to 1.0
+func AssertComponentScore(t *testing.T, score float64, fieldName string) {
+    t.Helper()
+    assert.GreaterOrEqual(t, score, 0.0, "%s must be >= 0.0", fieldName)
+    assert.LessOrEqual(t, score, 1.0, "%s must be <= 1.0", fieldName)
+}
+
+// AssertOBScore validates OB score is 0.0, 0.5, or 1.0
+func AssertOBScore(t *testing.T, score float64) {
+    t.Helper()
+    valid := score == 0.0 || score == 0.5 || score == 1.0
+    assert.True(t, valid, "OB score must be 0.0, 0.5, or 1.0, got %v", score)
+}
+
+// AssertRatingLabel validates label is valid enum value
+func AssertRatingLabel(t *testing.T, label string) {
+    t.Helper()
+    valid := false
+    for _, v := range ValidRatingLabels {
+        if label == v {
+            valid = true
+            break
+        }
+    }
+    assert.True(t, valid, "Invalid rating label: %s", label)
+}
+
+// AssertInvestabilityScore validates investability is 0-100 or nil (if gate failed)
+func AssertInvestabilityScore(t *testing.T, score interface{}, gatePassed bool) {
+    t.Helper()
+    if !gatePassed {
+        assert.Nil(t, score, "Investability must be nil when gate fails")
+        return
+    }
+    if s, ok := score.(float64); ok {
+        assert.GreaterOrEqual(t, s, 0.0, "Investability must be >= 0")
+        assert.LessOrEqual(t, s, 100.0, "Investability must be <= 100")
+    } else {
+        t.Errorf("Investability must be a number, got %T", score)
+    }
+}
+```
+
+---
+
+### 6.4 Rating Worker API Tests
+
+Create test files following existing patterns. Each test:
+1. Uses `SetupFreshEnvironment(t)`
+2. Creates job definition with worker config
+3. Executes job via `CreateAndExecuteJob`
+4. Validates schema via `ValidateSchema`
+5. Validates business rules
+6. Saves output via `SaveWorkerOutput`
+
+#### 6.4.1 rating_bfs_test.go
+```go
+// test/api/market_workers/rating_bfs_test.go
+func TestRatingBFSSingle(t *testing.T) {
+    env := SetupFreshEnvironment(t)
+    if env == nil { return }
+    defer env.Cleanup()
+
+    RequireEODHD(t, env)  // Needs fundamentals data
+
+    helper := env.NewHTTPTestHelper(t)
+    body := map[string]interface{}{
+        "id": "test-rating-bfs",
+        "name": "Test Rating BFS",
+        "type": "rating_bfs",
+        "enabled": true,
+        "tags": []string{"rating", "test"},
+        "steps": []map[string]interface{}{
+            {
+                "name": "calculate-bfs",
+                "type": "rating_bfs",
+                "config": map[string]interface{}{
+                    "ticker": "ASX:GNP",
+                },
+            },
+        },
+    }
+
+    jobID, _ := CreateAndExecuteJob(t, helper, body)
+    finalStatus := WaitForJobCompletion(t, helper, jobID, 2*time.Minute)
+    if finalStatus != "completed" {
+        t.Skipf("Job ended with status %s", finalStatus)
+    }
+
+    // ===== ASSERTIONS =====
+    tags := []string{"rating-bfs", "gnp"}
+    metadata, content := AssertOutputNotEmpty(t, helper, tags)
+
+    // Schema validation
+    ValidateSchema(t, metadata, BFSSchema)
+
+    // Business rules
+    if score, ok := metadata["score"].(float64); ok {
+        AssertGateScore(t, score, "BFS score")
+    }
+
+    SaveWorkerOutput(t, env, helper, tags, "GNP")
+}
+```
+
+#### 6.4.2 rating_cds_test.go
 - [ ] Create `test/api/market_workers/rating_cds_test.go`
+- Config: `ticker`, requires fundamentals + announcements
+- Tags: `["rating-cds", "{ticker}"]`
+- Validates: `AssertGateScore` (0, 1, 2)
+
+#### 6.4.3 rating_nfr_test.go
 - [ ] Create `test/api/market_workers/rating_nfr_test.go`
+- Config: `ticker`, requires announcements + prices
+- Tags: `["rating-nfr", "{ticker}"]`
+- Validates: `AssertComponentScore` (0.0-1.0)
+
+#### 6.4.4 rating_pps_test.go
 - [ ] Create `test/api/market_workers/rating_pps_test.go`
+- Config: `ticker`, requires announcements + prices
+- Tags: `["rating-pps", "{ticker}"]`
+- Validates: `AssertComponentScore` (0.0-1.0)
+
+#### 6.4.5 rating_vrs_test.go
 - [ ] Create `test/api/market_workers/rating_vrs_test.go`
+- Config: `ticker`, requires announcements + prices
+- Tags: `["rating-vrs", "{ticker}"]`
+- Validates: `AssertComponentScore` (0.0-1.0)
+
+#### 6.4.6 rating_ob_test.go
 - [ ] Create `test/api/market_workers/rating_ob_test.go`
+- Config: `ticker`, requires announcements + BFS score
+- Tags: `["rating-ob", "{ticker}"]`
+- Validates: `AssertOBScore` (0.0, 0.5, 1.0)
+
+#### 6.4.7 rating_composite_test.go
 - [ ] Create `test/api/market_workers/rating_composite_test.go`
+- Config: `ticker`, requires all score documents
+- Tags: `["stock-rating", "{ticker}"]`
+- Validates: `AssertRatingLabel`, `AssertInvestabilityScore`
 
-Follow existing test patterns in `common_test.go`.
+---
 
-#### 6.3 Golden Test Cases
-| Ticker | Expected Label | Gate | Investability |
-|--------|----------------|------|---------------|
-| BHP | LOW_ALPHA | Pass | 40-50 |
-| EXR | SPECULATIVE | Fail (CDS=0) | null |
-| CSL | LOW_ALPHA | Pass | 40-50 |
-| GNP | INVESTABLE | Pass | 65-75 |
-| SKS | INVESTABLE | Pass | 65-75 |
+### 6.5 Integration Test
 
-#### 6.4 Integration Tests
-- [ ] Create `test/api/market_workers/rating_integration_test.go`
-- [ ] Test full job flow with golden tickers
-- [ ] Verify document output schemas
-- [ ] Test concurrent execution with multiple tickers
+```go
+// test/api/market_workers/rating_integration_test.go
+func TestRatingFullFlow(t *testing.T) {
+    // Tests complete rating flow for golden tickers
+    // Uses job definition that runs all rating steps
+}
 
-#### 6.5 Performance
-- [ ] Full rating flow <30s per ticker
-- [ ] Batch processing throughput
+func TestRatingGoldenCases(t *testing.T) {
+    goldenCases := []struct {
+        ticker        string
+        expectedLabel string
+        gatePass      bool
+        investMin     float64
+        investMax     float64
+    }{
+        {"ASX:BHP", "LOW_ALPHA", true, 40, 50},
+        {"ASX:EXR", "SPECULATIVE", false, 0, 0},  // Gate fails
+        {"ASX:CSL", "LOW_ALPHA", true, 40, 50},
+        {"ASX:GNP", "INVESTABLE", true, 65, 75},
+        {"ASX:SKS", "INVESTABLE", true, 65, 75},
+    }
+
+    for _, tc := range goldenCases {
+        t.Run(tc.ticker, func(t *testing.T) {
+            // Execute full rating flow
+            // Assert label matches expected
+            // Assert investability in expected range
+        })
+    }
+}
+
+func TestRatingMultiTicker(t *testing.T) {
+    // Tests concurrent execution with multiple tickers
+    // Validates all outputs created
+    // Checks no cross-contamination between tickers
+}
+```
+
+---
+
+### 6.6 Service Unit Tests
+
+Pure function tests in `internal/services/rating/`:
+
+| File | Tests |
+|------|-------|
+| `bfs_test.go` | `CalculateBFS` with various Fundamentals inputs |
+| `cds_test.go` | `CalculateCDS` with various dilution scenarios |
+| `nfr_test.go` | `CalculateNFR` with fact vs narrative counts |
+| `pps_test.go` | `CalculatePPS` with price reaction scenarios |
+| `vrs_test.go` | `CalculateVRS` with volatility patterns |
+| `ob_test.go` | `CalculateOB` with catalyst detection |
+| `composite_test.go` | `CalculateRating` gate pass/fail scenarios |
+| `math_test.go` | `PriceWindow`, `DailyReturns`, `Stddev`, `CAGR` |
+
+**Test patterns:**
+- Table-driven tests with named cases
+- Edge cases: nil inputs, zero values, boundary conditions
+- No mocks - pure function testing
+
+---
+
+### 6.7 Test Coverage Matrix
+
+| Worker | API Test | Unit Test | Golden Cases | Tags |
+|--------|----------|-----------|--------------|------|
+| `rating_bfs` | `rating_bfs_test.go` | `bfs_test.go` | BHP, GNP | `rating-bfs` |
+| `rating_cds` | `rating_cds_test.go` | `cds_test.go` | EXR (fail), GNP | `rating-cds` |
+| `rating_nfr` | `rating_nfr_test.go` | `nfr_test.go` | All golden | `rating-nfr` |
+| `rating_pps` | `rating_pps_test.go` | `pps_test.go` | All golden | `rating-pps` |
+| `rating_vrs` | `rating_vrs_test.go` | `vrs_test.go` | All golden | `rating-vrs` |
+| `rating_ob` | `rating_ob_test.go` | `ob_test.go` | All golden | `rating-ob` |
+| `rating_composite` | `rating_composite_test.go` | `composite_test.go` | All golden | `stock-rating` |
+| Integration | `rating_integration_test.go` | - | All golden | - |
+
+**Coverage targets:**
+- Service unit tests: >90%
+- API tests: All workers covered
+- Golden cases: All 5 tickers pass expected outcomes
+
+---
+
+### 6.8 Cleanup Verification
+
+After test updates, verify:
+- [ ] `go test ./test/api/market_workers/...` passes
+- [ ] No import errors from deleted signal tests
+- [ ] All rating tests pass with golden tickers
+- [ ] Test results directory structure matches existing pattern
+
+---
 
 ### Deliverables
-- Service unit tests (>90% coverage)
-- Worker API tests (follow existing patterns)
-- Integration tests with golden cases
-- Performance benchmarks
+
+- [ ] `signal_test.go` deleted
+- [ ] `signal_computer_test.go` deleted
+- [ ] 7 WorkerSchema definitions in `common_test.go`
+- [ ] 6 business rule validators in `common_test.go`
+- [ ] 7 rating worker API tests
+- [ ] 1 integration test with golden cases
+- [ ] 8 service unit test files
+- [ ] All golden test cases pass
 
 ---
 
 ## Implementation Order
 
 ```
-Stage 1: Rating Service      ─── Pure calculation functions
+Stage 0: Market Worker Separation ─── PREREQUISITE: Separate data collection from processing
           ↓
-Stage 2: Rating Workers      ─── Document I/O, call services
+Stage 1: Rating Service           ─── Pure calculation functions
           ↓
-Stage 3: Job Definition      ─── Wire workers together
+Stage 2: Rating Workers           ─── Document I/O, call services
           ↓
-Stage 4: Output & Reporting  ─── Generate reports
+Stage 3: Job Definition           ─── Wire workers together
           ↓
-Stage 5: Cleanup             ─── Delete old code, move MQS
+Stage 4: Output & Reporting       ─── Generate reports
           ↓
-Stage 6: Verification        ─── Golden tests, benchmarks
+Stage 5: Cleanup                  ─── Delete old code, move MQS
+          ↓
+Stage 6: Verification             ─── Golden tests, benchmarks
 ```
+
+---
 
 ## Success Criteria
 
+- [ ] Market workers are pure data collection (no processing logic)
+- [ ] Processing workers handle analysis/classification
 - [ ] All golden test cases pass
 - [ ] Full rating flow <30s per ticker
 - [ ] Clean separation: services (pure) / workers (I/O)
@@ -830,5 +1509,5 @@ Stage 6: Verification        ─── Golden tests, benchmarks
 
 ---
 
-*Document Version: 3.0*
-*Created: 2026-01-07*
+*Document Version: 3.4*
+*Updated: 2026-01-08*

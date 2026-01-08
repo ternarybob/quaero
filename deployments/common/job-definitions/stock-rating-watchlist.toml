@@ -1,0 +1,166 @@
+# Stock Rating Watchlist
+# =========================================================================
+# Calculates investability ratings for a watchlist of stocks using the
+# deterministic rating pipeline: BFS, CDS, NFR, PPS, VRS, OB -> Composite
+#
+# WORKFLOW:
+# 1. Fetch market data (fundamentals, announcements, price data)
+# 2. Calculate component scores (can run in parallel after data fetch)
+# 3. Calculate composite rating (depends on all component scores)
+# 4. Email report with ratings summary
+#
+# TICKERS: EXR, GNP, SKS, TWR
+# OUTPUT TAG: stock-rating
+# =========================================================================
+
+# =========================================================================
+# Job Definition
+# =========================================================================
+id = "stock-rating-watchlist"
+name = "Stock Rating - Watchlist"
+type = "orchestrator"
+description = "Calculate investability ratings for watchlist stocks"
+tags = ["rating", "watchlist", "investability", "email"]
+schedule = ""
+timeout = "2h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Quaero"
+version = "1.0"
+created = "2026-01-08"
+updated = "2026-01-08"
+purpose = "Investability rating calculation for watchlist stocks"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+variables = [
+    { ticker = "EXR" },
+    { ticker = "GNP" },
+    { ticker = "SKS" },
+    { ticker = "TWR" },
+]
+
+# =========================================================================
+# Step 1: Fetch Fundamentals
+# =========================================================================
+[step.fetch_fundamentals]
+type = "market_fundamentals"
+description = "Fetch stock fundamentals for rating calculation"
+on_error = "continue"
+period = "Y2"
+
+# =========================================================================
+# Step 2: Fetch Announcements
+# =========================================================================
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch raw company announcements"
+on_error = "continue"
+period = "Y1"
+limit = 500
+
+# =========================================================================
+# Step 3: Process Announcements
+# =========================================================================
+[step.process_announcements]
+type = "processing_announcements"
+description = "Classify and analyze announcements for rating"
+depends = "fetch_announcements"
+on_error = "continue"
+
+# =========================================================================
+# Step 4: Fetch Price Data
+# =========================================================================
+[step.fetch_price_data]
+type = "market_data"
+description = "Fetch price history for rating calculation"
+on_error = "continue"
+period = "2y"
+
+# =========================================================================
+# Step 5: Calculate BFS (Business Foundation Score)
+# =========================================================================
+[step.calculate_bfs]
+type = "rating_bfs"
+description = "Calculate Business Foundation Score (0-2)"
+depends = "fetch_fundamentals"
+on_error = "continue"
+
+# =========================================================================
+# Step 6: Calculate CDS (Capital Discipline Score)
+# =========================================================================
+[step.calculate_cds]
+type = "rating_cds"
+description = "Calculate Capital Discipline Score (0-2)"
+depends = "fetch_fundamentals,process_announcements"
+on_error = "continue"
+months = 36
+
+# =========================================================================
+# Step 7: Calculate NFR (Narrative-to-Fact Ratio)
+# =========================================================================
+[step.calculate_nfr]
+type = "rating_nfr"
+description = "Calculate Narrative-to-Fact Ratio (0-1)"
+depends = "process_announcements"
+on_error = "continue"
+
+# =========================================================================
+# Step 8: Calculate PPS (Price Progression Score)
+# =========================================================================
+[step.calculate_pps]
+type = "rating_pps"
+description = "Calculate Price Progression Score (0-1)"
+depends = "process_announcements,fetch_price_data"
+on_error = "continue"
+
+# =========================================================================
+# Step 9: Calculate VRS (Volatility Regime Stability)
+# =========================================================================
+[step.calculate_vrs]
+type = "rating_vrs"
+description = "Calculate Volatility Regime Stability (0-1)"
+depends = "fetch_price_data"
+on_error = "continue"
+
+# =========================================================================
+# Step 10: Calculate OB (Optionality Bonus)
+# =========================================================================
+[step.calculate_ob]
+type = "rating_ob"
+description = "Calculate Optionality Bonus (0, 0.5, 1)"
+depends = "calculate_bfs,process_announcements"
+on_error = "continue"
+
+# =========================================================================
+# Step 11: Calculate Composite Rating
+# =========================================================================
+[step.calculate_composite]
+type = "rating_composite"
+description = "Calculate final investability rating"
+depends = "calculate_bfs,calculate_cds,calculate_nfr,calculate_pps,calculate_vrs,calculate_ob"
+on_error = "fail"
+output_tags = ["stock-rating", "weekly-rating"]
+
+# =========================================================================
+# Step 12: Email Report
+# =========================================================================
+[step.email_report]
+type = "email"
+description = "Email stock ratings summary"
+depends = "calculate_composite"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Rating - Watchlist Summary"
+style = "proforma"
+list_tags = ["stock-rating"]
+base_url = "http://localhost:18080"

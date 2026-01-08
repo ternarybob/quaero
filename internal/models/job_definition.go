@@ -58,6 +58,7 @@ const (
 	JobDefinitionTypeNavexaPortfolios       JobDefinitionType = "navexa_portfolios"        // Fetch all Navexa portfolios for the user
 	JobDefinitionTypeNavexaHoldings         JobDefinitionType = "navexa_holdings"          // Fetch holdings for a Navexa portfolio
 	JobDefinitionTypeNavexaPerformance      JobDefinitionType = "navexa_performance"       // Fetch P/L performance for a Navexa portfolio
+	JobDefinitionTypeManager                JobDefinitionType = "manager"                  // Multi-step orchestrated job (manager job with child steps)
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -80,7 +81,8 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 		JobDefinitionTypeMarketMacro, JobDefinitionTypeMarketCompetitor, JobDefinitionTypeMarketSignal,
 		JobDefinitionTypeMarketPortfolio, JobDefinitionTypeMarketAssessor, JobDefinitionTypeMarketNews,
 		JobDefinitionTypeMarketDataCollection,
-		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance:
+		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
+		JobDefinitionTypeManager:
 		return true
 	default:
 		return false
@@ -225,7 +227,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data_collection)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, manager, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data_collection)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)

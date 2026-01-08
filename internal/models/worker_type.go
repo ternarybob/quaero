@@ -34,7 +34,8 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial/market data workers (market_ prefix)
-	WorkerTypeMarketAnnouncements    WorkerType = "market_announcements"     // Company announcements via Markit API
+	WorkerTypeMarketAnnouncements          WorkerType = "market_announcements"           // Company announcements via Markit API
+	WorkerTypeProcessingAnnouncements      WorkerType = "processing_announcements"       // Process raw announcements, add classification/signal analysis
 	WorkerTypeMarketData             WorkerType = "market_data"              // Price data, technicals, indices via EODHD
 	WorkerTypeMarketNews             WorkerType = "market_news"              // Multi-exchange news via EODHD News API
 	WorkerTypeMarketDirectorInterest WorkerType = "market_director_interest" // Director interest (Appendix 3Y) filings
@@ -65,6 +66,15 @@ const (
 
 	// AI-powered cognitive orchestration workers
 	WorkerTypeOrchestrator WorkerType = "orchestrator" // AI agent that dynamically plans and executes steps
+
+	// Rating workers - Investability scoring system
+	WorkerTypeRatingBFS       WorkerType = "rating_bfs"       // Business Foundation Score (0-2)
+	WorkerTypeRatingCDS       WorkerType = "rating_cds"       // Capital Discipline Score (0-2)
+	WorkerTypeRatingNFR       WorkerType = "rating_nfr"       // Narrative-to-Fact Ratio (0-1)
+	WorkerTypeRatingPPS       WorkerType = "rating_pps"       // Price Progression Score (0-1)
+	WorkerTypeRatingVRS       WorkerType = "rating_vrs"       // Volatility Regime Stability (0-1)
+	WorkerTypeRatingOB        WorkerType = "rating_ob"        // Optionality Bonus (0, 0.5, 1)
+	WorkerTypeRatingComposite WorkerType = "rating_composite" // Composite investability rating
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -75,13 +85,15 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail,
-		WorkerTypeMarketAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
+		WorkerTypeMarketAnnouncements, WorkerTypeProcessingAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
 		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
 		WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
 		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
-		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator:
+		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
+		WorkerTypeRatingBFS, WorkerTypeRatingCDS, WorkerTypeRatingNFR, WorkerTypeRatingPPS,
+		WorkerTypeRatingVRS, WorkerTypeRatingOB, WorkerTypeRatingComposite:
 		return true
 	}
 	return false
@@ -113,6 +125,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeAggregateSummary,
 		WorkerTypeEmail,
 		WorkerTypeMarketAnnouncements,
+		WorkerTypeProcessingAnnouncements,
 		WorkerTypeMarketData,
 		WorkerTypeMarketNews,
 		WorkerTypeMarketDirectorInterest,
@@ -133,5 +146,12 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,
 		WorkerTypeOrchestrator,
+		WorkerTypeRatingBFS,
+		WorkerTypeRatingCDS,
+		WorkerTypeRatingNFR,
+		WorkerTypeRatingPPS,
+		WorkerTypeRatingVRS,
+		WorkerTypeRatingOB,
+		WorkerTypeRatingComposite,
 	}
 }

@@ -23,7 +23,19 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
-	"github.com/ternarybob/quaero/internal/queue/workers"
+	aiworkers "github.com/ternarybob/quaero/internal/workers/ai"
+	crawlerworkers "github.com/ternarybob/quaero/internal/workers/crawler"
+	devopsworkers "github.com/ternarybob/quaero/internal/workers/devops"
+	githubworkers "github.com/ternarybob/quaero/internal/workers/github"
+	marketworkers "github.com/ternarybob/quaero/internal/workers/market"
+	navexaworkers "github.com/ternarybob/quaero/internal/workers/navexa"
+	outputworkers "github.com/ternarybob/quaero/internal/workers/output"
+	processingworkers "github.com/ternarybob/quaero/internal/workers/processing"
+	ratingworkers "github.com/ternarybob/quaero/internal/workers/rating"
+	templateworkers "github.com/ternarybob/quaero/internal/workers/template"
+	testworkers "github.com/ternarybob/quaero/internal/workers/testworkers"
+	webworkers "github.com/ternarybob/quaero/internal/workers/web"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/cache"
@@ -77,7 +89,7 @@ type App struct {
 	JobManager    *queue.Manager
 	StepManager   *queue.StepManager
 	JobDispatcher *queue.JobDispatcher
-	JobProcessor  *workers.JobProcessor
+	JobProcessor  *workerutil.JobProcessor
 	JobMonitor    interfaces.JobMonitor
 	StepMonitor   interfaces.StepMonitor
 	JobService    *jobsvc.Service
@@ -567,7 +579,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Msg("Cache service initialized and wired to step manager")
 
 	// 5.9. Initialize job processor (replaces worker pool)
-	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)
+	jobProcessor := workerutil.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)
 	jobProcessor.SetEventService(a.EventService) // Enable event-based job cancellation
 	a.JobProcessor = jobProcessor
 	a.Logger.Debug().Msg("Job processor initialized")
@@ -754,7 +766,7 @@ func (a *App) initServices() error {
 	// ============================================================================
 
 	// Register crawler worker (implements both StepWorker and JobWorker)
-	crawlerWorker := workers.NewCrawlerWorker(
+	crawlerWorker := crawlerworkers.NewCrawlerWorker(
 		a.CrawlerService,
 		jobMgr,
 		queueMgr,
@@ -769,7 +781,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", crawlerWorker.GetType().String()).Str("job_type", crawlerWorker.GetWorkerType()).Msg("Crawler worker registered")
 
 	// Register GitHub Repo worker (implements both StepWorker and JobWorker)
-	githubRepoWorker := workers.NewGitHubRepoWorker(
+	githubRepoWorker := githubworkers.NewRepoWorker(
 		a.ConnectorService,
 		jobMgr,
 		queueMgr,
@@ -782,7 +794,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", githubRepoWorker.GetType().String()).Str("job_type", githubRepoWorker.GetWorkerType()).Msg("GitHub Repo worker registered")
 
 	// Register GitHub Actions worker (implements both StepWorker and JobWorker)
-	githubLogWorker := workers.NewGitHubLogWorker(
+	githubLogWorker := githubworkers.NewLogWorker(
 		a.ConnectorService,
 		jobMgr,
 		queueMgr,
@@ -795,7 +807,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", githubLogWorker.GetType().String()).Str("job_type", githubLogWorker.GetWorkerType()).Msg("GitHub Actions worker registered")
 
 	// Register GitHub Git worker (git clone-based, faster for bulk file downloads)
-	githubGitWorker := workers.NewGitHubGitWorker(
+	githubGitWorker := githubworkers.NewGitWorker(
 		a.ConnectorService,
 		jobMgr,
 		queueMgr,
@@ -808,7 +820,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", githubGitWorker.GetType().String()).Str("job_type", githubGitWorker.GetWorkerType()).Msg("GitHub Git worker registered")
 
 	// Register Local Directory worker (local filesystem indexing)
-	localDirWorker := workers.NewLocalDirWorker(
+	localDirWorker := devopsworkers.NewLocalDirWorker(
 		jobMgr,
 		queueMgr,
 		a.StorageManager.DocumentStorage(),
@@ -820,7 +832,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", localDirWorker.GetType().String()).Str("job_type", localDirWorker.GetWorkerType()).Msg("Local Directory worker registered")
 
 	// Register Code Map worker (hierarchical code structure analysis - optimized for large codebases)
-	codeMapWorker := workers.NewCodeMapWorker(
+	codeMapWorker := devopsworkers.NewCodeMapWorker(
 		jobMgr,
 		queueMgr,
 		a.StorageManager.DocumentStorage(),
@@ -834,7 +846,7 @@ func (a *App) initServices() error {
 
 	// Register agent worker if AgentService is available (implements both StepWorker and JobWorker)
 	if a.AgentService != nil {
-		agentWorker := workers.NewAgentWorker(
+		agentWorker := aiworkers.NewAgentWorker(
 			a.AgentService,
 			jobMgr,
 			queueMgr,
@@ -851,7 +863,7 @@ func (a *App) initServices() error {
 
 	// Register Tool Execution worker (processes tool_execution jobs from orchestrator)
 	// This worker executes individual tool calls as queue citizens with independent status tracking
-	toolExecutionWorker := workers.NewToolExecutionWorker(
+	toolExecutionWorker := aiworkers.NewToolExecutionWorker(
 		a.StepManager,
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
@@ -862,7 +874,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("job_type", toolExecutionWorker.GetWorkerType()).Msg("Tool execution worker registered")
 
 	// Register Places search worker (synchronous execution, no child jobs)
-	placesWorker := workers.NewPlacesWorker(
+	placesWorker := crawlerworkers.NewPlacesWorker(
 		a.PlacesService,
 		a.DocumentService,
 		a.EventService,
@@ -874,7 +886,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", placesWorker.GetType().String()).Msg("Places search worker registered")
 
 	// Register Web search worker (synchronous execution, no child jobs)
-	webSearchWorker := workers.NewWebSearchWorker(
+	webSearchWorker := webworkers.NewSearchWorker(
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
 		a.StorageManager.KeyValueStorage(),
@@ -886,35 +898,43 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
 	// Create data providers for inter-worker data sharing
-	fundamentalsProvider := workers.NewFundamentalsProvider(
+	fundamentalsProvider := marketworkers.NewFundamentalsProvider(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		a.Config.Jobs.Debug,
 	)
-	priceProvider := workers.NewPriceProvider(
+	priceProvider := marketworkers.NewPriceProvider(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 	)
 
 	// Register Market Announcements worker (company announcements via Markit API)
-	marketAnnouncementsWorker := workers.NewMarketAnnouncementsWorker(
+	// Now pure data collection - processing handled by separate worker
+	marketAnnouncementsWorker := marketworkers.NewAnnouncementsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
 		a.Config.Jobs.Debug,
-		a.ProviderFactory,
-		fundamentalsProvider,
-		priceProvider,
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
 
+	// Register Processing Announcements worker (enriches raw announcements)
+	processingAnnouncementsWorker := processingworkers.NewAnnouncementsWorker(
+		a.StorageManager.DocumentStorage(),
+		priceProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(processingAnnouncementsWorker)
+	a.Logger.Debug().Str("step_type", processingAnnouncementsWorker.GetType().String()).Msg("Processing Announcements worker registered")
+
 	// Register Market Data worker (multi-exchange via EODHD)
 	// API key is resolved at runtime from KV store
-	marketDataWorker := workers.NewMarketDataWorker(
+	marketDataWorker := marketworkers.NewDataWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -925,7 +945,7 @@ func (a *App) initServices() error {
 
 	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
 	// API key is resolved at runtime from KV store
-	marketNewsWorker := workers.NewMarketNewsWorker(
+	marketNewsWorker := marketworkers.NewNewsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -936,7 +956,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketNewsWorker.GetType().String()).Msg("Market News worker registered")
 
 	// Register Market Director Interest worker (director interest filings via Markit API)
-	marketDirectorInterestWorker := workers.NewMarketDirectorInterestWorker(
+	marketDirectorInterestWorker := marketworkers.NewDirectorInterestWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
@@ -945,7 +965,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketDirectorInterestWorker.GetType().String()).Msg("Market Director Interest worker registered")
 
 	// Register Market Fundamentals worker (consolidated: price, analyst coverage, historical financials via EODHD)
-	marketFundamentalsWorker := workers.NewMarketFundamentalsWorker(
+	marketFundamentalsWorker := marketworkers.NewFundamentalsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -956,7 +976,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketFundamentalsWorker.GetType().String()).Msg("Market Fundamentals worker registered")
 
 	// Register Market Macro worker (synchronous execution, fetches RBA rates and commodity prices)
-	marketMacroWorker := workers.NewMarketMacroWorker(
+	marketMacroWorker := marketworkers.NewMacroWorker(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		jobMgr,
@@ -965,7 +985,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketMacroWorker.GetType().String()).Msg("Market Macro worker registered")
 
 	// Register Market Competitor worker (identifies competitors via LLM and fetches their stock data)
-	marketCompetitorWorker := workers.NewMarketCompetitorWorker(
+	marketCompetitorWorker := marketworkers.NewCompetitorWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		jobMgr,
@@ -976,7 +996,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketCompetitorWorker.GetType().String()).Msg("Market Competitor worker registered")
 
 	// Register Market Consolidate worker (consolidates tagged documents, no AI)
-	marketConsolidateWorker := workers.NewMarketConsolidateWorker(
+	marketConsolidateWorker := marketworkers.NewConsolidateWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
@@ -987,7 +1007,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketConsolidateWorker.GetType().String()).Msg("Market Consolidate worker registered")
 
 	// Register Output Formatter worker (prepares output documents for email delivery)
-	outputFormatterWorker := workers.NewOutputFormatterWorker(
+	outputFormatterWorker := outputworkers.NewFormatterWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
@@ -1000,7 +1020,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", outputFormatterWorker.GetType().String()).Msg("Output Formatter worker registered")
 
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
-	navexaPortfoliosWorker := workers.NewNavexaPortfoliosWorker(
+	navexaPortfoliosWorker := navexaworkers.NewPortfoliosWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1011,7 +1031,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", navexaPortfoliosWorker.GetType().String()).Msg("Navexa Portfolios worker registered")
 
 	// Register Navexa Holdings worker (fetches holdings for a specific portfolio)
-	navexaHoldingsWorker := workers.NewNavexaHoldingsWorker(
+	navexaHoldingsWorker := navexaworkers.NewHoldingsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1022,7 +1042,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", navexaHoldingsWorker.GetType().String()).Msg("Navexa Holdings worker registered")
 
 	// Register Navexa Performance worker (fetches P/L performance for a portfolio)
-	navexaPerformanceWorker := workers.NewNavexaPerformanceWorker(
+	navexaPerformanceWorker := navexaworkers.NewPerformanceWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1035,7 +1055,7 @@ func (a *App) initServices() error {
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory
 	// Supports template-based prompts via internal/templates package
-	summaryWorker := workers.NewSummaryWorker(
+	summaryWorker := aiworkers.NewSummaryWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
@@ -1050,7 +1070,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
 	// Register Orchestrator worker (AI-powered cognitive orchestration with LLM reasoning)
-	orchestratorWorker := workers.NewOrchestratorWorker(
+	orchestratorWorker := aiworkers.NewOrchestratorWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.StorageManager.KeyValueStorage(),
@@ -1064,7 +1084,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", orchestratorWorker.GetType().String()).Msg("Orchestrator worker registered")
 
 	// Register enrichment pipeline workers (each handles a specific enrichment step)
-	analyzeBuildWorker := workers.NewAnalyzeBuildWorker(
+	analyzeBuildWorker := devopsworkers.NewAnalyzeBuildWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.LLMService,
@@ -1074,7 +1094,7 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(analyzeBuildWorker)
 	a.Logger.Debug().Str("step_type", analyzeBuildWorker.GetType().String()).Msg("Analyze build worker registered")
 
-	classifyWorker := workers.NewClassifyWorker(
+	classifyWorker := devopsworkers.NewClassifyWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.LLMService,
@@ -1084,7 +1104,7 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(classifyWorker)
 	a.Logger.Debug().Str("step_type", classifyWorker.GetType().String()).Msg("Classify worker registered")
 
-	dependencyGraphWorker := workers.NewDependencyGraphWorker(
+	dependencyGraphWorker := devopsworkers.NewDependencyGraphWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
@@ -1094,7 +1114,7 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(dependencyGraphWorker)
 	a.Logger.Debug().Str("step_type", dependencyGraphWorker.GetType().String()).Msg("Dependency graph worker registered")
 
-	aggregateSummaryWorker := workers.NewAggregateSummaryWorker(
+	aggregateSummaryWorker := devopsworkers.NewAggregateSummaryWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
@@ -1106,7 +1126,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
 
 	// Register Email worker (notification step for job definitions)
-	emailWorker := workers.NewEmailWorker(
+	emailWorker := outputworkers.NewEmailWorker(
 		a.MailerService,
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
@@ -1119,7 +1139,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", emailWorker.GetType().String()).Msg("Email worker registered")
 
 	// Register Email Watcher worker (monitors IMAP inbox for job execution commands)
-	emailWatcherWorker := workers.NewEmailWatcherWorker(
+	emailWatcherWorker := outputworkers.NewEmailWatcherWorker(
 		a.IMAPService,
 		a.StorageManager.JobDefinitionStorage(),
 		a.JobDispatcher,
@@ -1130,7 +1150,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", emailWatcherWorker.GetType().String()).Msg("Email watcher worker registered")
 
 	// Register Test Job Generator worker (testing worker for logging, error tolerance, and job hierarchy validation)
-	testJobGeneratorWorker := workers.NewTestJobGeneratorWorker(
+	testJobGeneratorWorker := testworkers.NewJobGeneratorWorker(
 		jobMgr,
 		queueMgr,
 		a.Logger,
@@ -1141,7 +1161,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", testJobGeneratorWorker.GetType().String()).Str("job_type", testJobGeneratorWorker.GetWorkerType()).Msg("Test Job Generator worker registered")
 
 	// Register Market Signal worker (computes PBAS, VLI, Regime signals from stock data)
-	marketSignalWorker := workers.NewMarketSignalWorker(
+	marketSignalWorker := marketworkers.NewSignalWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1151,7 +1171,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketSignalWorker.GetType().String()).Msg("Market Signal worker registered")
 
 	// Register Market Portfolio worker (aggregates ticker signals into portfolio-level metrics)
-	marketPortfolioWorker := workers.NewMarketPortfolioWorker(
+	marketPortfolioWorker := marketworkers.NewPortfolioWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1161,7 +1181,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", marketPortfolioWorker.GetType().String()).Msg("Market Portfolio worker registered")
 
 	// Register Market Assessor worker (AI-powered stock assessment with validation)
-	marketAssessorWorker := workers.NewMarketAssessorWorker(
+	marketAssessorWorker := marketworkers.NewAssessorWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1175,7 +1195,7 @@ func (a *App) initServices() error {
 	// Creates workers internally for inline execution (no child jobs)
 	// API keys are resolved at runtime from KV store by each embedded worker
 	// Embeds BaseMarketWorker for cache-aware document retrieval
-	marketDataCollectionWorker := workers.NewMarketDataCollectionWorker(
+	marketDataCollectionWorker := marketworkers.NewDataCollectionWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.StorageManager.KeyValueStorage(),
@@ -1189,7 +1209,7 @@ func (a *App) initServices() error {
 
 	// Signal analysis worker - analyzes announcement signal quality
 	// Consumes cached announcements and price data to produce signal analysis
-	signalAnalysisWorker := workers.NewSignalAnalysisWorker(
+	signalAnalysisWorker := processingworkers.NewSignalWorker(
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
 		a.ExchangeService,
@@ -1199,6 +1219,94 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(signalAnalysisWorker)
 	a.Logger.Debug().Str("step_type", signalAnalysisWorker.GetType().String()).Msg("Signal analysis worker registered")
+
+	// ============================================================================
+	// RATING WORKERS (Investability Scoring System)
+	// Pure calculation workers that consume market data and produce ratings
+	// ============================================================================
+
+	// Create announcements provider for inter-worker data sharing
+	announcementsProvider := marketworkers.NewAnnouncementsProvider(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		a.Config.Jobs.Debug,
+		fundamentalsProvider,
+		priceProvider,
+	)
+
+	// Register Rating BFS worker (Business Foundation Score)
+	ratingBFSWorker := ratingworkers.NewBFSWorker(
+		a.StorageManager.DocumentStorage(),
+		fundamentalsProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingBFSWorker)
+	a.Logger.Debug().Str("step_type", ratingBFSWorker.GetType().String()).Msg("Rating BFS worker registered")
+
+	// Register Rating CDS worker (Capital Discipline Score)
+	ratingCDSWorker := ratingworkers.NewCDSWorker(
+		a.StorageManager.DocumentStorage(),
+		fundamentalsProvider,
+		announcementsProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingCDSWorker)
+	a.Logger.Debug().Str("step_type", ratingCDSWorker.GetType().String()).Msg("Rating CDS worker registered")
+
+	// Register Rating NFR worker (Narrative-to-Fact Ratio)
+	ratingNFRWorker := ratingworkers.NewNFRWorker(
+		a.StorageManager.DocumentStorage(),
+		announcementsProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingNFRWorker)
+	a.Logger.Debug().Str("step_type", ratingNFRWorker.GetType().String()).Msg("Rating NFR worker registered")
+
+	// Register Rating PPS worker (Price Progression Score)
+	ratingPPSWorker := ratingworkers.NewPPSWorker(
+		a.StorageManager.DocumentStorage(),
+		announcementsProvider,
+		priceProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingPPSWorker)
+	a.Logger.Debug().Str("step_type", ratingPPSWorker.GetType().String()).Msg("Rating PPS worker registered")
+
+	// Register Rating VRS worker (Volatility Regime Stability)
+	ratingVRSWorker := ratingworkers.NewVRSWorker(
+		a.StorageManager.DocumentStorage(),
+		priceProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingVRSWorker)
+	a.Logger.Debug().Str("step_type", ratingVRSWorker.GetType().String()).Msg("Rating VRS worker registered")
+
+	// Register Rating OB worker (Optionality Bonus)
+	ratingOBWorker := ratingworkers.NewOBWorker(
+		a.StorageManager.DocumentStorage(),
+		announcementsProvider,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingOBWorker)
+	a.Logger.Debug().Str("step_type", ratingOBWorker.GetType().String()).Msg("Rating OB worker registered")
+
+	// Register Rating Composite worker (combines all scores)
+	ratingCompositeWorker := ratingworkers.NewCompositeWorker(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(ratingCompositeWorker)
+	a.Logger.Debug().Str("step_type", ratingCompositeWorker.GetType().String()).Msg("Rating Composite worker registered")
+
+	a.Logger.Debug().Msg("Rating workers registered")
 
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
@@ -1212,7 +1320,7 @@ func (a *App) initServices() error {
 	)
 
 	// Register Job Template worker (must be after JobDispatcher is created since it needs it)
-	jobTemplateWorker := workers.NewJobTemplateWorker(
+	jobTemplateWorker := templateworkers.NewJobTemplateWorker(
 		a.StorageManager.JobDefinitionStorage(),
 		jobs.NewService(a.StorageManager.KeyValueStorage(), a.AgentService, a.Logger),
 		a.JobDispatcher,
