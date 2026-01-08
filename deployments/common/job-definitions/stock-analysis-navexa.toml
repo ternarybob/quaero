@@ -58,6 +58,7 @@ benchmarks = [{ code = "XJO", name = "S&P/ASX 200" }]
 type = "navexa_holdings"
 description = "Fetch Navexa portfolio holdings"
 on_error = "fail"
+output_tags = ["collect_data"]  # next step name
 
 # =========================================================================
 # Step 2: Data Collection (Deterministic)
@@ -70,7 +71,8 @@ type = "market_data_collection"
 description = "Collect stock data for Navexa holdings"
 depends = "navexa_data"
 on_error = "fail"
-filter_tags = ["navexa-holdings"]
+# input_tags defaults to ["collect_data"] (step name)
+output_tags = ["analyze"]  # next step name
 
 # =========================================================================
 # Step 3: Stock Analysis (AI)
@@ -84,8 +86,8 @@ description = "Analyze collected stock data"
 depends = "collect_data"
 on_error = "fail"
 template = "stock-analysis"
-filter_tags = ["stock-data-collected"]
-output_tags = ["stock-analysis"]
+# input_tags defaults to ["analyze"] (step name)
+output_tags = ["email_report"]  # next step name
 
 # =========================================================================
 # Step 4: Email Report
@@ -99,4 +101,4 @@ always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "Navexa Portfolio Analysis - AI-Powered Report"
-body_from_tag = "stock-analysis"
+# input_tags defaults to ["email_report"] (step name)

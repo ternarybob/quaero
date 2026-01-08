@@ -58,6 +58,7 @@ type = "market_fundamentals"
 description = "Fetch stock fundamentals for each watchlist stock"
 on_error = "continue"
 period = "Y2"
+output_tags = ["email_report"]  # next step name
 
 # =========================================================================
 # Step 2: Email Report
@@ -74,5 +75,5 @@ on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "ASX Fundamentals - Watchlist Summary"
 style = "proforma"
-list_tags = ["asx-stock-data"]
+# input_tags defaults to ["email_report"] (step name)
 base_url = "http://localhost:8085"

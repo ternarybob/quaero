@@ -155,7 +155,7 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	// First, check for output_formatter document with instructions
-	formatterInstr := w.parseOutputFormatterDocument(ctx, stepConfig)
+	formatterInstr := w.parseOutputFormatterDocument(ctx, stepConfig, step.Name)
 
 	var body, htmlBody string
 	var bodyResult emailBodyResult
@@ -2112,8 +2112,9 @@ type outputFormatterInstructions struct {
 	bodyMarkdown string // the body content after frontmatter
 }
 
-// parseOutputFormatterDocument looks for an output_formatter document and parses its instructions
-func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConfig map[string]interface{}) outputFormatterInstructions {
+// parseOutputFormatterDocument looks for an output_formatter document and parses its instructions.
+// Uses input_tags from step config, defaulting to [stepName] if not specified.
+func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConfig map[string]interface{}, stepName string) outputFormatterInstructions {
 	result := outputFormatterInstructions{
 		format:     "inline",
 		attachment: false,
@@ -2121,9 +2122,16 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 		baseURL:    fmt.Sprintf("http://%s:%d", w.serverHost, w.serverPort),
 	}
 
-	// Look for documents with email-output tag (created by output_formatter)
+	// Extract input_tags from config, default to step name
+	inputTags := getInputTagsWithDefault(stepConfig, stepName)
+
+	w.logger.Debug().
+		Strs("input_tags", inputTags).
+		Msg("Searching for output_formatter document")
+
+	// Look for documents with specified input tags (created by output_formatter)
 	opts := interfaces.SearchOptions{
-		Tags:     []string{"email-output"},
+		Tags:     inputTags,
 		Limit:    1,
 		OrderBy:  "created_at",
 		OrderDir: "desc",
@@ -2131,7 +2139,9 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 
 	results, err := w.searchService.Search(ctx, "", opts)
 	if err != nil || len(results) == 0 {
-		w.logger.Debug().Msg("No output_formatter document found")
+		w.logger.Debug().
+			Strs("input_tags", inputTags).
+			Msg("No output_formatter document found with input_tags")
 		return result
 	}
 
@@ -2222,4 +2232,31 @@ func (w *EmailWorker) loadDocumentsForAttachment(ctx context.Context, docIDs []s
 		docs = append(docs, doc)
 	}
 	return docs
+}
+
+// getInputTagsWithDefault extracts input_tags from step config, defaulting to [stepName] if not specified.
+// This enables a consistent pipeline pattern where downstream steps consume documents by step name.
+func getInputTagsWithDefault(config map[string]interface{}, stepName string) []string {
+	// Check if input_tags is explicitly configured
+	if tags, ok := config["input_tags"].([]interface{}); ok && len(tags) > 0 {
+		result := make([]string, 0, len(tags))
+		for _, t := range tags {
+			if s, ok := t.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	if tags, ok := config["input_tags"].([]string); ok && len(tags) > 0 {
+		return tags
+	}
+
+	// Default to step name as the input tag
+	if stepName != "" {
+		return []string{stepName}
+	}
+
+	return nil
 }

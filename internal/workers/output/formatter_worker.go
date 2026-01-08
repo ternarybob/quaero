@@ -80,10 +80,7 @@ func (w *FormatterWorker) ValidateConfig(step models.JobStep) error {
 	if stepConfig == nil {
 		return fmt.Errorf("step config is required")
 	}
-	// input_tags is required
-	if _, ok := stepConfig["input_tags"]; !ok {
-		return fmt.Errorf("input_tags is required")
-	}
+	// input_tags is optional - defaults to [step.Name] if not specified
 	return nil
 }
 
@@ -94,8 +91,8 @@ func (w *FormatterWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract input_tags
-	inputTags := extractStringArray(stepConfig, "input_tags")
+	// Extract input_tags, defaulting to step name if not specified
+	inputTags := workerutil.GetInputTags(stepConfig, step.Name)
 
 	// Collect tickers - supports both step config and job-level variables
 	tickers := workerutil.CollectTickersWithJobDef(stepConfig, jobDef)
@@ -156,7 +153,8 @@ func (w *FormatterWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
-	inputTags := extractStringArray(stepConfig, "input_tags")
+	// Extract input_tags, defaulting to step name if not specified
+	inputTags := workerutil.GetInputTags(stepConfig, step.Name)
 	outputTags := extractStringArray(stepConfig, "output_tags")
 
 	// Collect tickers for filtering

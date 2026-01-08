@@ -60,22 +60,42 @@ description = "Identify and analyze competitors for each watchlist stock"
 on_error = "continue"
 api_key = "{google_gemini_api_key}"
 period = "Y1"
-output_tags = ["competitor-analysis"]
+output_tags = ["format_output"]  # next step name
 
 # =========================================================================
-# Step 2: Email Report
+# Step 2: Format Output
 # =========================================================================
-# Sends proforma email with document links (not full content)
-# Documents are listed with links to view in Quaero
+# Prepares output document for email delivery
+# Collects documents by input_tags, formats with email instructions
+# Options:
+#   format = "inline|pdf|html|markdown" (default: inline)
+#   attachment = true|false (default: false)
+#   style = "proforma|body" (default: body)
+
+[step.format_output]
+type = "output_formatter"
+description = "Format competitor analysis summaries for email"
+depends = "analyze_competitors"
+on_error = "fail"
+# input_tags defaults to ["format_output"] (step name)
+output_tags = ["email_report"]  # next step name
+title = "Competitor Analysis - Watchlist Summary"
+style = "proforma"
+# format = "inline"     # default: inline (markdown converted to HTML in body)
+# attachment = false    # default: no attachments
+
+# =========================================================================
+# Step 3: Email Report
+# =========================================================================
+# Sends email based on output_formatter document instructions
+# Reads format, attachment, style from output_formatter document frontmatter
 
 [step.email_report]
 type = "email"
-description = "Email competitor analysis report with document links"
-depends = "analyze_competitors"
+description = "Email competitor analysis report"
+depends = "format_output"
 always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "Competitor Analysis - Watchlist Summary"
-style = "proforma"
-list_tags = ["competitor-analysis"]
-base_url = "http://localhost:8085"
+# input_tags defaults to ["email_report"] (step name)

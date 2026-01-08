@@ -79,16 +79,18 @@ on_error = "fail"
 input_tags = ["announcement"]
 output_tags = ["email-output"]
 title = "ASX Announcements - Watchlist Summary"
-base_url = "http://localhost:8085"
 # format = "inline"     # default: inline (markdown converted to HTML in body)
 # attachment = false    # default: no attachments
 # style = "body"        # default: body (full content in email)
 
 # =========================================================================
-# Step 4: Email Report
+# Step 3: Email Report
 # =========================================================================
 # Sends email based on output_formatter document instructions
 # Reads format, attachment, style from output_formatter document frontmatter
+# Options:
+#   input_tags = ["email-output"] (default) - tags to search for formatted output
+#                Can be customized to match output_tags from previous step
 
 [step.email_report]
 type = "email"
@@ -98,3 +100,4 @@ always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "ASX Announcements - Watchlist Summary"
+# input_tags = ["email-output"]  # default: matches output_formatter's output tag

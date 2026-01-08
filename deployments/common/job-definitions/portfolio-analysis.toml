@@ -84,6 +84,7 @@ benchmarks = [{ code = "XJO", name = "S&P/ASX 200" }]
 type = "market_data_collection"
 description = "Collect stock data for all tickers"
 on_error = "fail"
+output_tags = ["analyze"]  # next step name
 
 # =========================================================================
 # Step 2: Stock Analysis (AI)
@@ -97,8 +98,8 @@ description = "Analyze collected stock data"
 depends = "collect_data"
 on_error = "fail"
 template = "stock-analysis"
-filter_tags = ["stock-data-collected"]
-output_tags = ["stock-analysis"]
+# input_tags defaults to ["analyze"] (step name)
+output_tags = ["portfolio_assessment"]  # next step name
 
 # =========================================================================
 # Step 3: Portfolio Assessment (AI)
@@ -112,8 +113,8 @@ description = "Portfolio-level analysis and recommendations"
 depends = "analyze"
 on_error = "fail"
 template = "portfolio-assessment"
-filter_tags = ["stock-analysis"]
-output_tags = ["portfolio-review"]
+# input_tags defaults to ["portfolio_assessment"] (step name)
+output_tags = ["email_report"]  # next step name
 
 # =========================================================================
 # Step 4: Email Report
@@ -129,4 +130,4 @@ always_run = true
 on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "Portfolio Analysis - AI-Powered Report"
-body_from_tag = "portfolio-review"
+# input_tags defaults to ["email_report"] (step name)

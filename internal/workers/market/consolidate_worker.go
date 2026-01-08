@@ -66,10 +66,7 @@ func (w *ConsolidateWorker) ValidateConfig(step models.JobStep) error {
 	if stepConfig == nil {
 		return fmt.Errorf("step config is required")
 	}
-	// input_tags is required
-	if _, ok := stepConfig["input_tags"]; !ok {
-		return fmt.Errorf("input_tags is required")
-	}
+	// input_tags is optional - defaults to [step.Name] if not specified
 	return nil
 }
 
@@ -80,17 +77,8 @@ func (w *ConsolidateWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract input_tags
-	var inputTags []string
-	if tags, ok := stepConfig["input_tags"].([]interface{}); ok {
-		for _, t := range tags {
-			if tag, ok := t.(string); ok && tag != "" {
-				inputTags = append(inputTags, tag)
-			}
-		}
-	} else if tags, ok := stepConfig["input_tags"].([]string); ok {
-		inputTags = tags
-	}
+	// Extract input_tags, defaulting to step name if not specified
+	inputTags := getInputTagsWithDefault(stepConfig, step.Name)
 
 	w.logger.Info().
 		Str("phase", "init").
@@ -132,18 +120,8 @@ func (w *ConsolidateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
-	// Extract input_tags
-	var inputTags []string
-	if tags, ok := stepConfig["input_tags"].([]interface{}); ok {
-		for _, t := range tags {
-			if tag, ok := t.(string); ok && tag != "" {
-				inputTags = append(inputTags, tag)
-			}
-		}
-	} else if tags, ok := stepConfig["input_tags"].([]string); ok {
-		inputTags = tags
-	}
-
+	// Extract input_tags, defaulting to step name if not specified
+	inputTags := getInputTagsWithDefault(stepConfig, step.Name)
 	if len(inputTags) == 0 {
 		return "", fmt.Errorf("input_tags is required and must not be empty")
 	}
@@ -402,4 +380,31 @@ func IsTickerTag(tag string) bool {
 	}
 
 	return true
+}
+
+// getInputTagsWithDefault extracts input_tags from step config, defaulting to [stepName] if not specified.
+// This enables a consistent pipeline pattern where downstream steps consume documents by step name.
+func getInputTagsWithDefault(config map[string]interface{}, stepName string) []string {
+	// Check if input_tags is explicitly configured
+	if tags, ok := config["input_tags"].([]interface{}); ok && len(tags) > 0 {
+		result := make([]string, 0, len(tags))
+		for _, t := range tags {
+			if s, ok := t.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	if tags, ok := config["input_tags"].([]string); ok && len(tags) > 0 {
+		return tags
+	}
+
+	// Default to step name as the input tag
+	if stepName != "" {
+		return []string{stepName}
+	}
+
+	return nil
 }

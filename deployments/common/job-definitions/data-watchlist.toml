@@ -58,6 +58,7 @@ type = "market_data"
 description = "Fetch market data for each watchlist stock"
 on_error = "continue"
 period = "Y1"
+output_tags = ["email_report"]  # next step name
 
 # =========================================================================
 # Step 2: Email Report
@@ -74,5 +75,5 @@ on_error = "fail"
 to = "bobmcallan@gmail.com"
 subject = "Market Data - Watchlist Summary"
 style = "proforma"
-list_tags = ["market-data"]
+# input_tags defaults to ["email_report"] (step name)
 base_url = "http://localhost:8085"

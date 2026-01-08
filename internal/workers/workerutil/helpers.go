@@ -175,3 +175,39 @@ func GetStringSliceConfig(config map[string]interface{}, key string, defaultValu
 	}
 	return defaultValue
 }
+
+// GetInputTags extracts input_tags from step config, defaulting to [stepName] if not specified.
+// This enables a consistent pipeline pattern where:
+//   - Each step outputs documents tagged with its step name
+//   - Downstream steps consume documents by specifying input_tags (defaults to their own step name)
+//   - job_id ensures we only get documents from the current job
+//
+// Parameters:
+//   - config: step configuration map
+//   - stepName: name of the current step (used as default if input_tags not specified)
+//
+// Returns the input_tags array (never empty - at minimum contains stepName)
+func GetInputTags(config map[string]interface{}, stepName string) []string {
+	// Check if input_tags is explicitly configured
+	if tags, ok := config["input_tags"].([]interface{}); ok && len(tags) > 0 {
+		result := make([]string, 0, len(tags))
+		for _, t := range tags {
+			if s, ok := t.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	if tags, ok := config["input_tags"].([]string); ok && len(tags) > 0 {
+		return tags
+	}
+
+	// Default to step name as the input tag
+	if stepName != "" {
+		return []string{stepName}
+	}
+
+	return nil
+}
