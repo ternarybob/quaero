@@ -70,7 +70,7 @@ func TestWorkerDataSingle(t *testing.T) {
 	metadata, content := AssertOutputNotEmpty(t, helper, tags)
 
 	// Assert content sections
-	expectedSections := []string{"Current Price", "Performance"}
+	expectedSections := []string{"Current Price", "Technical"}
 	AssertOutputContains(t, content, expectedSections)
 
 	// Assert schema compliance
@@ -104,7 +104,9 @@ func TestWorkerDataSingle(t *testing.T) {
 	}
 
 	SaveWorkerOutput(t, env, helper, tags, "BHP")
+	SaveSchemaDefinition(t, env, DataSchema, "DataSchema")
 	AssertResultFilesExist(t, env, 1)
+	AssertSchemaFileExists(t, env)
 	AssertNoServiceErrors(t, env)
 
 	t.Log("PASS: market_data single stock test completed")
@@ -166,6 +168,7 @@ func TestWorkerDataMulti(t *testing.T) {
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
 			SaveWorkerOutput(t, env, helper, tags, stock)
+			SaveSchemaDefinition(t, env, DataSchema, "DataSchema")
 			t.Logf("PASS: Validated market_data for %s", stock)
 		})
 	}

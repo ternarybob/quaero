@@ -243,6 +243,8 @@ func deriveJobDefinitionType(workerType models.WorkerType) models.JobDefinitionT
 		return models.JobDefinitionTypeWebSearch
 	case models.WorkerTypePlacesSearch:
 		return models.JobDefinitionTypePlaces
+	case models.WorkerTypeMarketData:
+		return models.JobDefinitionTypeMarketData
 	case models.WorkerTypeNavexaPortfolios:
 		return models.JobDefinitionTypeNavexaPortfolios
 	case models.WorkerTypeNavexaHoldings:

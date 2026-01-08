@@ -1578,6 +1578,7 @@ Schema files location: `internal/schemas/` (embedded in binary via embed.go)
 - `purchase-conviction.schema.json` - Purchase conviction analysis
 - `announcement-analysis.schema.json` - Announcement signal-to-noise analysis (excludes noise, includes sources)
 - `announcement-analysis-report.schema.json` - Multi-stock announcement analysis (alphabetically ordered)
+- `competitor.schema.json` - Competitor identification (array of {code, rationale})
 
 **Supported schema features**:
 - `type`: object, array, string, number, integer, boolean

@@ -680,6 +680,24 @@ func (w *DataWorker) createMarketDocument(ctx context.Context, data *Data, jobDe
 	sourceType := "market_data"
 	sourceID := data.Ticker.SourceID("market_data")
 
+	// Convert historical prices to serializable format for metadata
+	var historicalPrices []map[string]interface{}
+	for _, p := range data.HistoricalPrices {
+		historicalPrices = append(historicalPrices, map[string]interface{}{
+			"date":   p.Date.Format("2006-01-02"),
+			"open":   p.Open,
+			"high":   p.High,
+			"low":    p.Low,
+			"close":  p.Close,
+			"volume": p.Volume,
+		})
+	}
+
+	w.logger.Debug().
+		Str("ticker", data.Ticker.String()).
+		Int("historical_prices_count", len(historicalPrices)).
+		Msg("Creating market document with historical prices")
+
 	return &models.Document{
 		ID:              uuid.New().String(),
 		Title:           fmt.Sprintf("%s Market Data", data.Ticker.String()),
@@ -690,21 +708,22 @@ func (w *DataWorker) createMarketDocument(ctx context.Context, data *Data, jobDe
 		URL:             "",
 		Tags:            tags,
 		Metadata: map[string]interface{}{
-			"ticker":         data.Ticker.String(),
-			"exchange":       data.Ticker.Exchange,
-			"code":           data.Ticker.Code,
-			"last_price":     data.LastPrice,
-			"change_percent": data.ChangePercent,
-			"trend_signal":   data.TrendSignal,
-			"sma20":          data.SMA20,
-			"sma50":          data.SMA50,
-			"sma200":         data.SMA200,
-			"rsi14":          data.RSI14,
-			"support":        data.Support,
-			"resistance":     data.Resistance,
-			"week52_high":    data.Week52High,
-			"week52_low":     data.Week52Low,
-			"job_id":         parentJobID,
+			"ticker":            data.Ticker.String(),
+			"exchange":          data.Ticker.Exchange,
+			"code":              data.Ticker.Code,
+			"last_price":        data.LastPrice,
+			"change_percent":    data.ChangePercent,
+			"trend_signal":      data.TrendSignal,
+			"sma20":             data.SMA20,
+			"sma50":             data.SMA50,
+			"sma200":            data.SMA200,
+			"rsi14":             data.RSI14,
+			"support":           data.Support,
+			"resistance":        data.Resistance,
+			"week52_high":       data.Week52High,
+			"week52_low":        data.Week52Low,
+			"job_id":            parentJobID,
+			"historical_prices": historicalPrices,
 		},
 		CreatedAt:  now,
 		UpdatedAt:  now,

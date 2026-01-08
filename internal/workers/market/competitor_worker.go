@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------
-// CompetitorWorker - Analyzes competitors and fetches their stock data
-// Uses LLM to identify competitor ASX codes, then directly fetches stock data
-// for each competitor using FundamentalsWorker (inline execution).
+// CompetitorWorker - Identifies ASX-listed competitors for a target company
+// Uses LLM (Gemini) to analyze and return competitor tickers with rationale
+// NO stock data collection - just competitor identification and reasoning
 // -----------------------------------------------------------------------
 
 package market
@@ -10,26 +10,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"google.golang.org/genai"
 )
 
-// CompetitorWorker analyzes a target company, identifies competitors,
-// and fetches stock data for each competitor inline.
+// CompetitorOutput is the schema for JSON output
+type CompetitorOutput struct {
+	Schema       string             `json:"$schema"`
+	TargetTicker string             `json:"target_ticker"`
+	TargetCode   string             `json:"target_code"`
+	AnalyzedAt   string             `json:"analyzed_at"`
+	GeminiPrompt string             `json:"gemini_prompt"`
+	Competitors  []CompetitorEntry  `json:"competitors"`
+	WorkerDebug  *WorkerDebugOutput `json:"worker_debug,omitempty"`
+}
+
+// CompetitorEntry represents a single competitor with rationale
+type CompetitorEntry struct {
+	Code      string `json:"code"`
+	Rationale string `json:"rationale"`
+}
+
+// CompetitorWorker identifies ASX-listed competitors for a target company.
+// Uses LLM to analyze and return competitor tickers with comparison rationale.
 type CompetitorWorker struct {
-	documentStorage      interfaces.DocumentStorage
-	kvStorage            interfaces.KeyValueStorage
-	jobMgr               *queue.Manager
-	logger               arbor.ILogger
-	stockCollectorWorker *FundamentalsWorker // Reuses stock collector for competitor data
+	documentStorage interfaces.DocumentStorage
+	kvStorage       interfaces.KeyValueStorage
+	jobMgr          *queue.Manager
+	logger          arbor.ILogger
+	debugEnabled    bool
 }
 
 // Compile-time assertion
@@ -43,15 +61,12 @@ func NewCompetitorWorker(
 	logger arbor.ILogger,
 	debugEnabled bool,
 ) *CompetitorWorker {
-	// Create embedded stock collector worker for fetching competitor data
-	stockCollectorWorker := NewFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
-
 	return &CompetitorWorker{
-		documentStorage:      documentStorage,
-		kvStorage:            kvStorage,
-		jobMgr:               jobMgr,
-		logger:               logger,
-		stockCollectorWorker: stockCollectorWorker,
+		documentStorage: documentStorage,
+		kvStorage:       kvStorage,
+		jobMgr:          jobMgr,
+		logger:          logger,
+		debugEnabled:    debugEnabled,
 	}
 }
 
@@ -109,12 +124,6 @@ func (w *CompetitorWorker) Init(ctx context.Context, step models.JobStep, jobDef
 		outputTags = tags
 	}
 
-	// Period for historical data (default Y1)
-	period := "Y1"
-	if p, ok := stepConfig["period"].(string); ok && p != "" {
-		period = p
-	}
-
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
@@ -130,7 +139,6 @@ func (w *CompetitorWorker) Init(ctx context.Context, step models.JobStep, jobDef
 			Type: "market_competitor",
 			Config: map[string]interface{}{
 				"asx_code": ticker.Code,
-				"period":   period,
 			},
 		}
 	}
@@ -145,13 +153,12 @@ func (w *CompetitorWorker) Init(ctx context.Context, step models.JobStep, jobDef
 			"prompt_template": promptTemplate,
 			"api_key":         apiKey,
 			"output_tags":     outputTags,
-			"period":          period,
 			"step_config":     stepConfig,
 		},
 	}, nil
 }
 
-// CreateJobs uses LLM to identify competitors, then fetches stock data inline.
+// CreateJobs uses LLM to identify competitors and stores the analysis document.
 // Supports multiple target tickers - processes each sequentially.
 func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
@@ -167,7 +174,6 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	promptTemplate, _ := initResult.Metadata["prompt_template"].(string)
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 	outputTags, _ := initResult.Metadata["output_tags"].([]string)
-	period, _ := initResult.Metadata["period"].(string)
 
 	// Log overall step start
 	tickerCount := len(tickers)
@@ -184,7 +190,7 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	var lastErr error
 	successCount := 0
 	for _, ticker := range tickers {
-		err := w.processTicker(ctx, ticker.Code, promptTemplate, apiKey, outputTags, period, stepID, jobDef)
+		err := w.processTicker(ctx, ticker.Code, promptTemplate, apiKey, outputTags, stepID)
 		if err != nil {
 			w.logger.Error().Err(err).Str("ticker", ticker.String()).Msg("Failed to analyze competitors")
 			lastErr = err
@@ -209,7 +215,16 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 }
 
 // processTicker analyzes competitors for a single target ticker
-func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTemplate, apiKey string, outputTags []string, period, stepID string, jobDef models.JobDefinition) error {
+func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTemplate, apiKey string, outputTags []string, stepID string) error {
+	ticker := common.Ticker{Exchange: "ASX", Code: asxCode}
+
+	// Initialize debug info
+	debug := workerutil.NewWorkerDebug(models.WorkerTypeMarketCompetitor.String(), w.debugEnabled)
+	debug.SetTicker(ticker.String())
+	defer func() {
+		debug.Complete()
+	}()
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("asx_code", asxCode).
@@ -226,13 +241,16 @@ func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTem
 		prompt = fmt.Sprintf("Identify the top 3-5 ASX-listed competitors for %s", asxCode)
 	}
 
-	// Step 1: Use LLM to identify competitors
-	competitors, err := w.identifyCompetitors(ctx, asxCode, prompt, apiKey)
+	// Use LLM to identify competitors with rationale
+	debug.StartPhase("ai_generation")
+	competitors, actualPrompt, err := w.identifyCompetitors(ctx, asxCode, prompt, apiKey)
+	debug.EndPhase("ai_generation")
 	if err != nil {
 		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to identify competitors")
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "error", fmt.Sprintf("ASX:%s - Failed to identify competitors: %v", asxCode, err))
 		}
+		debug.CompleteWithError(err)
 		return fmt.Errorf("failed to identify competitors for %s: %w", asxCode, err)
 	}
 
@@ -241,102 +259,185 @@ func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTem
 		if w.jobMgr != nil {
 			w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("ASX:%s - No competitors identified by LLM", asxCode))
 		}
-		return nil // Not an error - just no competitors found
+	}
+
+	// Log competitors found
+	competitorCodes := make([]string, len(competitors))
+	for i, c := range competitors {
+		competitorCodes[i] = c.Code
+	}
+	w.logger.Info().
+		Str("asx_code", asxCode).
+		Strs("competitors", competitorCodes).
+		Msg("Competitors identified")
+
+	if w.jobMgr != nil && len(competitors) > 0 {
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Identified %d competitors: %s", asxCode, len(competitors), strings.Join(competitorCodes, ", ")))
+	}
+
+	// Create and save document
+	doc := w.createDocument(ticker, competitors, actualPrompt, outputTags, debug)
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		debug.CompleteWithError(err)
+		return fmt.Errorf("failed to save document: %w", err)
 	}
 
 	w.logger.Info().
-		Str("asx_code", asxCode).
-		Strs("competitors", competitors).
-		Msg("Competitors identified, fetching stock data")
+		Str("code", asxCode).
+		Int("competitor_count", len(competitors)).
+		Str("doc_id", doc.ID).
+		Msg("Saved competitor analysis document")
 
 	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Identified %d competitors: %s", asxCode, len(competitors), strings.Join(competitors, ", ")))
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Saved competitor analysis with %d competitors", asxCode, len(competitors)))
 	}
 
-	// Step 2: Fetch stock data for each competitor inline using FundamentalsWorker
-	fetchSuccessCount := 0
-	for _, competitorCode := range competitors {
-		err := w.fetchCompetitorStockData(ctx, competitorCode, period, outputTags, stepID, jobDef)
-		if err != nil {
-			w.logger.Warn().Err(err).Str("competitor", competitorCode).Msg("Failed to fetch stock data")
-			if w.jobMgr != nil {
-				w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Failed to fetch data for %s: %v", competitorCode, err))
+	return nil
+}
+
+// createDocument creates a document containing competitor analysis with schema output
+func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []CompetitorEntry, geminiPrompt string, outputTags []string, debug *workerutil.WorkerDebugInfo) *models.Document {
+	// Build tags
+	tags := []string{
+		"competitor-analysis",
+		strings.ToLower(ticker.Code),
+		fmt.Sprintf("ticker:%s", ticker.String()),
+		fmt.Sprintf("source_type:%s", models.WorkerTypeMarketCompetitor.String()),
+	}
+	tags = append(tags, outputTags...)
+
+	// Build worker debug output
+	var workerDebug *WorkerDebugOutput
+	if debug != nil && debug.IsEnabled() {
+		debug.Complete() // Ensure timing is captured
+		debugMeta := debug.ToMetadata()
+		if debugMeta != nil {
+			workerDebug = &WorkerDebugOutput{
+				WorkerType: models.WorkerTypeMarketCompetitor.String(),
+				Ticker:     ticker.String(),
 			}
-			continue
+			if startedAt, ok := debugMeta["started_at"].(string); ok {
+				workerDebug.StartedAt = startedAt
+			}
+			if completedAt, ok := debugMeta["completed_at"].(string); ok {
+				workerDebug.CompletedAt = completedAt
+			}
+			if timing, ok := debugMeta["timing"].(map[string]interface{}); ok {
+				if totalMs, ok := timing["total_ms"].(int64); ok {
+					workerDebug.Timing.TotalMs = totalMs
+				}
+				// AI generation time is captured in api_fetch_ms for simplicity
+				// (the LLM call is the "API fetch" for this worker)
+				if aiGenMs, ok := timing["ai_generation_ms"].(int64); ok {
+					workerDebug.Timing.APIFetchMs = aiGenMs
+				}
+			}
 		}
-		fetchSuccessCount++
-		if w.jobMgr != nil {
-			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Fetched stock data for ASX:%s", competitorCode))
+	}
+
+	// Build schema output
+	output := CompetitorOutput{
+		Schema:       "quaero/competitor/v1",
+		TargetTicker: ticker.String(),
+		TargetCode:   ticker.Code,
+		AnalyzedAt:   time.Now().Format(time.RFC3339),
+		GeminiPrompt: geminiPrompt,
+		Competitors:  competitors,
+		WorkerDebug:  workerDebug,
+	}
+
+	// Convert to map for document metadata
+	outputJSON, _ := json.Marshal(output)
+	var metadata map[string]interface{}
+	json.Unmarshal(outputJSON, &metadata)
+
+	// Build content markdown
+	var contentBuilder strings.Builder
+	contentBuilder.WriteString(fmt.Sprintf("# Competitor Analysis - %s\n\n", ticker.Code))
+	contentBuilder.WriteString(fmt.Sprintf("**Target:** %s\n", ticker.String()))
+	contentBuilder.WriteString(fmt.Sprintf("**Analyzed:** %s\n", time.Now().Format(time.RFC3339)))
+	contentBuilder.WriteString(fmt.Sprintf("**Competitors Found:** %d\n\n", len(competitors)))
+
+	// Show prompt in grey
+	contentBuilder.WriteString("<div style=\"color: #888; font-size: 0.85em;\">\n\n")
+	contentBuilder.WriteString(fmt.Sprintf("prompt - %s\n\n", geminiPrompt))
+	contentBuilder.WriteString("</div>\n\n")
+
+	// Competitors table
+	contentBuilder.WriteString("## Competitors\n\n")
+	if len(competitors) > 0 {
+		contentBuilder.WriteString("| Code | Rationale |\n")
+		contentBuilder.WriteString("|------|-----------|\n")
+		for _, c := range competitors {
+			// Escape pipe characters in rationale
+			rationale := strings.ReplaceAll(c.Rationale, "|", "\\|")
+			contentBuilder.WriteString(fmt.Sprintf("| %s | %s |\n", c.Code, rationale))
 		}
+	} else {
+		contentBuilder.WriteString("*No competitors identified*\n")
 	}
 
-	if fetchSuccessCount == 0 && len(competitors) > 0 {
-		return fmt.Errorf("failed to fetch any competitor stock data for %s", asxCode)
+	// Add Worker Debug section to markdown
+	if debug != nil && debug.IsEnabled() {
+		contentBuilder.WriteString(debug.ToMarkdown())
 	}
 
-	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("ASX:%s - Completed: fetched stock data for %d/%d competitors", asxCode, fetchSuccessCount, len(competitors)))
+	return &models.Document{
+		ID:              uuid.New().String(),
+		SourceType:      "competitor-analysis",
+		SourceID:        fmt.Sprintf("%s:%s:competitor-analysis", ticker.Exchange, ticker.Code),
+		Title:           fmt.Sprintf("Competitor Analysis - %s", ticker.Code),
+		ContentMarkdown: contentBuilder.String(),
+		Tags:            tags,
+		Metadata:        metadata,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
-
-	return nil
 }
 
-// fetchCompetitorStockData fetches stock data for a single competitor using FundamentalsWorker
-func (w *CompetitorWorker) fetchCompetitorStockData(ctx context.Context, asxCode, period string, outputTags []string, stepID string, jobDef models.JobDefinition) error {
-	// Create a synthetic step for the stock collector worker
-	stockStep := models.JobStep{
-		Name:        fmt.Sprintf("fetch_competitor_%s", strings.ToLower(asxCode)),
-		Type:        models.WorkerTypeMarketFundamentals,
-		Description: fmt.Sprintf("Fetch stock data for competitor ASX:%s", asxCode),
-		Config: map[string]interface{}{
-			"asx_code":    asxCode,
-			"period":      period,
-			"output_tags": outputTags,
-		},
-	}
-
-	// Call the stock collector worker directly
-	_, err := w.stockCollectorWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
-	if err != nil {
-		return fmt.Errorf("stock data fetch failed for %s: %w", asxCode, err)
-	}
-
-	return nil
-}
-
-// identifyCompetitors uses Gemini to identify competitor ASX codes
-func (w *CompetitorWorker) identifyCompetitors(ctx context.Context, asxCode, prompt, apiKey string) ([]string, error) {
+// identifyCompetitors uses Gemini to identify competitor ASX codes with rationale.
+// Uses schema-constrained output (ResponseSchema) to ensure structured JSON response.
+// Returns the competitors and the actual prompt sent to the LLM.
+func (w *CompetitorWorker) identifyCompetitors(ctx context.Context, asxCode, prompt, apiKey string) ([]CompetitorEntry, string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+		return nil, "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	// Build prompt for competitor identification
-	systemPrompt := fmt.Sprintf(`You are a financial analyst. Your task is to identify ASX-listed competitors.
+	// Build prompt for competitor identification - schema enforces JSON structure
+	systemPrompt := fmt.Sprintf(`You are a financial analyst identifying ASX-listed competitors.
 
-**Target Company**: ASX:%s
+Target Company: ASX:%s
 
-**Task**: %s
+Task: %s
 
-**IMPORTANT**: Return ONLY a JSON array of ASX stock codes (3-4 letter codes).
-Do NOT include the target company (%s) in the list.
-Do NOT include any explanation or other text.
-Only include companies that are actually listed on the ASX.
-
-**Example Response**:
-["WOW", "HVN", "JBH"]
-
-Return the JSON array now:`, asxCode, prompt, asxCode)
+Requirements:
+- Do NOT include the target company (%s) in the list
+- Only include companies actually listed on the ASX
+- Provide a clear rationale for why each company competes with the target`, asxCode, prompt, asxCode)
 
 	// Execute with timeout
 	llmCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	// Use schema-constrained output - Gemini enforces JSON structure
 	config := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr(float32(0.2)),
+		Temperature:      genai.Ptr(float32(0.2)),
+		ResponseMIMEType: "application/json",
+		ResponseSchema: &genai.Schema{
+			Type: genai.TypeArray,
+			Items: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"code":      {Type: genai.TypeString, Description: "ASX ticker code (e.g., RIO, FMG, S32)"},
+					"rationale": {Type: genai.TypeString, Description: "Why this company is a competitor to the target"},
+				},
+				Required: []string{"code", "rationale"},
+			},
+		},
 	}
 
 	resp, err := client.Models.GenerateContent(
@@ -348,16 +449,16 @@ Return the JSON array now:`, asxCode, prompt, asxCode)
 		config,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API call failed: %w", err)
+		return nil, systemPrompt, fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
 	if resp == nil || len(resp.Candidates) == 0 {
-		return nil, fmt.Errorf("no response from Gemini API")
+		return nil, systemPrompt, fmt.Errorf("no response from Gemini API")
 	}
 
 	responseText := resp.Text()
 	if responseText == "" {
-		return nil, fmt.Errorf("empty response from Gemini API")
+		return nil, systemPrompt, fmt.Errorf("empty response from Gemini API")
 	}
 
 	w.logger.Debug().
@@ -365,88 +466,60 @@ Return the JSON array now:`, asxCode, prompt, asxCode)
 		Str("response", responseText).
 		Msg("LLM competitor identification response")
 
-	// Parse JSON array of competitor codes
-	competitors, err := parseCompetitorCodes(responseText, asxCode)
+	// Parse JSON array of competitor entries (schema guarantees correct structure)
+	competitors, err := parseCompetitorEntries(responseText, asxCode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse competitor codes: %w", err)
+		return nil, systemPrompt, fmt.Errorf("failed to parse competitor entries: %w", err)
 	}
 
-	return competitors, nil
+	return competitors, systemPrompt, nil
 }
 
-// parseCompetitorCodes extracts ASX codes from LLM response
-func parseCompetitorCodes(response, targetCode string) ([]string, error) {
-	// Try to parse as JSON array first
+// parseCompetitorEntries extracts CompetitorEntry objects from schema-constrained LLM response.
+// With ResponseSchema enforcement, the response is guaranteed to be a valid JSON array.
+func parseCompetitorEntries(response, targetCode string) ([]CompetitorEntry, error) {
 	response = strings.TrimSpace(response)
 
-	// Remove markdown code blocks if present
-	if strings.HasPrefix(response, "```") {
-		lines := strings.Split(response, "\n")
-		var jsonLines []string
-		inBlock := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, "```") {
-				inBlock = !inBlock
-				continue
-			}
-			if inBlock || !strings.HasPrefix(line, "```") {
-				jsonLines = append(jsonLines, line)
-			}
-		}
-		response = strings.Join(jsonLines, "\n")
-		response = strings.TrimSpace(response)
+	// Parse JSON array of objects (schema guarantees this structure)
+	var entries []CompetitorEntry
+	if err := json.Unmarshal([]byte(response), &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
-	var codes []string
-	if err := json.Unmarshal([]byte(response), &codes); err == nil {
-		// Successfully parsed JSON
-		return filterValidCodes(codes, targetCode), nil
-	}
-
-	// Fallback: extract ASX codes using regex (3-4 uppercase letters)
-	re := regexp.MustCompile(`\b([A-Z]{3,4})\b`)
-	matches := re.FindAllStringSubmatch(response, -1)
-
-	seen := make(map[string]bool)
-	for _, match := range matches {
-		code := match[1]
-		if !seen[code] && code != targetCode {
-			seen[code] = true
-			codes = append(codes, code)
-		}
-	}
-
-	if len(codes) == 0 {
-		return nil, fmt.Errorf("no valid ASX codes found in response")
-	}
-
-	return codes, nil
+	// Filter and validate entries
+	return filterValidEntries(entries, targetCode), nil
 }
 
-// filterValidCodes removes invalid codes and the target code
-func filterValidCodes(codes []string, targetCode string) []string {
-	var valid []string
+// filterValidEntries removes invalid entries and the target code
+func filterValidEntries(entries []CompetitorEntry, targetCode string) []CompetitorEntry {
+	var valid []CompetitorEntry
 	seen := make(map[string]bool)
 
-	for _, code := range codes {
-		code = strings.ToUpper(strings.TrimSpace(code))
-		// Valid ASX codes are 3-4 uppercase letters
-		if len(code) >= 3 && len(code) <= 4 && code != targetCode && !seen[code] {
-			isAlpha := true
-			for _, c := range code {
-				if c < 'A' || c > 'Z' {
-					isAlpha = false
-					break
-				}
-			}
-			if isAlpha {
-				seen[code] = true
-				valid = append(valid, code)
-			}
+	for _, entry := range entries {
+		code := strings.ToUpper(strings.TrimSpace(entry.Code))
+		if isValidASXCode(code) && code != targetCode && !seen[code] {
+			seen[code] = true
+			valid = append(valid, CompetitorEntry{
+				Code:      code,
+				Rationale: entry.Rationale,
+			})
 		}
 	}
 
 	return valid
+}
+
+// isValidASXCode checks if a code is a valid ASX code format
+func isValidASXCode(code string) bool {
+	if len(code) < 3 || len(code) > 4 {
+		return false
+	}
+	for _, c := range code {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // ReturnsChildJobs returns false - we execute inline, not via child jobs

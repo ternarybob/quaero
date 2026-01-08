@@ -10,7 +10,8 @@
 param (
     [switch]$Run,
     [switch]$Deploy,
-    [switch]$Web
+    [switch]$Web,
+    [switch]$PreserveJobDefs
 )
 
 <#
@@ -39,6 +40,10 @@ param (
     Does not build or update version - for rapid frontend development
     Stops service, copies pages, restarts service
 
+.PARAMETER PreserveJobDefs
+    Preserve existing job-definitions in bin directory (skip job-definitions deployment)
+    By default, job-definitions are overridden from deployments/common with backup of changed files
+
 .EXAMPLE
     .\build.ps1
     Build quaero executable only (no deployment, silent on success)
@@ -46,6 +51,11 @@ param (
 .EXAMPLE
     .\build.ps1 -Deploy
     Build and deploy all files to bin directory (stops service if running)
+    Job-definitions are overridden from deployments/common (changed files backed up)
+
+.EXAMPLE
+    .\build.ps1 -Deploy -PreserveJobDefs
+    Build and deploy, but preserve existing job-definitions in bin directory
 
 .EXAMPLE
     .\build.ps1 -Run
@@ -303,7 +313,8 @@ function Stop-QuaeroService {
 function Deploy-Files {
     param(
         [string]$ProjectRoot,
-        [string]$BinDirectory
+        [string]$BinDirectory,
+        [switch]$PreserveJobDefs
     )
 
     # Common config path (shared across deployments)
@@ -396,32 +407,65 @@ function Deploy-Files {
     }
 
     # Deploy job-definitions from common directory first, then local overrides
-    # Only copy files that don't already exist in destination (preserve user edits)
+    # Default: Override with backup of changed files
+    # -PreserveJobDefs: Skip job-definitions deployment entirely
     $jobDefsDestPath = Join-Path -Path $BinDirectory -ChildPath "job-definitions"
     if (-not (Test-Path $jobDefsDestPath)) {
         New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
     }
 
-    # Copy from common first (base layer) - only if not exists
-    $commonJobDefsPath = Join-Path -Path $commonConfigPath -ChildPath "job-definitions"
-    if (Test-Path $commonJobDefsPath) {
-        Get-ChildItem -Path $commonJobDefsPath -File | ForEach-Object {
-            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
-            if (-not (Test-Path $destFile)) {
-                Copy-Item -Path $_.FullName -Destination $destFile
-            }
-        }
-    }
+    if ($PreserveJobDefs) {
+        Write-Host "  Preserving existing job-definitions (skipping deployment)" -ForegroundColor Yellow
+    } else {
+        # Helper function to deploy job-definitions with backup
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
-    # Copy from local (deployment-specific) - only if not exists
-    $localJobDefsPath = Join-Path -Path $localConfigPath -ChildPath "job-definitions"
-    if (Test-Path $localJobDefsPath) {
-        Get-ChildItem -Path $localJobDefsPath -File | ForEach-Object {
-            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
-            if (-not (Test-Path $destFile)) {
-                Copy-Item -Path $_.FullName -Destination $destFile
+        # Copy from common first (base layer) - override with backup
+        $commonJobDefsPath = Join-Path -Path $commonConfigPath -ChildPath "job-definitions"
+        if (Test-Path $commonJobDefsPath) {
+            Get-ChildItem -Path $commonJobDefsPath -File -Filter "*.toml" | ForEach-Object {
+                $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
+                if (Test-Path $destFile) {
+                    # Compare files - only backup if different
+                    $sourceHash = (Get-FileHash -Path $_.FullName -Algorithm MD5).Hash
+                    $destHash = (Get-FileHash -Path $destFile -Algorithm MD5).Hash
+                    if ($sourceHash -ne $destHash) {
+                        $backupFile = "$destFile.$timestamp"
+                        Copy-Item -Path $destFile -Destination $backupFile
+                        Write-Host "  Backed up: $($_.Name) -> $($_.Name).$timestamp" -ForegroundColor Gray
+                        Copy-Item -Path $_.FullName -Destination $destFile -Force
+                        Write-Host "  Updated: $($_.Name)" -ForegroundColor Cyan
+                    }
+                } else {
+                    Copy-Item -Path $_.FullName -Destination $destFile
+                    Write-Host "  Added: $($_.Name)" -ForegroundColor Green
+                }
             }
         }
+
+        # Copy from local (deployment-specific) - override with backup
+        $localJobDefsPath = Join-Path -Path $localConfigPath -ChildPath "job-definitions"
+        if (Test-Path $localJobDefsPath) {
+            Get-ChildItem -Path $localJobDefsPath -File -Filter "*.toml" | ForEach-Object {
+                $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $_.Name
+                if (Test-Path $destFile) {
+                    # Compare files - only backup if different
+                    $sourceHash = (Get-FileHash -Path $_.FullName -Algorithm MD5).Hash
+                    $destHash = (Get-FileHash -Path $destFile -Algorithm MD5).Hash
+                    if ($sourceHash -ne $destHash) {
+                        $backupFile = "$destFile.$timestamp"
+                        Copy-Item -Path $destFile -Destination $backupFile
+                        Write-Host "  Backed up: $($_.Name) -> $($_.Name).$timestamp" -ForegroundColor Gray
+                        Copy-Item -Path $_.FullName -Destination $destFile -Force
+                        Write-Host "  Updated: $($_.Name)" -ForegroundColor Cyan
+                    }
+                } else {
+                    Copy-Item -Path $_.FullName -Destination $destFile
+                    Write-Host "  Added: $($_.Name)" -ForegroundColor Green
+                }
+            }
+        }
+        # Note: Unique files in destination are preserved (not removed)
     }
 
     # Deploy templates from common directory first, then local overrides
@@ -694,7 +738,11 @@ Write-Host "MCP server built successfully: $mcpOutputPath" -ForegroundColor Gree
 # Handle deployment and execution based on parameters
 if ($Run -or $Deploy) {
     # Deploy files to bin directory
-    Deploy-Files -ProjectRoot $projectRoot -BinDirectory $binDir
+    if ($PreserveJobDefs) {
+        Deploy-Files -ProjectRoot $projectRoot -BinDirectory $binDir -PreserveJobDefs
+    } else {
+        Deploy-Files -ProjectRoot $projectRoot -BinDirectory $binDir
+    }
 
     if ($Run) {
         # Start application in new terminal

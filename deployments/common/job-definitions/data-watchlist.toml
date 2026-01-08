@@ -75,4 +75,4 @@ to = "bobmcallan@gmail.com"
 subject = "Market Data - Watchlist Summary"
 style = "proforma"
 list_tags = ["market-data"]
-base_url = "http://localhost:18080"
+base_url = "http://localhost:8085"

@@ -396,13 +396,13 @@ func (w *SignalWorker) extractTickerRaw(asxCode string, doc *models.Document) (s
 	}
 
 	// Extract price data
-	raw.Price.Current = getFloat64(metadata, "current_price")
-	raw.Price.Change1DPct = getFloat64(metadata, "change_percent")
-	raw.Price.EMA20 = getFloat64(metadata, "sma20") // Using SMA as proxy for EMA
-	raw.Price.EMA50 = getFloat64(metadata, "sma50")
-	raw.Price.EMA200 = getFloat64(metadata, "sma200")
-	raw.Price.High52W = getFloat64(metadata, "week52_high")
-	raw.Price.Low52W = getFloat64(metadata, "week52_low")
+	raw.Price.Current = MapGetFloat64(metadata, "current_price")
+	raw.Price.Change1DPct = MapGetFloat64(metadata, "change_percent")
+	raw.Price.EMA20 = MapGetFloat64(metadata, "sma20") // Using SMA as proxy for EMA
+	raw.Price.EMA50 = MapGetFloat64(metadata, "sma50")
+	raw.Price.EMA200 = MapGetFloat64(metadata, "sma200")
+	raw.Price.High52W = MapGetFloat64(metadata, "week52_high")
+	raw.Price.Low52W = MapGetFloat64(metadata, "week52_low")
 
 	// Extract period performance for returns
 	if perfData, ok := metadata["period_performance"].([]interface{}); ok {
@@ -427,8 +427,8 @@ func (w *SignalWorker) extractTickerRaw(asxCode string, doc *models.Document) (s
 	}
 
 	// Extract volume data
-	raw.Volume.Current = getInt64(metadata, "volume")
-	avgVol := getFloat64(metadata, "avg_volume")
+	raw.Volume.Current = MapGetInt64(metadata, "volume")
+	avgVol := MapGetFloat64(metadata, "avg_volume")
 	raw.Volume.SMA20 = avgVol
 	// Calculate volume z-score estimate (rough approximation)
 	if avgVol > 0 {
@@ -437,11 +437,11 @@ func (w *SignalWorker) extractTickerRaw(asxCode string, doc *models.Document) (s
 	}
 
 	// Extract fundamentals
-	raw.Fundamentals.RevenueYoYPct = getFloat64(metadata, "revenue_growth_yoy")
-	raw.Fundamentals.EBITDAMarginPct = getFloat64(metadata, "profit_margin") // Using profit margin as proxy
-	raw.Fundamentals.ROEPct = getFloat64(metadata, "return_on_equity")
-	raw.Fundamentals.NetDebtToEBITDA = getFloat64(metadata, "ev_to_ebitda") // Proxy
-	raw.Fundamentals.CurrentRatio = 1.5                                     // Default if not available
+	raw.Fundamentals.RevenueYoYPct = MapGetFloat64(metadata, "revenue_growth_yoy")
+	raw.Fundamentals.EBITDAMarginPct = MapGetFloat64(metadata, "profit_margin") // Using profit margin as proxy
+	raw.Fundamentals.ROEPct = MapGetFloat64(metadata, "return_on_equity")
+	raw.Fundamentals.NetDebtToEBITDA = MapGetFloat64(metadata, "ev_to_ebitda") // Proxy
+	raw.Fundamentals.CurrentRatio = 1.5                                        // Default if not available
 
 	// Check if we have meaningful fundamental data
 	if raw.Fundamentals.RevenueYoYPct != 0 || raw.Fundamentals.EBITDAMarginPct != 0 {
@@ -583,23 +583,4 @@ func (w *SignalWorker) generateMarkdown(ticker string, s signals.TickerSignals) 
 	return sb.String()
 }
 
-// Helper functions
-func getFloat64(m map[string]interface{}, key string) float64 {
-	if v, ok := m[key].(float64); ok {
-		return v
-	}
-	return 0
-}
-
-func getInt64(m map[string]interface{}, key string) int64 {
-	if v, ok := m[key].(float64); ok {
-		return int64(v)
-	}
-	if v, ok := m[key].(int64); ok {
-		return v
-	}
-	if v, ok := m[key].(int); ok {
-		return int64(v)
-	}
-	return 0
-}
+// Helper functions - use shared MapGetFloat64 and MapGetInt64 from types.go

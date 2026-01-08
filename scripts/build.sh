@@ -79,21 +79,24 @@ NC='\033[0m' # No Color
 RUN=false
 DEPLOY=false
 WEB=false
+PRESERVE_JOBDEFS=false
 
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --deploy, -deploy    Build and deploy all files to bin directory"
-    echo "  --run, -run          Build, deploy, and start the application"
-    echo "  --web, -web          Deploy only pages and restart (no build)"
-    echo "  --help, -h           Show this help message"
+    echo "  --deploy, -deploy              Build and deploy all files to bin directory"
+    echo "  --run, -run                    Build, deploy, and start the application"
+    echo "  --web, -web                    Deploy only pages and restart (no build)"
+    echo "  --preserve-jobdefs             Preserve existing job-definitions (skip deployment)"
+    echo "  --help, -h                     Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                   Build only (no deployment)"
-    echo "  $0 --deploy          Build and deploy files"
-    echo "  $0 --run             Build, deploy, and run"
-    echo "  $0 --web             Quick pages deploy and restart"
+    echo "  $0                             Build only (no deployment)"
+    echo "  $0 --deploy                    Build and deploy files (job-defs overridden with backup)"
+    echo "  $0 --deploy --preserve-jobdefs Build and deploy, preserve existing job-definitions"
+    echo "  $0 --run                       Build, deploy, and run"
+    echo "  $0 --web                       Quick pages deploy and restart"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -108,6 +111,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -web|--web)
             WEB=true
+            shift
+            ;;
+        --preserve-jobdefs|-preserve-jobdefs)
+            PRESERVE_JOBDEFS=true
             shift
             ;;
         -h|--help)
@@ -245,6 +252,7 @@ stop_quaero_service() {
 deploy_files() {
     local project_root=$1
     local bin_dir=$2
+    local preserve_jobdefs=$3
 
     # Common config path (shared across deployments)
     local common_config="$project_root/deployments/common"
@@ -315,33 +323,61 @@ deploy_files() {
     fi
 
     # Deploy job-definitions from common directory first, then local overrides
-    # Only copy files that don't already exist in destination (preserve user edits)
+    # Default: Override with backup of changed files
+    # --preserve-jobdefs: Skip job-definitions deployment entirely
     mkdir -p "$bin_dir/job-definitions"
 
-    # Copy from common first (base layer) - only if not exists
-    if [ -d "$common_config/job-definitions" ]; then
-        for file in "$common_config/job-definitions"/*.toml; do
-            if [ -f "$file" ]; then
-                local filename=$(basename "$file")
-                local dest_file="$bin_dir/job-definitions/$filename"
-                if [ ! -f "$dest_file" ]; then
-                    cp "$file" "$dest_file"
-                fi
-            fi
-        done
-    fi
+    if [ "$preserve_jobdefs" = true ]; then
+        echo -e "${YELLOW}  Preserving existing job-definitions (skipping deployment)${NC}"
+    else
+        local timestamp=$(date +"%Y%m%d-%H%M%S")
 
-    # Copy from local (deployment-specific) - only if not exists
-    if [ -d "$local_config/job-definitions" ]; then
-        for file in "$local_config/job-definitions"/*.toml; do
-            if [ -f "$file" ]; then
-                local filename=$(basename "$file")
-                local dest_file="$bin_dir/job-definitions/$filename"
-                if [ ! -f "$dest_file" ]; then
-                    cp "$file" "$dest_file"
+        # Copy from common first (base layer) - override with backup
+        if [ -d "$common_config/job-definitions" ]; then
+            for file in "$common_config/job-definitions"/*.toml; do
+                if [ -f "$file" ]; then
+                    local filename=$(basename "$file")
+                    local dest_file="$bin_dir/job-definitions/$filename"
+                    if [ -f "$dest_file" ]; then
+                        # Compare files - only backup if different
+                        if ! cmp -s "$file" "$dest_file"; then
+                            local backup_file="$dest_file.$timestamp"
+                            cp "$dest_file" "$backup_file"
+                            echo -e "${GRAY}  Backed up: $filename -> $filename.$timestamp${NC}"
+                            cp "$file" "$dest_file"
+                            echo -e "${CYAN}  Updated: $filename${NC}"
+                        fi
+                    else
+                        cp "$file" "$dest_file"
+                        echo -e "${GREEN}  Added: $filename${NC}"
+                    fi
                 fi
-            fi
-        done
+            done
+        fi
+
+        # Copy from local (deployment-specific) - override with backup
+        if [ -d "$local_config/job-definitions" ]; then
+            for file in "$local_config/job-definitions"/*.toml; do
+                if [ -f "$file" ]; then
+                    local filename=$(basename "$file")
+                    local dest_file="$bin_dir/job-definitions/$filename"
+                    if [ -f "$dest_file" ]; then
+                        # Compare files - only backup if different
+                        if ! cmp -s "$file" "$dest_file"; then
+                            local backup_file="$dest_file.$timestamp"
+                            cp "$dest_file" "$backup_file"
+                            echo -e "${GRAY}  Backed up: $filename -> $filename.$timestamp${NC}"
+                            cp "$file" "$dest_file"
+                            echo -e "${CYAN}  Updated: $filename${NC}"
+                        fi
+                    else
+                        cp "$file" "$dest_file"
+                        echo -e "${GREEN}  Added: $filename${NC}"
+                    fi
+                fi
+            done
+        fi
+        # Note: Unique files in destination are preserved (not removed)
     fi
 
     # Deploy templates from common directory first, then local overrides
@@ -563,7 +599,7 @@ echo -e "${GREEN}MCP server built: $MCP_OUTPUT_PATH${NC}"
 # Handle deployment and execution based on parameters
 if [ "$RUN" = true ] || [ "$DEPLOY" = true ]; then
     # Deploy files to bin directory
-    deploy_files "$PROJECT_ROOT" "$BIN_DIR"
+    deploy_files "$PROJECT_ROOT" "$BIN_DIR" "$PRESERVE_JOBDEFS"
 
     if [ "$RUN" = true ]; then
         # Start application in background

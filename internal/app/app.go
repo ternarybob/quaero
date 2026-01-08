@@ -23,19 +23,6 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
-	aiworkers "github.com/ternarybob/quaero/internal/workers/ai"
-	crawlerworkers "github.com/ternarybob/quaero/internal/workers/crawler"
-	devopsworkers "github.com/ternarybob/quaero/internal/workers/devops"
-	githubworkers "github.com/ternarybob/quaero/internal/workers/github"
-	marketworkers "github.com/ternarybob/quaero/internal/workers/market"
-	navexaworkers "github.com/ternarybob/quaero/internal/workers/navexa"
-	outputworkers "github.com/ternarybob/quaero/internal/workers/output"
-	processingworkers "github.com/ternarybob/quaero/internal/workers/processing"
-	ratingworkers "github.com/ternarybob/quaero/internal/workers/rating"
-	templateworkers "github.com/ternarybob/quaero/internal/workers/template"
-	testworkers "github.com/ternarybob/quaero/internal/workers/testworkers"
-	webworkers "github.com/ternarybob/quaero/internal/workers/web"
-	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/cache"
@@ -60,6 +47,19 @@ import (
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
+	aiworkers "github.com/ternarybob/quaero/internal/workers/ai"
+	crawlerworkers "github.com/ternarybob/quaero/internal/workers/crawler"
+	devopsworkers "github.com/ternarybob/quaero/internal/workers/devops"
+	githubworkers "github.com/ternarybob/quaero/internal/workers/github"
+	marketworkers "github.com/ternarybob/quaero/internal/workers/market"
+	navexaworkers "github.com/ternarybob/quaero/internal/workers/navexa"
+	outputworkers "github.com/ternarybob/quaero/internal/workers/output"
+	processingworkers "github.com/ternarybob/quaero/internal/workers/processing"
+	ratingworkers "github.com/ternarybob/quaero/internal/workers/rating"
+	templateworkers "github.com/ternarybob/quaero/internal/workers/template"
+	testworkers "github.com/ternarybob/quaero/internal/workers/testworkers"
+	webworkers "github.com/ternarybob/quaero/internal/workers/web"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/timshannon/badgerhold/v4"
 )
 
@@ -921,16 +921,6 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
-
-	// Register Processing Announcements worker (enriches raw announcements)
-	processingAnnouncementsWorker := processingworkers.NewAnnouncementsWorker(
-		a.StorageManager.DocumentStorage(),
-		priceProvider,
-		a.Logger,
-		jobMgr,
-	)
-	a.StepManager.RegisterWorker(processingAnnouncementsWorker)
-	a.Logger.Debug().Str("step_type", processingAnnouncementsWorker.GetType().String()).Msg("Processing Announcements worker registered")
 
 	// Register Market Data worker (multi-exchange via EODHD)
 	// API key is resolved at runtime from KV store

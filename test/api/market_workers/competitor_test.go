@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------
 // Tests for market_competitor worker
 // Uses LLM (Gemini) to analyze competitor landscape for a company
+// Output: competitor tickers with rationale (no stock data)
 // -----------------------------------------------------------------------
 
 package market_workers
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestWorkerCompetitorSingle tests single stock competitor analysis
@@ -22,8 +24,8 @@ func TestWorkerCompetitorSingle(t *testing.T) {
 	}
 	defer env.Cleanup()
 
-	// Require both LLM (for competitor identification) and EODHD (for stock data)
-	RequireAllMarketServices(t, env)
+	// Require LLM for competitor identification
+	RequireLLM(t, env)
 
 	helper := env.NewHTTPTestHelper(t)
 
@@ -42,7 +44,9 @@ func TestWorkerCompetitorSingle(t *testing.T) {
 				"name": "analyze-competitors",
 				"type": "market_competitor",
 				"config": map[string]interface{}{
-					"asx_code": ticker,
+					"asx_code":    ticker,
+					"api_key":     "{google_gemini_api_key}",
+					"output_tags": []string{"competitor-analysis", strings.ToLower(ticker)},
 				},
 			},
 		},
@@ -64,31 +68,61 @@ func TestWorkerCompetitorSingle(t *testing.T) {
 	}
 
 	// === ASSERTIONS ===
+	// The competitor worker creates competitor analysis documents
 	tags := []string{"competitor-analysis", strings.ToLower(ticker)}
 	metadata, content := AssertOutputNotEmpty(t, helper, tags)
 
-	// Assert content contains expected sections
-	expectedSections := []string{"Competitor", "Analysis"}
+	// Assert schema compliance - competitor output uses CompetitorSchema
+	isValid := ValidateSchema(t, metadata, CompetitorSchema)
+	assert.True(t, isValid, "Output should comply with CompetitorSchema")
+
+	// Assert content contains expected sections (competitor analysis format)
+	expectedSections := []string{"Competitor Analysis", "Competitors"}
 	AssertOutputContains(t, content, expectedSections)
 
-	// Assert schema compliance
-	isValid := ValidateSchema(t, metadata, CompetitorSchema)
-	assert.True(t, isValid, "Output should comply with competitor schema")
+	// Verify target ticker is captured correctly
+	if targetTicker, ok := metadata["target_ticker"].(string); ok {
+		assert.Contains(t, targetTicker, ticker, "target_ticker should contain ticker code")
+		t.Logf("PASS: target_ticker = %s", targetTicker)
+	}
 
-	// Validate competitors array
+	// Verify target code is captured correctly
+	if targetCode, ok := metadata["target_code"].(string); ok {
+		assert.Equal(t, ticker, targetCode, "target_code should match ticker")
+		t.Logf("PASS: target_code = %s", targetCode)
+	}
+
+	// Verify gemini_prompt is present and non-empty
+	if geminiPrompt, ok := metadata["gemini_prompt"].(string); ok {
+		assert.NotEmpty(t, geminiPrompt, "gemini_prompt should not be empty")
+		assert.Contains(t, geminiPrompt, ticker, "gemini_prompt should contain target ticker")
+		t.Logf("PASS: gemini_prompt captured (%d chars)", len(geminiPrompt))
+	}
+
+	// Verify competitors array exists
 	if competitors, ok := metadata["competitors"].([]interface{}); ok {
 		t.Logf("PASS: Found %d competitors", len(competitors))
-		if len(competitors) > 0 {
-			if first, ok := competitors[0].(map[string]interface{}); ok {
-				if _, hasName := first["name"]; hasName {
-					t.Log("PASS: Competitor has 'name' field")
-				}
+		// Verify each competitor has code and rationale
+		for i, comp := range competitors {
+			if compMap, ok := comp.(map[string]interface{}); ok {
+				code, hasCode := compMap["code"].(string)
+				rationale, hasRationale := compMap["rationale"].(string)
+				require.True(t, hasCode, "Competitor %d should have code", i)
+				require.True(t, hasRationale, "Competitor %d should have rationale", i)
+				require.NotEmpty(t, code, "Competitor %d code should not be empty", i)
+				require.NotEmpty(t, rationale, "Competitor %d rationale should not be empty", i)
+				t.Logf("  Competitor %d: %s - %s", i, code, rationale)
 			}
 		}
 	}
 
+	// Verify content contains the prompt in grey styling
+	assert.Contains(t, content, "prompt -", "Content should contain grey-styled prompt")
+
 	SaveWorkerOutput(t, env, helper, tags, ticker)
+	SaveSchemaDefinition(t, env, CompetitorSchema, "CompetitorSchema")
 	AssertResultFilesExist(t, env, 1)
+	AssertSchemaFileExists(t, env)
 	AssertNoServiceErrors(t, env)
 
 	t.Log("PASS: market_competitor single stock test completed")
@@ -102,8 +136,8 @@ func TestWorkerCompetitorMulti(t *testing.T) {
 	}
 	defer env.Cleanup()
 
-	// Require both LLM (for competitor identification) and EODHD (for stock data)
-	RequireAllMarketServices(t, env)
+	// Require LLM for competitor identification
+	RequireLLM(t, env)
 
 	helper := env.NewHTTPTestHelper(t)
 
@@ -124,7 +158,9 @@ func TestWorkerCompetitorMulti(t *testing.T) {
 						"name": "analyze-competitors",
 						"type": "market_competitor",
 						"config": map[string]interface{}{
-							"asx_code": stock,
+							"asx_code":    stock,
+							"api_key":     "{google_gemini_api_key}",
+							"output_tags": []string{"competitor-analysis", strings.ToLower(stock)},
 						},
 					},
 				},
@@ -145,10 +181,28 @@ func TestWorkerCompetitorMulti(t *testing.T) {
 			metadata, content := AssertOutputNotEmpty(t, helper, tags)
 
 			assert.NotEmpty(t, content, "Content for %s should not be empty", stock)
+
+			// Validate schema
 			isValid := ValidateSchema(t, metadata, CompetitorSchema)
-			assert.True(t, isValid, "Output for %s should comply with schema", stock)
+			assert.True(t, isValid, "Output for %s should comply with CompetitorSchema", stock)
+
+			// Verify target code matches
+			if targetCode, ok := metadata["target_code"].(string); ok {
+				assert.Equal(t, stock, targetCode, "target_code should match stock")
+			}
+
+			// Verify competitors have rationale
+			if competitors, ok := metadata["competitors"].([]interface{}); ok {
+				for i, comp := range competitors {
+					if compMap, ok := comp.(map[string]interface{}); ok {
+						_, hasRationale := compMap["rationale"].(string)
+						assert.True(t, hasRationale, "Competitor %d for %s should have rationale", i, stock)
+					}
+				}
+			}
 
 			SaveWorkerOutput(t, env, helper, tags, stock)
+			SaveSchemaDefinition(t, env, CompetitorSchema, "CompetitorSchema")
 			t.Logf("PASS: Validated competitor analysis for %s", stock)
 		})
 	}

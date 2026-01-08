@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "competitor.schema.json",
+  "title": "Competitor Analysis Schema",
+  "description": "Schema for LLM-generated competitor identification. Returns an array of ASX-listed competitor companies with rationale.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["code", "rationale"],
+    "properties": {
+      "code": {
+        "type": "string",
+        "description": "ASX ticker code (e.g., RIO, FMG, S32)"
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Explanation of why this company is a competitor to the target"
+      }
+    }
+  }
+}

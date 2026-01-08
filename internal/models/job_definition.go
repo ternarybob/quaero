@@ -54,6 +54,7 @@ const (
 	JobDefinitionTypeMarketPortfolio        JobDefinitionType = "market_portfolio"         // Aggregates ticker signals into portfolio-level analysis
 	JobDefinitionTypeMarketAssessor         JobDefinitionType = "market_assessor"          // AI-powered assessment of signals and portfolio
 	JobDefinitionTypeMarketNews             JobDefinitionType = "market_news"              // Multi-exchange news via EODHD News API
+	JobDefinitionTypeMarketData             JobDefinitionType = "market_data"              // Price data, technicals, indices via EODHD
 	JobDefinitionTypeMarketDataCollection   JobDefinitionType = "market_data_collection"   // Deterministic market data collection
 	JobDefinitionTypeNavexaPortfolios       JobDefinitionType = "navexa_portfolios"        // Fetch all Navexa portfolios for the user
 	JobDefinitionTypeNavexaHoldings         JobDefinitionType = "navexa_holdings"          // Fetch holdings for a Navexa portfolio
@@ -80,7 +81,7 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 		JobDefinitionTypeMarketFundamentals, JobDefinitionTypeMarketDirectorInterest,
 		JobDefinitionTypeMarketMacro, JobDefinitionTypeMarketCompetitor, JobDefinitionTypeMarketSignal,
 		JobDefinitionTypeMarketPortfolio, JobDefinitionTypeMarketAssessor, JobDefinitionTypeMarketNews,
-		JobDefinitionTypeMarketDataCollection,
+		JobDefinitionTypeMarketData, JobDefinitionTypeMarketDataCollection,
 		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
 		JobDefinitionTypeManager:
 		return true
@@ -227,7 +228,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, manager, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data_collection)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, manager, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data, market_data_collection)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)

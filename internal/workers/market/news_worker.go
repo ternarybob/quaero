@@ -26,10 +26,10 @@ import (
 // For ASX tickers, delegates to AnnouncementsWorker.
 // For other exchanges, uses EODHD News API.
 type NewsWorker struct {
-	documentStorage           interfaces.DocumentStorage
-	kvStorage                 interfaces.KeyValueStorage
-	logger                    arbor.ILogger
-	jobMgr                    *queue.Manager
+	documentStorage     interfaces.DocumentStorage
+	kvStorage           interfaces.KeyValueStorage
+	logger              arbor.ILogger
+	jobMgr              *queue.Manager
 	announcementsWorker *AnnouncementsWorker
 }
 
@@ -65,10 +65,10 @@ func NewNewsWorker(
 	announcementsWorker *AnnouncementsWorker,
 ) *NewsWorker {
 	return &NewsWorker{
-		documentStorage:           documentStorage,
-		kvStorage:                 kvStorage,
-		logger:                    logger,
-		jobMgr:                    jobMgr,
+		documentStorage:     documentStorage,
+		kvStorage:           kvStorage,
+		logger:              logger,
+		jobMgr:              jobMgr,
 		announcementsWorker: announcementsWorker,
 	}
 }

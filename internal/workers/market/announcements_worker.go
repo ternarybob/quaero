@@ -1,11 +1,13 @@
 // -----------------------------------------------------------------------
-// AnnouncementsWorker - Fetches RAW ASX company announcements
-// Uses the Markit Digital API and ASX HTML page to fetch announcements
-// Produces raw announcement documents for downstream processing
+// AnnouncementsWorker - Fetches company announcements and produces classified output
+// Uses AnnouncementService for exchange-specific data fetching
+// Outputs JSON and Markdown documents with classification and signal-noise analysis
 //
-// SEPARATION OF CONCERNS:
-// - This worker: DATA COLLECTION ONLY (fetch from APIs, store raw data)
-// - Processing: Handled by processing_announcements_worker
+// DATA COLLECTION + PROCESSING:
+// - Primary: ASX sources (Markit API, HTML scraping) for ASX-listed stocks
+// - Fallback: EODHD for non-ASX exchanges or when ASX sources fail
+// - Applies classification via internal/services/announcements
+// - Outputs both raw and processed documents with 36-month rolling window
 // -----------------------------------------------------------------------
 
 package market
@@ -14,12 +16,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,10 +28,12 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	announcementsvc "github.com/ternarybob/quaero/internal/services/announcements"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
-// ASXAnnouncement represents a single ASX announcement (raw data)
-type ASXAnnouncement struct {
+// RawAnnouncement represents a single market announcement (raw data from API)
+type RawAnnouncement struct {
 	Date           time.Time `json:"date"`
 	Headline       string    `json:"headline"`
 	PDFURL         string    `json:"pdf_url"`
@@ -43,35 +44,101 @@ type ASXAnnouncement struct {
 	Type           string    `json:"type"`
 }
 
-// AnnouncementsWorker fetches raw ASX company announcements.
+// AnnouncementsOutput is the schema for JSON output
+type AnnouncementsOutput struct {
+	Schema         string                   `json:"$schema"`
+	Ticker         string                   `json:"ticker"`
+	Exchange       string                   `json:"exchange"`
+	Code           string                   `json:"code"`
+	FetchedAt      string                   `json:"fetched_at"`
+	DateRangeStart string                   `json:"date_range_start"`
+	DateRangeEnd   string                   `json:"date_range_end"`
+	Summary        AnnouncementsSummary     `json:"summary"`
+	Announcements  []AnnouncementOutputItem `json:"announcements"`
+	WorkerDebug    *WorkerDebugOutput       `json:"worker_debug,omitempty"`
+}
+
+// WorkerDebugOutput contains debug/timing information for the worker
+type WorkerDebugOutput struct {
+	WorkerType   string              `json:"worker_type"`
+	Ticker       string              `json:"ticker"`
+	StartedAt    string              `json:"started_at"`
+	CompletedAt  string              `json:"completed_at"`
+	Timing       WorkerTimingOutput  `json:"timing"`
+	APIEndpoints []WorkerAPIEndpoint `json:"api_endpoints,omitempty"`
+}
+
+// WorkerTimingOutput contains timing breakdown by phase
+type WorkerTimingOutput struct {
+	APIFetchMs    int64 `json:"api_fetch_ms,omitempty"`
+	ComputationMs int64 `json:"computation_ms,omitempty"`
+	TotalMs       int64 `json:"total_ms"`
+}
+
+// WorkerAPIEndpoint contains details of an API call
+type WorkerAPIEndpoint struct {
+	Endpoint   string `json:"endpoint"`
+	Method     string `json:"method"`
+	DurationMs int64  `json:"duration_ms"`
+	StatusCode int    `json:"status_code,omitempty"`
+}
+
+// AnnouncementsSummary contains classification summary statistics
+type AnnouncementsSummary struct {
+	TotalCount           int     `json:"total_count"`
+	HighRelevanceCount   int     `json:"high_relevance_count"`
+	MediumRelevanceCount int     `json:"medium_relevance_count"`
+	LowRelevanceCount    int     `json:"low_relevance_count"`
+	NoiseCount           int     `json:"noise_count"`
+	RoutineCount         int     `json:"routine_count"`
+	SignalToNoiseRatio   float64 `json:"signal_to_noise_ratio,omitempty"`
+
+	// Definitions for Relevance and Signal ratings
+	RelevanceDefinition string `json:"relevance_definition"`
+	SignalDefinition    string `json:"signal_definition"`
+}
+
+// RelevanceDefinitionText explains the Relevance rating categories
+const RelevanceDefinitionText = "Relevance categorizes announcements by importance: HIGH = price-sensitive or major events (takeovers, financials, guidance); MEDIUM = governance and significant operational (directors, contracts, exploration); LOW = routine disclosures (progress reports, presentations); NOISE = no material indicators found."
+
+// SignalDefinitionText explains the Signal rating categories
+const SignalDefinitionText = "Signal measures market impact: HIGH_SIGNAL = significant reaction (>=3% price change OR >=2x volume); MODERATE_SIGNAL = notable reaction (>=1.5% price change OR >=1.5x volume); LOW_SIGNAL = minimal reaction (>=0.5% price change OR >=1.2x volume); NOISE = no meaningful impact; ROUTINE = administrative filings excluded from analysis."
+
+// AnnouncementOutputItem represents a single announcement in the output
+type AnnouncementOutputItem struct {
+	Date            string `json:"date"`
+	Headline        string `json:"headline"`
+	Type            string `json:"type"`
+	Link            string `json:"link"`
+	PriceSensitive  bool   `json:"price_sensitive"`
+	Relevance       string `json:"relevance"`
+	RelevanceReason string `json:"relevance_reason,omitempty"`
+	SignalRating    string `json:"signal_rating"`
+	SignalReason    string `json:"signal_reason,omitempty"`
+	IsRoutine       bool   `json:"is_routine"`
+	RoutineType     string `json:"routine_type,omitempty"`
+
+	// Price impact data (from market_data worker)
+	DayOfChange    *float64 `json:"day_of_change,omitempty"`   // Price change on announcement day (%)
+	Day10Change    *float64 `json:"day_10_change,omitempty"`   // Price change after 10 trading days (%)
+	VolumeMultiple *float64 `json:"volume_multiple,omitempty"` // Volume on announcement day vs 30-day average
+}
+
+// AnnouncementsWorker fetches company announcements and produces classified output.
 // This worker executes synchronously (no child jobs).
-// Output: Raw announcement documents (no classification or analysis)
+// Output: JSON and Markdown documents with classification and 36-month rolling window
 type AnnouncementsWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	announcementSvc *announcementsvc.Service
 	debugEnabled    bool
 }
 
 // Compile-time assertion
 var _ interfaces.DefinitionWorker = (*AnnouncementsWorker)(nil)
-
-// asxAPIResponse represents the JSON response from Markit Digital API
-type asxAPIResponse struct {
-	Data struct {
-		Items []struct {
-			Date             string `json:"date"`
-			Headline         string `json:"headline"`
-			URL              string `json:"url"`
-			DocumentKey      string `json:"documentKey"`
-			FileSize         string `json:"fileSize"`
-			IsPriceSensitive bool   `json:"isPriceSensitive"`
-			AnnouncementType string `json:"announcementType"`
-		} `json:"items"`
-	} `json:"data"`
-}
 
 // NewAnnouncementsWorker creates a new announcements worker for data collection
 func NewAnnouncementsWorker(
@@ -82,16 +149,18 @@ func NewAnnouncementsWorker(
 	debugEnabled bool,
 ) *AnnouncementsWorker {
 	jar, _ := cookiejar.New(nil)
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Jar:     jar,
+	}
 	return &AnnouncementsWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
 		logger:          logger,
 		jobMgr:          jobMgr,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
-		debugEnabled: debugEnabled,
+		httpClient:      httpClient,
+		announcementSvc: announcementsvc.NewService(logger, httpClient, kvStorage),
+		debugEnabled:    debugEnabled,
 	}
 }
 
@@ -193,9 +262,9 @@ func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobSte
 		return "", fmt.Errorf("no ASX codes in init result")
 	}
 
-	// Get config parameters
-	period := "Y1"
-	limit := 500
+	// Get config parameters - default to 3 years (36 months rolling)
+	period := "Y3"
+	limit := 1000
 	if step.Config != nil {
 		if p, ok := step.Config["period"].(string); ok && p != "" {
 			period = p
@@ -231,117 +300,367 @@ func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobSte
 	return stepID, nil
 }
 
-// processOneTicker fetches and stores raw announcements for a single ticker
-func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, asxCode, period string, limit int, jobDef *models.JobDefinition, stepID string, outputTags []string) error {
-	w.logger.Info().Str("asx_code", asxCode).Str("period", period).Msg("Fetching ASX announcements")
+// processOneTicker fetches and stores announcements for a single ticker
+func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, code, period string, limit int, jobDef *models.JobDefinition, stepID string, outputTags []string) error {
+	// Initialize debug info
+	ticker := fmt.Sprintf("ASX:%s", code)
+	debug := workerutil.NewWorkerDebug(models.WorkerTypeMarketAnnouncements.String(), w.debugEnabled)
+	debug.SetTicker(ticker)
+	defer func() {
+		debug.Complete()
+	}()
 
-	// Fetch announcements
-	announcements, err := w.fetchAnnouncements(ctx, asxCode, period, limit)
+	w.logger.Info().Str("code", code).Str("period", period).Msg("Fetching announcements")
+
+	// Fetch announcements (with timing)
+	debug.StartPhase("api_fetch")
+	anns, err := w.fetchAnnouncements(ctx, code, period, limit)
+	debug.EndPhase("api_fetch")
 	if err != nil {
+		debug.CompleteWithError(err)
 		return fmt.Errorf("failed to fetch announcements: %w", err)
 	}
 
-	if len(announcements) == 0 {
-		w.logger.Info().Str("asx_code", asxCode).Msg("No announcements found")
+	if len(anns) == 0 {
+		w.logger.Info().Str("code", code).Msg("No announcements found")
 		return nil
 	}
 
-	// Create raw announcement document
-	doc := w.createRawDocument(ctx, announcements, asxCode, jobDef, outputTags)
+	// Create announcement document with classification (with timing)
+	debug.StartPhase("computation")
+	doc := w.createDocument(ctx, anns, code, jobDef, outputTags, debug)
+	debug.EndPhase("computation")
+
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		debug.CompleteWithError(err)
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
 	w.logger.Info().
-		Str("asx_code", asxCode).
-		Int("count", len(announcements)).
+		Str("code", code).
+		Int("count", len(anns)).
 		Str("doc_id", doc.ID).
-		Msg("Saved raw announcements document")
+		Msg("Saved announcements document")
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Fetched %d announcements for ASX:%s", len(announcements), asxCode))
+			fmt.Sprintf("Fetched %d announcements for %s", len(anns), code))
 	}
 
 	return nil
 }
 
-// createRawDocument creates a document containing raw announcement data
-func (w *AnnouncementsWorker) createRawDocument(ctx context.Context, announcements []ASXAnnouncement, asxCode string, jobDef *models.JobDefinition, outputTags []string) *models.Document {
-	ticker := common.Ticker{Exchange: "ASX", Code: asxCode}
+// createDocument creates a document containing announcement data with classification
+func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnnouncement, code string, jobDef *models.JobDefinition, outputTags []string, debug *workerutil.WorkerDebugInfo) *models.Document {
+	ticker := common.Ticker{Exchange: "ASX", Code: code}
+
+	// Load price data from market_data worker (respects separation of concerns)
+	ohlcvPrices := w.loadPriceData(ctx, ticker)
+
+	// Convert OHLCV to PriceBar format for announcement service
+	var priceBars []announcementsvc.PriceBar
+	for _, p := range ohlcvPrices {
+		priceBars = append(priceBars, announcementsvc.PriceBar{
+			Date:   p.Date,
+			Open:   p.Open,
+			High:   p.High,
+			Low:    p.Low,
+			Close:  p.Close,
+			Volume: p.Volume,
+		})
+	}
+
+	// Convert to service layer format for classification
+	rawAnns := make([]announcementsvc.RawAnnouncement, len(anns))
+	for i, ann := range anns {
+		rawAnns[i] = announcementsvc.RawAnnouncement{
+			Date:           ann.Date,
+			Headline:       ann.Headline,
+			Type:           ann.Type,
+			PDFURL:         ann.PDFURL,
+			DocumentKey:    ann.DocumentKey,
+			PriceSensitive: ann.PriceSensitive,
+		}
+	}
+
+	// Process announcements (classification, signal-noise analysis)
+	// Price data enables signal-to-noise analysis based on market reaction
+	processed, summary, _ := announcementsvc.ProcessAnnouncements(rawAnns, priceBars)
 
 	// Build tags
-	// Include lowercase ticker code for tag-based lookups (consistent with processing worker)
 	tags := []string{
-		"asx-announcement-raw",
+		"announcement",
 		strings.ToLower(ticker.Code),
 		fmt.Sprintf("ticker:%s", ticker.String()),
 		fmt.Sprintf("source_type:%s", models.WorkerTypeMarketAnnouncements.String()),
 	}
 	tags = append(tags, outputTags...)
 
-	// Convert announcements to JSON-friendly format
-	annJSON := make([]map[string]interface{}, len(announcements))
-	for i, ann := range announcements {
-		annJSON[i] = map[string]interface{}{
-			"date":            ann.Date.Format(time.RFC3339),
-			"headline":        ann.Headline,
-			"type":            ann.Type,
-			"pdf_url":         ann.PDFURL,
-			"document_key":    ann.DocumentKey,
-			"price_sensitive": ann.PriceSensitive,
+	// Sort announcements by date descending (latest to oldest)
+	sort.Slice(processed, func(i, j int) bool {
+		return processed[i].Date.After(processed[j].Date)
+	})
+
+	// Build structured output using schema types
+	announcements := make([]AnnouncementOutputItem, len(processed))
+	for i, ann := range processed {
+		dateStr := ""
+		if !ann.Date.IsZero() {
+			dateStr = ann.Date.Format("2006-01-02")
+		}
+		item := AnnouncementOutputItem{
+			Date:            dateStr,
+			Headline:        ann.Headline,
+			Type:            ann.Type,
+			Link:            ann.PDFURL,
+			PriceSensitive:  ann.PriceSensitive,
+			Relevance:       ann.RelevanceCategory,
+			RelevanceReason: ann.RelevanceReason,
+			SignalRating:    string(ann.SignalNoiseRating),
+			SignalReason:    ann.SignalNoiseRationale,
+			IsRoutine:       ann.IsRoutine,
+			RoutineType:     ann.RoutineType,
+		}
+
+		// Calculate price impact if we have price data
+		if len(ohlcvPrices) > 0 && !ann.Date.IsZero() {
+			dayOf, day10, _, volumeMult := w.calculateAnnouncementPriceImpact(ann.Date, ohlcvPrices)
+			item.DayOfChange = dayOf
+			item.Day10Change = day10
+			item.VolumeMultiple = volumeMult
+		}
+
+		announcements[i] = item
+	}
+
+	// Calculate date range
+	dateRangeStart := ""
+	dateRangeEnd := ""
+	if len(processed) > 0 {
+		// Already sorted desc, so first is newest, last is oldest
+		if !processed[0].Date.IsZero() {
+			dateRangeEnd = processed[0].Date.Format("2006-01-02")
+		}
+		if !processed[len(processed)-1].Date.IsZero() {
+			dateRangeStart = processed[len(processed)-1].Date.Format("2006-01-02")
 		}
 	}
 
-	metadata := map[string]interface{}{
-		"ticker":             ticker.String(),
-		"exchange":           ticker.Exchange,
-		"code":               ticker.Code,
-		"announcement_count": len(announcements),
-		"announcements":      annJSON,
-		"fetched_at":         time.Now().Format(time.RFC3339),
+	// Calculate signal-to-noise ratio
+	signalCount := summary.HighRelevanceCount + summary.MediumRelevanceCount
+	noiseCount := summary.LowRelevanceCount + summary.NoiseCount + summary.RoutineCount
+	signalToNoiseRatio := 0.0
+	if noiseCount > 0 {
+		signalToNoiseRatio = float64(signalCount) / float64(noiseCount)
 	}
 
-	// Add date range
-	if len(announcements) > 0 {
-		// Sort by date descending
-		sort.Slice(announcements, func(i, j int) bool {
-			return announcements[i].Date.After(announcements[j].Date)
-		})
-		metadata["date_range_start"] = announcements[len(announcements)-1].Date.Format("2006-01-02")
-		metadata["date_range_end"] = announcements[0].Date.Format("2006-01-02")
+	// Build worker debug output
+	var workerDebug *WorkerDebugOutput
+	if debug != nil && debug.IsEnabled() {
+		debug.Complete() // Ensure timing is captured
+		debugMeta := debug.ToMetadata()
+		if debugMeta != nil {
+			workerDebug = &WorkerDebugOutput{
+				WorkerType: models.WorkerTypeMarketAnnouncements.String(),
+				Ticker:     ticker.String(),
+			}
+			if startedAt, ok := debugMeta["started_at"].(string); ok {
+				workerDebug.StartedAt = startedAt
+			}
+			if completedAt, ok := debugMeta["completed_at"].(string); ok {
+				workerDebug.CompletedAt = completedAt
+			}
+			if timing, ok := debugMeta["timing"].(map[string]interface{}); ok {
+				if totalMs, ok := timing["total_ms"].(int64); ok {
+					workerDebug.Timing.TotalMs = totalMs
+				}
+				if apiFetchMs, ok := timing["api_fetch_ms"].(int64); ok {
+					workerDebug.Timing.APIFetchMs = apiFetchMs
+				}
+				if computationMs, ok := timing["computation_ms"].(int64); ok {
+					workerDebug.Timing.ComputationMs = computationMs
+				}
+			}
+			if endpoints, ok := debugMeta["api_endpoints"].([]map[string]interface{}); ok {
+				for _, ep := range endpoints {
+					apiEp := WorkerAPIEndpoint{}
+					if endpoint, ok := ep["endpoint"].(string); ok {
+						apiEp.Endpoint = endpoint
+					}
+					if method, ok := ep["method"].(string); ok {
+						apiEp.Method = method
+					}
+					if durationMs, ok := ep["duration_ms"].(int64); ok {
+						apiEp.DurationMs = durationMs
+					}
+					if statusCode, ok := ep["status_code"].(int); ok {
+						apiEp.StatusCode = statusCode
+					}
+					workerDebug.APIEndpoints = append(workerDebug.APIEndpoints, apiEp)
+				}
+			}
+		}
 	}
 
-	// Build content summary
+	// Build output using schema
+	output := AnnouncementsOutput{
+		Schema:         "quaero/announcements/v1",
+		Ticker:         ticker.String(),
+		Exchange:       ticker.Exchange,
+		Code:           ticker.Code,
+		FetchedAt:      time.Now().Format(time.RFC3339),
+		DateRangeStart: dateRangeStart,
+		DateRangeEnd:   dateRangeEnd,
+		Summary: AnnouncementsSummary{
+			TotalCount:           len(processed),
+			HighRelevanceCount:   summary.HighRelevanceCount,
+			MediumRelevanceCount: summary.MediumRelevanceCount,
+			LowRelevanceCount:    summary.LowRelevanceCount,
+			NoiseCount:           summary.NoiseCount,
+			RoutineCount:         summary.RoutineCount,
+			SignalToNoiseRatio:   signalToNoiseRatio,
+			RelevanceDefinition:  RelevanceDefinitionText,
+			SignalDefinition:     SignalDefinitionText,
+		},
+		Announcements: announcements,
+		WorkerDebug:   workerDebug,
+	}
+
+	// Convert to map for document metadata
+	outputJSON, _ := json.Marshal(output)
+	var metadata map[string]interface{}
+	json.Unmarshal(outputJSON, &metadata)
+
+	// Build content markdown
 	var contentBuilder strings.Builder
-	contentBuilder.WriteString(fmt.Sprintf("# ASX Announcements - %s\n\n", asxCode))
+	contentBuilder.WriteString(fmt.Sprintf("# Company Announcements - %s\n\n", code))
 	contentBuilder.WriteString(fmt.Sprintf("**Ticker:** %s\n", ticker.String()))
-	contentBuilder.WriteString(fmt.Sprintf("**Count:** %d announcements\n\n", len(announcements)))
-	contentBuilder.WriteString("## Recent Announcements\n\n")
+	contentBuilder.WriteString(fmt.Sprintf("**Period:** %s to %s\n", dateRangeStart, dateRangeEnd))
+	contentBuilder.WriteString(fmt.Sprintf("**Count:** %d announcements\n\n", len(processed)))
 
-	// Include first 20 announcements in content
-	displayCount := 20
-	if len(announcements) < displayCount {
-		displayCount = len(announcements)
-	}
-	for i := 0; i < displayCount; i++ {
-		ann := announcements[i]
-		sensitive := ""
-		if ann.PriceSensitive {
-			sensitive = " [Price Sensitive]"
+	// Summary statistics (keep at top)
+	contentBuilder.WriteString("## Summary\n\n")
+	contentBuilder.WriteString(fmt.Sprintf("- **Total Announcements:** %d\n", summary.TotalCount))
+	contentBuilder.WriteString(fmt.Sprintf("- **High Relevance:** %d\n", summary.HighRelevanceCount))
+	contentBuilder.WriteString(fmt.Sprintf("- **Medium Relevance:** %d\n", summary.MediumRelevanceCount))
+	contentBuilder.WriteString(fmt.Sprintf("- **Low/Noise/Routine:** %d\n\n", summary.LowRelevanceCount+summary.NoiseCount+summary.RoutineCount))
+
+	// Relevance definition with keywords (grey font)
+	contentBuilder.WriteString("<div style=\"color: #888; font-size: 0.85em;\">\n\n")
+	contentBuilder.WriteString("**Relevance Classification** - based on headline keywords and ASX price-sensitive flag:\n\n")
+	contentBuilder.WriteString("- **HIGH:** Price-sensitive flag, or contains: TAKEOVER, ACQUISITION, MERGER, DIVIDEND, PLACEMENT, SPP, QUARTERLY, EARNINGS, GUIDANCE, FORECAST\n")
+	contentBuilder.WriteString("- **MEDIUM:** Contains: DIRECTOR, CEO, CFO, AGM, CONTRACT, AGREEMENT, EXPLORATION, DRILLING, RESOURCE, APPROVAL, LICENSE\n")
+	contentBuilder.WriteString("- **LOW/NOISE:** Routine disclosures: PROGRESS REPORT, UPDATE, APPENDIX, SUBSTANTIAL HOLDER, or no keywords matched\n\n")
+	contentBuilder.WriteString("</div>\n\n")
+
+	contentBuilder.WriteString("## Announcements\n\n")
+
+	// Filter to HIGH and MEDIUM relevance, then consolidate by date
+	// Prefer price-sensitive announcements when multiple on same day
+	var displayAnns []AnnouncementOutputItem
+	for _, ann := range announcements {
+		if ann.Relevance == "HIGH" || ann.Relevance == "MEDIUM" {
+			displayAnns = append(displayAnns, ann)
 		}
-		contentBuilder.WriteString(fmt.Sprintf("- **%s**: %s%s\n",
-			ann.Date.Format("2006-01-02"), ann.Headline, sensitive))
 	}
-	if len(announcements) > displayCount {
-		contentBuilder.WriteString(fmt.Sprintf("\n... and %d more announcements\n", len(announcements)-displayCount))
+
+	// Consolidate by date - keep only one announcement per date, prefer price-sensitive
+	consolidatedByDate := make(map[string]AnnouncementOutputItem)
+	dateOrder := []string{} // preserve order
+
+	for _, ann := range displayAnns {
+		dateStr := ann.Date
+		if dateStr == "" {
+			dateStr = "-"
+		}
+
+		existing, exists := consolidatedByDate[dateStr]
+		if !exists {
+			consolidatedByDate[dateStr] = ann
+			dateOrder = append(dateOrder, dateStr)
+		} else {
+			// Prefer price-sensitive over non-price-sensitive
+			if ann.PriceSensitive && !existing.PriceSensitive {
+				consolidatedByDate[dateStr] = ann
+			}
+			// If both are price-sensitive or both not, keep first (already sorted by date desc)
+		}
+	}
+
+	// Table with smaller font using HTML wrapper
+	contentBuilder.WriteString("<div style=\"font-size: 0.85em;\">\n\n")
+
+	// Table header - simplified: removed Review column
+	contentBuilder.WriteString("| Date | PS | Headline | Price | Volume | Link |\n")
+	contentBuilder.WriteString("|------|:--:|----------|------:|-------:|------|\n")
+
+	// Table rows - consolidated by date
+	for _, dateStr := range dateOrder {
+		ann := consolidatedByDate[dateStr]
+
+		ps := ""
+		if ann.PriceSensitive {
+			ps = "✓"
+		}
+
+		// Build link
+		link := ""
+		if ann.Link != "" {
+			link = fmt.Sprintf("[View](%s)", ann.Link)
+		}
+
+		// Truncate headline if too long
+		headline := ann.Headline
+		if len(headline) > 60 {
+			headline = headline[:57] + "..."
+		}
+
+		// Format price with color
+		priceStr := "-"
+		if ann.DayOfChange != nil {
+			color := "#228B22" // Forest green for positive
+			if *ann.DayOfChange < 0 {
+				color = "#CD5C5C" // Indian red for negative
+			}
+			priceStr = fmt.Sprintf("<span style=\"color:%s\">%+.1f%%</span>", color, *ann.DayOfChange)
+		}
+
+		// Format volume with color
+		volumeStr := "-"
+		if ann.VolumeMultiple != nil {
+			color := "#228B22" // Forest green for high volume
+			if *ann.VolumeMultiple < 1.0 {
+				color = "#CD5C5C" // Indian red for below average
+			}
+			volumeStr = fmt.Sprintf("<span style=\"color:%s\">%.1fx</span>", color, *ann.VolumeMultiple)
+		}
+
+		contentBuilder.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+			dateStr,
+			ps,
+			headline,
+			priceStr,
+			volumeStr,
+			link,
+		))
+	}
+
+	contentBuilder.WriteString("\n</div>\n")
+
+	// Add note showing count
+	contentBuilder.WriteString(fmt.Sprintf("\n*Showing %d of %d (High and Medium relevance only)*\n",
+		len(displayAnns), len(processed)))
+
+	// Add Worker Debug section to markdown (uses workerutil.ToMarkdown())
+	if debug != nil && debug.IsEnabled() {
+		contentBuilder.WriteString(debug.ToMarkdown())
 	}
 
 	return &models.Document{
 		ID:              uuid.New().String(),
-		SourceType:      "asx_announcement_raw",
-		SourceID:        fmt.Sprintf("%s:%s:announcement_raw", ticker.Exchange, ticker.Code),
-		Title:           fmt.Sprintf("ASX Announcements - %s (Raw)", asxCode),
+		SourceType:      "announcement",
+		SourceID:        fmt.Sprintf("%s:%s:announcement", ticker.Exchange, ticker.Code),
+		Title:           fmt.Sprintf("Company Announcements - %s", code),
 		ContentMarkdown: contentBuilder.String(),
 		Tags:            tags,
 		Metadata:        metadata,
@@ -350,287 +669,41 @@ func (w *AnnouncementsWorker) createRawDocument(ctx context.Context, announcemen
 	}
 }
 
-// fetchAnnouncements fetches announcements using the best source for the period
-func (w *AnnouncementsWorker) fetchAnnouncements(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
-	// For Y1 or longer periods, use ASX HTML page which returns full year data
-	if period == "Y1" || period == "Y5" {
-		announcements, err := w.fetchAnnouncementsFromHTML(ctx, asxCode, period, limit)
-		if err != nil {
-			w.logger.Warn().Err(err).Msg("HTML fetch failed, falling back to Markit API")
-		} else if len(announcements) > 0 {
-			return announcements, nil
-		}
+// fetchAnnouncements fetches announcements using the announcement service.
+// ASX is primary for ASX tickers, EODHD is used for non-ASX or as fallback.
+func (w *AnnouncementsWorker) fetchAnnouncements(ctx context.Context, code, period string, limit int) ([]RawAnnouncement, error) {
+	// Parse ticker to determine exchange
+	ticker := common.ParseTicker(code)
+	if ticker.Exchange == "" {
+		// Default to ASX for bare codes
+		ticker.Exchange = "ASX"
 	}
 
-	// Build Markit Digital API URL
-	url := fmt.Sprintf("https://asx.api.markitdigital.com/asx-research/1.0/companies/%s/announcements",
-		strings.ToLower(asxCode))
-
-	w.logger.Debug().Str("url", url).Msg("Fetching ASX announcements from API")
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Use announcement service to fetch
+	svcAnns, err := w.announcementSvc.FetchAnnouncements(ctx, ticker, period, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("announcement service failed: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var apiResp asxAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	cutoffDate := w.calculateCutoffDate(period)
-
-	var announcements []ASXAnnouncement
-	for _, item := range apiResp.Data.Items {
-		if limit > 0 && len(announcements) >= limit {
-			break
-		}
-
-		date, err := time.Parse(time.RFC3339, item.Date)
-		if err != nil {
-			date, err = time.Parse("2006-01-02T15:04:05", item.Date)
-			if err != nil {
-				date = time.Now()
-			}
-		}
-
-		if !cutoffDate.IsZero() && date.Before(cutoffDate) {
-			continue
-		}
-
-		pdfURL := item.URL
-		if pdfURL == "" && item.DocumentKey != "" {
-			pdfURL = fmt.Sprintf("https://www.asx.com.au/asxpdf/%s", item.DocumentKey)
-		}
-
-		ann := ASXAnnouncement{
-			Date:           date,
-			Headline:       item.Headline,
-			PDFURL:         pdfURL,
-			PDFFilename:    item.DocumentKey,
-			DocumentKey:    item.DocumentKey,
-			FileSize:       item.FileSize,
-			PriceSensitive: item.IsPriceSensitive,
-			Type:           item.AnnouncementType,
-		}
-
-		announcements = append(announcements, ann)
-	}
-
-	return announcements, nil
-}
-
-// fetchAnnouncementsFromHTML scrapes announcements from ASX statistics HTML page
-func (w *AnnouncementsWorker) fetchAnnouncementsFromHTML(ctx context.Context, asxCode, period string, limit int) ([]ASXAnnouncement, error) {
-	currentYear := time.Now().Year()
-	var allAnnouncements []ASXAnnouncement
-
-	yearsToFetch := 2
-	if period == "Y3" {
-		yearsToFetch = 4
-	} else if period == "Y5" {
-		yearsToFetch = 6
-	}
-
-	for yearOffset := 0; yearOffset < yearsToFetch; yearOffset++ {
-		year := currentYear - yearOffset
-
-		url := fmt.Sprintf("https://www.asx.com.au/asx/v2/statistics/announcements.do?by=asxCode&asxCode=%s&timeframe=Y&year=%d",
-			strings.ToUpper(asxCode), year)
-
-		w.logger.Debug().Str("url", url).Int("year", year).Msg("Fetching ASX announcements from HTML")
-
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-		resp, err := w.httpClient.Do(req)
-		if err != nil {
-			w.logger.Warn().Err(err).Int("year", year).Msg("Failed to fetch HTML page")
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			continue
-		}
-
-		announcements := w.parseAnnouncementsHTML(string(body), asxCode, year)
-		allAnnouncements = append(allAnnouncements, announcements...)
-	}
-
-	// Sort by date descending and apply limit
-	sort.Slice(allAnnouncements, func(i, j int) bool {
-		return allAnnouncements[i].Date.After(allAnnouncements[j].Date)
-	})
-
-	if limit > 0 && len(allAnnouncements) > limit {
-		allAnnouncements = allAnnouncements[:limit]
-	}
-
-	return allAnnouncements, nil
-}
-
-// parseAnnouncementsHTML extracts announcements from HTML content
-func (w *AnnouncementsWorker) parseAnnouncementsHTML(html, asxCode string, year int) []ASXAnnouncement {
-	var announcements []ASXAnnouncement
-
-	// Pattern to match table rows
-	rowPattern := regexp.MustCompile(`(?s)<tr[^>]*>(.*?)</tr>`)
-	rows := rowPattern.FindAllStringSubmatch(html, -1)
-
-	for _, row := range rows {
-		if len(row) < 2 {
-			continue
-		}
-		rowContent := row[1]
-
-		// Skip header rows
-		if strings.Contains(rowContent, "<th") {
-			continue
-		}
-
-		// Extract cells
-		cellPattern := regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
-		cells := cellPattern.FindAllStringSubmatch(rowContent, -1)
-		if len(cells) < 4 {
-			continue
-		}
-
-		// Parse date (first cell)
-		dateStr := strings.TrimSpace(stripHTML(cells[0][1]))
-		date, err := time.Parse("02/01/2006", dateStr)
-		if err != nil {
-			date, err = time.Parse("2/01/2006", dateStr)
-			if err != nil {
-				continue
-			}
-		}
-
-		// Parse headline and link (second cell)
-		headlineCell := cells[1][1]
-		headline := strings.TrimSpace(stripHTML(headlineCell))
-
-		// Extract PDF URL
-		pdfURL := ""
-		documentKey := ""
-		linkPattern := regexp.MustCompile(`href="([^"]+)"`)
-		if linkMatch := linkPattern.FindStringSubmatch(headlineCell); len(linkMatch) > 1 {
-			pdfURL = linkMatch[1]
-			if strings.Contains(pdfURL, "/asxpdf/") {
-				parts := strings.Split(pdfURL, "/")
-				if len(parts) > 0 {
-					documentKey = parts[len(parts)-1]
-				}
-			}
-		}
-
-		// Parse price-sensitive flag (third cell)
-		priceSensitive := strings.Contains(cells[2][1], "Yes") || strings.Contains(cells[2][1], "Y")
-
-		// Parse pages/type (fourth cell if exists)
-		pageCount := 0
-		if len(cells) > 3 {
-			if p, err := strconv.Atoi(strings.TrimSpace(stripHTML(cells[3][1]))); err == nil {
-				pageCount = p
-			}
-		}
-
-		// Infer type from headline
-		annType := w.inferAnnouncementType(headline, pageCount)
-
-		announcements = append(announcements, ASXAnnouncement{
-			Date:           date,
-			Headline:       headline,
-			PDFURL:         pdfURL,
-			DocumentKey:    documentKey,
-			PriceSensitive: priceSensitive,
-			Type:           annType,
-		})
-	}
-
-	return announcements
-}
-
-// stripHTML removes HTML tags from a string
-func stripHTML(s string) string {
-	tagPattern := regexp.MustCompile(`<[^>]*>`)
-	s = tagPattern.ReplaceAllString(s, "")
-	s = strings.ReplaceAll(s, "&nbsp;", " ")
-	s = strings.ReplaceAll(s, "&amp;", "&")
-	return strings.TrimSpace(s)
-}
-
-// inferAnnouncementType guesses announcement type from headline
-func (w *AnnouncementsWorker) inferAnnouncementType(headline string, pageCount int) string {
-	headlineUpper := strings.ToUpper(headline)
-
-	typePatterns := []struct {
-		keywords []string
-		annType  string
-	}{
-		{[]string{"TRADING HALT", "SUSPENSION"}, "Trading Halt"},
-		{[]string{"QUARTERLY", "ACTIVITIES REPORT", "4C"}, "Quarterly Report"},
-		{[]string{"HALF YEAR", "HALF-YEAR", "1H", "H1"}, "Half Year Report"},
-		{[]string{"ANNUAL REPORT", "FULL YEAR", "FY"}, "Annual Report"},
-		{[]string{"DIVIDEND"}, "Dividend"},
-		{[]string{"AGM", "GENERAL MEETING"}, "Meeting"},
-		{[]string{"APPENDIX"}, "Appendix"},
-		{[]string{"DIRECTOR"}, "Director Related"},
-		{[]string{"SUBSTANTIAL", "HOLDER"}, "Substantial Holder"},
-	}
-
-	for _, tp := range typePatterns {
-		for _, kw := range tp.keywords {
-			if strings.Contains(headlineUpper, kw) {
-				return tp.annType
-			}
+	// Convert from service format to worker format
+	anns := make([]RawAnnouncement, len(svcAnns))
+	for i, a := range svcAnns {
+		anns[i] = RawAnnouncement{
+			Date:           a.Date,
+			Headline:       a.Headline,
+			PDFURL:         a.PDFURL,
+			DocumentKey:    a.DocumentKey,
+			PriceSensitive: a.PriceSensitive,
+			Type:           a.Type,
 		}
 	}
 
-	if pageCount > 20 {
-		return "Report"
-	}
-	return "Announcement"
-}
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Int("count", len(anns)).
+		Msg("Fetched announcements via service")
 
-// calculateCutoffDate calculates the cutoff date based on period
-func (w *AnnouncementsWorker) calculateCutoffDate(period string) time.Time {
-	now := time.Now()
-
-	switch period {
-	case "M1":
-		return now.AddDate(0, -1, 0)
-	case "M3":
-		return now.AddDate(0, -3, 0)
-	case "M6":
-		return now.AddDate(0, -6, 0)
-	case "Y1":
-		return now.AddDate(-1, 0, 0)
-	case "Y3":
-		return now.AddDate(-3, 0, 0)
-	case "Y5":
-		return now.AddDate(-5, 0, 0)
-	default:
-		return now.AddDate(-1, 0, 0) // Default to 1 year
-	}
+	return anns, nil
 }
 
 // ReturnsChildJobs returns false since this executes synchronously
@@ -642,4 +715,179 @@ func (w *AnnouncementsWorker) ReturnsChildJobs() bool {
 func (w *AnnouncementsWorker) ValidateConfig(step models.JobStep) error {
 	// Config is optional - asx_code can come from job-level variables
 	return nil
+}
+
+// loadPriceData retrieves OHLCV data from cached market_data document.
+// This respects separation of concerns - market_data worker handles collection/caching.
+// Returns nil if no data is available.
+func (w *AnnouncementsWorker) loadPriceData(ctx context.Context, ticker common.Ticker) []OHLCV {
+	sourceType := models.WorkerTypeMarketData.String()
+	sourceID := ticker.SourceID("market_data")
+
+	doc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+	if err != nil || doc == nil {
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Str("source_type", sourceType).
+			Str("source_id", sourceID).
+			Msg("No cached market data found for price impact calculation")
+		return nil
+	}
+
+	// Extract historical prices from document metadata
+	// BadgerHold uses gob encoding, so we need to handle both []interface{} and []map[string]interface{}
+	var pricesData []interface{}
+	switch v := doc.Metadata["historical_prices"].(type) {
+	case []interface{}:
+		pricesData = v
+	case []map[string]interface{}:
+		// Convert []map[string]interface{} to []interface{}
+		for _, m := range v {
+			pricesData = append(pricesData, m)
+		}
+	default:
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Str("type", fmt.Sprintf("%T", doc.Metadata["historical_prices"])).
+			Msg("No historical prices in market data document (unexpected type)")
+		return nil
+	}
+
+	if len(pricesData) == 0 {
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Msg("No historical prices in market data document (empty)")
+		return nil
+	}
+
+	var prices []OHLCV
+	for _, p := range pricesData {
+		pm, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		dateStr, _ := pm["date"].(string)
+		date, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+
+		ohlcv := OHLCV{
+			Date:   date,
+			Open:   MapGetFloat64(pm, "open"),
+			High:   MapGetFloat64(pm, "high"),
+			Low:    MapGetFloat64(pm, "low"),
+			Close:  MapGetFloat64(pm, "close"),
+			Volume: MapGetInt64(pm, "volume"),
+		}
+		prices = append(prices, ohlcv)
+	}
+
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Int("price_count", len(prices)).
+		Msg("Loaded market data for price impact calculation")
+
+	return prices
+}
+
+// calculateAnnouncementPriceImpact calculates price impact for an announcement.
+// Returns Day-Of change, Day+10 change, Retention, and Volume multiple.
+func (w *AnnouncementsWorker) calculateAnnouncementPriceImpact(annDate time.Time, prices []OHLCV) (dayOf, day10, retention, volumeMult *float64) {
+	if len(prices) == 0 {
+		return nil, nil, nil, nil
+	}
+
+	// Build date-to-price map for O(1) lookups
+	priceMap := make(map[string]OHLCV)
+	for _, p := range prices {
+		priceMap[p.Date.Format("2006-01-02")] = p
+	}
+
+	annDateStr := annDate.Format("2006-01-02")
+
+	// Find price on announcement date (or closest trading day after)
+	var priceOnDate OHLCV
+	foundOnDate := false
+	for i := 0; i <= 5; i++ {
+		checkDate := annDate.AddDate(0, 0, i).Format("2006-01-02")
+		if p, ok := priceMap[checkDate]; ok {
+			priceOnDate = p
+			foundOnDate = true
+			if i == 0 {
+				annDateStr = checkDate
+			}
+			break
+		}
+	}
+	if !foundOnDate {
+		return nil, nil, nil, nil
+	}
+
+	// Find previous trading day's price
+	var priceBefore OHLCV
+	for i := 1; i <= 10; i++ {
+		checkDate := annDate.AddDate(0, 0, -i).Format("2006-01-02")
+		if p, ok := priceMap[checkDate]; ok {
+			priceBefore = p
+			break
+		}
+	}
+	if priceBefore.Close == 0 {
+		return nil, nil, nil, nil
+	}
+
+	// Day-Of change: (announcement day close - previous day close) / previous day close * 100
+	dayOfChange := ((priceOnDate.Close - priceBefore.Close) / priceBefore.Close) * 100
+	dayOf = &dayOfChange
+
+	// Find T+10 trading day price
+	var priceT10 OHLCV
+	tradingDays := 0
+	for i := 1; i <= 20 && tradingDays < 10; i++ {
+		checkDate := annDate.AddDate(0, 0, i).Format("2006-01-02")
+		if p, ok := priceMap[checkDate]; ok {
+			tradingDays++
+			if tradingDays == 10 {
+				priceT10 = p
+			}
+		}
+	}
+
+	if priceT10.Close > 0 {
+		// Day+10 change: (T+10 close - previous day close) / previous day close * 100
+		day10Change := ((priceT10.Close - priceBefore.Close) / priceBefore.Close) * 100
+		day10 = &day10Change
+
+		// Retention: How much of Day-Of change was retained at T+10
+		// If Day-Of was positive and Day+10 is still positive, retention = Day+10/Day-Of
+		if dayOfChange != 0 {
+			retentionVal := (day10Change / dayOfChange) * 100
+			retention = &retentionVal
+		}
+	}
+
+	// Volume multiple: announcement day volume vs 30-day average
+	var totalVolume int64
+	volumeCount := 0
+	for i := 1; i <= 60 && volumeCount < 30; i++ {
+		checkDate := annDate.AddDate(0, 0, -i).Format("2006-01-02")
+		if p, ok := priceMap[checkDate]; ok && p.Volume > 0 {
+			totalVolume += p.Volume
+			volumeCount++
+		}
+	}
+	if volumeCount > 0 {
+		avgVolume := float64(totalVolume) / float64(volumeCount)
+		if avgVolume > 0 {
+			volMult := float64(priceOnDate.Volume) / avgVolume
+			volumeMult = &volMult
+		}
+	}
+
+	// Log the calculation for the specific announcement date
+	_ = annDateStr // suppress unused warning
+
+	return dayOf, day10, retention, volumeMult
 }

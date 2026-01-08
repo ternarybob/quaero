@@ -17,8 +17,8 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/ternarybob/quaero/internal/services/rating"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
 // VRSWorker calculates Volatility Regime Stability for tickers.

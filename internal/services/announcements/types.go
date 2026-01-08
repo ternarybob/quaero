@@ -33,6 +33,10 @@ type RawAnnouncement struct {
 	PDFURL         string    `json:"pdf_url"`
 	DocumentKey    string    `json:"document_key"`
 	PriceSensitive bool      `json:"price_sensitive"`
+
+	// PDF storage fields (populated after download)
+	PDFStorageKey string `json:"pdf_storage_key,omitempty"`
+	PDFDownloaded bool   `json:"pdf_downloaded,omitempty"`
 }
 
 // ProcessedAnnouncement represents an announcement with analysis applied
@@ -156,16 +160,16 @@ type MQSScores struct {
 
 // ProcessingSummary contains aggregated statistics and results from processing
 type ProcessingSummary struct {
-	TotalCount           int                    `json:"total_count"`
-	HighRelevanceCount   int                    `json:"high_relevance_count"`
-	MediumRelevanceCount int                    `json:"medium_relevance_count"`
-	LowRelevanceCount    int                    `json:"low_relevance_count"`
-	NoiseCount           int                    `json:"noise_count"`
-	HighSignalCount      int                    `json:"high_signal_count"`
-	ModerateSignalCount  int                    `json:"moderate_signal_count"`
-	LowSignalCount       int                    `json:"low_signal_count"`
-	RoutineCount         int                    `json:"routine_count"`
-	AnomalyCount         int                    `json:"anomaly_count"`
+	TotalCount           int                     `json:"total_count"`
+	HighRelevanceCount   int                     `json:"high_relevance_count"`
+	MediumRelevanceCount int                     `json:"medium_relevance_count"`
+	LowRelevanceCount    int                     `json:"low_relevance_count"`
+	NoiseCount           int                     `json:"noise_count"`
+	HighSignalCount      int                     `json:"high_signal_count"`
+	ModerateSignalCount  int                     `json:"moderate_signal_count"`
+	LowSignalCount       int                     `json:"low_signal_count"`
+	RoutineCount         int                     `json:"routine_count"`
+	AnomalyCount         int                     `json:"anomaly_count"`
 	Announcements        []ProcessedAnnouncement `json:"announcements,omitempty"`
-	MQSScores            *MQSScores             `json:"mqs_scores,omitempty"`
+	MQSScores            *MQSScores              `json:"mqs_scores,omitempty"`
 }

@@ -274,12 +274,34 @@ func (c *Client) GetNews(ctx context.Context, symbols []string, opts ...QueryOpt
 		return nil, err
 	}
 
-	// Parse dates
+	// Parse dates - EODHD News API returns various formats
+	// Known formats: "2024-12-15 10:30:00", "2024-12-15", RFC3339, etc.
+	dateFormats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02T15:04:05.000Z",
+		"Mon, 02 Jan 2006 15:04:05 MST",
+		"Mon, 02 Jan 2006 15:04:05 -0700",
+		"January 2, 2006",
+		"Jan 2, 2006",
+	}
 	for i := range result {
-		if t, err := time.Parse("2006-01-02 15:04:05", result[i].DateStr); err == nil {
-			result[i].Date = t
-		} else if t, err := time.Parse("2006-01-02", result[i].DateStr); err == nil {
-			result[i].Date = t
+		if result[i].DateStr == "" {
+			continue
+		}
+		parsed := false
+		for _, format := range dateFormats {
+			if t, err := time.Parse(format, result[i].DateStr); err == nil {
+				result[i].Date = t
+				parsed = true
+				break
+			}
+		}
+		if !parsed {
+			c.logger.Debug().Str("dateStr", result[i].DateStr).Str("title", result[i].Title).Msg("Failed to parse news date")
 		}
 	}
 

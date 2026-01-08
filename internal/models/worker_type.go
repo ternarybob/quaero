@@ -34,8 +34,7 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial/market data workers (market_ prefix)
-	WorkerTypeMarketAnnouncements          WorkerType = "market_announcements"           // Company announcements via Markit API
-	WorkerTypeProcessingAnnouncements      WorkerType = "processing_announcements"       // Process raw announcements, add classification/signal analysis
+	WorkerTypeMarketAnnouncements    WorkerType = "market_announcements"     // Company announcements with classification
 	WorkerTypeMarketData             WorkerType = "market_data"              // Price data, technicals, indices via EODHD
 	WorkerTypeMarketNews             WorkerType = "market_news"              // Multi-exchange news via EODHD News API
 	WorkerTypeMarketDirectorInterest WorkerType = "market_director_interest" // Director interest (Appendix 3Y) filings
@@ -85,7 +84,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeReindex, WorkerTypeLocalDir, WorkerTypeCodeMap, WorkerTypeSummary,
 		WorkerTypeAnalyzeBuild, WorkerTypeClassify, WorkerTypeDependencyGraph,
 		WorkerTypeAggregateSummary, WorkerTypeEmail,
-		WorkerTypeMarketAnnouncements, WorkerTypeProcessingAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
+		WorkerTypeMarketAnnouncements, WorkerTypeMarketData, WorkerTypeMarketNews,
 		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
@@ -125,7 +124,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeAggregateSummary,
 		WorkerTypeEmail,
 		WorkerTypeMarketAnnouncements,
-		WorkerTypeProcessingAnnouncements,
 		WorkerTypeMarketData,
 		WorkerTypeMarketNews,
 		WorkerTypeMarketDirectorInterest,

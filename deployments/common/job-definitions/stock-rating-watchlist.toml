@@ -62,22 +62,13 @@ period = "Y2"
 # =========================================================================
 [step.fetch_announcements]
 type = "market_announcements"
-description = "Fetch raw company announcements"
+description = "Fetch company announcements for rating calculation"
 on_error = "continue"
 period = "Y1"
 limit = 500
 
 # =========================================================================
-# Step 3: Process Announcements
-# =========================================================================
-[step.process_announcements]
-type = "processing_announcements"
-description = "Classify and analyze announcements for rating"
-depends = "fetch_announcements"
-on_error = "continue"
-
-# =========================================================================
-# Step 4: Fetch Price Data
+# Step 3: Fetch Price Data
 # =========================================================================
 [step.fetch_price_data]
 type = "market_data"
@@ -86,7 +77,7 @@ on_error = "continue"
 period = "2y"
 
 # =========================================================================
-# Step 5: Calculate BFS (Business Foundation Score)
+# Step 4: Calculate BFS (Business Foundation Score)
 # =========================================================================
 [step.calculate_bfs]
 type = "rating_bfs"
@@ -95,35 +86,35 @@ depends = "fetch_fundamentals"
 on_error = "continue"
 
 # =========================================================================
-# Step 6: Calculate CDS (Capital Discipline Score)
+# Step 5: Calculate CDS (Capital Discipline Score)
 # =========================================================================
 [step.calculate_cds]
 type = "rating_cds"
 description = "Calculate Capital Discipline Score (0-2)"
-depends = "fetch_fundamentals,process_announcements"
+depends = "fetch_fundamentals,fetch_announcements"
 on_error = "continue"
 months = 36
 
 # =========================================================================
-# Step 7: Calculate NFR (Narrative-to-Fact Ratio)
+# Step 6: Calculate NFR (Narrative-to-Fact Ratio)
 # =========================================================================
 [step.calculate_nfr]
 type = "rating_nfr"
 description = "Calculate Narrative-to-Fact Ratio (0-1)"
-depends = "process_announcements"
+depends = "fetch_announcements"
 on_error = "continue"
 
 # =========================================================================
-# Step 8: Calculate PPS (Price Progression Score)
+# Step 7: Calculate PPS (Price Progression Score)
 # =========================================================================
 [step.calculate_pps]
 type = "rating_pps"
 description = "Calculate Price Progression Score (0-1)"
-depends = "process_announcements,fetch_price_data"
+depends = "fetch_announcements,fetch_price_data"
 on_error = "continue"
 
 # =========================================================================
-# Step 9: Calculate VRS (Volatility Regime Stability)
+# Step 8: Calculate VRS (Volatility Regime Stability)
 # =========================================================================
 [step.calculate_vrs]
 type = "rating_vrs"
@@ -132,16 +123,16 @@ depends = "fetch_price_data"
 on_error = "continue"
 
 # =========================================================================
-# Step 10: Calculate OB (Optionality Bonus)
+# Step 9: Calculate OB (Optionality Bonus)
 # =========================================================================
 [step.calculate_ob]
 type = "rating_ob"
 description = "Calculate Optionality Bonus (0, 0.5, 1)"
-depends = "calculate_bfs,process_announcements"
+depends = "calculate_bfs,fetch_announcements"
 on_error = "continue"
 
 # =========================================================================
-# Step 11: Calculate Composite Rating
+# Step 10: Calculate Composite Rating
 # =========================================================================
 [step.calculate_composite]
 type = "rating_composite"
@@ -151,7 +142,7 @@ on_error = "fail"
 output_tags = ["stock-rating", "weekly-rating"]
 
 # =========================================================================
-# Step 12: Email Report
+# Step 11: Email Report
 # =========================================================================
 [step.email_report]
 type = "email"
@@ -163,4 +154,4 @@ to = "bobmcallan@gmail.com"
 subject = "Stock Rating - Watchlist Summary"
 style = "proforma"
 list_tags = ["stock-rating"]
-base_url = "http://localhost:18080"
+base_url = "http://localhost:8085"

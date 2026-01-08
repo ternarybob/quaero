@@ -40,3 +40,33 @@ type FundamentalsFinancialPeriod struct {
 	GrossMargin     float64 // Gross margin percentage
 	NetMargin       float64 // Net margin percentage
 }
+
+// MapGetFloat64 safely extracts a float64 from a map[string]interface{}
+func MapGetFloat64(m map[string]interface{}, key string) float64 {
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case float64:
+			return val
+		case int:
+			return float64(val)
+		case int64:
+			return float64(val)
+		}
+	}
+	return 0
+}
+
+// MapGetInt64 safely extracts an int64 from a map[string]interface{}
+func MapGetInt64(m map[string]interface{}, key string) int64 {
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case int64:
+			return val
+		case int:
+			return int64(val)
+		case float64:
+			return int64(val)
+		}
+	}
+	return 0
+}

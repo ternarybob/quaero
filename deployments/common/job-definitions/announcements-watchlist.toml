@@ -53,28 +53,16 @@ variables = [
 # =========================================================================
 # Step 1: Fetch Announcements (per ticker)
 # =========================================================================
-# Fetches raw ASX announcements for each stock using MarketAnnouncementsWorker
-# Creates documents tagged ['asx-announcement-raw', '<ticker>']
+# Fetches and classifies announcements for each stock
+# Creates documents tagged ['announcement', '<ticker>']
 
 [step.fetch_announcements]
 type = "market_announcements"
-description = "Fetch raw ASX announcements for each watchlist stock"
+description = "Fetch and classify announcements for each watchlist stock"
 on_error = "continue"
 
 # =========================================================================
-# Step 2: Process Announcements
-# =========================================================================
-# Processes raw announcements: classification, signal-noise analysis, price impact
-# Creates documents tagged ['asx-announcement-summary', '<ticker>']
-
-[step.process_announcements]
-type = "processing_announcements"
-description = "Classify and analyze announcements"
-depends = "fetch_announcements"
-on_error = "continue"
-
-# =========================================================================
-# Step 3: Format Output
+# Step 2: Format Output
 # =========================================================================
 # Prepares output document for email delivery
 # Collects documents by input_tags, formats with email instructions
@@ -86,12 +74,12 @@ on_error = "continue"
 [step.format_output]
 type = "output_formatter"
 description = "Format announcement summaries for email"
-depends = "process_announcements"
+depends = "fetch_announcements"
 on_error = "fail"
-input_tags = ["asx-announcement-summary"]
+input_tags = ["announcement"]
 output_tags = ["email-output"]
 title = "ASX Announcements - Watchlist Summary"
-# base_url = "http://localhost:18080"  # optional: defaults to configured server URL
+base_url = "http://localhost:8085"
 # format = "inline"     # default: inline (markdown converted to HTML in body)
 # attachment = false    # default: no attachments
 # style = "body"        # default: body (full content in email)

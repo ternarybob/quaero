@@ -54,19 +54,21 @@ var (
 		},
 	}
 
-	// AnnouncementsSchema for processing_announcements worker (Signal Classification)
+	// AnnouncementsSchema for market_announcements worker (with inline classification)
+	// Schema: quaero/announcements/v1
 	AnnouncementsSchema = WorkerSchema{
-		RequiredFields: []string{"ticker", "total_count", "high_relevance_count"},
-		OptionalFields: []string{"medium_relevance_count", "low_relevance_count", "noise_count", "mqs_scores", "announcements", "exchange", "period", "processed_at"},
+		RequiredFields: []string{"$schema", "ticker", "summary", "announcements"},
+		OptionalFields: []string{"exchange", "code", "fetched_at", "date_range_start", "date_range_end"},
 		FieldTypes: map[string]string{
-			"ticker":                 "string",
-			"total_count":            "number",
-			"high_relevance_count":   "number",
-			"medium_relevance_count": "number",
-			"low_relevance_count":    "number",
-			"noise_count":            "number",
-			"mqs_scores":             "object",
-			"announcements":          "array",
+			"$schema":          "string",
+			"ticker":           "string",
+			"exchange":         "string",
+			"code":             "string",
+			"fetched_at":       "string",
+			"date_range_start": "string",
+			"date_range_end":   "string",
+			"summary":          "object",
+			"announcements":    "array",
 		},
 		ArraySchemas: map[string][]string{},
 	}
@@ -117,12 +119,21 @@ var (
 	}
 
 	// CompetitorSchema for market_competitor worker
+	// Schema: quaero/competitor/v1
 	CompetitorSchema = WorkerSchema{
-		RequiredFields: []string{"target_asx_code", "competitors"},
-		OptionalFields: []string{"competitor_count"},
+		RequiredFields: []string{"$schema", "target_ticker", "target_code", "analyzed_at", "gemini_prompt", "competitors"},
+		OptionalFields: []string{"worker_debug"},
 		FieldTypes: map[string]string{
-			"target_asx_code": "string",
-			"competitors":     "array",
+			"$schema":       "string",
+			"target_ticker": "string",
+			"target_code":   "string",
+			"analyzed_at":   "string",
+			"gemini_prompt": "string",
+			"competitors":   "array",
+			"worker_debug":  "object",
+		},
+		ArraySchemas: map[string][]string{
+			"competitors": {"code", "rationale"},
 		},
 	}
 
@@ -855,9 +866,9 @@ func AssertSectionConsistency(t *testing.T, content1, content2 string, requiredS
 	return allConsistent
 }
 
-// AnnouncementsRequiredSections defines the sections that must be present in announcements output (Signal Classification)
+// AnnouncementsRequiredSections defines the sections that must be present in announcements output
 var AnnouncementsRequiredSections = []string{
-	"Signal Quality Metrics",
+	"Summary",
 	"Announcements",
 }
 

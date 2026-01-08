@@ -18,8 +18,8 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/ternarybob/quaero/internal/services/llm"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"google.golang.org/genai"
 )
 

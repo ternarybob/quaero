@@ -43,6 +43,21 @@ type DirectorInterestFiling struct {
 	Type        string
 }
 
+// directorInterestAPIResponse represents the JSON response from Markit Digital API
+type directorInterestAPIResponse struct {
+	Data struct {
+		Items []struct {
+			Date             string `json:"date"`
+			Headline         string `json:"headline"`
+			URL              string `json:"url"`
+			DocumentKey      string `json:"documentKey"`
+			FileSize         string `json:"fileSize"`
+			IsPriceSensitive bool   `json:"isPriceSensitive"`
+			AnnouncementType string `json:"announcementType"`
+		} `json:"items"`
+	} `json:"data"`
+}
+
 // NewDirectorInterestWorker creates a new ASX director interest worker
 func NewDirectorInterestWorker(
 	documentStorage interfaces.DocumentStorage,
@@ -268,8 +283,8 @@ func (w *DirectorInterestWorker) fetchDirectorInterest(ctx context.Context, asxC
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	// Parse JSON response (reuse asxAPIResponse type from announcements)
-	var apiResp asxAPIResponse
+	// Parse JSON response
+	var apiResp directorInterestAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}

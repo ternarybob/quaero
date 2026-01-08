@@ -160,6 +160,11 @@ TEST_PKG=$(dirname "$TEST_FILE")
 # Store as ordered array
 TESTS=($TEST_LIST)
 echo "Found ${#TESTS[@]} tests to run sequentially"
+
+# Build -run pattern to filter ONLY tests from this file
+# Join test names with | for regex alternation
+RUN_PATTERN="^($(IFS='|'; echo "${TESTS[*]}"))$"
+echo "Run pattern: $RUN_PATTERN"
 ````
 
 **MUST write `$WORKDIR/tdd_state.md`:**
@@ -171,6 +176,9 @@ echo "Found ${#TESTS[@]} tests to run sequentially"
 
 ## Test Package
 `{test_pkg}`
+
+## Run Pattern
+`{run_pattern}` (filters to ONLY tests from specified file)
 
 ## Workdir
 `{workdir}`
@@ -211,9 +219,9 @@ ITERATION = 0
 │                                                                 │
 │   TEST_LOG="$WORKDIR/logs/test_iter${ITERATION}.log"            │
 │                                                                 │
-│   # Run ALL tests from file in SINGLE process                   │
+│   # Run ONLY tests from the specified file using -run filter    │
 │   # Tests run sequentially and share one results directory      │
-│   go test -v -timeout 30m ./$TEST_PKG/... \                     │
+│   go test -v -timeout 30m -run "$RUN_PATTERN" ./$TEST_PKG/... \ │
 │       > "$TEST_LOG" 2>&1                                        │
 │   RESULT=$?                                                     │
 │                                                                 │
@@ -369,9 +377,9 @@ extract_failure() {
 
 **Step 4.1: Verify final state**
 ````bash
-# Run all tests one final time with output capture
+# Run all tests from the specified file one final time with output capture
 FINAL_LOG="$WORKDIR/logs/final_run.log"
-go test -v -timeout 30m ./$TEST_PKG/... > "$FINAL_LOG" 2>&1
+go test -v -timeout 30m -run "$RUN_PATTERN" ./$TEST_PKG/... > "$FINAL_LOG" 2>&1
 FINAL_RESULT=$?
 
 if [ $FINAL_RESULT -eq 0 ]; then
@@ -626,8 +634,8 @@ if currentStatus != expectedStatus {
 ## OUTPUT CAPTURE QUICK REFERENCE
 
 ````bash
-# CORRECT: Run ALL tests in single process, output to file
-go test -v -timeout 30m ./$TEST_PKG/... > "$WORKDIR/logs/test_iter0.log" 2>&1
+# CORRECT: Run ONLY tests from specified file using -run filter
+go test -v -timeout 30m -run "$RUN_PATTERN" ./$TEST_PKG/... > "$WORKDIR/logs/test_iter0.log" 2>&1
 tail -30 "$WORKDIR/logs/test_iter0.log"
 
 # CORRECT: Build output to file, summary to Claude

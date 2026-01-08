@@ -1,8 +1,7 @@
 // -----------------------------------------------------------------------
-// Tests for announcement processing workers
-// Tests the two-step workflow:
-// 1. market_announcements - Fetches raw announcements from ASX API
-// 2. processing_announcements - Classifies and analyzes announcements
+// Tests for announcement workers
+// Tests the market_announcements worker which fetches and classifies
+// announcements in a single step (inline classification)
 // -----------------------------------------------------------------------
 
 package market_workers
@@ -31,29 +30,28 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 
 	helper := env.NewHTTPTestHelper(t)
 
-	// Create job definition with two-step workflow
+	// Create job definition with single-step workflow (classification is inline)
 	defID := fmt.Sprintf("test-announcements-single-%d", time.Now().UnixNano())
 	ticker := "EXR"
 
 	body := map[string]interface{}{
 		"id":          defID,
 		"name":        "Announcements Single Stock Test",
-		"description": "Test announcement processing with two-step workflow",
+		"description": "Test announcement fetch and classification",
 		"type":        "manager",
 		"enabled":     true,
 		"tags":        []string{"worker-test", "announcements", "single-stock"},
 		"steps": []map[string]interface{}{
 			{
-				"name": "fetch-announcements",
-				"type": "market_announcements",
+				"name": "fetch-market-data",
+				"type": "market_data",
 				"config": map[string]interface{}{
-					"asx_code": ticker,
+					"ticker": ticker,
 				},
 			},
 			{
-				"name":    "process-announcements",
-				"type":    "processing_announcements",
-				"depends": "fetch-announcements",
+				"name": "fetch-announcements",
+				"type": "market_announcements",
 				"config": map[string]interface{}{
 					"asx_code": ticker,
 				},
@@ -81,13 +79,13 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 
 	// === ASSERTIONS ===
 
-	// Assert summary document output (from processing_announcements)
-	summaryTags := []string{"asx-announcement-summary", strings.ToLower(ticker)}
+	// Assert announcement document output (with classification)
+	summaryTags := []string{"announcement", strings.ToLower(ticker)}
 	metadata, content := AssertOutputNotEmpty(t, helper, summaryTags)
 
-	// Assert content contains expected sections (Signal Classification)
+	// Assert content contains expected sections
 	expectedSections := []string{
-		"Signal Quality Metrics",
+		"Summary",
 		"Announcements",
 	}
 	AssertOutputContains(t, content, expectedSections)
@@ -101,30 +99,29 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 		}
 	}
 
-	// Assert schema compliance (Signal Classification)
+	// Assert schema compliance (quaero/announcements/v1)
 	isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
-	assert.True(t, isValid, "Output should comply with signal classification schema")
+	assert.True(t, isValid, "Output should comply with announcements schema")
 
-	// Assert required fields for signal classification
-	AssertMetadataHasFields(t, metadata, []string{"ticker", "total_count", "high_relevance_count"})
+	// Assert required fields for schema
+	AssertMetadataHasFields(t, metadata, []string{"$schema", "ticker", "summary", "announcements"})
 
-	// Validate relevance counts are valid numbers
-	if totalCount, ok := metadata["total_count"].(float64); ok {
-		assert.GreaterOrEqual(t, totalCount, 0.0, "total_count should be >= 0")
-		t.Logf("PASS: total_count = %.0f", totalCount)
-	}
-
-	if highRelevance, ok := metadata["high_relevance_count"].(float64); ok {
-		assert.GreaterOrEqual(t, highRelevance, 0.0, "high_relevance_count should be >= 0")
-		t.Logf("PASS: high_relevance_count = %.0f", highRelevance)
-	}
-
-	// Validate MQS scores if present
-	if mqsScores, ok := metadata["mqs_scores"].(map[string]interface{}); ok {
-		if snr, ok := mqsScores["signal_to_noise_ratio"].(float64); ok {
+	// Validate summary object contains classification counts
+	if summary, ok := metadata["summary"].(map[string]interface{}); ok {
+		if totalCount, ok := summary["total_count"].(float64); ok {
+			assert.GreaterOrEqual(t, totalCount, 0.0, "total_count should be >= 0")
+			t.Logf("PASS: total_count = %.0f", totalCount)
+		}
+		if highRelevance, ok := summary["high_relevance_count"].(float64); ok {
+			assert.GreaterOrEqual(t, highRelevance, 0.0, "high_relevance_count should be >= 0")
+			t.Logf("PASS: high_relevance_count = %.0f", highRelevance)
+		}
+		if snr, ok := summary["signal_to_noise_ratio"].(float64); ok {
 			assert.GreaterOrEqual(t, snr, 0.0, "signal_to_noise_ratio should be >= 0")
 			t.Logf("PASS: signal_to_noise_ratio = %.2f", snr)
 		}
+	} else {
+		t.Error("FAIL: Output MUST have summary object")
 	}
 
 	// Save output and schema
@@ -161,7 +158,7 @@ func TestProcessingAnnouncementsMulti(t *testing.T) {
 			body := map[string]interface{}{
 				"id":          defID,
 				"name":        fmt.Sprintf("Announcements Test - %s", stock),
-				"description": "Test announcement processing multi-stock",
+				"description": "Test announcement fetch and classification multi-stock",
 				"type":        "manager",
 				"enabled":     true,
 				"tags":        []string{"worker-test", "announcements", "multi-stock"},
@@ -169,14 +166,6 @@ func TestProcessingAnnouncementsMulti(t *testing.T) {
 					{
 						"name": "fetch-announcements",
 						"type": "market_announcements",
-						"config": map[string]interface{}{
-							"asx_code": stock,
-						},
-					},
-					{
-						"name":    "process-announcements",
-						"type":    "processing_announcements",
-						"depends": "fetch-announcements",
 						"config": map[string]interface{}{
 							"asx_code": stock,
 						},
@@ -206,9 +195,9 @@ func TestProcessingAnnouncementsMulti(t *testing.T) {
 
 			// === ASSERTIONS ===
 
-			// Assert summary document output
-			summaryTags := []string{"asx-announcement-summary", strings.ToLower(stock)}
-			metadata, content := AssertOutputNotEmpty(t, helper, summaryTags)
+			// Assert announcement document output
+			announcementTags := []string{"announcement", strings.ToLower(stock)}
+			metadata, content := AssertOutputNotEmpty(t, helper, announcementTags)
 
 			// Assert content not empty
 			assert.NotEmpty(t, content, "Content for %s should not be empty", stock)
@@ -218,7 +207,7 @@ func TestProcessingAnnouncementsMulti(t *testing.T) {
 			assert.True(t, isValid, "Output for %s should comply with schema", stock)
 
 			// Save output
-			SaveWorkerOutput(t, env, helper, summaryTags, stock)
+			SaveWorkerOutput(t, env, helper, announcementTags, stock)
 
 			t.Logf("PASS: Validated announcements for %s", stock)
 		})
@@ -230,24 +219,8 @@ func TestProcessingAnnouncementsMulti(t *testing.T) {
 	t.Log("PASS: announcement processing multi-stock test completed")
 }
 
-// =============================================================================
-// market_announcements Worker Tests (Raw Output - No Processing)
-// =============================================================================
-
-// RawAnnouncementsSchema defines expected fields for raw announcement output
-var RawAnnouncementsSchema = WorkerSchema{
-	RequiredFields: []string{"ticker", "announcements"},
-	OptionalFields: []string{"exchange", "fetched_at", "period", "total_count"},
-	FieldTypes: map[string]string{
-		"ticker":        "string",
-		"announcements": "array",
-		"total_count":   "number",
-	},
-	ArraySchemas: map[string][]string{},
-}
-
 // TestMarketAnnouncementsSingle tests the market_announcements worker alone (single ticker)
-// This tests raw announcement fetching WITHOUT the processing_announcements step
+// This tests announcement fetching WITH inline classification
 func TestMarketAnnouncementsSingle(t *testing.T) {
 	env := SetupFreshEnvironment(t)
 	if env == nil {
@@ -265,7 +238,7 @@ func TestMarketAnnouncementsSingle(t *testing.T) {
 	body := map[string]interface{}{
 		"id":          defID,
 		"name":        "Market Announcements Single Stock Test",
-		"description": "Test market_announcements worker raw output (no processing)",
+		"description": "Test market_announcements worker with inline classification",
 		"type":        "market_announcements",
 		"enabled":     true,
 		"tags":        []string{"worker-test", "market-announcements", "single-stock"},
@@ -298,39 +271,61 @@ func TestMarketAnnouncementsSingle(t *testing.T) {
 
 	// === ASSERTIONS ===
 
-	// Assert raw document output with correct tags
-	rawTags := []string{"asx-announcement-raw", strings.ToLower(ticker)}
-	metadata, content := AssertOutputNotEmpty(t, helper, rawTags)
-	assert.NotEmpty(t, content, "Raw content should not be empty")
+	// Assert announcement document output with correct tags
+	announcementTags := []string{"announcement", strings.ToLower(ticker)}
+	metadata, content := AssertOutputNotEmpty(t, helper, announcementTags)
+	assert.NotEmpty(t, content, "Announcement content should not be empty")
 
-	// Assert schema compliance for raw announcements
-	isValid := ValidateSchema(t, metadata, RawAnnouncementsSchema)
-	assert.True(t, isValid, "Output should comply with raw announcements schema")
+	// Assert schema compliance for announcements (quaero/announcements/v1)
+	isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
+	assert.True(t, isValid, "Output should comply with announcements schema")
 
-	// Raw output MUST have announcements array
+	// Output MUST have announcements array
 	if anns, ok := metadata["announcements"]; ok {
 		if arr, ok := anns.([]interface{}); ok {
 			assert.GreaterOrEqual(t, len(arr), 0, "announcements array should exist")
-			t.Logf("PASS: Raw output has %d announcements", len(arr))
+			t.Logf("PASS: Output has %d announcements", len(arr))
 		} else {
 			t.Error("FAIL: announcements field must be an array")
 		}
 	} else {
-		t.Error("FAIL: Raw output MUST have announcements field")
+		t.Error("FAIL: Output MUST have announcements field")
 	}
 
-	// Should NOT have classification fields (those come from processing_announcements)
-	classificationFields := []string{"high_relevance_count", "medium_relevance_count", "low_relevance_count", "noise_count", "mqs_scores"}
-	for _, field := range classificationFields {
-		if _, hasField := metadata[field]; hasField {
-			t.Errorf("FAIL: Raw output should NOT have %s (classification field from processing_announcements)", field)
+	// Validate summary object contains classification counts
+	if summary, ok := metadata["summary"].(map[string]interface{}); ok {
+		classificationFields := []string{"total_count", "high_relevance_count", "medium_relevance_count", "low_relevance_count", "noise_count"}
+		for _, field := range classificationFields {
+			if _, hasField := summary[field]; hasField {
+				t.Logf("PASS: summary has classification field %s", field)
+			}
+		}
+	} else {
+		t.Error("FAIL: Output MUST have summary object")
+	}
+
+	// Validate 36-month rolling window (date range should span at least 30 months for Y3 period)
+	// Note: EODHD may not have 36 months of data for all stocks, but we verify the requested range
+	if dateRangeStart, ok := metadata["date_range_start"].(string); ok {
+		if dateRangeEnd, ok := metadata["date_range_end"].(string); ok {
+			startDate, errStart := time.Parse("2006-01-02", dateRangeStart)
+			endDate, errEnd := time.Parse("2006-01-02", dateRangeEnd)
+			if errStart == nil && errEnd == nil {
+				monthsDiff := int(endDate.Sub(startDate).Hours() / (24 * 30))
+				t.Logf("Date range: %s to %s (%d months)", dateRangeStart, dateRangeEnd, monthsDiff)
+				// Warn if date range is less than expected (API may have limited data)
+				if monthsDiff < 30 {
+					t.Logf("WARNING: Date range is only %d months (expected ~36 months for Y3 period). API may have limited historical data.", monthsDiff)
+				} else {
+					t.Logf("PASS: Date range spans %d months (36-month rolling window)", monthsDiff)
+				}
+			}
 		}
 	}
-	t.Log("PASS: Raw output correctly lacks classification fields")
 
 	// Save output files
-	SaveWorkerOutput(t, env, helper, rawTags, ticker)
-	SaveSchemaDefinition(t, env, RawAnnouncementsSchema, "RawAnnouncementsSchema")
+	SaveWorkerOutput(t, env, helper, announcementTags, ticker)
+	SaveSchemaDefinition(t, env, AnnouncementsSchema, "AnnouncementsSchema")
 	AssertResultFilesExist(t, env, 1)
 	AssertSchemaFileExists(t, env)
 
@@ -352,7 +347,7 @@ func TestMarketAnnouncementsMulti(t *testing.T) {
 
 	helper := env.NewHTTPTestHelper(t)
 
-	// Test stocks for raw announcement fetching
+	// Test stocks for announcement fetching with inline classification
 	stocks := []string{"BHP", "GNP"}
 
 	for _, stock := range stocks {
@@ -362,7 +357,7 @@ func TestMarketAnnouncementsMulti(t *testing.T) {
 			body := map[string]interface{}{
 				"id":          defID,
 				"name":        fmt.Sprintf("Market Announcements Test - %s", stock),
-				"description": "Test market_announcements multi-stock raw output",
+				"description": "Test market_announcements multi-stock with classification",
 				"type":        "market_announcements",
 				"enabled":     true,
 				"tags":        []string{"worker-test", "market-announcements", "multi-stock"},
@@ -397,21 +392,21 @@ func TestMarketAnnouncementsMulti(t *testing.T) {
 
 			// === ASSERTIONS ===
 
-			// Assert raw document output
-			rawTags := []string{"asx-announcement-raw", strings.ToLower(stock)}
-			metadata, content := AssertOutputNotEmpty(t, helper, rawTags)
+			// Assert announcement document output with classification
+			announcementTags := []string{"announcement", strings.ToLower(stock)}
+			metadata, content := AssertOutputNotEmpty(t, helper, announcementTags)
 
 			// Assert content not empty
 			assert.NotEmpty(t, content, "Content for %s should not be empty", stock)
 
 			// Assert schema compliance
-			isValid := ValidateSchema(t, metadata, RawAnnouncementsSchema)
-			assert.True(t, isValid, "Output for %s should comply with raw schema", stock)
+			isValid := ValidateSchema(t, metadata, AnnouncementsSchema)
+			assert.True(t, isValid, "Output for %s should comply with announcements schema", stock)
 
 			// Save output
-			SaveWorkerOutput(t, env, helper, rawTags, stock)
+			SaveWorkerOutput(t, env, helper, announcementTags, stock)
 
-			t.Logf("PASS: Validated raw announcements for %s", stock)
+			t.Logf("PASS: Validated announcements for %s", stock)
 		})
 	}
 
@@ -419,85 +414,4 @@ func TestMarketAnnouncementsMulti(t *testing.T) {
 	AssertNoServiceErrors(t, env)
 
 	t.Log("PASS: market_announcements multi-stock test completed")
-}
-
-// TestMarketAnnouncementsRawOutput tests that market_announcements produces raw output
-// DEPRECATED: Use TestMarketAnnouncementsSingle instead - this test is kept for backward compatibility
-func TestMarketAnnouncementsRawOutput(t *testing.T) {
-	env := SetupFreshEnvironment(t)
-	if env == nil {
-		return
-	}
-	defer env.Cleanup()
-
-	RequireLLM(t, env)
-
-	helper := env.NewHTTPTestHelper(t)
-
-	defID := fmt.Sprintf("test-raw-announcements-%d", time.Now().UnixNano())
-	ticker := "GNP"
-
-	// Test market_announcements worker alone (raw output)
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "Raw Announcements Test",
-		"description": "Test market_announcements raw data output",
-		"type":        "market_announcements",
-		"enabled":     true,
-		"tags":        []string{"worker-test", "raw-announcements"},
-		"steps": []map[string]interface{}{
-			{
-				"name": "fetch-raw-announcements",
-				"type": "market_announcements",
-				"config": map[string]interface{}{
-					"asx_code": ticker,
-				},
-			},
-		},
-	}
-
-	jobID, _ := CreateAndExecuteJob(t, helper, body)
-	if jobID == "" {
-		return
-	}
-
-	t.Logf("Executing raw announcements job: %s", jobID)
-
-	finalStatus := WaitForJobCompletion(t, helper, jobID, 2*time.Minute)
-	if finalStatus != "completed" {
-		t.Skipf("Job ended with status %s", finalStatus)
-		return
-	}
-
-	// Assert raw document output
-	rawTags := []string{"asx-announcement-raw", strings.ToLower(ticker)}
-	metadata, content := AssertOutputNotEmpty(t, helper, rawTags)
-
-	// Assert schema compliance for raw announcements
-	isValid := ValidateSchema(t, metadata, RawAnnouncementsSchema)
-	assert.True(t, isValid, "Output should comply with raw announcements schema")
-
-	// Raw output should have announcements array
-	if anns, ok := metadata["announcements"]; ok {
-		if arr, ok := anns.([]interface{}); ok {
-			t.Logf("PASS: Raw output has %d announcements", len(arr))
-		}
-	} else {
-		t.Error("FAIL: Raw output MUST have announcements field")
-	}
-
-	// Should NOT have classification fields (those come from processing)
-	if _, hasRelevance := metadata["high_relevance_count"]; hasRelevance {
-		t.Error("FAIL: Raw output should NOT have high_relevance_count (classification field)")
-	} else {
-		t.Log("PASS: Raw output correctly lacks classification fields")
-	}
-
-	assert.NotEmpty(t, content, "Raw content should not be empty")
-
-	// Save output files
-	SaveWorkerOutput(t, env, helper, rawTags, ticker)
-	AssertResultFilesExist(t, env, 1)
-
-	t.Log("PASS: market_announcements raw output test completed")
 }

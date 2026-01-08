@@ -17,20 +17,20 @@ import (
 
 // MQSAnalyzer calculates Management Quality Scores from announcement and price data
 type MQSAnalyzer struct {
-	announcements []market.ASXAnnouncement
+	announcements []market.RawAnnouncement
 	prices        []market.OHLCV
 	priceMap      map[string]market.OHLCV // date string -> OHLCV
 	ticker        string
 	exchange      string
 	fundamentals  *market.FundamentalsFinancialData // EODHD financial data (optional)
-	newsItems     []EODHDNewsItem            // EODHD news for matching (optional)
-	marketCap     int64                      // Market capitalization
-	sector        string                     // Industry sector
-	assetClass    AssetClass                 // Asset class classification
+	newsItems     []EODHDNewsItem                   // EODHD news for matching (optional)
+	marketCap     int64                             // Market capitalization
+	sector        string                            // Industry sector
+	assetClass    AssetClass                        // Asset class classification
 }
 
 // NewMQSAnalyzer creates a new MQS analyzer
-func NewMQSAnalyzer(announcements []market.ASXAnnouncement, prices []market.OHLCV, ticker, exchange string) *MQSAnalyzer {
+func NewMQSAnalyzer(announcements []market.RawAnnouncement, prices []market.OHLCV, ticker, exchange string) *MQSAnalyzer {
 	// Build price map for O(1) lookups
 	priceMap := make(map[string]market.OHLCV)
 	for _, p := range prices {
@@ -63,7 +63,7 @@ func (a *MQSAnalyzer) SetNews(news []EODHDNewsItem) {
 
 // filterAnnouncementsToPeriod filters announcements to the specified date range
 func (a *MQSAnalyzer) filterAnnouncementsToPeriod(start, end time.Time) {
-	filtered := make([]market.ASXAnnouncement, 0, len(a.announcements))
+	filtered := make([]market.RawAnnouncement, 0, len(a.announcements))
 	for _, ann := range a.announcements {
 		if !ann.Date.Before(start) && !ann.Date.After(end) {
 			filtered = append(filtered, ann)
@@ -165,7 +165,7 @@ func (a *MQSAnalyzer) analyzeAnnouncements() []MQSAnnouncement {
 }
 
 // analyzeSingleAnnouncement calculates MQS metrics for one announcement
-func (a *MQSAnalyzer) analyzeSingleAnnouncement(ann market.ASXAnnouncement) *MQSAnnouncement {
+func (a *MQSAnalyzer) analyzeSingleAnnouncement(ann market.RawAnnouncement) *MQSAnnouncement {
 	// Get market data around announcement
 	leadIn := a.calculateLeadIn(ann.Date)
 	dayOf := a.calculateDayOf(ann.Date)

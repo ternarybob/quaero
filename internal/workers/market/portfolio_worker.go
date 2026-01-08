@@ -231,8 +231,8 @@ func (w *PortfolioWorker) loadPortfolioState(ctx context.Context, portfolioTag s
 						Name:        getString(hMap, "name"),
 						Sector:      getString(hMap, "sector"),
 						HoldingType: getString(hMap, "holding_type"),
-						Units:       getFloat64(hMap, "units"),
-						AvgPrice:    getFloat64(hMap, "avg_price"),
+						Units:       MapGetFloat64(hMap, "units"),
+						AvgPrice:    MapGetFloat64(hMap, "avg_price"),
 					}
 					holding.ComputeCostBasis()
 					portfolio.Holdings = append(portfolio.Holdings, holding)
@@ -277,7 +277,7 @@ func (w *PortfolioWorker) loadSignals(ctx context.Context, portfolio signals.Por
 			ts := signals.TickerSignals{
 				Ticker: holding.Ticker,
 				Price: signals.PriceSignals{
-					Current: getFloat64(doc.Metadata, "current_price"),
+					Current: MapGetFloat64(doc.Metadata, "current_price"),
 				},
 				Regime: signals.RegimeSignal{
 					Classification: getString(doc.Metadata, "regime"),

@@ -417,7 +417,7 @@ func (w *AssessorWorker) parseAssessmentResponse(response string, batchSignals [
 		if entryExit, ok := raw["entry_exit"].(map[string]interface{}); ok {
 			assessment.EntryExit = signals.EntryExitParams{
 				StopLoss:     getString(entryExit, "stop_loss"),
-				StopLossPct:  getFloat64(entryExit, "stop_loss_pct"),
+				StopLossPct:  MapGetFloat64(entryExit, "stop_loss_pct"),
 				Invalidation: getString(entryExit, "invalidation"),
 			}
 		}
