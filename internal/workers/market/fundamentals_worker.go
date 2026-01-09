@@ -24,6 +24,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
@@ -119,13 +120,14 @@ const (
 
 // FundamentalsWorker fetches comprehensive stock data using EODHD API.
 // This consolidates asx_stock_data, asx_analyst_coverage, and asx_historical_financials.
-// NO AI processing - pure data collection only.
+// Optionally generates a company blurb via LLM if providerFactory is available.
 type FundamentalsWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	httpClient      *http.Client
+	providerFactory *llm.ProviderFactory
 	debugEnabled    bool
 }
 
@@ -135,13 +137,14 @@ var _ interfaces.DefinitionWorker = (*FundamentalsWorker)(nil)
 // StockCollectorData holds all consolidated stock data (in-code schema)
 type StockCollectorData struct {
 	// Core identification
-	Symbol      string `json:"symbol"`
-	CompanyName string `json:"company_name"`
-	AsxCode     string `json:"asx_code"`
-	Currency    string `json:"currency"`
-	ISIN        string `json:"isin,omitempty"`
-	Sector      string `json:"sector,omitempty"`
-	Industry    string `json:"industry,omitempty"`
+	Symbol       string `json:"symbol"`
+	CompanyName  string `json:"company_name"`
+	CompanyBlurb string `json:"company_blurb,omitempty"`
+	AsxCode      string `json:"asx_code"`
+	Currency     string `json:"currency"`
+	ISIN         string `json:"isin,omitempty"`
+	Sector       string `json:"sector,omitempty"`
+	Industry     string `json:"industry,omitempty"`
 
 	// Price data (from EOD)
 	CurrentPrice  float64 `json:"current_price"`
@@ -515,6 +518,7 @@ func NewFundamentalsWorker(
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	providerFactory *llm.ProviderFactory,
 	debugEnabled bool,
 ) *FundamentalsWorker {
 	return &FundamentalsWorker{
@@ -525,7 +529,8 @@ func NewFundamentalsWorker(
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		debugEnabled: debugEnabled,
+		providerFactory: providerFactory,
+		debugEnabled:    debugEnabled,
 	}
 }
 
@@ -884,6 +889,9 @@ func (w *FundamentalsWorker) fetchComprehensiveData(ctx context.Context, ticker 
 	// STEP 4: Calculate period performance
 	w.calculatePeriodPerformance(data)
 
+	// STEP 5: Generate company blurb via LLM (if available)
+	data.CompanyBlurb = w.generateCompanyBlurb(ctx, data)
+
 	// Calculate upside potential
 	if data.CurrentPrice > 0 && data.TargetMean > 0 {
 		data.UpsidePotential = ((data.TargetMean - data.CurrentPrice) / data.CurrentPrice) * 100
@@ -896,6 +904,72 @@ func (w *FundamentalsWorker) fetchComprehensiveData(ctx context.Context, ticker 
 		Msg("Fetched comprehensive stock data from EODHD")
 
 	return data, nil
+}
+
+// generateCompanyBlurb generates a brief description of the company using LLM.
+// Returns an empty string if LLM is unavailable or fails (graceful degradation).
+func (w *FundamentalsWorker) generateCompanyBlurb(ctx context.Context, data *StockCollectorData) string {
+	// Skip if no LLM provider available
+	if w.providerFactory == nil {
+		w.logger.Debug().
+			Str("company", data.CompanyName).
+			Msg("LLM provider not available, skipping company blurb generation")
+		return ""
+	}
+
+	// Skip if we don't have enough data to generate a meaningful blurb
+	if data.CompanyName == "" {
+		return ""
+	}
+
+	// Build prompt for company blurb
+	prompt := fmt.Sprintf(`Generate a brief 1-2 sentence description of what %s does and its industry sector.
+
+Company: %s
+Sector: %s
+Industry: %s
+
+Requirements:
+- Keep it factual and concise (1-2 sentences max)
+- Focus only on what the company does and its industry
+- Do not include financial data, investment advice, or opinions
+- Do not mention stock price, market cap, or valuation
+- Write in present tense
+
+Response format: Just the description, no preamble or explanation.`,
+		data.CompanyName,
+		data.CompanyName,
+		data.Sector,
+		data.Industry,
+	)
+
+	request := &llm.ContentRequest{
+		Messages: []interfaces.Message{
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3, // Low temperature for factual content
+		MaxTokens:   150, // Brief response
+	}
+
+	response, err := w.providerFactory.GenerateContent(ctx, request)
+	if err != nil {
+		w.logger.Warn().
+			Err(err).
+			Str("company", data.CompanyName).
+			Msg("Failed to generate company blurb via LLM")
+		return ""
+	}
+
+	// Clean up response - remove any leading/trailing whitespace or quotes
+	blurb := strings.TrimSpace(response.Text)
+	blurb = strings.Trim(blurb, "\"")
+
+	w.logger.Debug().
+		Str("company", data.CompanyName).
+		Str("blurb", blurb).
+		Msg("Generated company blurb via LLM")
+
+	return blurb
 }
 
 // fetchEODHDFundamentals fetches all fundamental data from EODHD
@@ -1192,6 +1266,8 @@ func (w *FundamentalsWorker) fetchEODHDHistoricalPrices(ctx context.Context, api
 		dateFrom = now.AddDate(-2, 0, 0)
 	case "Y5":
 		dateFrom = now.AddDate(-5, 0, 0)
+	case "Y10":
+		dateFrom = now.AddDate(-10, 0, 0)
 	default:
 		dateFrom = now.AddDate(-1, 0, 0)
 	}
@@ -1680,6 +1756,7 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 		"asx_code":            ticker.Code, // Keep for backwards compatibility
 		"exchange":            ticker.Exchange,
 		"company_name":        data.CompanyName,
+		"company_blurb":       data.CompanyBlurb,
 		"currency":            data.Currency,
 		"current_price":       data.CurrentPrice,
 		"price_change":        data.PriceChange,
@@ -1864,7 +1941,7 @@ func (w *FundamentalsWorker) writeFinancialPerformanceTable(content *strings.Bui
 
 	// Add annual data first (most important)
 	for i, a := range data.AnnualData {
-		if i >= 8 { // Limit to 8 annual periods
+		if i >= 10 { // Limit to 10 annual periods (10 years if available)
 			break
 		}
 		label := a.EndDate[:7] // YYYY-MM format for label

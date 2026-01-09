@@ -36,7 +36,7 @@ func NewFundamentalsProvider(
 	logger arbor.ILogger,
 	debugEnabled bool,
 ) *FundamentalsProvider {
-	worker := NewFundamentalsWorker(documentStorage, kvStorage, logger, nil, debugEnabled)
+	worker := NewFundamentalsWorker(documentStorage, kvStorage, logger, nil, nil, debugEnabled)
 	return &FundamentalsProvider{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,

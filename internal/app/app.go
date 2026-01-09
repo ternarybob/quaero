@@ -963,6 +963,7 @@ func (a *App) initServices() error {
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 		jobMgr,
+		a.ProviderFactory,
 		a.Config.Jobs.Debug,
 	)
 	a.StepManager.RegisterWorker(marketFundamentalsWorker)

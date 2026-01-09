@@ -58,24 +58,27 @@ func TestJobIsolationSingle(t *testing.T) {
 				{"ticker": ticker},
 			},
 		},
+		// IMPORTANT: Both jobs use the SAME output_tags = ["format_output"] to replicate
+		// the production scenario where announcements-watchlist.toml and competitor-watchlist.toml
+		// both use output_tags = ["format_output"]. This tests job isolation when tags overlap.
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch_announcements",
 				"type": "market_announcements",
 				"config": map[string]interface{}{
-					"output_tags": []string{"format_announcements"},
+					"output_tags": []string{"format_output"}, // Same as Job 2 - tests isolation
 				},
 			},
 			{
-				"name": "format_announcements",
+				"name": "format_output",
 				"type": "output_formatter",
 				"config": map[string]interface{}{
-					"output_tags": []string{"email_announcements"},
+					"output_tags": []string{"email_report"}, // Same step name as Job 2
 					"title":       "Company Announcements",
 				},
 			},
 			{
-				"name": "email_announcements",
+				"name": "email_report",
 				"type": "email",
 				"config": map[string]interface{}{
 					"to":      "{email_recipient}",
@@ -105,12 +108,13 @@ func TestJobIsolationSingle(t *testing.T) {
 	t.Logf("Job 1 (announcements pipeline) completed successfully")
 
 	// Verify Job 1 created an announcement document
+	// The announcement document has tags like ["announcement", "exr", "format_output"]
 	announcementTags := []string{"announcement", strings.ToLower(ticker)}
 	_, announcementContent := AssertOutputNotEmpty(t, helper, announcementTags)
 	require.Contains(t, announcementContent, "Announcements", "Job 1 should create document with Announcements content")
 	t.Log("Job 1 created announcement document successfully")
 
-	// Save Job 1 output
+	// Save Job 1 output - use email_report tags since we changed step names
 	SaveWorkerOutput(t, env, helper, announcementTags, ticker+"_announcements")
 
 	// Small delay to ensure document is persisted
@@ -308,26 +312,29 @@ func TestJobIsolationMulti(t *testing.T) {
 		"config": map[string]interface{}{
 			"variables": tickerVariables,
 		},
+		// IMPORTANT: Both jobs use the SAME output_tags = ["format_output"] to replicate
+		// the production scenario where announcements-watchlist.toml and competitor-watchlist.toml
+		// both use output_tags = ["format_output"]. This tests job isolation when tags overlap.
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch_announcements",
 				"type": "market_announcements",
 				"config": map[string]interface{}{
-					"output_tags": []string{"format_announcements"},
+					"output_tags": []string{"format_output"}, // Same as Job 2 - tests isolation
 				},
 			},
 			{
-				"name": "format_announcements",
+				"name": "format_output",
 				"type": "output_formatter",
 				"config": map[string]interface{}{
-					"output_tags": []string{"email_announcements"},
+					"output_tags": []string{"email_report"}, // Same step name as Job 2
 					"title":       "Company Announcements - Watchlist Summary",
 					"style":       "body",
 					"order":       "ticker",
 				},
 			},
 			{
-				"name": "email_announcements",
+				"name": "email_report",
 				"type": "email",
 				"config": map[string]interface{}{
 					"to":      "{email_recipient}",
@@ -365,8 +372,8 @@ func TestJobIsolationMulti(t *testing.T) {
 		t.Logf("Job 1 created announcement document for %s", stock)
 	}
 
-	// Save Job 1 merged output
-	SaveWorkerOutput(t, env, helper, []string{"email_announcements"}, "announcements_watchlist")
+	// Save Job 1 merged output - use email_report tags since we changed step names
+	SaveWorkerOutput(t, env, helper, []string{"email_report"}, "announcements_watchlist")
 
 	// Small delay to ensure documents are persisted
 	time.Sleep(1 * time.Second)

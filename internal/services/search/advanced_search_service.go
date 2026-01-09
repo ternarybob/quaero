@@ -161,7 +161,8 @@ func (s *AdvancedSearchService) executeListDocuments(
 		Offset:   opts.Offset,
 		OrderBy:  orderBy,
 		OrderDir: orderDir,
-		Tags:     opts.Tags, // Push tags filter to DB level for efficiency
+		Tags:     opts.Tags,  // Push tags filter to DB level for efficiency
+		JobID:    opts.JobID, // Push job filter to DB level for isolation
 	}
 
 	// Push document_type filter to DB level for efficiency
@@ -256,6 +257,19 @@ func (s *AdvancedSearchService) applyFilters(
 	// Apply tags filter if specified (documents must have ALL tags)
 	if len(opts.Tags) > 0 {
 		results = filterByTags(results, opts.Tags)
+	}
+
+	// Apply job filter if specified (document.Jobs must contain the job ID)
+	// This is critical for job isolation - ensures documents from one pipeline
+	// don't leak into another pipeline's output
+	if opts.JobID != "" {
+		beforeJobFilter := len(results)
+		results = filterByJobs(results, opts.JobID)
+		s.logger.Debug().
+			Int("before_job_filter", beforeJobFilter).
+			Int("after_job_filter", len(results)).
+			Str("job_id", opts.JobID).
+			Msg("Job filtering results")
 	}
 
 	// Apply limit after filters

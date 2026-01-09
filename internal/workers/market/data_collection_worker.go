@@ -79,8 +79,9 @@ func NewDataCollectionWorker(
 
 	// Create embedded workers for inline execution
 	// Note: announcementsWorker gets nil providerFactory as AI summary is not needed in collection mode
+	// fundamentalsWorker gets nil providerFactory as company blurb generation is optional
 	// API keys are resolved at runtime from KV store by each worker
-	fundamentalsWorker := NewFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
+	fundamentalsWorker := NewFundamentalsWorker(documentStorage, kvStorage, logger, jobMgr, nil, debugEnabled)
 	marketDataWorker := NewDataWorker(documentStorage, kvStorage, logger, jobMgr)
 	directorInterestWorker := NewDirectorInterestWorker(documentStorage, logger, jobMgr)
 	competitorWorker := NewCompetitorWorker(documentStorage, kvStorage, jobMgr, logger, debugEnabled)
