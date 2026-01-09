@@ -38,12 +38,13 @@ var (
 	// FundamentalsSchema for market_fundamentals worker
 	FundamentalsSchema = WorkerSchema{
 		RequiredFields: []string{"asx_code", "company_name", "current_price", "currency"},
-		OptionalFields: []string{"historical_prices", "analyst_count", "pe_ratio", "change_percent", "volume", "market_cap", "ticker", "symbol"},
+		OptionalFields: []string{"historical_prices", "analyst_count", "pe_ratio", "change_percent", "volume", "market_cap", "ticker", "symbol", "company_blurb"},
 		FieldTypes: map[string]string{
 			"asx_code":          "string",
 			"ticker":            "string",
 			"symbol":            "string",
 			"company_name":      "string",
+			"company_blurb":     "string",
 			"current_price":     "number",
 			"currency":          "string",
 			"change_percent":    "number",

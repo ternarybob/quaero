@@ -1592,7 +1592,12 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 	content.WriteString(fmt.Sprintf("# %s Comprehensive Stock Data - %s\n\n", ticker.String(), data.CompanyName))
 	content.WriteString(fmt.Sprintf("**Last Updated**: %s\n", data.LastUpdated.Format("2 Jan 2006 3:04 PM AEST")))
 	content.WriteString(fmt.Sprintf("**Currency**: %s\n", data.Currency))
-	content.WriteString(fmt.Sprintf("**Worker**: %s\n\n", models.WorkerTypeMarketFundamentals))
+	content.WriteString(fmt.Sprintf("**Worker**: %s\n", models.WorkerTypeMarketFundamentals))
+	content.WriteString("\n")
+	if data.CompanyBlurb != "" {
+		content.WriteString("## About\n\n")
+		content.WriteString(fmt.Sprintf("%s\n\n", data.CompanyBlurb))
+	}
 
 	// Current Price Section
 	content.WriteString("## Current Price\n\n")

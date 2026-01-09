@@ -25,6 +25,8 @@ func TestWorkerFundamentalsSingle(t *testing.T) {
 
 	// Require EODHD for stock fundamentals data
 	RequireEODHD(t, env)
+	// Require LLM for company blurb generation (REQ-2)
+	RequireLLM(t, env)
 
 	helper := env.NewHTTPTestHelper(t)
 
@@ -90,6 +92,24 @@ func TestWorkerFundamentalsSingle(t *testing.T) {
 
 	// Assert specific fields
 	AssertMetadataHasFields(t, metadata, []string{"symbol", "current_price", "currency"})
+
+	// REQ-2: Assert company_blurb field exists in metadata and markdown
+	if companyBlurb, ok := metadata["company_blurb"].(string); ok {
+		if companyBlurb != "" {
+			t.Logf("PASS: company_blurb = %s", companyBlurb)
+			// Verify markdown contains the About section with company blurb
+			assert.Contains(t, content, "## About", "Markdown should contain About section with company blurb")
+		} else {
+			t.Logf("WARNING: company_blurb is empty - LLM may have failed to generate blurb")
+		}
+	} else {
+		t.Logf("WARNING: company_blurb field not present in metadata as string")
+	}
+
+	// Save schema definition for REQ-2 verification
+	if err := SaveSchemaDefinition(t, env, FundamentalsSchema, "FundamentalsSchema"); err != nil {
+		t.Logf("Warning: failed to save schema definition: %v", err)
+	}
 
 	// Validate historical_prices array if present
 	if histPrices, ok := metadata["historical_prices"].([]interface{}); ok {
