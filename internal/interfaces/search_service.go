@@ -23,6 +23,9 @@ type SearchOptions struct {
 	// Tags filters documents that have ALL specified tags (AND operation)
 	Tags []string
 
+	// JobID filters documents that belong to a specific job (document.Jobs contains this ID)
+	JobID string
+
 	// CreatedAfter filters documents created after this timestamp (RFC3339 format)
 	CreatedAfter string
 

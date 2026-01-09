@@ -113,6 +113,33 @@ func hasAllTags(docTags, requiredTags []string) bool {
 	return true
 }
 
+// filterByJobs filters documents that have the specified job ID in their Jobs array
+// Uses OR logic: document matches if its Jobs array contains the jobID
+// Used by both FTS5SearchService and AdvancedSearchService
+func filterByJobs(docs []*models.Document, jobID string) []*models.Document {
+	if jobID == "" {
+		return docs
+	}
+
+	filtered := make([]*models.Document, 0, len(docs))
+	for _, doc := range docs {
+		if hasJob(doc.Jobs, jobID) {
+			filtered = append(filtered, doc)
+		}
+	}
+	return filtered
+}
+
+// hasJob checks if the document's Jobs array contains the specified job ID
+func hasJob(docJobs []string, jobID string) bool {
+	for _, j := range docJobs {
+		if j == jobID {
+			return true
+		}
+	}
+	return false
+}
+
 // matchesMetadata checks if document metadata matches all filter criteria
 // Supports:
 //   - Flat keys: "category" matches metadata["category"]

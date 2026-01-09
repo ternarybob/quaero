@@ -74,6 +74,7 @@ const (
 type ListOptions struct {
 	SourceType    string
 	Tags          []string // Filter by tags (OR logic - match any tag)
+	JobID         string   // Filter by job ID (document.Jobs contains this ID)
 	Limit         int
 	Offset        int
 	OrderBy       string  // created_at, updated_at, title

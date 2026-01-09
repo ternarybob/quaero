@@ -236,9 +236,10 @@ Use `TaskOutput(task_id, block: false)` to check progress without blocking.
 **Use Task tool with Plan agent:** `Task(subagent_type: Plan, model: opus)`
 
 1. Read: `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`
-2. Analyze existing patterns in target directories (use `subagent_type: Explore, model: opus` for codebase exploration)
-3. Extract requirements → `$WORKDIR/requirements.md`
-4. Create step docs → `$WORKDIR/step_N.md` for each step
+2. For market worker tests: Read `.claude/skills/market-worker-test/SKILL.md` (MANDATORY)
+3. Analyze existing patterns in target directories (use `subagent_type: Explore, model: opus` for codebase exploration)
+4. Extract requirements → `$WORKDIR/requirements.md`
+5. Create step docs → `$WORKDIR/step_N.md` for each step
 
 **Step doc template (`$WORKDIR/step_N.md`):**
 ```markdown

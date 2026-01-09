@@ -69,7 +69,7 @@
                 </div>
                 <div class="card-body">
                     <!-- Filter Controls -->
-                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                         <input type="search" id="search-box" class="form-input" placeholder="Search documents...">
                         <div style="position: relative;">
                             <input type="text" id="tag-filter-input" class="form-input" placeholder="Filter by tags..."
@@ -79,6 +79,8 @@
                                 <!-- Tag options will be populated here -->
                             </div>
                         </div>
+                        <input type="text" id="job-filter-input" class="form-input" placeholder="Filter by job ID..."
+                            oninput="applyJobFilter()" autocomplete="off">
                     </div>
 
                     <!-- Selected Tags Row (full width below search) -->
@@ -96,12 +98,13 @@
                                 <th>SOURCE</th>
                                 <th>DETAILS</th>
                                 <th>TAGS</th>
+                                <th>JOBS</th>
                                 <th>UPDATED</th>
                             </tr>
                         </thead>
                         <tbody id="documents-table-body">
                             <tr>
-                                <td colspan="5" class="text-center">
+                                <td colspan="6" class="text-center">
                                     Loading documents...
                                 </td>
                             </tr>
@@ -140,6 +143,7 @@
         const pageSize = 50; // Server-side pagination page size
         let availableTags = []; // All tags available in the system
         let selectedTags = new Set(); // Currently selected tags for filtering
+        let jobFilter = ''; // Job ID filter
 
         // Load document statistics
         async function loadStats(button) {
@@ -215,6 +219,11 @@
                     params.append('tags', Array.from(selectedTags).join(','));
                 }
 
+                // Add job filter if specified
+                if (jobFilter) {
+                    params.append('job_id', jobFilter);
+                }
+
                 const response = await fetch(`/api/documents?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error('Failed to fetch documents');
@@ -241,6 +250,13 @@
 
         // Filter documents based on source filter (server-side)
         function filterDocuments() {
+            currentPage = 1; // Reset to first page when filtering
+            loadDocuments(); // Reload from server with new filter
+        }
+
+        // Apply job ID filter (server-side)
+        function applyJobFilter() {
+            jobFilter = document.getElementById('job-filter-input').value.trim();
             currentPage = 1; // Reset to first page when filtering
             loadDocuments(); // Reload from server with new filter
         }
@@ -305,6 +321,15 @@
                     ? tags.map(tag => `<span class="label">${tag}</span>`).join('')
                     : '<span class="text-gray">-</span>';
 
+                // Format jobs as short IDs (no links)
+                const jobs = doc.jobs || [];
+                const jobsHtml = jobs.length > 0
+                    ? jobs.map(jobId => {
+                        const shortId = jobId.substring(0, 8);
+                        return `<span class="label label-primary" title="${jobId}">${shortId}</span>`;
+                    }).join(' ')
+                    : '<span class="text-gray">-</span>';
+
                 return `
                     <tr class="document-row" onclick="toggleDetail('${doc.id}')">
                         <td style="text-align: center;" onclick="event.stopPropagation()">
@@ -320,10 +345,11 @@
                             </div>
                         </td>
                         <td>${tagsHtml}</td>
+                        <td>${jobsHtml}</td>
                         <td>${updatedDate}</td>
                     </tr>
                     <tr id="detail-${doc.id}" class="detail-row" style="display: none;">
-                        <td colspan="5" style="padding: 0;">
+                        <td colspan="6" style="padding: 0;">
                             <div class="detail-content">
                                 <div style="margin-bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between;">
                                     <div>

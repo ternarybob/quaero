@@ -29,7 +29,6 @@ type CompetitorOutput struct {
 	TargetTicker string             `json:"target_ticker"`
 	TargetCode   string             `json:"target_code"`
 	AnalyzedAt   string             `json:"analyzed_at"`
-	GeminiPrompt string             `json:"gemini_prompt"`
 	Competitors  []CompetitorEntry  `json:"competitors"`
 	WorkerDebug  *WorkerDebugOutput `json:"worker_debug,omitempty"`
 }
@@ -169,6 +168,10 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		}
 	}
 
+	// Get manager_id for document isolation across pipeline steps
+	// All documents from the same pipeline run share the same manager_id
+	managerID := workerutil.GetManagerID(ctx, w.jobMgr, stepID)
+
 	// Get tickers from metadata
 	tickers, _ := initResult.Metadata["tickers"].([]common.Ticker)
 	promptTemplate, _ := initResult.Metadata["prompt_template"].(string)
@@ -190,7 +193,7 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	var lastErr error
 	successCount := 0
 	for _, ticker := range tickers {
-		err := w.processTicker(ctx, ticker.Code, promptTemplate, apiKey, outputTags, stepID)
+		err := w.processTicker(ctx, ticker.Code, promptTemplate, apiKey, outputTags, stepID, managerID)
 		if err != nil {
 			w.logger.Error().Err(err).Str("ticker", ticker.String()).Msg("Failed to analyze competitors")
 			lastErr = err
@@ -215,12 +218,13 @@ func (w *CompetitorWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 }
 
 // processTicker analyzes competitors for a single target ticker
-func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTemplate, apiKey string, outputTags []string, stepID string) error {
+func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTemplate, apiKey string, outputTags []string, stepID, managerID string) error {
 	ticker := common.Ticker{Exchange: "ASX", Code: asxCode}
 
 	// Initialize debug info
 	debug := workerutil.NewWorkerDebug(models.WorkerTypeMarketCompetitor.String(), w.debugEnabled)
 	debug.SetTicker(ticker.String())
+	debug.SetJobID(stepID) // Include job ID in debug output
 	defer func() {
 		debug.Complete()
 	}()
@@ -243,7 +247,7 @@ func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTem
 
 	// Use LLM to identify competitors with rationale
 	debug.StartPhase("ai_generation")
-	competitors, actualPrompt, err := w.identifyCompetitors(ctx, asxCode, prompt, apiKey)
+	competitors, _, err := w.identifyCompetitors(ctx, asxCode, prompt, apiKey)
 	debug.EndPhase("ai_generation")
 	if err != nil {
 		w.logger.Error().Err(err).Str("asx_code", asxCode).Msg("Failed to identify competitors")
@@ -276,7 +280,7 @@ func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTem
 	}
 
 	// Create and save document
-	doc := w.createDocument(ticker, competitors, actualPrompt, outputTags, debug)
+	doc := w.createDocument(ticker, competitors, outputTags, debug, managerID)
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
 		debug.CompleteWithError(err)
 		return fmt.Errorf("failed to save document: %w", err)
@@ -296,7 +300,7 @@ func (w *CompetitorWorker) processTicker(ctx context.Context, asxCode, promptTem
 }
 
 // createDocument creates a document containing competitor analysis with schema output
-func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []CompetitorEntry, geminiPrompt string, outputTags []string, debug *workerutil.WorkerDebugInfo) *models.Document {
+func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []CompetitorEntry, outputTags []string, debug *workerutil.WorkerDebugInfo, managerID string) *models.Document {
 	// Build tags
 	tags := []string{
 		"competitor-analysis",
@@ -341,7 +345,6 @@ func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []Co
 		TargetTicker: ticker.String(),
 		TargetCode:   ticker.Code,
 		AnalyzedAt:   time.Now().Format(time.RFC3339),
-		GeminiPrompt: geminiPrompt,
 		Competitors:  competitors,
 		WorkerDebug:  workerDebug,
 	}
@@ -351,17 +354,19 @@ func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []Co
 	var metadata map[string]interface{}
 	json.Unmarshal(outputJSON, &metadata)
 
+	// Build Jobs array for job isolation (required by downstream workers like output_formatter)
+	// Use managerID so all steps in the same pipeline can find this document
+	var jobs []string
+	if managerID != "" {
+		jobs = []string{managerID}
+	}
+
 	// Build content markdown
 	var contentBuilder strings.Builder
 	contentBuilder.WriteString(fmt.Sprintf("# Competitor Analysis - %s\n\n", ticker.Code))
 	contentBuilder.WriteString(fmt.Sprintf("**Target:** %s\n", ticker.String()))
 	contentBuilder.WriteString(fmt.Sprintf("**Analyzed:** %s\n", time.Now().Format(time.RFC3339)))
 	contentBuilder.WriteString(fmt.Sprintf("**Competitors Found:** %d\n\n", len(competitors)))
-
-	// Show prompt in grey
-	contentBuilder.WriteString("<div style=\"color: #888; font-size: 0.85em;\">\n\n")
-	contentBuilder.WriteString(fmt.Sprintf("prompt - %s\n\n", geminiPrompt))
-	contentBuilder.WriteString("</div>\n\n")
 
 	// Competitors table
 	contentBuilder.WriteString("## Competitors\n\n")
@@ -377,18 +382,25 @@ func (w *CompetitorWorker) createDocument(ticker common.Ticker, competitors []Co
 		contentBuilder.WriteString("*No competitors identified*\n")
 	}
 
+	// Generate document ID early so it can be included in debug info
+	docID := uuid.New().String()
+	if debug != nil {
+		debug.SetDocumentID(docID) // Include document ID in debug output
+	}
+
 	// Add Worker Debug section to markdown
 	if debug != nil && debug.IsEnabled() {
 		contentBuilder.WriteString(debug.ToMarkdown())
 	}
 
 	return &models.Document{
-		ID:              uuid.New().String(),
+		ID:              docID,
 		SourceType:      "competitor-analysis",
 		SourceID:        fmt.Sprintf("%s:%s:competitor-analysis", ticker.Exchange, ticker.Code),
 		Title:           fmt.Sprintf("Competitor Analysis - %s", ticker.Code),
 		ContentMarkdown: contentBuilder.String(),
 		Tags:            tags,
+		Jobs:            jobs,
 		Metadata:        metadata,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),

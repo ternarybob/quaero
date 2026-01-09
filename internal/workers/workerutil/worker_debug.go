@@ -25,7 +25,8 @@ type WorkerDebugInfo struct {
 	enabled      bool
 	mu           sync.Mutex
 	WorkerType   string               `json:"worker_type"`
-	Ticker       string               `json:"ticker,omitempty"` // Optional: ticker being processed
+	Ticker       string               `json:"ticker,omitempty"`      // Optional: ticker being processed
+	DocumentID   string               `json:"document_id,omitempty"` // Document being generated
 	StartedAt    time.Time            `json:"started_at"`
 	CompletedAt  time.Time            `json:"completed_at,omitempty"`
 	APIEndpoints []APICallInfo        `json:"api_endpoints,omitempty"`
@@ -105,6 +106,26 @@ func (w *WorkerDebugInfo) SetTicker(ticker string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Ticker = ticker
+}
+
+// SetJobID sets the job ID for this worker execution
+func (w *WorkerDebugInfo) SetJobID(jobID string) {
+	if !w.enabled {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.jobID = jobID
+}
+
+// SetDocumentID sets the document ID being generated
+func (w *WorkerDebugInfo) SetDocumentID(documentID string) {
+	if !w.enabled {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.DocumentID = documentID
 }
 
 // RecordAPICall records details of an API call
@@ -352,6 +373,14 @@ func (w *WorkerDebugInfo) ToMetadata() map[string]interface{} {
 		result["ticker"] = w.Ticker
 	}
 
+	if w.jobID != "" {
+		result["job_id"] = w.jobID
+	}
+
+	if w.DocumentID != "" {
+		result["document_id"] = w.DocumentID
+	}
+
 	if !w.CompletedAt.IsZero() {
 		result["completed_at"] = w.CompletedAt.Format(time.RFC3339)
 	}
@@ -423,6 +452,12 @@ func (w *WorkerDebugInfo) ToMarkdown() string {
 	sb.WriteString(fmt.Sprintf("**Worker Type**: %s  \n", w.WorkerType))
 	if w.Ticker != "" {
 		sb.WriteString(fmt.Sprintf("**Ticker**: %s  \n", w.Ticker))
+	}
+	if w.jobID != "" {
+		sb.WriteString(fmt.Sprintf("**Job ID**: %s  \n", w.jobID))
+	}
+	if w.DocumentID != "" {
+		sb.WriteString(fmt.Sprintf("**Document ID**: %s  \n", w.DocumentID))
 	}
 	sb.WriteString(fmt.Sprintf("**Started**: %s  \n", w.StartedAt.Format(time.RFC3339)))
 	if !w.CompletedAt.IsZero() {

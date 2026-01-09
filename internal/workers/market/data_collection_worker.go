@@ -86,7 +86,8 @@ func NewDataCollectionWorker(
 	competitorWorker := NewCompetitorWorker(documentStorage, kvStorage, jobMgr, logger, debugEnabled)
 
 	// Create announcements worker (pure data collection, no providers needed)
-	announcementsWorker := NewAnnouncementsWorker(documentStorage, kvStorage, logger, jobMgr, debugEnabled)
+	// Pass marketDataWorker as DocumentProvisioner for worker-to-worker communication pattern
+	announcementsWorker := NewAnnouncementsWorker(documentStorage, kvStorage, logger, jobMgr, marketDataWorker, debugEnabled)
 
 	return &DataCollectionWorker{
 		BaseMarketWorker:       baseWorker,

@@ -186,6 +186,8 @@ func TestMyAPI(t *testing.T) {
 
 ## Market Worker Tests (`test/api/market_workers/`)
 
+**MANDATORY:** Read `.claude/skills/market-worker-test/SKILL.md` before creating or modifying market worker tests.
+
 Market worker tests follow a specific pattern with shared infrastructure in `common_test.go`.
 
 ### Core Infrastructure
@@ -520,6 +522,7 @@ For UI tests specifically:
 
 ## See Also
 
+- `.claude/skills/market-worker-test/SKILL.md` - Market worker test patterns (MANDATORY)
 - `.claude/skills/monitoring/SKILL.md` - Detailed UI testing patterns
 - `.claude/skills/go/SKILL.md` - Go code patterns
 - `docs/architecture/ARCHITECTURE.md` - System architecture

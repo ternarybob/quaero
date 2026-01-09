@@ -131,6 +131,17 @@ func (s *FTS5SearchService) Search(
 			Msg("Tag filtering results")
 	}
 
+	// Apply job filter if specified (document.Jobs must contain the job ID)
+	if opts.JobID != "" {
+		beforeJobFilter := len(results)
+		results = filterByJobs(results, opts.JobID)
+		s.logger.Debug().
+			Int("before_job_filter", beforeJobFilter).
+			Int("after_job_filter", len(results)).
+			Str("job_id", opts.JobID).
+			Msg("Job filtering results")
+	}
+
 	// Apply limit after filters
 	if opts.Limit > 0 && len(results) > opts.Limit {
 		results = results[:opts.Limit]

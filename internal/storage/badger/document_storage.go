@@ -141,14 +141,15 @@ func (s *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 	query := badgerhold.Where("ID").Ne("") // Select all
 
 	hasTags := opts != nil && len(opts.Tags) > 0
+	hasJobID := opts != nil && opts.JobID != ""
 
 	if opts != nil {
 		if opts.SourceType != "" {
 			query = query.And("SourceType").Eq(opts.SourceType)
 		}
-		// Don't apply Limit/Offset yet if we need to filter by tags in Go
+		// Don't apply Limit/Offset yet if we need to filter by tags or jobs in Go
 		// BadgerHold doesn't support array contains, so we filter post-query
-		if !hasTags {
+		if !hasTags && !hasJobID {
 			if opts.Limit > 0 {
 				query = query.Limit(opts.Limit)
 			}
@@ -185,6 +186,27 @@ func (s *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 			Int("total_before_filter", len(docs)).
 			Int("total_after_filter", len(filtered)).
 			Msg("BadgerDB: Tag filtering completed")
+
+		docs = filtered
+	}
+
+	// If job ID filter is specified, filter documents that have the job ID in their Jobs array
+	if hasJobID {
+		s.logger.Debug().
+			Str("filter_job_id", opts.JobID).
+			Msg("BadgerDB: Filtering by job ID")
+
+		filtered := make([]models.Document, 0)
+		for _, doc := range docs {
+			if hasJob(doc.Jobs, opts.JobID) {
+				filtered = append(filtered, doc)
+			}
+		}
+
+		s.logger.Debug().
+			Int("total_before_filter", len(docs)).
+			Int("total_after_filter", len(filtered)).
+			Msg("BadgerDB: Job ID filtering completed")
 
 		docs = filtered
 	}
@@ -332,6 +354,16 @@ func hasAllDocTags(docTags, requiredTags []string) bool {
 		}
 	}
 	return true
+}
+
+// hasJob checks if a job ID exists in the document's Jobs array
+func hasJob(docJobs []string, jobID string) bool {
+	for _, j := range docJobs {
+		if j == jobID {
+			return true
+		}
+	}
+	return false
 }
 
 // sortDocuments sorts a slice of documents by the specified field and direction.

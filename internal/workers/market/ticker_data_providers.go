@@ -266,6 +266,9 @@ type AnnouncementsProvider struct {
 var _ interfaces.AnnouncementDataProvider = (*AnnouncementsProvider)(nil)
 
 // NewAnnouncementsProvider creates a new AnnouncementsProvider.
+// Note: dataWorker is nil here because this provider is used standalone without
+// the full worker-to-worker communication pattern. Price data falls back to
+// direct document lookup via loadPriceDataDirect.
 func NewAnnouncementsProvider(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
@@ -278,7 +281,8 @@ func NewAnnouncementsProvider(
 		documentStorage,
 		kvStorage,
 		logger,
-		nil, // jobMgr
+		nil, // jobMgr - not used in provider context
+		nil, // documentProvisioner - falls back to direct document lookup
 		debugEnabled,
 	)
 	return &AnnouncementsProvider{

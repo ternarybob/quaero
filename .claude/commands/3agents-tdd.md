@@ -144,11 +144,16 @@ Verify directory exists before continuing.
 - `.claude/skills/go/SKILL.md` - Go changes
 - `.claude/skills/frontend/SKILL.md` - Frontend changes
 - `.claude/skills/monitoring/SKILL.md` - UI tests
+- `.claude/skills/market-worker-test/SKILL.md` - Market worker tests (MANDATORY for `test/api/market_workers/`)
 
 **Step 1.4: Read test architecture**
 - `docs/TEST_ARCHITECTURE.md`
 
-**Step 1.5: For UI job tests**
+**Step 1.5: For market worker tests**
+- Validate against skill: `.claude/skills/market-worker-test/SKILL.md`
+- Ensure required output files: `job_definition.json`, `schema.json`, `output.md`, `output.json`
+
+**Step 1.6: For UI job tests**
 - Validate against template: `test/ui/job_definition_general_test.go`
 
 ### PHASE 2: BUILD TEST LIST

@@ -720,6 +720,7 @@ func (w *FundamentalsWorker) processTicker(ctx context.Context, ticker common.Ti
 	// Initialize debug tracking
 	debug := workerutil.NewWorkerDebug("market_fundamentals", w.debugEnabled)
 	debug.SetTicker(ticker.String())
+	debug.SetJobID(stepID) // Include job ID in debug output
 
 	sourceType := "market_fundamentals"
 	sourceID := ticker.SourceID("stock_collector")
@@ -734,6 +735,11 @@ func (w *FundamentalsWorker) processTicker(ctx context.Context, ticker common.Ti
 				Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
 				Int("cache_hours", cacheHours).
 				Msg("Using cached stock collector data")
+
+			// Associate cached document with current job for downstream workers
+			if err := workerutil.AssociateDocumentWithJob(ctx, existingDoc, stepID, w.documentStorage, w.logger); err != nil {
+				w.logger.Warn().Err(err).Str("doc_id", existingDoc.ID).Str("step_id", stepID).Msg("Failed to associate cached document with job")
+			}
 
 			if w.jobMgr != nil {
 				w.jobMgr.AddJobLog(ctx, stepID, "info",
@@ -1766,8 +1772,12 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 		metadata["period_performance"] = data.PeriodPerformance
 	}
 
+	// Generate document ID early so it can be included in debug info
+	docID := "doc_" + uuid.New().String()
+
 	// Add worker debug metadata if enabled
 	if debug != nil {
+		debug.SetDocumentID(docID) // Include document ID in debug output
 		debug.Complete()
 		if debugMeta := debug.ToMetadata(); debugMeta != nil {
 			metadata["worker_debug"] = debugMeta
@@ -1780,7 +1790,7 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 
 	now := time.Now()
 	doc := &models.Document{
-		ID:              "doc_" + uuid.New().String(),
+		ID:              docID,
 		SourceType:      "market_fundamentals",
 		SourceID:        ticker.SourceID("stock_collector"),
 		URL:             fmt.Sprintf("https://eodhd.com/financial-summary/%s", ticker.EODHDSymbol()),

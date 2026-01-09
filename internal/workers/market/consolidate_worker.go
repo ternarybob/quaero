@@ -18,6 +18,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
 // ConsolidateWorker consolidates tagged documents into a single output document.
@@ -118,6 +119,9 @@ func (w *ConsolidateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		}
 	}
 
+	// Get manager_id for document search and isolation
+	managerID := workerutil.GetManagerID(ctx, w.jobMgr, stepID)
+
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
 	// Extract input_tags, defaulting to step name if not specified
@@ -166,12 +170,14 @@ func (w *ConsolidateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Consolidating documents with tags: %v", inputTags))
 	}
 
-	// Search for documents with input tags
+	// Search for documents with input tags, filtered by current pipeline
+	// JobID filter ensures we only get documents from this pipeline execution
 	opts := interfaces.SearchOptions{
 		Tags:     inputTags,
 		Limit:    100,
 		OrderBy:  "created_at",
 		OrderDir: "desc",
+		JobID:    managerID,
 	}
 
 	results, err := w.searchService.Search(ctx, "", opts)
@@ -295,6 +301,7 @@ func (w *ConsolidateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		Title:           title,
 		ContentMarkdown: sb.String(),
 		Tags:            finalTags,
+		Jobs:            []string{managerID},
 		SourceType:      "consolidation",
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
@@ -303,7 +310,6 @@ func (w *ConsolidateWorker) CreateJobs(ctx context.Context, step models.JobStep,
 			"source_tags":      inputTags,
 			"tickers":          tickers,
 			"consolidation":    true,
-			"parent_job_id":    stepID,
 			"consolidate_date": time.Now().Format(time.RFC3339),
 		},
 	}

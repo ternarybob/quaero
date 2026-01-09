@@ -27,3 +27,7 @@ description = "Fake EODHD API key for ASX stock data (overridden by .env.test)"
 [navexa_base_url]
 value = "https://api.navexa.com.au"
 description = "Navexa API base URL"
+
+[email_recipient]
+value = "bobmcallan@gmail.com"
+description = "Test email recipient for automated testing"

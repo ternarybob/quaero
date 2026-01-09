@@ -16,7 +16,10 @@ import (
 )
 
 // TestProcessingAnnouncementsSingle tests the full announcement processing pipeline
-// for a single stock using the two-step workflow.
+// for a single stock. This configuration matches production (announcements-watchlist.toml)
+// where only market_announcements runs without a preceding market_data step.
+// The announcements worker handles EODHD fallback internally for price impact data.
+// Also validates caching: running the job twice should return the same document ID.
 func TestProcessingAnnouncementsSingle(t *testing.T) {
 	env := SetupFreshEnvironment(t)
 	if env == nil {
@@ -30,7 +33,8 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 
 	helper := env.NewHTTPTestHelper(t)
 
-	// Create job definition with single-step workflow (classification is inline)
+	// Create job definition matching production config (no separate market_data step)
+	// Production: deployments/common/job-definitions/announcements-watchlist.toml
 	defID := fmt.Sprintf("test-announcements-single-%d", time.Now().UnixNano())
 	ticker := "EXR"
 
@@ -42,13 +46,6 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 		"enabled":     true,
 		"tags":        []string{"worker-test", "announcements", "single-stock"},
 		"steps": []map[string]interface{}{
-			{
-				"name": "fetch-market-data",
-				"type": "market_data",
-				"config": map[string]interface{}{
-					"ticker": ticker,
-				},
-			},
 			{
 				"name": "fetch-announcements",
 				"type": "market_announcements",
@@ -62,26 +59,52 @@ func TestProcessingAnnouncementsSingle(t *testing.T) {
 	// Save job definition
 	SaveJobDefinition(t, env, body)
 
-	// Create and execute job
-	jobID, _ := CreateAndExecuteJob(t, helper, body)
-	if jobID == "" {
+	// === FIRST EXECUTION ===
+	jobID1, _ := CreateAndExecuteJob(t, helper, body)
+	if jobID1 == "" {
 		return
 	}
 
-	t.Logf("Executing announcement processing job: %s", jobID)
+	t.Logf("Executing announcement processing job (1st run): %s", jobID1)
 
 	// Wait for completion
-	finalStatus := WaitForJobCompletion(t, helper, jobID, 3*time.Minute)
+	finalStatus := WaitForJobCompletion(t, helper, jobID1, 3*time.Minute)
 	if finalStatus != "completed" {
 		t.Skipf("Job ended with status %s", finalStatus)
 		return
 	}
 
-	// === ASSERTIONS ===
-
-	// Assert announcement document output (with classification)
+	// Get document ID from first run
 	summaryTags := []string{"announcement", strings.ToLower(ticker)}
-	metadata, content := AssertOutputNotEmpty(t, helper, summaryTags)
+	docID1, metadata, content := AssertOutputNotEmptyWithID(t, helper, summaryTags)
+	t.Logf("First run document ID: %s", docID1)
+
+	// === SECOND EXECUTION (tests caching) ===
+	jobID2, _ := CreateAndExecuteJob(t, helper, body)
+	if jobID2 == "" {
+		return
+	}
+
+	t.Logf("Executing announcement processing job (2nd run): %s", jobID2)
+
+	finalStatus2 := WaitForJobCompletion(t, helper, jobID2, 3*time.Minute)
+	if finalStatus2 != "completed" {
+		t.Skipf("Second job ended with status %s", finalStatus2)
+		return
+	}
+
+	// Get document ID from second run
+	docID2, _, _ := AssertOutputNotEmptyWithID(t, helper, summaryTags)
+	t.Logf("Second run document ID: %s", docID2)
+
+	// === CACHING ASSERTION ===
+	// Document ID should be the same (cached document reused)
+	assert.Equal(t, docID1, docID2, "CACHING: Document ID should be the same on second run (document was cached)")
+	if docID1 == docID2 {
+		t.Logf("PASS: Caching works - same document ID returned on second run")
+	}
+
+	// === REMAINING ASSERTIONS (using first run data) ===
 
 	// Assert content contains expected sections
 	expectedSections := []string{

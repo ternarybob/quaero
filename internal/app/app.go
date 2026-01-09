@@ -910,20 +910,9 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// Register Market Announcements worker (company announcements via Markit API)
-	// Now pure data collection - processing handled by separate worker
-	marketAnnouncementsWorker := marketworkers.NewAnnouncementsWorker(
-		a.StorageManager.DocumentStorage(),
-		a.StorageManager.KeyValueStorage(),
-		a.Logger,
-		jobMgr,
-		a.Config.Jobs.Debug,
-	)
-	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
-	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
-
 	// Register Market Data worker (multi-exchange via EODHD)
 	// API key is resolved at runtime from KV store
+	// NOTE: Must be created BEFORE AnnouncementsWorker for worker-to-worker communication
 	marketDataWorker := marketworkers.NewDataWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
@@ -932,6 +921,20 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(marketDataWorker)
 	a.Logger.Debug().Str("step_type", marketDataWorker.GetType().String()).Msg("Market Data worker registered")
+
+	// Register Market Announcements worker (company announcements via Markit API)
+	// Now pure data collection - processing handled by separate worker
+	// Receives DataWorker for worker-to-worker communication pattern (price data)
+	marketAnnouncementsWorker := marketworkers.NewAnnouncementsWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		marketDataWorker, // DocumentProvisioner for price data (worker-to-worker communication)
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
+	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
 
 	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
 	// API key is resolved at runtime from KV store

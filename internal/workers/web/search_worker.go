@@ -284,6 +284,7 @@ func (w *SearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 
 	// Create debug info if enabled
 	debug := workerutil.NewWorkerDebug("web_search", w.debugEnabled)
+	debug.SetJobID(stepID) // Include job ID in debug output
 
 	w.logger.Info().
 		Str("phase", "run").
@@ -666,6 +667,12 @@ func (w *SearchWorker) createDocument(ctx context.Context, results *WebSearchRes
 		content.WriteString("\n")
 	}
 
+	// Generate document ID early so it can be included in debug info
+	docID := "doc_" + uuid.New().String()
+	if debug != nil {
+		debug.SetDocumentID(docID) // Include document ID in debug output
+	}
+
 	// Append debug info to markdown if enabled
 	if debug != nil && debug.IsEnabled() {
 		content.WriteString(debug.ToMarkdown())
@@ -725,7 +732,7 @@ func (w *SearchWorker) createDocument(ctx context.Context, results *WebSearchRes
 
 	now := time.Now()
 	doc := &models.Document{
-		ID:              "doc_" + uuid.New().String(),
+		ID:              docID,
 		SourceType:      "web_search",
 		SourceID:        sourceID, // Stable ID for caching
 		Title:           fmt.Sprintf("Web Search: %s", query),

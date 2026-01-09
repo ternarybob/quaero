@@ -21,6 +21,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
 // DataWorker fetches market price data and calculates technical indicators.
@@ -32,8 +33,9 @@ type DataWorker struct {
 	jobMgr          *queue.Manager
 }
 
-// Compile-time assertion
+// Compile-time assertions
 var _ interfaces.DefinitionWorker = (*DataWorker)(nil)
+var _ interfaces.DocumentProvisioner = (*DataWorker)(nil)
 
 // MarketData holds all fetched and calculated market data
 type Data struct {
@@ -106,8 +108,8 @@ func (w *DataWorker) Init(ctx context.Context, step models.JobStep, jobDef model
 		return nil, fmt.Errorf("ticker, asx_code, tickers, or asx_codes is required in step config or job variables")
 	}
 
-	// Period for historical data (default Y1 = 12 months)
-	period := "Y1"
+	// Period for historical data (default Y3 = 36 months)
+	period := "Y3"
 	if p, ok := stepConfig["period"].(string); ok && p != "" {
 		period = p
 	}
@@ -241,6 +243,12 @@ func (w *DataWorker) processTicker(ctx context.Context, ticker common.Ticker, pe
 					Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
 					Int("cache_hours", cacheHours).
 					Msg("Using cached market data")
+
+				// Associate cached document with current job for downstream workers
+				if err := workerutil.AssociateDocumentWithJob(ctx, existingDoc, stepID, w.documentStorage, w.logger); err != nil {
+					w.logger.Warn().Err(err).Str("doc_id", existingDoc.ID).Str("step_id", stepID).Msg("Failed to associate cached document with job")
+				}
+
 				if w.jobMgr != nil {
 					w.jobMgr.AddJobLog(ctx, stepID, "info",
 						fmt.Sprintf("%s - Using cached data (last synced: %s)",
@@ -301,6 +309,121 @@ func (w *DataWorker) ReturnsChildJobs() bool {
 	return false
 }
 
+// EnsureMarketData ensures market data documents exist for the given tickers.
+// This method is designed for worker-to-worker communication where another worker
+// needs market data but should not fetch it directly.
+//
+// Pattern:
+//   - If document exists and is fresh (within cacheHours), returns existing document ID
+//   - If document is missing or stale, fetches from EODHD and saves new document
+//   - Returns document IDs only, NOT the data - caller retrieves via DocumentStorage
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - tickers: Tickers to ensure data for
+//   - cacheHours: Cache freshness window (0 = always fetch)
+//   - forceRefresh: If true, bypasses cache and always fetches
+//
+// Returns:
+//   - map[string]string: ticker string -> document ID
+//   - error: if all tickers failed
+func (w *DataWorker) EnsureMarketData(ctx context.Context, tickers []common.Ticker, cacheHours int, forceRefresh bool) (map[string]string, error) {
+	result := make(map[string]string)
+	var lastErr error
+	successCount := 0
+
+	// Default period for historical data
+	period := "Y3"
+
+	for _, ticker := range tickers {
+		sourceType := "market_data"
+		sourceID := ticker.SourceID("market_data")
+
+		// Check for cached data if not forcing refresh
+		if !forceRefresh && cacheHours > 0 {
+			existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+			if err == nil && existingDoc != nil && existingDoc.LastSynced != nil {
+				if time.Since(*existingDoc.LastSynced) < time.Duration(cacheHours)*time.Hour {
+					// Document is fresh - return its ID
+					w.logger.Debug().
+						Str("ticker", ticker.String()).
+						Str("doc_id", existingDoc.ID).
+						Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+						Msg("EnsureMarketData: using cached document")
+					result[ticker.String()] = existingDoc.ID
+					successCount++
+					continue
+				}
+			}
+		}
+
+		// Cache miss or stale - fetch fresh data
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Bool("force_refresh", forceRefresh).
+			Msg("EnsureMarketData: fetching fresh data")
+
+		marketData, err := w.fetchMarketData(ctx, ticker, period)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("ticker", ticker.String()).Msg("EnsureMarketData: failed to fetch data")
+			lastErr = err
+			continue
+		}
+
+		// Calculate technical indicators
+		w.calculateMarketTechnicals(marketData)
+
+		// Create and save document (no output tags needed for cross-worker call)
+		doc := w.createMarketDocument(ctx, marketData, nil, "", nil)
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
+			w.logger.Warn().Err(err).Str("ticker", ticker.String()).Msg("EnsureMarketData: failed to save document")
+			lastErr = err
+			continue
+		}
+
+		result[ticker.String()] = doc.ID
+		successCount++
+
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Str("doc_id", doc.ID).
+			Msg("EnsureMarketData: created fresh document")
+	}
+
+	// Return error only if ALL tickers failed
+	if successCount == 0 && lastErr != nil {
+		return nil, fmt.Errorf("all tickers failed, last error: %w", lastErr)
+	}
+
+	return result, nil
+}
+
+// EnsureDocuments implements the DocumentProvisioner interface.
+// It ensures market data documents exist for the given ticker identifiers.
+// Identifiers should be exchange-qualified ticker strings (e.g., "ASX:GNP", "NYSE:AAPL").
+//
+// This generic interface method wraps EnsureMarketData to enable worker-to-worker
+// communication without coupling to concrete types.
+func (w *DataWorker) EnsureDocuments(ctx context.Context, identifiers []string, options interfaces.DocumentProvisionOptions) (map[string]string, error) {
+	// Parse string identifiers to Ticker types
+	tickers := make([]common.Ticker, 0, len(identifiers))
+	for _, id := range identifiers {
+		ticker := common.ParseTicker(id)
+		if ticker.Code == "" {
+			w.logger.Warn().Str("identifier", id).Msg("EnsureDocuments: invalid ticker identifier")
+			continue
+		}
+		tickers = append(tickers, ticker)
+	}
+
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("no valid ticker identifiers provided")
+	}
+
+	// Delegate to existing EnsureMarketData implementation
+	return w.EnsureMarketData(ctx, tickers, options.CacheHours, options.ForceRefresh)
+}
+
 // ValidateConfig validates step configuration
 // Config can be nil if tickers will be provided via job-level variables.
 func (w *DataWorker) ValidateConfig(step models.JobStep) error {
@@ -358,10 +481,12 @@ func (w *DataWorker) fetchMarketData(ctx context.Context, ticker common.Ticker, 
 		from = to.AddDate(-1, 0, 0)
 	case "Y2":
 		from = to.AddDate(-2, 0, 0)
+	case "Y3":
+		from = to.AddDate(-3, 0, 0)
 	case "Y5":
 		from = to.AddDate(-5, 0, 0)
 	default:
-		from = to.AddDate(-1, 0, 0) // Default 1 year
+		from = to.AddDate(-3, 0, 0) // Default 3 years
 	}
 
 	// Fetch EOD data

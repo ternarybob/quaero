@@ -4,9 +4,66 @@
 package workerutil
 
 import (
+	"context"
+	"time"
+
+	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
+
+// JobGetter is a minimal interface for getting job state.
+// This allows workers to look up the manager_id from their step job.
+type JobGetter interface {
+	GetJob(ctx context.Context, jobID string) (interface{}, error)
+}
+
+// GetManagerID extracts the manager_id from the step job's metadata.
+// This is used by workers to tag documents with the orchestrator job ID,
+// enabling job isolation across all steps in the same pipeline.
+//
+// The manager_id is set by the dispatcher when creating step jobs and ensures
+// that all documents from the same pipeline run share the same identifier,
+// allowing downstream workers (like output_formatter) to find documents
+// created by upstream workers.
+//
+// Parameters:
+//   - ctx: context for the operation
+//   - jobMgr: interface with GetJob method to retrieve the step job state
+//   - stepID: the current step's job ID
+//
+// Returns the manager_id or stepID as fallback if manager_id not found.
+func GetManagerID(ctx context.Context, jobMgr JobGetter, stepID string) string {
+	if jobMgr == nil || stepID == "" {
+		return stepID
+	}
+
+	jobInterface, err := jobMgr.GetJob(ctx, stepID)
+	if err != nil {
+		return stepID // Fallback to stepID if job lookup fails
+	}
+
+	// Type assert to QueueJobState
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok || jobState == nil {
+		return stepID
+	}
+
+	// First check the ManagerID field directly (if set)
+	if jobState.ManagerID != nil && *jobState.ManagerID != "" {
+		return *jobState.ManagerID
+	}
+
+	// Fallback: check metadata for manager_id
+	if jobState.Metadata != nil {
+		if managerID, ok := jobState.Metadata["manager_id"].(string); ok && managerID != "" {
+			return managerID
+		}
+	}
+
+	return stepID // Ultimate fallback
+}
 
 // ParseTicker parses a ticker from config, supporting both legacy ("GNP") and
 // exchange-qualified ("ASX:GNP") formats.
@@ -208,6 +265,70 @@ func GetInputTags(config map[string]interface{}, stepName string) []string {
 	if stepName != "" {
 		return []string{stepName}
 	}
+
+	return nil
+}
+
+// AssociateDocumentWithJob associates an existing document with a job execution.
+// This is used when a worker reuses a cached document from a previous job.
+// It appends the job ID to the document's Jobs array (if not already present),
+// enabling multiple concurrent jobs to reference the same document.
+//
+// This solves the job isolation problem where:
+// 1. First run creates documents with job_id_1 in Jobs array
+// 2. Second run finds cached documents (still fresh), doesn't recreate them
+// 3. Without this function, second run's output_formatter finds NOTHING (filters by job_id_2)
+// 4. With this function, cached documents are associated with current job via Jobs array
+//
+// Parameters:
+//   - ctx: context for the operation
+//   - doc: the document to associate (must not be nil)
+//   - jobID: the current job's ID to associate the document with
+//   - storage: document storage for saving the updated document
+//   - logger: logger for tracking the association
+//
+// Returns error if the document could not be saved.
+func AssociateDocumentWithJob(ctx context.Context, doc *models.Document, jobID string, storage interfaces.DocumentStorage, logger arbor.ILogger) error {
+	if doc == nil {
+		return nil // Nothing to associate
+	}
+
+	if jobID == "" {
+		return nil // No job to associate with
+	}
+
+	// Check if job ID already exists in Jobs array (avoid duplicates)
+	for _, existingJob := range doc.Jobs {
+		if existingJob == jobID {
+			logger.Debug().
+				Str("doc_id", doc.ID).
+				Str("job_id", jobID).
+				Msg("Document already associated with job, skipping")
+			return nil
+		}
+	}
+
+	// Append job ID to Jobs array
+	doc.Jobs = append(doc.Jobs, jobID)
+
+	// Update timestamp
+	doc.UpdatedAt = time.Now()
+
+	// Save the document
+	if err := storage.SaveDocument(doc); err != nil {
+		logger.Error().
+			Err(err).
+			Str("doc_id", doc.ID).
+			Str("job_id", jobID).
+			Msg("Failed to save document after job association")
+		return err
+	}
+
+	logger.Info().
+		Str("doc_id", doc.ID).
+		Str("job_id", jobID).
+		Int("total_jobs", len(doc.Jobs)).
+		Msg("Associated cached document with current job")
 
 	return nil
 }

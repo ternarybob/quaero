@@ -352,6 +352,12 @@ func validateFieldType(val interface{}, expectedType string) bool {
 
 // AssertOutputNotEmpty validates that output.md and output.json exist and are non-empty
 func AssertOutputNotEmpty(t *testing.T, helper *common.HTTPTestHelper, tags []string) (map[string]interface{}, string) {
+	_, metadata, content := AssertOutputNotEmptyWithID(t, helper, tags)
+	return metadata, content
+}
+
+// AssertOutputNotEmptyWithID validates that output.md and output.json exist and are non-empty, returns document ID
+func AssertOutputNotEmptyWithID(t *testing.T, helper *common.HTTPTestHelper, tags []string) (string, map[string]interface{}, string) {
 	tagStr := strings.Join(tags, ",")
 	resp, err := helper.GET("/api/documents?tags=" + tagStr + "&limit=1")
 	require.NoError(t, err, "Failed to query documents with tags: %s", tagStr)
@@ -383,7 +389,7 @@ func AssertOutputNotEmpty(t *testing.T, helper *common.HTTPTestHelper, tags []st
 	require.Greater(t, len(doc.Metadata), 0, "FAIL: output.json (metadata) must not be empty - worker produced no metadata fields")
 	t.Logf("PASS: output.json has %d fields", len(doc.Metadata))
 
-	return doc.Metadata, doc.ContentMarkdown
+	return doc.ID, doc.Metadata, doc.ContentMarkdown
 }
 
 // AssertOutputContains validates that output.md contains expected strings

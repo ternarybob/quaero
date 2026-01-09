@@ -3,11 +3,17 @@
 // Uses AnnouncementService for exchange-specific data fetching
 // Outputs JSON and Markdown documents with classification and signal-noise analysis
 //
+// WORKER COMMUNICATION PATTERN:
+// This worker reads cached market_data documents for price impact analysis.
+// It does NOT fetch price data directly - that responsibility belongs to the
+// market_data worker. Pipeline configuration should ensure market_data runs
+// before market_announcements if price impact analysis is desired.
+//
 // DATA COLLECTION + PROCESSING:
 // - Primary: ASX sources (Markit API, HTML scraping) for ASX-listed stocks
-// - Fallback: EODHD for non-ASX exchanges or when ASX sources fail
+// - Fallback: EODHD for non-ASX exchanges or when ASX sources fail (via AnnouncementService)
 // - Applies classification via internal/services/announcements
-// - Outputs both raw and processed documents with 36-month rolling window
+// - Outputs both raw and processed documents
 // -----------------------------------------------------------------------
 
 package market
@@ -16,8 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/cookiejar"
 	"sort"
 	"strings"
 	"time"
@@ -126,41 +130,37 @@ type AnnouncementOutputItem struct {
 
 // AnnouncementsWorker fetches company announcements and produces classified output.
 // This worker executes synchronously (no child jobs).
-// Output: JSON and Markdown documents with classification and 36-month rolling window
+// Output: JSON and Markdown documents with classification
 type AnnouncementsWorker struct {
-	documentStorage interfaces.DocumentStorage
-	kvStorage       interfaces.KeyValueStorage
-	logger          arbor.ILogger
-	jobMgr          *queue.Manager
-	httpClient      *http.Client
-	announcementSvc *announcementsvc.Service
-	debugEnabled    bool
+	documentStorage     interfaces.DocumentStorage
+	logger              arbor.ILogger
+	jobMgr              *queue.Manager
+	announcementSvc     *announcementsvc.Service
+	debugEnabled        bool
+	documentProvisioner interfaces.DocumentProvisioner // For worker-to-worker communication pattern
 }
 
 // Compile-time assertion
 var _ interfaces.DefinitionWorker = (*AnnouncementsWorker)(nil)
 
-// NewAnnouncementsWorker creates a new announcements worker for data collection
+// NewAnnouncementsWorker creates a new announcements worker for data collection.
+// The documentProvisioner parameter enables worker-to-worker communication for price data.
+// Any worker implementing interfaces.DocumentProvisioner can be passed (e.g., DataWorker).
 func NewAnnouncementsWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
+	documentProvisioner interfaces.DocumentProvisioner,
 	debugEnabled bool,
 ) *AnnouncementsWorker {
-	jar, _ := cookiejar.New(nil)
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
-		Jar:     jar,
-	}
 	return &AnnouncementsWorker{
-		documentStorage: documentStorage,
-		kvStorage:       kvStorage,
-		logger:          logger,
-		jobMgr:          jobMgr,
-		httpClient:      httpClient,
-		announcementSvc: announcementsvc.NewService(logger, httpClient, kvStorage),
-		debugEnabled:    debugEnabled,
+		documentStorage:     documentStorage,
+		logger:              logger,
+		jobMgr:              jobMgr,
+		announcementSvc:     announcementsvc.NewService(logger, nil, kvStorage),
+		debugEnabled:        debugEnabled,
+		documentProvisioner: documentProvisioner,
 	}
 }
 
@@ -262,15 +262,23 @@ func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobSte
 		return "", fmt.Errorf("no ASX codes in init result")
 	}
 
+	// Get manager_id for document isolation across pipeline steps
+	// All documents from the same pipeline run share the same manager_id
+	managerID := workerutil.GetManagerID(ctx, w.jobMgr, stepID)
+
 	// Get config parameters - default to 3 years (36 months rolling)
 	period := "Y3"
 	limit := 1000
+	cacheHours := 24 // Default cache duration for announcements
 	if step.Config != nil {
 		if p, ok := step.Config["period"].(string); ok && p != "" {
 			period = p
 		}
 		if l, ok := step.Config["limit"].(float64); ok {
 			limit = int(l)
+		}
+		if c, ok := step.Config["cache_hours"].(float64); ok {
+			cacheHours = int(c)
 		}
 	}
 
@@ -288,7 +296,7 @@ func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobSte
 
 	// Process each ticker
 	for _, code := range codes {
-		if err := w.processOneTicker(ctx, code, period, limit, &jobDef, stepID, outputTags); err != nil {
+		if err := w.processOneTicker(ctx, code, period, limit, cacheHours, &jobDef, stepID, managerID, outputTags); err != nil {
 			w.logger.Warn().Err(err).Str("asx_code", code).Msg("Failed to fetch announcements")
 			if w.jobMgr != nil {
 				w.jobMgr.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Failed to fetch announcements for %s: %v", code, err))
@@ -301,14 +309,46 @@ func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobSte
 }
 
 // processOneTicker fetches and stores announcements for a single ticker
-func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, code, period string, limit int, jobDef *models.JobDefinition, stepID string, outputTags []string) error {
+func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, code, period string, limit int, cacheHours int, jobDef *models.JobDefinition, stepID, managerID string, outputTags []string) error {
 	// Initialize debug info
-	ticker := fmt.Sprintf("ASX:%s", code)
+	tickerStr := fmt.Sprintf("ASX:%s", code)
 	debug := workerutil.NewWorkerDebug(models.WorkerTypeMarketAnnouncements.String(), w.debugEnabled)
-	debug.SetTicker(ticker)
+	debug.SetTicker(tickerStr)
+	debug.SetJobID(stepID) // Include job ID in debug output
 	defer func() {
 		debug.Complete()
 	}()
+
+	// Build source identifiers for caching
+	sourceType := "announcement"
+	sourceID := fmt.Sprintf("ASX:%s:announcement", code)
+
+	// Check for cached data before fetching
+	if cacheHours > 0 {
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && existingDoc != nil && existingDoc.LastSynced != nil {
+			if time.Since(*existingDoc.LastSynced) < time.Duration(cacheHours)*time.Hour {
+				w.logger.Info().
+					Str("code", code).
+					Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+					Int("cache_hours", cacheHours).
+					Msg("Using cached announcements data")
+
+				// Associate cached document with current job for downstream workers
+				// Use managerID so all steps in the pipeline can find this document
+				if err := workerutil.AssociateDocumentWithJob(ctx, existingDoc, managerID, w.documentStorage, w.logger); err != nil {
+					w.logger.Warn().Err(err).Str("doc_id", existingDoc.ID).Str("manager_id", managerID).Msg("Failed to associate cached document with job")
+				}
+
+				if w.jobMgr != nil {
+					w.jobMgr.AddJobLog(ctx, stepID, "info",
+						fmt.Sprintf("%s - Using cached announcements (last synced: %s)",
+							code, existingDoc.LastSynced.Format("2006-01-02 15:04")))
+				}
+				return nil
+			}
+		}
+	}
 
 	w.logger.Info().Str("code", code).Str("period", period).Msg("Fetching announcements")
 
@@ -328,7 +368,7 @@ func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, code, period
 
 	// Create announcement document with classification (with timing)
 	debug.StartPhase("computation")
-	doc := w.createDocument(ctx, anns, code, jobDef, outputTags, debug)
+	doc := w.createDocument(ctx, anns, code, jobDef, outputTags, debug, managerID)
 	debug.EndPhase("computation")
 
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
@@ -351,7 +391,7 @@ func (w *AnnouncementsWorker) processOneTicker(ctx context.Context, code, period
 }
 
 // createDocument creates a document containing announcement data with classification
-func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnnouncement, code string, jobDef *models.JobDefinition, outputTags []string, debug *workerutil.WorkerDebugInfo) *models.Document {
+func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnnouncement, code string, jobDef *models.JobDefinition, outputTags []string, debug *workerutil.WorkerDebugInfo, managerID string) *models.Document {
 	ticker := common.Ticker{Exchange: "ASX", Code: code}
 
 	// Load price data from market_data worker (respects separation of concerns)
@@ -531,6 +571,13 @@ func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnno
 	var metadata map[string]interface{}
 	json.Unmarshal(outputJSON, &metadata)
 
+	// Build Jobs array for job isolation (required by downstream workers like output_formatter)
+	// Use managerID so all steps in the same pipeline can find this document
+	var jobs []string
+	if managerID != "" {
+		jobs = []string{managerID}
+	}
+
 	// Build content markdown
 	var contentBuilder strings.Builder
 	contentBuilder.WriteString(fmt.Sprintf("# Company Announcements - %s\n\n", code))
@@ -590,17 +637,38 @@ func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnno
 	// Table with smaller font using HTML wrapper
 	contentBuilder.WriteString("<div style=\"font-size: 0.85em;\">\n\n")
 
-	// Table header - simplified: removed Review column
-	contentBuilder.WriteString("| Date | PS | Headline | Price | Volume | Link |\n")
-	contentBuilder.WriteString("|------|:--:|----------|------:|-------:|------|\n")
+	// Table header - includes Signal rating column
+	contentBuilder.WriteString("| Date | PS | Signal | Headline | Price | Volume | Link |\n")
+	contentBuilder.WriteString("|------|:--:|:------:|----------|------:|-------:|------|\n")
 
-	// Table rows - consolidated by date
+	// Limit to 10 most recent announcements for markdown display
+	displayCount := len(dateOrder)
+	if displayCount > 10 {
+		dateOrder = dateOrder[:10]
+	}
+
+	// Table rows - consolidated by date, limited to 10
 	for _, dateStr := range dateOrder {
 		ann := consolidatedByDate[dateStr]
 
 		ps := ""
 		if ann.PriceSensitive {
 			ps = "✓"
+		}
+
+		// Format signal rating (abbreviated)
+		signalStr := "-"
+		switch ann.SignalRating {
+		case "HIGH_SIGNAL":
+			signalStr = "HIGH"
+		case "MODERATE_SIGNAL":
+			signalStr = "MOD"
+		case "LOW_SIGNAL":
+			signalStr = "LOW"
+		case "NOISE":
+			signalStr = "NOISE"
+		case "ROUTINE":
+			signalStr = "RTN"
 		}
 
 		// Build link
@@ -635,9 +703,10 @@ func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnno
 			volumeStr = fmt.Sprintf("<span style=\"color:%s\">%.1fx</span>", color, *ann.VolumeMultiple)
 		}
 
-		contentBuilder.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+		contentBuilder.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
 			dateStr,
 			ps,
+			signalStr,
 			headline,
 			priceStr,
 			volumeStr,
@@ -647,25 +716,35 @@ func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnno
 
 	contentBuilder.WriteString("\n</div>\n")
 
-	// Add note showing count
-	contentBuilder.WriteString(fmt.Sprintf("\n*Showing %d of %d (High and Medium relevance only)*\n",
-		len(displayAnns), len(processed)))
+	// Add note showing count (limited to 10 most recent)
+	shownCount := len(dateOrder)
+	contentBuilder.WriteString(fmt.Sprintf("\n*Showing %d of %d HIGH/MEDIUM relevance (last 10, total %d announcements)*\n",
+		shownCount, displayCount, len(processed)))
+
+	// Generate document ID early so it can be included in debug info
+	docID := uuid.New().String()
+	if debug != nil {
+		debug.SetDocumentID(docID) // Include document ID in debug output
+	}
 
 	// Add Worker Debug section to markdown (uses workerutil.ToMarkdown())
 	if debug != nil && debug.IsEnabled() {
 		contentBuilder.WriteString(debug.ToMarkdown())
 	}
 
+	now := time.Now()
 	return &models.Document{
-		ID:              uuid.New().String(),
+		ID:              docID,
 		SourceType:      "announcement",
 		SourceID:        fmt.Sprintf("%s:%s:announcement", ticker.Exchange, ticker.Code),
 		Title:           fmt.Sprintf("Company Announcements - %s", code),
 		ContentMarkdown: contentBuilder.String(),
 		Tags:            tags,
+		Jobs:            jobs,
 		Metadata:        metadata,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastSynced:      &now, // Required for caching to work
 	}
 }
 
@@ -717,10 +796,63 @@ func (w *AnnouncementsWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
-// loadPriceData retrieves OHLCV data from cached market_data document.
-// This respects separation of concerns - market_data worker handles collection/caching.
-// Returns nil if no data is available.
+// loadPriceData retrieves OHLCV data using the DocumentProvisioner interface.
+//
+// ARCHITECTURE: This uses the worker-to-worker communication pattern:
+//  1. Call DocumentProvisioner.EnsureDocuments() with ticker identifier
+//  2. Receive document ID(s) back
+//  3. Use document ID to retrieve document content from DocumentStorage
+//
+// This ensures the provisioner (e.g., DataWorker) owns all market data fetching and caching logic.
+// If documentProvisioner is nil (backward compatibility), falls back to direct document lookup.
 func (w *AnnouncementsWorker) loadPriceData(ctx context.Context, ticker common.Ticker) []OHLCV {
+	if w.documentProvisioner == nil {
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Msg("No DocumentProvisioner available, falling back to direct document lookup")
+		return w.loadPriceDataDirect(ctx, ticker)
+	}
+
+	// Call DocumentProvisioner to ensure market data exists (worker-to-worker communication)
+	// Use 24-hour cache, no force refresh
+	docIDs, err := w.documentProvisioner.EnsureDocuments(ctx, []string{ticker.String()}, interfaces.DocumentProvisionOptions{
+		CacheHours:   24,
+		ForceRefresh: false,
+	})
+	if err != nil {
+		w.logger.Debug().
+			Err(err).
+			Str("ticker", ticker.String()).
+			Msg("Failed to ensure market data via DocumentProvisioner")
+		return nil
+	}
+
+	// Get document ID for this ticker
+	docID, ok := docIDs[ticker.String()]
+	if !ok || docID == "" {
+		w.logger.Debug().
+			Str("ticker", ticker.String()).
+			Msg("No document ID returned for ticker from DocumentProvisioner")
+		return nil
+	}
+
+	// Retrieve document by ID
+	doc, err := w.documentStorage.GetDocument(docID)
+	if err != nil || doc == nil {
+		w.logger.Debug().
+			Err(err).
+			Str("ticker", ticker.String()).
+			Str("doc_id", docID).
+			Msg("Failed to retrieve market data document by ID")
+		return nil
+	}
+
+	return w.extractOHLCVFromDocument(doc, ticker)
+}
+
+// loadPriceDataDirect attempts to load price data directly from document storage.
+// This is the fallback when DataWorker is not available.
+func (w *AnnouncementsWorker) loadPriceDataDirect(ctx context.Context, ticker common.Ticker) []OHLCV {
 	sourceType := models.WorkerTypeMarketData.String()
 	sourceID := ticker.SourceID("market_data")
 
@@ -730,10 +862,15 @@ func (w *AnnouncementsWorker) loadPriceData(ctx context.Context, ticker common.T
 			Str("ticker", ticker.String()).
 			Str("source_type", sourceType).
 			Str("source_id", sourceID).
-			Msg("No cached market data found for price impact calculation")
+			Msg("No cached market data document found (direct lookup)")
 		return nil
 	}
 
+	return w.extractOHLCVFromDocument(doc, ticker)
+}
+
+// extractOHLCVFromDocument extracts OHLCV price data from a market data document.
+func (w *AnnouncementsWorker) extractOHLCVFromDocument(doc *models.Document, ticker common.Ticker) []OHLCV {
 	// Extract historical prices from document metadata
 	// BadgerHold uses gob encoding, so we need to handle both []interface{} and []map[string]interface{}
 	var pricesData []interface{}
@@ -787,7 +924,7 @@ func (w *AnnouncementsWorker) loadPriceData(ctx context.Context, ticker common.T
 	w.logger.Debug().
 		Str("ticker", ticker.String()).
 		Int("price_count", len(prices)).
-		Msg("Loaded market data for price impact calculation")
+		Msg("Extracted price data from market data document")
 
 	return prices
 }

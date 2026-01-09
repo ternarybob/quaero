@@ -71,6 +71,7 @@ output_tags = ["format_output"]  # next step name
 #   format = "inline|pdf|html|markdown" (default: inline)
 #   attachment = true|false (default: false)
 #   style = "proforma|body" (default: body)
+#   order = "ticker|created_at" (default: ticker)
 
 [step.format_output]
 type = "output_formatter"
@@ -80,7 +81,8 @@ on_error = "fail"
 # input_tags defaults to ["format_output"] (step name)
 output_tags = ["email_report"]  # next step name
 title = "Competitor Analysis - Watchlist Summary"
-style = "proforma"
+style = "body"           # Merge document content (not table listing)
+order = "ticker"         # Order by ticker alphabetically (EXR, GNP, SKS, TWR)
 # format = "inline"     # default: inline (markdown converted to HTML in body)
 # attachment = false    # default: no attachments
 

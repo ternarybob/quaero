@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -195,7 +196,7 @@ func (d *JobDispatcher) ExecuteJobDefinition(ctx context.Context, jobDef *models
 }
 
 // executeJobDefinitionInternal is the internal implementation that optionally accepts a pre-created manager ID.
-func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCreatedManagerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCreatedManagerID string, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (resultManagerID string, resultErr error) {
 	// Use provided manager ID or generate new one
 	var managerID string
 	managerAlreadyCreated := preCreatedManagerID != ""
@@ -204,6 +205,39 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 	} else {
 		managerID = uuid.New().String()
 	}
+
+	// CRITICAL: Panic recovery to prevent crashes from propagating
+	// Without this, any panic in step execution (e.g., in workers like EmailWorker)
+	// will crash the entire application without proper logging or cleanup
+	defer func() {
+		if r := recover(); r != nil {
+			stackTrace := common.GetStackTrace()
+
+			// Log the panic at ERROR level
+			d.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Str("stack", stackTrace).
+				Str("manager_id", managerID).
+				Str("job_def_id", jobDef.ID).
+				Str("job_def_name", jobDef.Name).
+				Msg("FATAL: Panic in job definition execution - writing crash file")
+
+			// Write crash file for debugging and audit
+			common.WriteCrashFile(r, stackTrace)
+
+			// Mark manager job as failed if we have a valid ID
+			if managerID != "" {
+				panicErr := fmt.Sprintf("Job panicked: %v", r)
+				d.jobManager.SetJobError(ctx, managerID, panicErr)
+				d.jobManager.UpdateJobStatus(ctx, managerID, "failed")
+				d.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("PANIC: %s", panicErr))
+			}
+
+			// Set return values
+			resultManagerID = managerID
+			resultErr = fmt.Errorf("job definition execution panicked: %v", r)
+		}
+	}()
 
 	// Prepare config and metadata
 	jobDefConfig := make(map[string]interface{})

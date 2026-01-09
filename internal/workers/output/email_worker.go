@@ -22,6 +22,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/mailer"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/renderer/html"
@@ -142,6 +143,9 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		}
 	}
 
+	// Get manager_id for document search - all steps in the same pipeline share this ID
+	managerID := workerutil.GetManagerID(ctx, w.jobMgr, stepID)
+
 	// Extract metadata from init result
 	to, _ := initResult.Metadata["to"].(string)
 	subject, _ := initResult.Metadata["subject"].(string)
@@ -155,21 +159,42 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	// First, check for output_formatter document with instructions
-	formatterInstr := w.parseOutputFormatterDocument(ctx, stepConfig, step.Name)
+	formatterInstr := w.parseOutputFormatterDocument(ctx, stepConfig, step.Name, managerID)
 
 	var body, htmlBody string
 	var bodyResult emailBodyResult
 
+	// Extract document_content option for content field priority override
+	documentContent := "" // empty means use priority: html > markdown > json
+	if dc, ok := stepConfig["document_content"].(string); ok {
+		documentContent = strings.ToLower(dc)
+	}
+
 	if formatterInstr.found {
 		// Use output_formatter document for body
 		w.logger.Info().Msg("Using output_formatter document for email content")
-		body = formatterInstr.bodyMarkdown
-		htmlBody = w.convertMarkdownToHTML(formatterInstr.bodyMarkdown)
+
+		// Content priority: pre-rendered HTML > markdown conversion
+		// Unless document_content explicitly requests a specific format
+		if documentContent != "" {
+			// User explicitly requested a specific content format
+			body, htmlBody = w.selectDocumentContent(formatterInstr.sourceDoc, documentContent)
+		} else if formatterInstr.bodyHTML != "" {
+			// Use pre-rendered HTML directly (from ContentHTML field)
+			htmlBody = formatterInstr.bodyHTML
+			body = formatterInstr.bodyMarkdown
+			w.logger.Info().Msg("Using pre-rendered ContentHTML from output_formatter document")
+		} else {
+			// Fall back to converting markdown to HTML
+			body = formatterInstr.bodyMarkdown
+			htmlBody = w.convertMarkdownToHTML(formatterInstr.bodyMarkdown)
+		}
+
 		bodyResult.sourceDoc = formatterInstr.sourceDoc
 		bodyResult.attachments = w.loadDocumentsForAttachment(ctx, formatterInstr.documentIDs)
 	} else {
 		// Fallback to traditional body resolution
-		bodyResult = w.resolveBodyWithSource(ctx, stepConfig)
+		bodyResult = w.resolveBodyWithSource(ctx, stepConfig, managerID)
 		body = bodyResult.textBody
 		htmlBody = bodyResult.htmlBody
 	}
@@ -274,7 +299,8 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 
 		// Save HTML body as document for verification and debugging
 		// This allows tests to retrieve and verify actual HTML content
-		htmlDoc := w.saveHTMLDocument(ctx, stepID, subject, htmlBody)
+		// Pass managerID for job isolation - ensures document is associated with current pipeline
+		htmlDoc := w.saveHTMLDocument(ctx, stepID, managerID, subject, htmlBody)
 		if htmlDoc != nil {
 			if err := w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Email HTML document saved: %s", htmlDoc.ID)); err != nil {
 				w.logger.Warn().Err(err).Msg("Failed to add HTML document log")
@@ -445,18 +471,19 @@ type jobErrorInfo struct {
 //   - input (tag or array of tags to filter documents - matches output_tags from previous steps)
 //
 // All text content is converted to HTML for proper email presentation
-func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]interface{}) (textBody, htmlBody string) {
-	result := w.resolveBodyWithSource(ctx, stepConfig)
+func (w *EmailWorker) resolveBody(ctx context.Context, stepConfig map[string]interface{}, stepID string) (textBody, htmlBody string) {
+	result := w.resolveBodyWithSource(ctx, stepConfig, stepID)
 	return result.textBody, result.htmlBody
 }
 
 // resolveBodyWithSource determines the email body and returns source document info
-func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[string]interface{}) emailBodyResult {
+// managerID is used to filter documents by Jobs array, ensuring only documents from the current pipeline are included
+func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[string]interface{}, managerID string) emailBodyResult {
 	var result emailBodyResult
 
 	// Check for proforma style - creates simple email with document list and links
 	if style, ok := stepConfig["style"].(string); ok && style == "proforma" {
-		return w.resolveProformaBody(ctx, stepConfig)
+		return w.resolveProformaBody(ctx, stepConfig, managerID)
 	}
 
 	// Direct body text (markdown is converted to HTML)
@@ -487,6 +514,7 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 
 	// Body from tag (get most recently CREATED document with tag)
 	// Order by created_at to get the newest summary, not the most recently updated
+	// JobID filter ensures we only get documents from this pipeline execution
 	if tag, ok := stepConfig["body_from_tag"].(string); ok && tag != "" {
 		w.logger.Debug().Str("tag", tag).Msg("Looking for document by tag for email body")
 		opts := interfaces.SearchOptions{
@@ -494,6 +522,7 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 			Limit:    1,
 			OrderBy:  "created_at",
 			OrderDir: "desc",
+			JobID:    managerID,
 		}
 		results, err := w.searchService.Search(ctx, "", opts)
 		if err == nil && len(results) > 0 {
@@ -541,11 +570,13 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 
 		if len(inputTags) > 0 {
 			w.logger.Debug().Strs("input_tags", inputTags).Msg("Looking for document by input tags for email body")
+			// JobID filter ensures we only get documents from this pipeline execution
 			opts := interfaces.SearchOptions{
 				Tags:     inputTags,
 				Limit:    1,
 				OrderBy:  "created_at",
 				OrderDir: "desc",
+				JobID:    managerID,
 			}
 			results, err := w.searchService.Search(ctx, "", opts)
 			if err == nil && len(results) > 0 {
@@ -579,7 +610,9 @@ func (w *EmailWorker) resolveBodyWithSource(ctx context.Context, stepConfig map[
 //   - list_tags: array of tags to find documents (required for proforma)
 //   - base_url: base URL for Quaero document links (default: http://localhost:port)
 //   - title: optional title for the email body
-func (w *EmailWorker) resolveProformaBody(ctx context.Context, stepConfig map[string]interface{}) emailBodyResult {
+//
+// managerID is used to filter documents by Jobs array, ensuring only documents from the current pipeline are included
+func (w *EmailWorker) resolveProformaBody(ctx context.Context, stepConfig map[string]interface{}, managerID string) emailBodyResult {
 	var result emailBodyResult
 
 	// Get base URL for document links
@@ -655,6 +688,7 @@ func (w *EmailWorker) resolveProformaBody(ctx context.Context, stepConfig map[st
 	w.logger.Debug().Strs("list_tags", listTags).Msg("Finding documents for proforma email")
 
 	// Find all documents matching the tags
+	// MetadataFilters ensures we only get documents from this job execution
 	var documents []*models.Document
 	for _, tag := range listTags {
 		opts := interfaces.SearchOptions{
@@ -662,6 +696,7 @@ func (w *EmailWorker) resolveProformaBody(ctx context.Context, stepConfig map[st
 			Limit:    50,
 			OrderBy:  "created_at",
 			OrderDir: "desc",
+			JobID:    managerID,
 		}
 		results, err := w.searchService.Search(ctx, "", opts)
 		if err != nil {
@@ -872,7 +907,8 @@ func (w *EmailWorker) generateErrorEmailBody(errorInfo jobErrorInfo, jobID strin
 
 // saveHTMLDocument saves the HTML email body as a document for verification
 // This creates a retrievable artifact that tests can use to verify actual HTML content
-func (w *EmailWorker) saveHTMLDocument(ctx context.Context, stepID, subject, htmlBody string) *models.Document {
+// managerID is used to associate the document with the current job execution
+func (w *EmailWorker) saveHTMLDocument(ctx context.Context, stepID, managerID, subject, htmlBody string) *models.Document {
 	if htmlBody == "" {
 		return nil
 	}
@@ -881,6 +917,15 @@ func (w *EmailWorker) saveHTMLDocument(ctx context.Context, stepID, subject, htm
 	shortStepID := stepID
 	if len(stepID) > 8 {
 		shortStepID = stepID[:8]
+	}
+
+	// Build Jobs array for job isolation
+	// Use managerID if available (shared across all steps in pipeline), otherwise stepID
+	var jobs []string
+	if managerID != "" {
+		jobs = []string{managerID}
+	} else if stepID != "" {
+		jobs = []string{stepID}
 	}
 
 	doc := &models.Document{
@@ -892,9 +937,11 @@ func (w *EmailWorker) saveHTMLDocument(ctx context.Context, stepID, subject, htm
 		DetailLevel:     models.DetailLevelFull,
 		Metadata: map[string]interface{}{
 			"step_id":    stepID,
+			"manager_id": managerID,
 			"subject":    subject,
 			"html_bytes": len(htmlBody),
 		},
+		Jobs:       jobs,
 		Tags:       []string{"email-html", fmt.Sprintf("email-html-%s", shortStepID)},
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -2110,11 +2157,13 @@ type outputFormatterInstructions struct {
 	docCount     int      // number of documents
 	sourceDoc    *models.Document
 	bodyMarkdown string // the body content after frontmatter
+	bodyHTML     string // pre-rendered HTML from ContentHTML field (takes priority)
 }
 
 // parseOutputFormatterDocument looks for an output_formatter document and parses its instructions.
 // Uses input_tags from step config, defaulting to [stepName] if not specified.
-func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConfig map[string]interface{}, stepName string) outputFormatterInstructions {
+// managerID is used to filter documents by Jobs array, ensuring only documents from the current pipeline are included.
+func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConfig map[string]interface{}, stepName, managerID string) outputFormatterInstructions {
 	result := outputFormatterInstructions{
 		format:     "inline",
 		attachment: false,
@@ -2130,11 +2179,13 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 		Msg("Searching for output_formatter document")
 
 	// Look for documents with specified input tags (created by output_formatter)
+	// JobID filter ensures we only get documents from this pipeline execution
 	opts := interfaces.SearchOptions{
 		Tags:     inputTags,
 		Limit:    1,
 		OrderBy:  "created_at",
 		OrderDir: "desc",
+		JobID:    managerID,
 	}
 
 	results, err := w.searchService.Search(ctx, "", opts)
@@ -2153,6 +2204,14 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 
 	result.found = true
 	result.sourceDoc = doc
+
+	// Capture pre-rendered HTML if available (takes priority over markdown conversion)
+	if doc.ContentHTML != "" {
+		result.bodyHTML = doc.ContentHTML
+		w.logger.Debug().
+			Int("html_len", len(doc.ContentHTML)).
+			Msg("Found pre-rendered ContentHTML in output_formatter document")
+	}
 
 	// Parse frontmatter from document
 	content := doc.ContentMarkdown
@@ -2232,6 +2291,52 @@ func (w *EmailWorker) loadDocumentsForAttachment(ctx context.Context, docIDs []s
 		docs = append(docs, doc)
 	}
 	return docs
+}
+
+// selectDocumentContent selects content from a document based on the requested content type.
+// Returns body (text) and htmlBody for email sending.
+// If the requested content type is empty in the document, returns a stub message.
+func (w *EmailWorker) selectDocumentContent(doc *models.Document, contentType string) (body, htmlBody string) {
+	if doc == nil {
+		return "", ""
+	}
+
+	switch contentType {
+	case "html":
+		if doc.ContentHTML != "" {
+			return doc.ContentMarkdown, doc.ContentHTML
+		}
+		stub := fmt.Sprintf("%s html:blank", doc.Title)
+		return stub, w.wrapInEmailTemplate("<p>" + stub + "</p>")
+
+	case "markdown":
+		if doc.ContentMarkdown != "" {
+			return doc.ContentMarkdown, w.convertMarkdownToHTML(doc.ContentMarkdown)
+		}
+		stub := fmt.Sprintf("%s markdown:blank", doc.Title)
+		return stub, w.wrapInEmailTemplate("<p>" + stub + "</p>")
+
+	case "json":
+		if doc.ContentJSON != "" {
+			// For JSON, display as preformatted text
+			return doc.ContentJSON, w.wrapInEmailTemplate("<pre>" + escapeHTML(doc.ContentJSON) + "</pre>")
+		}
+		stub := fmt.Sprintf("%s json:blank", doc.Title)
+		return stub, w.wrapInEmailTemplate("<p>" + stub + "</p>")
+
+	default:
+		// Default priority: html > markdown > json
+		if doc.ContentHTML != "" {
+			return doc.ContentMarkdown, doc.ContentHTML
+		}
+		if doc.ContentMarkdown != "" {
+			return doc.ContentMarkdown, w.convertMarkdownToHTML(doc.ContentMarkdown)
+		}
+		if doc.ContentJSON != "" {
+			return doc.ContentJSON, w.wrapInEmailTemplate("<pre>" + escapeHTML(doc.ContentJSON) + "</pre>")
+		}
+		return "", ""
+	}
 }
 
 // getInputTagsWithDefault extracts input_tags from step config, defaulting to [stepName] if not specified.

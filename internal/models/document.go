@@ -52,9 +52,11 @@ type Document struct {
 	SourceType string `json:"source_type"` // jira, confluence, github
 	SourceID   string `json:"source_id"`   // Original ID from source
 
-	// Content (markdown-first)
+	// Content (markdown-first, with alternative formats for email/output flexibility)
 	Title           string `json:"title"`
 	ContentMarkdown string `json:"content_markdown"` // PRIMARY CONTENT: Markdown format
+	ContentHTML     string `json:"content_html"`     // Alternative: Pre-rendered HTML (for email priority)
+	ContentJSON     string `json:"content_json"`     // Alternative: Structured JSON data
 	DetailLevel     string `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
 
 	// NOTE: Phase 5 - Embedding fields removed (using FTS5 search only)
@@ -64,6 +66,7 @@ type Document struct {
 	Metadata map[string]interface{} `json:"metadata"`
 	URL      string                 `json:"url"`  // Link to original
 	Tags     []string               `json:"tags"` // User-defined tags from job definitions for categorization and filtering
+	Jobs     []string               `json:"jobs"` // Job IDs that own/reference this document (supports multiple concurrent jobs)
 
 	// Structured extracts - populated at ingestion time by extractors
 	// Enables deterministic retrieval of structured data rather than LLM needle-finding

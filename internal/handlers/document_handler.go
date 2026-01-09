@@ -100,6 +100,7 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	opts := &interfaces.ListOptions{
 		SourceType:    query.Get("source_type"),
 		Tags:          tags,
+		JobID:         query.Get("job_id"),
 		Limit:         limit,
 		Offset:        offset,
 		OrderBy:       query.Get("order_by"),
