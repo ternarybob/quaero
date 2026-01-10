@@ -108,7 +108,7 @@ func TestNavexaOrchestratorIntegration(t *testing.T) {
 
 // validateNavexaOutput validates the Navexa orchestrator output document
 func validateNavexaOutput(t *testing.T, helper *common.HTTPTestHelper) {
-	// Find document by tag (new modular template uses portfolio-review tag)
+	// Find document by tag - portfolio_review worker uses portfolio-review tag
 	searchResp, err := helper.GET("/api/documents?tags=portfolio-review&limit=1")
 	require.NoError(t, err)
 	defer searchResp.Body.Close()

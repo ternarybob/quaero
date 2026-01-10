@@ -1,16 +1,13 @@
 // -----------------------------------------------------------------------
-// PortfolioWorker - Fetches a specific portfolio with holdings from Navexa
+// PortfolioWorker - Fetches a specific portfolio with holdings via Navexa API
 // Uses performance API to get holdings with quantity, value, and weight data
 // -----------------------------------------------------------------------
 
-package navexa
+package portfolio
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +16,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/navexa"
 )
 
 // PortfolioHolding represents a holding with performance data for portfolio output
@@ -36,7 +34,7 @@ type PortfolioHolding struct {
 // DefaultCacheHours is the default freshness window for cached portfolio documents
 const DefaultCacheHours = 24
 
-// PortfolioWorker fetches a specific portfolio with its holdings.
+// PortfolioWorker fetches a specific portfolio with its holdings via Navexa API.
 // Unlike PortfoliosWorker (lists all) or HoldingsWorker (needs ID),
 // this worker accepts a portfolio name and returns the complete portfolio document.
 // Implements document caching with freshness checking to avoid redundant API calls.
@@ -46,14 +44,13 @@ type PortfolioWorker struct {
 	searchService   interfaces.SearchService
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
-	httpClient      *http.Client
 	debugEnabled    bool
 }
 
 // Compile-time assertion
 var _ interfaces.DefinitionWorker = (*PortfolioWorker)(nil)
 
-// NewPortfolioWorker creates a new Navexa portfolio worker
+// NewPortfolioWorker creates a new portfolio fetch worker
 func NewPortfolioWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
@@ -68,16 +65,13 @@ func NewPortfolioWorker(
 		searchService:   searchService,
 		logger:          logger,
 		jobMgr:          jobMgr,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		debugEnabled: debugEnabled,
+		debugEnabled:    debugEnabled,
 	}
 }
 
-// GetType returns WorkerTypeNavexaPortfolio
+// GetType returns WorkerTypePortfolioFetch
 func (w *PortfolioWorker) GetType() models.WorkerType {
-	return models.WorkerTypeNavexaPortfolio
+	return models.WorkerTypePortfolioFetch
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
@@ -89,7 +83,7 @@ func (w *PortfolioWorker) ReturnsChildJobs() bool {
 func (w *PortfolioWorker) ValidateConfig(step models.JobStep) error {
 	// name is required to identify the portfolio
 	if step.Config == nil {
-		return fmt.Errorf("config is required for navexa_portfolio")
+		return fmt.Errorf("config is required for portfolio_fetch")
 	}
 	if _, ok := step.Config["name"]; !ok {
 		return fmt.Errorf("name is required in config (e.g., name = \"smsf\")")
@@ -101,7 +95,7 @@ func (w *PortfolioWorker) ValidateConfig(step models.JobStep) error {
 func (w *PortfolioWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for navexa_portfolio")
+		return nil, fmt.Errorf("step config is required for portfolio_fetch")
 	}
 
 	portfolioName, ok := stepConfig["name"].(string)
@@ -113,14 +107,14 @@ func (w *PortfolioWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("portfolio_name", portfolioName).
-		Msg("Navexa portfolio worker initialized")
+		Msg("Portfolio fetch worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
 			{
-				ID:     fmt.Sprintf("navexa-portfolio-%s", portfolioName),
+				ID:     fmt.Sprintf("portfolio-fetch-%s", portfolioName),
 				Name:   fmt.Sprintf("Fetch portfolio %s with holdings", portfolioName),
-				Type:   "navexa_portfolio",
+				Type:   "portfolio_fetch",
 				Config: stepConfig,
 			},
 		},
@@ -144,7 +138,7 @@ func (w *PortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize navexa_portfolio worker: %w", err)
+			return "", fmt.Errorf("failed to initialize portfolio_fetch worker: %w", err)
 		}
 	}
 
@@ -204,70 +198,57 @@ func (w *PortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		}
 	}
 
-	// Get API key from KV storage
-	apiKey, err := w.getAPIKey(ctx, stepConfig)
+	// Create Navexa client
+	client, err := w.createNavexaClient(ctx, stepConfig)
 	if err != nil {
-		return "", fmt.Errorf("failed to get Navexa API key: %w", err)
+		return "", fmt.Errorf("failed to create Navexa client: %w", err)
 	}
 
-	// Step 1: Fetch all portfolios to find the one matching the name
+	// Fetch portfolio with holdings using the Navexa service
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Fetching portfolios to find '%s'", portfolioName))
+			fmt.Sprintf("Fetching portfolio '%s' with holdings", portfolioName))
 	}
 
-	portfolios, err := w.fetchPortfolios(ctx, apiKey, stepID)
+	portfolioWithHoldings, err := client.GetPortfolioWithHoldings(ctx, portfolioName)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch Navexa portfolios: %w", err)
+		return "", fmt.Errorf("failed to fetch portfolio with holdings: %w", err)
 	}
 
-	// Find portfolio matching the name (case-insensitive contains)
-	var matchedPortfolio *NavexaPortfolio
-	for i := range portfolios {
-		if strings.Contains(strings.ToUpper(portfolios[i].Name), strings.ToUpper(portfolioName)) {
-			matchedPortfolio = &portfolios[i]
-			break
+	matchedPortfolio := &NavexaPortfolio{
+		ID:               portfolioWithHoldings.Portfolio.ID,
+		Name:             portfolioWithHoldings.Portfolio.Name,
+		DateCreated:      portfolioWithHoldings.Portfolio.DateCreated,
+		BaseCurrencyCode: portfolioWithHoldings.Portfolio.BaseCurrencyCode,
+	}
+
+	// Convert enriched holdings to PortfolioHolding
+	holdings := make([]PortfolioHolding, len(portfolioWithHoldings.Holdings))
+	for i, h := range portfolioWithHoldings.Holdings {
+		holdings[i] = PortfolioHolding{
+			Symbol:        h.Symbol,
+			Name:          h.Name,
+			Exchange:      h.Exchange,
+			Quantity:      h.Quantity,
+			AvgBuyPrice:   h.AvgBuyPrice,
+			CurrentValue:  h.CurrentValue,
+			HoldingWeight: h.HoldingWeight,
+			CurrencyCode:  h.CurrencyCode,
 		}
-	}
-
-	if matchedPortfolio == nil {
-		return "", fmt.Errorf("no portfolio found matching name '%s' (available: %d portfolios)", portfolioName, len(portfolios))
 	}
 
 	w.logger.Info().
 		Int("portfolio_id", matchedPortfolio.ID).
 		Str("portfolio_name", matchedPortfolio.Name).
-		Msg("Found matching portfolio")
-
-	// Step 2: Fetch performance data with holdings (includes quantity, value, weight)
-	// Use dateCreated as from date, today as to date
-	fromDate := matchedPortfolio.DateCreated
-	if len(fromDate) > 10 {
-		fromDate = fromDate[:10] // Extract YYYY-MM-DD from datetime
-	}
-	toDate := time.Now().Format("2006-01-02")
-
-	if w.jobMgr != nil {
-		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Fetching performance for portfolio %s (ID: %d) from %s to %s",
-				matchedPortfolio.Name, matchedPortfolio.ID, fromDate, toDate))
-	}
-
-	holdings, err := w.fetchPerformanceHoldings(ctx, apiKey, matchedPortfolio.ID, fromDate, toDate, stepID)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Navexa performance holdings: %w", err)
-	}
-
-	w.logger.Info().
 		Int("holding_count", len(holdings)).
-		Msg("Performance holdings fetched successfully")
+		Msg("Portfolio with holdings fetched successfully")
 
 	// Generate markdown content
 	markdown := w.generateMarkdown(matchedPortfolio, holdings)
 
 	// Build tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	tags := []string{"navexa-portfolio", matchedPortfolio.Name, dateTag}
+	tags := []string{"portfolio-fetch", matchedPortfolio.Name, dateTag}
 
 	// Add output_tags from step config
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -310,10 +291,10 @@ func (w *PortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	// Create document with schema-compliant metadata
 	doc := &models.Document{
 		ID:              uuid.New().String(),
-		Title:           fmt.Sprintf("Navexa Portfolio - %s", matchedPortfolio.Name),
+		Title:           fmt.Sprintf("Portfolio - %s", matchedPortfolio.Name),
 		URL:             fmt.Sprintf("%s/v1/portfolios/%d", baseURL, matchedPortfolio.ID),
-		SourceType:      "navexa_portfolio",
-		SourceID:        fmt.Sprintf("navexa:portfolio:%d", matchedPortfolio.ID),
+		SourceType:      "portfolio_fetch",
+		SourceID:        fmt.Sprintf("portfolio:%d", matchedPortfolio.ID),
 		ContentMarkdown: markdown,
 		Tags:            tags,
 		CreatedAt:       now,
@@ -341,9 +322,26 @@ func (w *PortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("portfolio_name", matchedPortfolio.Name).
 		Int("holding_count", len(holdings)).
 		Str("document_id", doc.ID).
-		Msg("Navexa portfolio with holdings fetched and stored")
+		Msg("Portfolio with holdings fetched and stored")
 
 	return stepID, nil
+}
+
+// createNavexaClient creates a Navexa API client with the appropriate configuration
+func (w *PortfolioWorker) createNavexaClient(ctx context.Context, stepConfig map[string]interface{}) (*navexa.Client, error) {
+	apiKey, err := w.getAPIKey(ctx, stepConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := w.getBaseURL(ctx)
+
+	opts := []navexa.ClientOption{
+		navexa.WithBaseURL(baseURL),
+		navexa.WithLogger(w.logger),
+	}
+
+	return navexa.NewClient(apiKey, opts...), nil
 }
 
 // getAPIKey retrieves the Navexa API key from KV storage or step config
@@ -376,107 +374,11 @@ func (w *PortfolioWorker) getBaseURL(ctx context.Context) string {
 	return navexaDefaultBaseURL
 }
 
-// fetchPortfolios fetches all portfolios from the Navexa API
-func (w *PortfolioWorker) fetchPortfolios(ctx context.Context, apiKey string, stepID string) ([]NavexaPortfolio, error) {
-	baseURL := w.getBaseURL(ctx)
-	url := baseURL + "/v1/portfolios"
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	var portfolios []NavexaPortfolio
-	if err := json.NewDecoder(resp.Body).Decode(&portfolios); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return portfolios, nil
-}
-
-// fetchPerformanceHoldings fetches holdings with performance data from the Navexa performance API
-// Returns holdings with quantity, avgBuyPrice (calculated), and holdingWeight
-func (w *PortfolioWorker) fetchPerformanceHoldings(ctx context.Context, apiKey string, portfolioID int, fromDate, toDate string, stepID string) ([]PortfolioHolding, error) {
-	apiBaseURL := w.getBaseURL(ctx)
-	baseURL := fmt.Sprintf("%s/v1/portfolios/%d/performance", apiBaseURL, portfolioID)
-
-	// Build query parameters
-	params := url.Values{}
-	params.Set("from", fromDate)
-	params.Set("to", toDate)
-	params.Set("isPortfolioGroup", "false")
-	params.Set("groupBy", "holding")
-	params.Set("showLocalCurrency", "false")
-
-	fullURL := baseURL + "?" + params.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
-	}
-
-	// Parse raw response matching Navexa API structure
-	var raw NavexaPerformanceRaw
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Convert to PortfolioHolding with calculated avgBuyPrice
-	holdings := make([]PortfolioHolding, len(raw.Holdings))
-	for i, h := range raw.Holdings {
-		// Calculate avgBuyPrice = totalValue / quantity
-		// totalValue is in h.TotalReturn.TotalValue
-		var avgBuyPrice float64
-		if h.TotalQuantity > 0 {
-			avgBuyPrice = h.TotalReturn.TotalValue / h.TotalQuantity
-		}
-
-		holdings[i] = PortfolioHolding{
-			Symbol:        h.Symbol,
-			Name:          h.Name,
-			Exchange:      h.Exchange,
-			Quantity:      h.TotalQuantity,
-			AvgBuyPrice:   avgBuyPrice,
-			CurrentValue:  h.TotalReturn.TotalValue,
-			HoldingWeight: h.HoldingWeight,
-			CurrencyCode:  h.CurrencyCode,
-		}
-	}
-
-	return holdings, nil
-}
-
 // generateMarkdown creates a markdown document from the portfolio and holdings data
 func (w *PortfolioWorker) generateMarkdown(portfolio *NavexaPortfolio, holdings []PortfolioHolding) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# Navexa Portfolio - %s\n\n", portfolio.Name))
+	sb.WriteString(fmt.Sprintf("# Portfolio - %s\n\n", portfolio.Name))
 	sb.WriteString("## Portfolio Information\n\n")
 	sb.WriteString(fmt.Sprintf("- **Portfolio ID**: %d\n", portfolio.ID))
 	sb.WriteString(fmt.Sprintf("- **Name**: %s\n", portfolio.Name))
@@ -543,9 +445,9 @@ func (w *PortfolioWorker) getCachedPortfolio(ctx context.Context, portfolioName 
 		return nil, false
 	}
 
-	// Search for document with navexa-portfolio tag and matching name
+	// Search for document with portfolio-fetch tag and matching name
 	opts := interfaces.SearchOptions{
-		Tags:  []string{"navexa-portfolio", portfolioName},
+		Tags:  []string{"portfolio-fetch", portfolioName},
 		Limit: 1,
 	}
 

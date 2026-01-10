@@ -245,12 +245,18 @@ func deriveJobDefinitionType(workerType models.WorkerType) models.JobDefinitionT
 		return models.JobDefinitionTypePlaces
 	case models.WorkerTypeMarketData:
 		return models.JobDefinitionTypeMarketData
-	case models.WorkerTypeNavexaPortfolios:
-		return models.JobDefinitionTypeNavexaPortfolios
-	case models.WorkerTypeNavexaHoldings:
-		return models.JobDefinitionTypeNavexaHoldings
-	case models.WorkerTypeNavexaPerformance:
-		return models.JobDefinitionTypeNavexaPerformance
+	case models.WorkerTypePortfolioList:
+		return models.JobDefinitionTypePortfolioList
+	case models.WorkerTypePortfolioFetch:
+		return models.JobDefinitionTypePortfolioFetch
+	case models.WorkerTypePortfolioHoldings:
+		return models.JobDefinitionTypePortfolioHoldings
+	case models.WorkerTypePortfolioPerformance:
+		return models.JobDefinitionTypePortfolioPerformance
+	case models.WorkerTypePortfolioReview:
+		return models.JobDefinitionTypePortfolioReview
+	case models.WorkerTypeNavexaPortfolio:
+		return models.JobDefinitionTypeNavexaPortfolio
 	default:
 		return models.JobDefinitionTypeCustom
 	}

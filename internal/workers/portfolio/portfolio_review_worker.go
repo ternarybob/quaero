@@ -5,7 +5,7 @@
 // Generic design: accepts any document with the required schema (portfolio, holdings).
 // -----------------------------------------------------------------------
 
-package navexa
+package portfolio
 
 import (
 	"context"
@@ -58,9 +58,9 @@ func NewPortfolioReviewWorker(
 	}
 }
 
-// GetType returns WorkerTypeNavexaPortfolioReview
+// GetType returns WorkerTypePortfolioReview
 func (w *PortfolioReviewWorker) GetType() models.WorkerType {
-	return models.WorkerTypeNavexaPortfolioReview
+	return models.WorkerTypePortfolioReview
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
@@ -72,7 +72,7 @@ func (w *PortfolioReviewWorker) ReturnsChildJobs() bool {
 // Requires either filter_tags or portfolio_document_id to identify the input document
 func (w *PortfolioReviewWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("config is required for navexa_portfolio_review")
+		return fmt.Errorf("config is required for portfolio_review")
 	}
 
 	// Check for filter_tags
@@ -88,11 +88,11 @@ func (w *PortfolioReviewWorker) ValidateConfig(step models.JobStep) error {
 	return fmt.Errorf("either filter_tags or portfolio_document_id is required in config")
 }
 
-// Init initializes the Navexa portfolio review worker
+// Init initializes the portfolio review worker
 func (w *PortfolioReviewWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for navexa_portfolio_review")
+		return nil, fmt.Errorf("step config is required for portfolio_review")
 	}
 
 	// Get model from config or use default
@@ -118,7 +118,7 @@ func (w *PortfolioReviewWorker) Init(ctx context.Context, step models.JobStep, j
 			{
 				ID:     fmt.Sprintf("portfolio-review-%s", step.Name),
 				Name:   "Generate portfolio review from document",
-				Type:   "navexa_portfolio_review",
+				Type:   "portfolio_review",
 				Config: stepConfig,
 			},
 		},
@@ -140,7 +140,7 @@ func (w *PortfolioReviewWorker) CreateJobs(ctx context.Context, step models.JobS
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize navexa_portfolio_review worker: %w", err)
+			return "", fmt.Errorf("failed to initialize portfolio_review worker: %w", err)
 		}
 	}
 
@@ -221,7 +221,7 @@ func (w *PortfolioReviewWorker) CreateJobs(ctx context.Context, step models.JobS
 
 	// Step 5: Build output tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	tags := []string{"navexa-portfolio-review", portfolioName, dateTag}
+	tags := []string{"portfolio-review", portfolioName, dateTag}
 
 	// Add output_tags from step config
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -240,7 +240,7 @@ func (w *PortfolioReviewWorker) CreateJobs(ctx context.Context, step models.JobS
 		ID:              uuid.New().String(),
 		Title:           fmt.Sprintf("Portfolio Review - %s", portfolioName),
 		URL:             portfolioDoc.URL,
-		SourceType:      "navexa_portfolio_review",
+		SourceType:      "portfolio_review",
 		SourceID:        fmt.Sprintf("portfolio:%d:review", portfolioID),
 		ContentMarkdown: review,
 		Tags:            tags,

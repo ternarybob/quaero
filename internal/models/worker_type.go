@@ -34,27 +34,32 @@ const (
 	WorkerTypeEmail WorkerType = "email" // Send email notification with job results
 
 	// Financial/market data workers (market_ prefix)
-	WorkerTypeMarketAnnouncements    WorkerType = "market_announcements"     // Company announcements with classification
-	WorkerTypeMarketData             WorkerType = "market_data"              // Price data, technicals, indices via EODHD
-	WorkerTypeMarketNews             WorkerType = "market_news"              // Multi-exchange news via EODHD News API
-	WorkerTypeMarketDirectorInterest WorkerType = "market_director_interest" // Director interest (Appendix 3Y) filings
-	WorkerTypeMarketFundamentals     WorkerType = "market_fundamentals"      // Price, analyst coverage, financials via EODHD
-	WorkerTypeMarketMacro            WorkerType = "market_macro"             // Macroeconomic data (RBA rates, commodities)
-	WorkerTypeMarketCompetitor       WorkerType = "market_competitor"        // Competitor stock analysis
-	WorkerTypeMarketSignal           WorkerType = "market_signal"            // PBAS, VLI, Regime signals computation
-	WorkerTypeMarketPortfolio        WorkerType = "market_portfolio"         // Portfolio-level signal aggregation
-	WorkerTypeMarketAssessor         WorkerType = "market_assessor"          // AI-powered stock assessment
-	WorkerTypeMarketDataCollection   WorkerType = "market_data_collection"   // Deterministic market data collection
-	WorkerTypeMarketConsolidate      WorkerType = "market_consolidate"       // Consolidate tagged documents (no AI)
-	WorkerTypeSignalAnalysis         WorkerType = "signal_analysis"          // Announcement signal classification and scoring
-	WorkerTypeOutputFormatter        WorkerType = "output_formatter"         // Format output documents for email delivery
+	WorkerTypeMarketAnnouncements        WorkerType = "market_announcements"         // Company announcements with classification
+	WorkerTypeMarketData                 WorkerType = "market_data"                  // Price data, technicals, indices via EODHD
+	WorkerTypeMarketNews                 WorkerType = "market_news"                  // Multi-exchange news via EODHD News API
+	WorkerTypeMarketDirectorInterest     WorkerType = "market_director_interest"     // Director interest (Appendix 3Y) filings
+	WorkerTypeMarketFundamentals         WorkerType = "market_fundamentals"          // Price, analyst coverage, financials via EODHD
+	WorkerTypeMarketMacro                WorkerType = "market_macro"                 // Macroeconomic data (RBA rates, commodities)
+	WorkerTypeMarketCompetitor           WorkerType = "market_competitor"            // Competitor stock analysis
+	WorkerTypeMarketSignal               WorkerType = "market_signal"                // PBAS, VLI, Regime signals computation
+	WorkerTypeMarketPortfolio            WorkerType = "market_portfolio"             // Portfolio-level signal aggregation
+	WorkerTypeMarketAssessor             WorkerType = "market_assessor"              // AI-powered stock assessment
+	WorkerTypeMarketDataCollection       WorkerType = "market_data_collection"       // Deterministic market data collection
+	WorkerTypeMarketConsolidate          WorkerType = "market_consolidate"           // Consolidate tagged documents (no AI)
+	WorkerTypeMarketAnnouncementDownload WorkerType = "market_announcement_download" // Download PDFs from filtered announcements
+	WorkerTypeSignalAnalysis             WorkerType = "signal_analysis"              // Announcement signal classification and scoring
+	WorkerTypeOutputFormatter            WorkerType = "output_formatter"             // Format output documents for email delivery
 
-	// Navexa portfolio workers
-	WorkerTypeNavexaPortfolios      WorkerType = "navexa_portfolios"       // Fetch all Navexa portfolios for the user
-	WorkerTypeNavexaPortfolio       WorkerType = "navexa_portfolio"        // Fetch specific portfolio by name with holdings
-	WorkerTypeNavexaHoldings        WorkerType = "navexa_holdings"         // Fetch holdings for a Navexa portfolio
-	WorkerTypeNavexaPerformance     WorkerType = "navexa_performance"      // Fetch P/L performance for a Navexa portfolio
-	WorkerTypeNavexaPortfolioReview WorkerType = "navexa_portfolio_review" // LLM-generated portfolio review from holdings
+	// Portfolio workers
+	WorkerTypePortfolio            WorkerType = "portfolio"             // Unified portfolio worker (accepts ticker list or navexa portfolio)
+	WorkerTypePortfolioList        WorkerType = "portfolio_list"        // Fetch all portfolios for the user
+	WorkerTypePortfolioFetch       WorkerType = "portfolio_fetch"       // Fetch specific portfolio by name with holdings
+	WorkerTypePortfolioHoldings    WorkerType = "portfolio_holdings"    // Fetch holdings for a portfolio
+	WorkerTypePortfolioPerformance WorkerType = "portfolio_performance" // Fetch P/L performance for a portfolio
+	WorkerTypePortfolioReview      WorkerType = "portfolio_review"      // LLM-generated portfolio review from portfolio documents
+
+	// Navexa workers
+	WorkerTypeNavexaPortfolio WorkerType = "navexa_portfolio" // Fetch portfolio by name from Navexa API
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors
@@ -90,8 +95,9 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
-		WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
-		WorkerTypeNavexaPortfolios, WorkerTypeNavexaPortfolio, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance, WorkerTypeNavexaPortfolioReview,
+		WorkerTypeMarketAnnouncementDownload, WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
+		WorkerTypePortfolio, WorkerTypePortfolioList, WorkerTypePortfolioFetch, WorkerTypePortfolioHoldings, WorkerTypePortfolioPerformance, WorkerTypePortfolioReview,
+		WorkerTypeNavexaPortfolio,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
 		WorkerTypeRatingBFS, WorkerTypeRatingCDS, WorkerTypeRatingNFR, WorkerTypeRatingPPS,
 		WorkerTypeRatingVRS, WorkerTypeRatingOB, WorkerTypeRatingComposite:
@@ -137,13 +143,16 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeMarketAssessor,
 		WorkerTypeMarketDataCollection,
 		WorkerTypeMarketConsolidate,
+		WorkerTypeMarketAnnouncementDownload,
 		WorkerTypeSignalAnalysis,
 		WorkerTypeOutputFormatter,
-		WorkerTypeNavexaPortfolios,
+		WorkerTypePortfolio,
+		WorkerTypePortfolioList,
+		WorkerTypePortfolioFetch,
+		WorkerTypePortfolioHoldings,
+		WorkerTypePortfolioPerformance,
+		WorkerTypePortfolioReview,
 		WorkerTypeNavexaPortfolio,
-		WorkerTypeNavexaHoldings,
-		WorkerTypeNavexaPerformance,
-		WorkerTypeNavexaPortfolioReview,
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,

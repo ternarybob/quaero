@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------
-// HoldingsWorker - Fetches holdings for a Navexa portfolio
+// HoldingsWorker - Fetches holdings for a portfolio via Navexa API
 // -----------------------------------------------------------------------
 
-package navexa
+package portfolio
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// HoldingsWorker fetches holdings for a specific Navexa portfolio.
+// HoldingsWorker fetches holdings for a specific portfolio via Navexa API.
 type HoldingsWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
@@ -52,7 +52,7 @@ type NavexaHolding struct {
 	DateCreated       string `json:"dateCreated"`
 }
 
-// NewHoldingsWorker creates a new Navexa holdings worker
+// NewHoldingsWorker creates a new portfolio holdings worker
 func NewHoldingsWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
@@ -72,9 +72,9 @@ func NewHoldingsWorker(
 	}
 }
 
-// GetType returns WorkerTypeNavexaHoldings
+// GetType returns WorkerTypePortfolioHoldings
 func (w *HoldingsWorker) GetType() models.WorkerType {
-	return models.WorkerTypeNavexaHoldings
+	return models.WorkerTypePortfolioHoldings
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
@@ -85,7 +85,7 @@ func (w *HoldingsWorker) ReturnsChildJobs() bool {
 // ValidateConfig validates the worker configuration
 func (w *HoldingsWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("config is required for navexa_holdings")
+		return fmt.Errorf("config is required for portfolio_holdings")
 	}
 	if _, ok := step.Config["portfolio_id"]; !ok {
 		return fmt.Errorf("portfolio_id is required in config")
@@ -97,7 +97,7 @@ func (w *HoldingsWorker) ValidateConfig(step models.JobStep) error {
 func (w *HoldingsWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for navexa_holdings")
+		return nil, fmt.Errorf("step config is required for portfolio_holdings")
 	}
 
 	portfolioID, err := w.getPortfolioID(stepConfig)
@@ -115,14 +115,14 @@ func (w *HoldingsWorker) Init(ctx context.Context, step models.JobStep, jobDef m
 		Str("step_name", step.Name).
 		Int("portfolio_id", portfolioID).
 		Str("portfolio_name", portfolioName).
-		Msg("Navexa holdings worker initialized")
+		Msg("Portfolio holdings worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
 			{
-				ID:     fmt.Sprintf("navexa-holdings-%d", portfolioID),
+				ID:     fmt.Sprintf("portfolio-holdings-%d", portfolioID),
 				Name:   fmt.Sprintf("Fetch holdings for portfolio %s", portfolioName),
-				Type:   "navexa_holdings",
+				Type:   "portfolio_holdings",
 				Config: stepConfig,
 			},
 		},
@@ -143,7 +143,7 @@ func (w *HoldingsWorker) CreateJobs(ctx context.Context, step models.JobStep, jo
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize navexa_holdings worker: %w", err)
+			return "", fmt.Errorf("failed to initialize portfolio_holdings worker: %w", err)
 		}
 	}
 
@@ -168,7 +168,7 @@ func (w *HoldingsWorker) CreateJobs(ctx context.Context, step models.JobStep, jo
 
 	// Build tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	tags := []string{"navexa-holdings", portfolioName, dateTag}
+	tags := []string{"portfolio-holdings", portfolioName, dateTag}
 
 	// Add output_tags from step config (supports both []interface{} from TOML and []string from inline calls)
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -211,10 +211,10 @@ func (w *HoldingsWorker) CreateJobs(ctx context.Context, step models.JobStep, jo
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
-		Title:           fmt.Sprintf("Navexa Holdings - %s", portfolioName),
+		Title:           fmt.Sprintf("Portfolio Holdings - %s", portfolioName),
 		URL:             fmt.Sprintf("%s/v1/portfolios/%d/holdings", baseURL, portfolioID),
-		SourceType:      "navexa_holdings",
-		SourceID:        fmt.Sprintf("navexa:portfolio:%d:holdings", portfolioID),
+		SourceType:      "portfolio_holdings",
+		SourceID:        fmt.Sprintf("portfolio:%d:holdings", portfolioID),
 		ContentMarkdown: markdown,
 		Tags:            tags,
 		CreatedAt:       now,
@@ -243,7 +243,7 @@ func (w *HoldingsWorker) CreateJobs(ctx context.Context, step models.JobStep, jo
 		Str("portfolio_name", portfolioName).
 		Int("holding_count", len(holdings)).
 		Str("document_id", doc.ID).
-		Msg("Navexa holdings fetched and stored")
+		Msg("Portfolio holdings fetched and stored")
 
 	return stepID, nil
 }
@@ -329,7 +329,7 @@ func (w *HoldingsWorker) fetchHoldings(ctx context.Context, apiKey string, portf
 func (w *HoldingsWorker) generateMarkdown(holdings []NavexaHolding, portfolioName string, portfolioID int) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# Navexa Holdings - %s\n\n", portfolioName))
+	sb.WriteString(fmt.Sprintf("# Portfolio Holdings - %s\n\n", portfolioName))
 	sb.WriteString(fmt.Sprintf("**Portfolio ID**: %d\n", portfolioID))
 	sb.WriteString(fmt.Sprintf("**Fetched**: %s\n\n", time.Now().Format("2 January 2006 3:04 PM")))
 	sb.WriteString(fmt.Sprintf("**Total Holdings**: %d\n\n", len(holdings)))

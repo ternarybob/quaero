@@ -179,7 +179,9 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		return nil, err
 	}
 
-	// Extract filter_tags (required) - documents to include in summary
+	// Extract filter_tags for documents to include in summary
+	// First check explicit filter_tags, then fall back to input_tags (defaults to step name)
+	// This supports the pipeline pattern where upstream steps tag output with their step name
 	var filterTags []string
 	if tags, ok := stepConfig["filter_tags"].([]interface{}); ok {
 		for _, tag := range tags {
@@ -191,8 +193,13 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		filterTags = tags
 	}
 
+	// Fall back to input_tags with step name as default
 	if len(filterTags) == 0 {
-		return nil, fmt.Errorf("filter_tags is required in step config")
+		filterTags = workerutil.GetInputTags(stepConfig, step.Name)
+	}
+
+	if len(filterTags) == 0 {
+		return nil, fmt.Errorf("filter_tags is required in step config (or use input_tags, or set step name for default)")
 	}
 
 	// Extract filter_limit from step config (prevents token overflow on large codebases)
@@ -714,16 +721,21 @@ func (w *SummaryWorker) ValidateConfig(step models.JobStep) error {
 		return fmt.Errorf("summary step requires either 'template' or 'prompt' in config")
 	}
 
-	// Validate required filter_tags field
+	// Validate that we can resolve input tags
+	// First check explicit filter_tags, then fall back to input_tags (defaults to step name)
 	var hasFilterTags bool
 	if tags, ok := step.Config["filter_tags"].([]interface{}); ok && len(tags) > 0 {
 		hasFilterTags = true
 	} else if tags, ok := step.Config["filter_tags"].([]string); ok && len(tags) > 0 {
 		hasFilterTags = true
+	} else {
+		// Fall back to input_tags with step name as default (supports pipeline pattern)
+		inputTags := workerutil.GetInputTags(step.Config, step.Name)
+		hasFilterTags = len(inputTags) > 0
 	}
 
 	if !hasFilterTags {
-		return fmt.Errorf("summary step requires 'filter_tags' in config")
+		return fmt.Errorf("summary step requires 'filter_tags' or 'input_tags' in config, or a non-empty step name")
 	}
 
 	// Validate output_validation format if specified

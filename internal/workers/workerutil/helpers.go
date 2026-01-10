@@ -269,6 +269,41 @@ func GetInputTags(config map[string]interface{}, stepName string) []string {
 	return nil
 }
 
+// GetOutputTags extracts output_tags from step config.
+// This enables pipeline routing where parent steps pass their output_tags to sub-workers,
+// allowing downstream steps to find documents created by intermediate workers.
+//
+// Parameters:
+//   - config: step configuration map
+//
+// Returns the output_tags array (may be empty if not configured)
+func GetOutputTags(config map[string]interface{}) []string {
+	if tags, ok := config["output_tags"].([]interface{}); ok && len(tags) > 0 {
+		result := make([]string, 0, len(tags))
+		for _, t := range tags {
+			if s, ok := t.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	if tags, ok := config["output_tags"].([]string); ok && len(tags) > 0 {
+		return tags
+	}
+	return nil
+}
+
+// MergeOutputTags merges parent step output_tags with sub-worker specific tags.
+// The parent step's output_tags come first (for pipeline routing), followed by sub-worker tags.
+// This enables intermediate workers like DataCollectionWorker to pass through pipeline routing tags
+// while still adding their own descriptive tags.
+func MergeOutputTags(parentOutputTags []string, subWorkerTags ...string) []string {
+	result := make([]string, 0, len(parentOutputTags)+len(subWorkerTags))
+	result = append(result, parentOutputTags...)
+	result = append(result, subWorkerTags...)
+	return result
+}
+
 // AssociateDocumentWithJob associates an existing document with a job execution.
 // This is used when a worker reuses a cached document from a previous job.
 // It appends the job ID to the document's Jobs array (if not already present),

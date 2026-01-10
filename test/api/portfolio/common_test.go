@@ -251,8 +251,8 @@ func SaveNavexaWorkerOutput(t *testing.T, helper *common.HTTPTestHelper, results
 // SavePortfolioReviewWorkerOutput saves portfolio review document output to results directory
 // CRITICAL: This function FAILS the test if document is missing or empty
 func SavePortfolioReviewWorkerOutput(t *testing.T, helper *common.HTTPTestHelper, resultsDir string) (map[string]interface{}, string) {
-	resp, err := helper.GET("/api/documents?tags=navexa-portfolio-review&limit=1")
-	require.NoError(t, err, "FAIL: Failed to query documents with tag navexa-portfolio-review")
+	resp, err := helper.GET("/api/documents?tags=portfolio-review&limit=1")
+	require.NoError(t, err, "FAIL: Failed to query documents with tag portfolio-review")
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode, "FAIL: Document query must succeed")
@@ -266,7 +266,7 @@ func SavePortfolioReviewWorkerOutput(t *testing.T, helper *common.HTTPTestHelper
 	}
 
 	require.NoError(t, helper.ParseJSONResponse(resp, &result), "FAIL: Failed to parse document response")
-	require.NotEmpty(t, result.Documents, "FAIL: No documents found with tag navexa-portfolio-review - worker produced no output")
+	require.NotEmpty(t, result.Documents, "FAIL: No documents found with tag portfolio-review - worker produced no output")
 
 	doc := result.Documents[0]
 

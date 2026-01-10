@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------
-// PerformanceWorker - Fetches P/L performance for a Navexa portfolio
+// PerformanceWorker - Fetches P/L performance for a portfolio via Navexa API
 // -----------------------------------------------------------------------
 
-package navexa
+package portfolio
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// PerformanceWorker fetches P/L performance for a specific Navexa portfolio.
+// PerformanceWorker fetches P/L performance for a specific portfolio via Navexa API.
 type PerformanceWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
@@ -108,7 +108,7 @@ type NavexaHoldingPerformance struct {
 	AvgCost       float64 `json:"averageCost"`
 }
 
-// NewPerformanceWorker creates a new Navexa performance worker
+// NewPerformanceWorker creates a new portfolio performance worker
 func NewPerformanceWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
@@ -128,9 +128,9 @@ func NewPerformanceWorker(
 	}
 }
 
-// GetType returns WorkerTypeNavexaPerformance
+// GetType returns WorkerTypePortfolioPerformance
 func (w *PerformanceWorker) GetType() models.WorkerType {
-	return models.WorkerTypeNavexaPerformance
+	return models.WorkerTypePortfolioPerformance
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
@@ -141,7 +141,7 @@ func (w *PerformanceWorker) ReturnsChildJobs() bool {
 // ValidateConfig validates the worker configuration
 func (w *PerformanceWorker) ValidateConfig(step models.JobStep) error {
 	if step.Config == nil {
-		return fmt.Errorf("config is required for navexa_performance")
+		return fmt.Errorf("config is required for portfolio_performance")
 	}
 	if _, ok := step.Config["portfolio_id"]; !ok {
 		return fmt.Errorf("portfolio_id is required in config")
@@ -153,7 +153,7 @@ func (w *PerformanceWorker) ValidateConfig(step models.JobStep) error {
 func (w *PerformanceWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return nil, fmt.Errorf("step config is required for navexa_performance")
+		return nil, fmt.Errorf("step config is required for portfolio_performance")
 	}
 
 	portfolioID, err := w.getPortfolioID(stepConfig)
@@ -191,14 +191,14 @@ func (w *PerformanceWorker) Init(ctx context.Context, step models.JobStep, jobDe
 		Str("from", fromDate).
 		Str("to", toDate).
 		Str("group_by", groupBy).
-		Msg("Navexa performance worker initialized")
+		Msg("Portfolio performance worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
 			{
-				ID:     fmt.Sprintf("navexa-performance-%d", portfolioID),
+				ID:     fmt.Sprintf("portfolio-performance-%d", portfolioID),
 				Name:   fmt.Sprintf("Fetch performance for portfolio %s", portfolioName),
-				Type:   "navexa_performance",
+				Type:   "portfolio_performance",
 				Config: stepConfig,
 			},
 		},
@@ -222,7 +222,7 @@ func (w *PerformanceWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize navexa_performance worker: %w", err)
+			return "", fmt.Errorf("failed to initialize portfolio_performance worker: %w", err)
 		}
 	}
 
@@ -255,7 +255,7 @@ func (w *PerformanceWorker) CreateJobs(ctx context.Context, step models.JobStep,
 
 	// Build tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	tags := []string{"navexa-performance", portfolioName, dateTag}
+	tags := []string{"portfolio-performance", portfolioName, dateTag}
 
 	// Add output_tags from step config (supports both []interface{} from TOML and []string from inline calls)
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -311,10 +311,10 @@ func (w *PerformanceWorker) CreateJobs(ctx context.Context, step models.JobStep,
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
-		Title:           fmt.Sprintf("Navexa Performance - %s", portfolioName),
+		Title:           fmt.Sprintf("Portfolio Performance - %s", portfolioName),
 		URL:             fmt.Sprintf("%s/v1/portfolios/%d/performance", baseURL, portfolioID),
-		SourceType:      "navexa_performance",
-		SourceID:        fmt.Sprintf("navexa:portfolio:%d:performance", portfolioID),
+		SourceType:      "portfolio_performance",
+		SourceID:        fmt.Sprintf("portfolio:%d:performance", portfolioID),
 		ContentMarkdown: markdown,
 		Tags:            tags,
 		CreatedAt:       now,
@@ -350,7 +350,7 @@ func (w *PerformanceWorker) CreateJobs(ctx context.Context, step models.JobStep,
 		Float64("total_value", performance.TotalValue).
 		Float64("total_return", performance.TotalReturn).
 		Str("document_id", doc.ID).
-		Msg("Navexa performance fetched and stored")
+		Msg("Portfolio performance fetched and stored")
 
 	return stepID, nil
 }
@@ -543,7 +543,7 @@ func formatMoneyInt(val float64) string {
 func (w *PerformanceWorker) generateMarkdown(perf *NavexaPerformance, portfolioName string, portfolioID int, fromDate, toDate string) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# Navexa Performance - %s\n\n", portfolioName))
+	sb.WriteString(fmt.Sprintf("# Portfolio Performance - %s\n\n", portfolioName))
 	sb.WriteString(fmt.Sprintf("**Portfolio ID**: %d\n", portfolioID))
 	sb.WriteString(fmt.Sprintf("**Period**: %s to %s\n", fromDate, toDate))
 	sb.WriteString(fmt.Sprintf("**Currency**: %s\n", perf.BaseCurrencyCode))

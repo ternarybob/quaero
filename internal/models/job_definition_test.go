@@ -425,9 +425,11 @@ func TestAllWorkerTypes(t *testing.T) {
 		WorkerTypeEmailWatcher:           true,
 		WorkerTypeJobTemplate:            true,
 		WorkerTypeOrchestrator:           true,
-		WorkerTypeNavexaPortfolios:       true,
-		WorkerTypeNavexaHoldings:         true,
-		WorkerTypeNavexaPerformance:      true,
+		WorkerTypePortfolioList:          true,
+		WorkerTypePortfolioFetch:         true,
+		WorkerTypePortfolioHoldings:      true,
+		WorkerTypePortfolioPerformance:   true,
+		WorkerTypePortfolioReview:        true,
 	}
 
 	for _, st := range allTypes {

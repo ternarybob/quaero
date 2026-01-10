@@ -20,6 +20,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/exchange"
+	"github.com/ternarybob/quaero/internal/workers/workerutil"
 )
 
 // DataCollectionWorker handles deterministic stock data collection.
@@ -126,7 +127,7 @@ func (w *DataCollectionWorker) Init(ctx context.Context, step models.JobStep, jo
 	}
 
 	// Collect tickers from all sources
-	tickers := w.collectTickers(ctx, stepConfig, jobDef)
+	tickers := w.collectTickers(ctx, stepConfig, jobDef, step.Name)
 
 	if len(tickers) == 0 {
 		return nil, fmt.Errorf("no tickers found in variables or filter documents")
@@ -211,27 +212,52 @@ func (w *DataCollectionWorker) Init(ctx context.Context, step models.JobStep, jo
 }
 
 // collectTickers gathers tickers from all sources
-func (w *DataCollectionWorker) collectTickers(ctx context.Context, stepConfig map[string]interface{}, jobDef models.JobDefinition) []string {
+func (w *DataCollectionWorker) collectTickers(ctx context.Context, stepConfig map[string]interface{}, jobDef models.JobDefinition, stepName string) []string {
 	tickerSet := make(map[string]bool)
 
 	// Source 1: Step-level variables
 	w.extractTickersFromVariables(stepConfig, tickerSet)
+	w.logger.Debug().
+		Int("tickers_from_step_vars", len(tickerSet)).
+		Str("step_name", stepName).
+		Msg("collectTickers: After step-level variables")
 
 	// Source 2: Job-level variables
 	if jobDef.Config != nil {
 		w.extractTickersFromVariables(jobDef.Config, tickerSet)
+		w.logger.Debug().
+			Int("tickers_after_job_vars", len(tickerSet)).
+			Msg("collectTickers: After job-level variables")
 	}
 
-	// Source 3: Filter documents by tags (e.g., navexa-holdings)
-	if filterTags, ok := w.extractFilterTags(stepConfig); ok && len(filterTags) > 0 {
+	// Source 3: Filter documents by tags (e.g., navexa-holdings, or step name as default)
+	if filterTags, ok := w.extractFilterTags(stepConfig, stepName); ok && len(filterTags) > 0 {
+		w.logger.Info().
+			Strs("filter_tags", filterTags).
+			Str("step_name", stepName).
+			Msg("collectTickers: Searching for documents by filter_tags")
+
 		opts := interfaces.SearchOptions{
 			Tags:  filterTags,
 			Limit: 100,
 		}
 		docs, err := w.searchService.Search(ctx, "", opts)
 		if err == nil {
+			w.logger.Info().
+				Int("docs_found", len(docs)).
+				Strs("filter_tags", filterTags).
+				Msg("collectTickers: Documents found by filter_tags")
+
 			for _, doc := range docs {
 				tickers := w.extractTickersFromDocument(doc)
+				w.logger.Debug().
+					Str("doc_id", doc.ID).
+					Str("doc_title", doc.Title).
+					Strs("doc_tags", doc.Tags).
+					Int("tickers_extracted", len(tickers)).
+					Strs("tickers", tickers).
+					Msg("collectTickers: Extracted tickers from document")
+
 				for _, ticker := range tickers {
 					tickerSet[strings.ToUpper(ticker)] = true
 				}
@@ -239,6 +265,10 @@ func (w *DataCollectionWorker) collectTickers(ctx context.Context, stepConfig ma
 		} else {
 			w.logger.Warn().Err(err).Strs("filter_tags", filterTags).Msg("Failed to search documents by filter_tags")
 		}
+	} else {
+		w.logger.Debug().
+			Str("step_name", stepName).
+			Msg("collectTickers: No filter_tags configured (using step name default)")
 	}
 
 	// Convert to slice
@@ -305,8 +335,12 @@ func (w *DataCollectionWorker) extractTickersFromVariables(config map[string]int
 	}
 }
 
-// extractFilterTags extracts filter_tags from step config
-func (w *DataCollectionWorker) extractFilterTags(stepConfig map[string]interface{}) ([]string, bool) {
+// extractFilterTags extracts tags for document filtering.
+// First checks filter_tags, then falls back to input_tags (defaulting to step name).
+// This enables the pipeline pattern where upstream steps tag documents with their step name
+// and downstream steps find them using their input_tags (or their own step name as default).
+func (w *DataCollectionWorker) extractFilterTags(stepConfig map[string]interface{}, stepName string) ([]string, bool) {
+	// First try explicit filter_tags
 	if tags, ok := stepConfig["filter_tags"].([]interface{}); ok {
 		result := make([]string, 0, len(tags))
 		for _, tag := range tags {
@@ -314,12 +348,19 @@ func (w *DataCollectionWorker) extractFilterTags(stepConfig map[string]interface
 				result = append(result, s)
 			}
 		}
-		return result, len(result) > 0
+		if len(result) > 0 {
+			return result, true
+		}
 	}
-	if tags, ok := stepConfig["filter_tags"].([]string); ok {
-		return tags, len(tags) > 0
+	if tags, ok := stepConfig["filter_tags"].([]string); ok && len(tags) > 0 {
+		return tags, true
 	}
-	return nil, false
+
+	// Fall back to input_tags (uses GetInputTags which defaults to step name)
+	// This enables the pipeline pattern: upstream step tags documents with its name,
+	// downstream step finds them using input_tags defaulting to step name
+	inputTags := workerutil.GetInputTags(stepConfig, stepName)
+	return inputTags, len(inputTags) > 0
 }
 
 // extractTickersFromDocument extracts tickers from a document (e.g., navexa-holdings)
@@ -331,13 +372,25 @@ func (w *DataCollectionWorker) extractTickersFromDocument(doc *models.Document) 
 	}
 
 	// Check for holdings array in metadata (navexa-holdings format)
-	if holdings, ok := doc.Metadata["holdings"].([]interface{}); ok {
+	// Note: After BadgerDB storage, []map[string]interface{} may deserialize as-is,
+	// so we need to handle both []interface{} and []map[string]interface{} types
+	switch holdings := doc.Metadata["holdings"].(type) {
+	case []interface{}:
 		for _, h := range holdings {
 			holding, ok := h.(map[string]interface{})
 			if !ok {
 				continue
 			}
+			symbol, _ := holding["symbol"].(string)
+			exchange, _ := holding["exchange"].(string)
 
+			// Only include ASX tickers
+			if symbol != "" && (exchange == "ASX" || exchange == "AU" || exchange == "") {
+				tickers = append(tickers, symbol)
+			}
+		}
+	case []map[string]interface{}:
+		for _, holding := range holdings {
 			symbol, _ := holding["symbol"].(string)
 			exchange, _ := holding["exchange"].(string)
 
@@ -349,9 +402,17 @@ func (w *DataCollectionWorker) extractTickersFromDocument(doc *models.Document) 
 	}
 
 	// Check for tickers array in metadata
-	if tickerArray, ok := doc.Metadata["tickers"].([]interface{}); ok {
+	// Handle both []interface{} and []string types
+	switch tickerArray := doc.Metadata["tickers"].(type) {
+	case []interface{}:
 		for _, t := range tickerArray {
 			if ticker, ok := t.(string); ok && ticker != "" {
+				tickers = append(tickers, ticker)
+			}
+		}
+	case []string:
+		for _, ticker := range tickerArray {
+			if ticker != "" {
 				tickers = append(tickers, ticker)
 			}
 		}
@@ -376,12 +437,18 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 	announcementPeriod, _ := initResult.Metadata["announcement_period"].(string)
 	activeWorkers, _ := initResult.Metadata["active_workers"].(map[string]bool)
 
+	// Extract parent step's output_tags for pipeline routing
+	// This ensures documents created by sub-workers are tagged with the parent step's output_tags
+	// so downstream steps can find them
+	parentOutputTags := workerutil.GetOutputTags(step.Config)
+
 	w.logger.Info().
 		Str("step_id", stepID).
 		Int("ticker_count", len(tickers)).
 		Strs("benchmarks", benchmarkCodes).
 		Str("data_period", dataPeriod).
 		Str("announcement_period", announcementPeriod).
+		Strs("parent_output_tags", parentOutputTags).
 		Msg("Starting stock data collection - executing ASX workers inline")
 
 	var totalDocs int
@@ -406,7 +473,7 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 				Config: map[string]interface{}{
 					"ticker":      ticker,
 					"period":      dataPeriod,
-					"output_tags": []string{"stock-data-collected", "benchmark", code},
+					"output_tags": workerutil.MergeOutputTags(parentOutputTags, "stock-data-collected", "benchmark", code),
 				},
 			}
 			_, err := w.marketDataWorker.CreateJobs(ctx, indexStep, jobDef, stepID, nil)
@@ -432,7 +499,7 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 				Config: map[string]interface{}{
 					"asx_code":    ticker,
 					"period":      dataPeriod,
-					"output_tags": []string{"stock-data-collected", ticker},
+					"output_tags": workerutil.MergeOutputTags(parentOutputTags, "stock-data-collected", ticker),
 				},
 			}
 			_, err := w.fundamentalsWorker.CreateJobs(ctx, stockStep, jobDef, stepID, nil)
@@ -454,7 +521,7 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 				Config: map[string]interface{}{
 					"asx_code":    ticker,
 					"period":      announcementPeriod,
-					"output_tags": []string{"stock-data-collected", ticker},
+					"output_tags": workerutil.MergeOutputTags(parentOutputTags, "stock-data-collected", ticker),
 				},
 			}
 			_, err := w.announcementsWorker.CreateJobs(ctx, announcementStep, jobDef, stepID, nil)
@@ -476,7 +543,7 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 				Config: map[string]interface{}{
 					"asx_code":    ticker,
 					"period":      dataPeriod,
-					"output_tags": []string{"stock-data-collected", ticker},
+					"output_tags": workerutil.MergeOutputTags(parentOutputTags, "stock-data-collected", ticker),
 				},
 			}
 			_, err := w.directorInterestWorker.CreateJobs(ctx, directorStep, jobDef, stepID, nil)
@@ -498,7 +565,7 @@ func (w *DataCollectionWorker) CreateJobs(ctx context.Context, step models.JobSt
 				Config: map[string]interface{}{
 					"asx_code":    ticker,
 					"api_key":     "{google_gemini_api_key}", // Resolve from KV store at runtime
-					"output_tags": []string{"stock-data-collected", ticker},
+					"output_tags": workerutil.MergeOutputTags(parentOutputTags, "stock-data-collected", ticker),
 				},
 			}
 			_, err := w.competitorWorker.CreateJobs(ctx, competitorStep, jobDef, stepID, nil)

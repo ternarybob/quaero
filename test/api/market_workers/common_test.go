@@ -226,6 +226,27 @@ var (
 		},
 	}
 
+	// AnnouncementDownloadSchema for market_announcement_download worker
+	// Schema: quaero/announcement_download/v1
+	AnnouncementDownloadSchema = WorkerSchema{
+		RequiredFields: []string{"$schema", "ticker", "fetched_at", "filter_types", "total_matched", "total_downloaded", "total_failed", "announcements"},
+		OptionalFields: []string{"source_document_id"},
+		FieldTypes: map[string]string{
+			"$schema":            "string",
+			"ticker":             "string",
+			"fetched_at":         "string",
+			"filter_types":       "array",
+			"total_matched":      "number",
+			"total_downloaded":   "number",
+			"total_failed":       "number",
+			"announcements":      "array",
+			"source_document_id": "string",
+		},
+		ArraySchemas: map[string][]string{
+			"announcements": {"date", "headline", "type"},
+		},
+	}
+
 	// PortfolioSchema for market_portfolio worker
 	PortfolioSchema = WorkerSchema{
 		RequiredFields: []string{"portfolio_tag"},

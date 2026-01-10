@@ -1,10 +1,10 @@
 // =============================================================================
-// Navexa Worker Integration Tests
+// Portfolio Worker Integration Tests (via Navexa API)
 // =============================================================================
-// Tests the Navexa portfolio integration workers:
-// 1. navexa_portfolios - Fetch all user portfolios
-// 2. navexa_holdings - Fetch holdings for a portfolio
-// 3. navexa_performance - Fetch P/L performance data
+// Tests the portfolio workers:
+// 1. portfolio_list - Fetch all user portfolios
+// 2. portfolio_holdings - Fetch holdings for a portfolio
+// 3. portfolio_performance - Fetch P/L performance data
 //
 // IMPORTANT: These tests require a valid navexa_api_key in KV storage.
 // If not configured, tests will skip gracefully.
@@ -25,7 +25,7 @@ import (
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// TestWorkerNavexaPortfolios tests the navexa_portfolios worker
+// TestWorkerNavexaPortfolios tests the portfolio_list worker
 func TestWorkerNavexaPortfolios(t *testing.T) {
 	// Initialize timing data
 	timingData := common.NewTestTimingData(t.Name())
@@ -67,19 +67,19 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 
 	// Step 2: Run worker job
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Creating job definition", time.Now().Format(time.RFC3339)))
-	defID := fmt.Sprintf("test-navexa-portfolios-%d", time.Now().UnixNano())
+	defID := fmt.Sprintf("test-portfolio-list-%d", time.Now().UnixNano())
 
 	body := map[string]interface{}{
 		"id":          defID,
-		"name":        "Navexa Portfolios Worker Test",
-		"description": "Test navexa_portfolios worker",
-		"type":        "navexa_portfolios",
+		"name":        "Portfolio List Worker Test",
+		"description": "Test portfolio_list worker",
+		"type":        "portfolio_list",
 		"enabled":     true,
-		"tags":        []string{"worker-test", "navexa"},
+		"tags":        []string{"worker-test", "portfolio"},
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch-portfolios",
-				"type": "navexa_portfolios",
+				"type": "portfolio_list",
 			},
 		},
 	}
@@ -118,7 +118,7 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
-	t.Logf("Executed navexa_portfolios job: %s", jobID)
+	t.Logf("Executed portfolio_list job: %s", jobID)
 	timingData.AddStepTiming("job_trigger", time.Since(stepStart).Seconds())
 
 	// Wait for completion
@@ -133,9 +133,9 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 
 	// Step 5: Validate document was created
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 5: Validating document creation", time.Now().Format(time.RFC3339)))
-	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "navexa-portfolio")
+	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "portfolio-list")
 
-	docResp, err := helper.GET("/api/documents?tags=navexa-portfolio&limit=1")
+	docResp, err := helper.GET("/api/documents?tags=portfolio-list&limit=1")
 	require.NoError(t, err)
 	defer docResp.Body.Close()
 
@@ -143,9 +143,9 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 		Documents []map[string]interface{} `json:"documents"`
 	}
 	require.NoError(t, helper.ParseJSONResponse(docResp, &docResult))
-	require.NotEmpty(t, docResult.Documents, "Worker must create document with navexa-portfolio tag")
+	require.NotEmpty(t, docResult.Documents, "Worker must create document with portfolio-list tag")
 
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with navexa-portfolio tag", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with portfolio-list tag", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaPortfolios completed successfully", time.Now().Format(time.RFC3339)))
 
 	WriteTestLog(t, resultsDir, testLog)
@@ -163,7 +163,7 @@ func TestWorkerNavexaPortfolios(t *testing.T) {
 	t.Log("PASS: TestWorkerNavexaPortfolios completed successfully")
 }
 
-// TestWorkerNavexaHoldings tests the navexa_holdings worker
+// TestWorkerNavexaHoldings tests the portfolio_holdings worker
 // This test fetches portfolios first to get a valid portfolio ID
 func TestWorkerNavexaHoldings(t *testing.T) {
 	// Initialize timing data
@@ -208,18 +208,18 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	t.Logf("Step 2: Testing holdings for portfolio %d (%s)", portfolioID, portfolioName)
 
 	// Test holdings worker
-	holdingsDefID := fmt.Sprintf("test-navexa-holdings-%d", time.Now().UnixNano())
+	holdingsDefID := fmt.Sprintf("test-portfolio-holdings-%d", time.Now().UnixNano())
 	holdingsBody := map[string]interface{}{
 		"id":          holdingsDefID,
-		"name":        "Navexa Holdings Worker Test",
-		"description": "Test navexa_holdings worker",
-		"type":        "navexa_holdings",
+		"name":        "Portfolio Holdings Worker Test",
+		"description": "Test portfolio_holdings worker",
+		"type":        "portfolio_holdings",
 		"enabled":     true,
-		"tags":        []string{"worker-test", "navexa"},
+		"tags":        []string{"worker-test", "portfolio"},
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch-holdings",
-				"type": "navexa_holdings",
+				"type": "portfolio_holdings",
 				"config": map[string]interface{}{
 					"portfolio_id":   portfolioID,
 					"portfolio_name": portfolioName,
@@ -258,7 +258,7 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
-	t.Logf("Executed navexa_holdings job: %s", jobID)
+	t.Logf("Executed portfolio_holdings job: %s", jobID)
 
 	finalStatus := WaitForJobCompletion(t, helper, jobID, 2*time.Minute)
 	timingData.AddStepTiming("job_execution", time.Since(stepStart).Seconds())
@@ -266,9 +266,9 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	require.Equal(t, "completed", finalStatus, "Holdings job must complete successfully - got status: %s", finalStatus)
 
 	// Validate document was created
-	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "navexa-holdings")
+	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "portfolio-holdings")
 
-	holdingsDocResp, err := helper.GET("/api/documents?tags=navexa-holdings&limit=1")
+	holdingsDocResp, err := helper.GET("/api/documents?tags=portfolio-holdings&limit=1")
 	require.NoError(t, err)
 	defer holdingsDocResp.Body.Close()
 
@@ -276,9 +276,9 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 		Documents []map[string]interface{} `json:"documents"`
 	}
 	require.NoError(t, helper.ParseJSONResponse(holdingsDocResp, &holdingsDocResult))
-	require.NotEmpty(t, holdingsDocResult.Documents, "Worker must create document with navexa-holdings tag")
+	require.NotEmpty(t, holdingsDocResult.Documents, "Worker must create document with portfolio-holdings tag")
 
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with navexa-holdings tag", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with portfolio-holdings tag", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaHoldings completed successfully", time.Now().Format(time.RFC3339)))
 
 	WriteTestLog(t, resultsDir, testLog)
@@ -296,7 +296,7 @@ func TestWorkerNavexaHoldings(t *testing.T) {
 	t.Log("PASS: TestWorkerNavexaHoldings completed successfully")
 }
 
-// TestWorkerNavexaPerformance tests the navexa_performance worker
+// TestWorkerNavexaPerformance tests the portfolio_performance worker
 // This test fetches portfolios first to get a valid portfolio ID
 func TestWorkerNavexaPerformance(t *testing.T) {
 	// Initialize timing data
@@ -341,18 +341,18 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	t.Logf("Step 2: Testing performance for portfolio %d (%s)", portfolioID, portfolioName)
 
 	// Test performance worker
-	perfDefID := fmt.Sprintf("test-navexa-performance-%d", time.Now().UnixNano())
+	perfDefID := fmt.Sprintf("test-portfolio-performance-%d", time.Now().UnixNano())
 	perfBody := map[string]interface{}{
 		"id":          perfDefID,
-		"name":        "Navexa Performance Worker Test",
-		"description": "Test navexa_performance worker",
-		"type":        "navexa_performance",
+		"name":        "Portfolio Performance Worker Test",
+		"description": "Test portfolio_performance worker",
+		"type":        "portfolio_performance",
 		"enabled":     true,
-		"tags":        []string{"worker-test", "navexa"},
+		"tags":        []string{"worker-test", "portfolio"},
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch-performance",
-				"type": "navexa_performance",
+				"type": "portfolio_performance",
 				"config": map[string]interface{}{
 					"portfolio_id":   portfolioID,
 					"portfolio_name": portfolioName,
@@ -391,7 +391,7 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
-	t.Logf("Executed navexa_performance job: %s", jobID)
+	t.Logf("Executed portfolio_performance job: %s", jobID)
 
 	finalStatus := WaitForJobCompletion(t, helper, jobID, 2*time.Minute)
 	timingData.AddStepTiming("job_execution", time.Since(stepStart).Seconds())
@@ -399,9 +399,9 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	require.Equal(t, "completed", finalStatus, "Performance job must complete successfully - got status: %s", finalStatus)
 
 	// Validate document was created
-	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "navexa-performance")
+	_, _ = SaveNavexaWorkerOutput(t, helper, resultsDir, "portfolio-performance")
 
-	perfDocResp, err := helper.GET("/api/documents?tags=navexa-performance&limit=1")
+	perfDocResp, err := helper.GET("/api/documents?tags=portfolio-performance&limit=1")
 	require.NoError(t, err)
 	defer perfDocResp.Body.Close()
 
@@ -409,7 +409,7 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 		Documents []map[string]interface{} `json:"documents"`
 	}
 	require.NoError(t, helper.ParseJSONResponse(perfDocResp, &perfDocResult))
-	require.NotEmpty(t, perfDocResult.Documents, "Worker must create document with navexa-performance tag")
+	require.NotEmpty(t, perfDocResult.Documents, "Worker must create document with portfolio-performance tag")
 
 	// Validate markdown content has real data (not formatting bugs or all zeros)
 	perfDoc := perfDocResult.Documents[0]
@@ -429,7 +429,7 @@ func TestWorkerNavexaPerformance(t *testing.T) {
 	// Assert holdings have real values (at least one holding with value > $0)
 	require.Regexp(t, `\| [A-Z]+ \| .+ \| \$[1-9][0-9,]* \|`, markdown, "At least one holding must have non-zero value")
 
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with navexa-performance tag", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with portfolio-performance tag", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Markdown contains real non-zero values (no formatting bugs)", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestWorkerNavexaPerformance completed successfully", time.Now().Format(time.RFC3339)))
 

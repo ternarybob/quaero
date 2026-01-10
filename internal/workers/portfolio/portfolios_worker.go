@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------
-// PortfoliosWorker - Fetches all portfolios from Navexa API
+// PortfoliosWorker - Fetches all portfolios via Navexa API
 // -----------------------------------------------------------------------
 
-package navexa
+package portfolio
 
 import (
 	"context"
@@ -47,7 +47,7 @@ type NavexaPortfolio struct {
 	BaseCurrencyCode string `json:"baseCurrencyCode"`
 }
 
-// NewPortfoliosWorker creates a new Navexa portfolios worker
+// NewPortfoliosWorker creates a new portfolio list worker
 func NewPortfoliosWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
@@ -67,9 +67,9 @@ func NewPortfoliosWorker(
 	}
 }
 
-// GetType returns WorkerTypeNavexaPortfolios
+// GetType returns WorkerTypePortfolioList
 func (w *PortfoliosWorker) GetType() models.WorkerType {
-	return models.WorkerTypeNavexaPortfolios
+	return models.WorkerTypePortfolioList
 }
 
 // ReturnsChildJobs returns false - this worker executes inline
@@ -83,19 +83,19 @@ func (w *PortfoliosWorker) ValidateConfig(step models.JobStep) error {
 	return nil
 }
 
-// Init initializes the Navexa portfolios worker
+// Init initializes the portfolio list worker
 func (w *PortfoliosWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
-		Msg("Navexa portfolios worker initialized")
+		Msg("Portfolio list worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
 			{
-				ID:     "navexa-portfolios",
-				Name:   "Fetch all Navexa portfolios",
-				Type:   "navexa_portfolios",
+				ID:     "portfolio-list",
+				Name:   "Fetch all portfolios",
+				Type:   "portfolio_list",
 				Config: step.Config,
 			},
 		},
@@ -114,7 +114,7 @@ func (w *PortfoliosWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 		var err error
 		initResult, err = w.Init(ctx, step, jobDef)
 		if err != nil {
-			return "", fmt.Errorf("failed to initialize navexa_portfolios worker: %w", err)
+			return "", fmt.Errorf("failed to initialize portfolio_list worker: %w", err)
 		}
 	}
 
@@ -140,7 +140,7 @@ func (w *PortfoliosWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 
 	// Build tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
-	tags := []string{"navexa-portfolio", dateTag}
+	tags := []string{"portfolio-list", dateTag}
 
 	// Add output_tags from step config (supports both []interface{} from TOML and []string from inline calls)
 	if outputTags, ok := stepConfig["output_tags"].([]interface{}); ok {
@@ -171,10 +171,10 @@ func (w *PortfoliosWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	now := time.Now()
 	doc := &models.Document{
 		ID:              uuid.New().String(),
-		Title:           "Navexa Portfolios",
+		Title:           "Portfolio List",
 		URL:             baseURL + "/v1/portfolios",
-		SourceType:      "navexa_portfolios",
-		SourceID:        "navexa:portfolios",
+		SourceType:      "portfolio_list",
+		SourceID:        "portfolio:list",
 		ContentMarkdown: markdown,
 		Tags:            tags,
 		CreatedAt:       now,
@@ -193,13 +193,13 @@ func (w *PortfoliosWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Fetched %d Navexa portfolios", len(portfolios)))
+			fmt.Sprintf("Fetched %d portfolios", len(portfolios)))
 	}
 
 	w.logger.Info().
 		Int("portfolio_count", len(portfolios)).
 		Str("document_id", doc.ID).
-		Msg("Navexa portfolios fetched and stored")
+		Msg("Portfolio list fetched and stored")
 
 	return stepID, nil
 }
@@ -273,7 +273,7 @@ func (w *PortfoliosWorker) fetchPortfolios(ctx context.Context, apiKey string, s
 func (w *PortfoliosWorker) generateMarkdown(portfolios []NavexaPortfolio) string {
 	var sb strings.Builder
 
-	sb.WriteString("# Navexa Portfolios\n\n")
+	sb.WriteString("# Portfolio List\n\n")
 	sb.WriteString(fmt.Sprintf("**Fetched**: %s\n\n", time.Now().Format("2 January 2006 3:04 PM")))
 	sb.WriteString(fmt.Sprintf("**Total Portfolios**: %d\n\n", len(portfolios)))
 

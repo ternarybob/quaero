@@ -598,9 +598,10 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 		}
 
 		// Resolve placeholders in step config
+		// Supports {config.xxx} for job config values and {key} for KV storage lookups
 		resolvedStep := step
-		if step.Config != nil && d.kvStorage != nil {
-			resolvedStep.Config = d.resolvePlaceholders(ctx, step.Config)
+		if step.Config != nil {
+			resolvedStep.Config = d.resolvePlaceholdersWithJobConfig(ctx, step.Config, jobDef.Config)
 		}
 
 		// Log step starting to the step job (which has step_name in metadata for UI filtering)
@@ -1156,42 +1157,79 @@ func (d *JobDispatcher) executeJobDefinitionInternal(ctx context.Context, preCre
 	return managerID, nil
 }
 
-// resolvePlaceholders recursively resolves {key-name} placeholders in step config values
+// resolvePlaceholders recursively resolves {key-name} placeholders in step config values.
+// Deprecated: Use resolvePlaceholdersWithJobConfig for config variable support.
 func (d *JobDispatcher) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
-	if config == nil || d.kvStorage == nil {
+	return d.resolvePlaceholdersWithJobConfig(ctx, config, nil)
+}
+
+// resolvePlaceholdersWithJobConfig recursively resolves placeholders in step config values.
+// Supports two types of placeholders:
+//   - {config.xxx} - looks up xxx in the job definition's [config] section
+//   - {key-name} - looks up key-name in KV storage
+func (d *JobDispatcher) resolvePlaceholdersWithJobConfig(ctx context.Context, config map[string]interface{}, jobConfig map[string]interface{}) map[string]interface{} {
+	if config == nil {
 		return config
 	}
 
 	resolved := make(map[string]interface{})
 	for key, value := range config {
-		resolved[key] = d.resolveValue(ctx, value)
+		resolved[key] = d.resolveValueWithJobConfig(ctx, value, jobConfig)
 	}
 	return resolved
 }
 
-// resolveValue recursively resolves placeholders in a single value
-func (d *JobDispatcher) resolveValue(ctx context.Context, value interface{}) interface{} {
+// resolveValueWithJobConfig recursively resolves placeholders in a single value.
+// Supports {config.xxx} for job config references and {key} for KV storage lookups.
+func (d *JobDispatcher) resolveValueWithJobConfig(ctx context.Context, value interface{}, jobConfig map[string]interface{}) interface{} {
 	switch v := value.(type) {
 	case string:
 		if len(v) > 2 && v[0] == '{' && v[len(v)-1] == '}' {
 			keyName := v[1 : len(v)-1]
-			kvValue, err := d.kvStorage.Get(ctx, keyName)
-			if err == nil && kvValue != "" {
-				return kvValue
+
+			// Check for {config.xxx} pattern - job definition config lookup
+			if strings.HasPrefix(keyName, "config.") {
+				configKey := strings.TrimPrefix(keyName, "config.")
+				if jobConfig != nil {
+					if configValue, exists := jobConfig[configKey]; exists {
+						// Return the config value directly (preserves type)
+						return configValue
+					}
+				}
+				// Config key not found, return placeholder as-is for debugging
+				d.logger.Warn().
+					Str("placeholder", v).
+					Str("config_key", configKey).
+					Msg("Config placeholder not resolved: key not found in job config")
+				return v
+			}
+
+			// Fall back to KV storage lookup for {key} pattern
+			if d.kvStorage != nil {
+				kvValue, err := d.kvStorage.Get(ctx, keyName)
+				if err == nil && kvValue != "" {
+					return kvValue
+				}
 			}
 		}
 		return v
 	case map[string]interface{}:
-		return d.resolvePlaceholders(ctx, v)
+		return d.resolvePlaceholdersWithJobConfig(ctx, v, jobConfig)
 	case []interface{}:
 		resolved := make([]interface{}, len(v))
 		for i, item := range v {
-			resolved[i] = d.resolveValue(ctx, item)
+			resolved[i] = d.resolveValueWithJobConfig(ctx, item, jobConfig)
 		}
 		return resolved
 	default:
 		return v
 	}
+}
+
+// resolveValue recursively resolves placeholders in a single value
+// Deprecated: Use resolveValueWithJobConfig for config variable support.
+func (d *JobDispatcher) resolveValue(ctx context.Context, value interface{}) interface{} {
+	return d.resolveValueWithJobConfig(ctx, value, nil)
 }
 
 // checkErrorTolerance checks if the error tolerance threshold has been exceeded

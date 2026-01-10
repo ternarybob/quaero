@@ -52,8 +52,8 @@ import (
 	devopsworkers "github.com/ternarybob/quaero/internal/workers/devops"
 	githubworkers "github.com/ternarybob/quaero/internal/workers/github"
 	marketworkers "github.com/ternarybob/quaero/internal/workers/market"
-	navexaworkers "github.com/ternarybob/quaero/internal/workers/navexa"
 	outputworkers "github.com/ternarybob/quaero/internal/workers/output"
+	portfolioworkers "github.com/ternarybob/quaero/internal/workers/portfolio"
 	processingworkers "github.com/ternarybob/quaero/internal/workers/processing"
 	ratingworkers "github.com/ternarybob/quaero/internal/workers/rating"
 	templateworkers "github.com/ternarybob/quaero/internal/workers/template"
@@ -936,6 +936,20 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(marketAnnouncementsWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementsWorker.GetType().String()).Msg("Market Announcements worker registered")
 
+	// Register Market Announcement Download worker (downloads PDFs from filtered announcements)
+	// Uses worker-to-worker pattern with DocumentProvider interface
+	marketAnnouncementDownloadWorker := marketworkers.NewAnnouncementDownloadWorker(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		marketAnnouncementsWorker, // Worker-to-worker: DocumentProvider pattern
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(marketAnnouncementDownloadWorker)
+	a.Logger.Debug().Str("step_type", marketAnnouncementDownloadWorker.GetType().String()).Msg("Market Announcement Download worker registered")
+
 	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
 	// API key is resolved at runtime from KV store
 	marketNewsWorker := marketworkers.NewNewsWorker(
@@ -1014,7 +1028,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", outputFormatterWorker.GetType().String()).Msg("Output Formatter worker registered")
 
 	// Register Navexa Portfolios worker (fetches all user portfolios from Navexa API)
-	navexaPortfoliosWorker := navexaworkers.NewPortfoliosWorker(
+	navexaPortfoliosWorker := portfolioworkers.NewPortfoliosWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1026,7 +1040,7 @@ func (a *App) initServices() error {
 
 	// Register Navexa Portfolio worker (fetches specific portfolio by name with holdings)
 	// SearchService is required for document caching/freshness checking
-	navexaPortfolioWorker := navexaworkers.NewPortfolioWorker(
+	navexaPortfolioWorker := portfolioworkers.NewPortfolioWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.SearchService, // For document caching with freshness checking
@@ -1038,7 +1052,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", navexaPortfolioWorker.GetType().String()).Msg("Navexa Portfolio worker registered")
 
 	// Register Navexa Holdings worker (fetches holdings for a specific portfolio)
-	navexaHoldingsWorker := navexaworkers.NewHoldingsWorker(
+	navexaHoldingsWorker := portfolioworkers.NewHoldingsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1049,7 +1063,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", navexaHoldingsWorker.GetType().String()).Msg("Navexa Holdings worker registered")
 
 	// Register Navexa Performance worker (fetches P/L performance for a portfolio)
-	navexaPerformanceWorker := navexaworkers.NewPerformanceWorker(
+	navexaPerformanceWorker := portfolioworkers.NewPerformanceWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
@@ -1062,7 +1076,7 @@ func (a *App) initServices() error {
 	// Register Navexa Portfolio Review worker (LLM-generated portfolio review from portfolio documents)
 	// SearchService is required for filter_tags document lookup
 	// Consumes documents via filter_tags or direct document ID (generic design)
-	navexaPortfolioReviewWorker := navexaworkers.NewPortfolioReviewWorker(
+	navexaPortfolioReviewWorker := portfolioworkers.NewPortfolioReviewWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.SearchService, // For filter_tags document lookup
@@ -1073,6 +1087,19 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(navexaPortfolioReviewWorker)
 	a.Logger.Debug().Str("step_type", navexaPortfolioReviewWorker.GetType().String()).Msg("Navexa Portfolio Review worker registered")
+
+	// Register Navexa Portfolio worker (fetches portfolio by name from Navexa API)
+	// This is a Navexa-specific worker that uses the Navexa service to fetch portfolio by name
+	navexaPortfolioFetchWorker := portfolioworkers.NewNavexaPortfolioWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.SearchService, // For document caching with freshness checking
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(navexaPortfolioFetchWorker)
+	a.Logger.Debug().Str("step_type", navexaPortfolioFetchWorker.GetType().String()).Msg("Navexa Portfolio worker registered")
 
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory

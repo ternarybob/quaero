@@ -36,6 +36,7 @@ type DataWorker struct {
 // Compile-time assertions
 var _ interfaces.DefinitionWorker = (*DataWorker)(nil)
 var _ interfaces.DocumentProvisioner = (*DataWorker)(nil)
+var _ interfaces.DocumentProvider = (*DataWorker)(nil)
 
 // MarketData holds all fetched and calculated market data
 type Data struct {
@@ -422,6 +423,124 @@ func (w *DataWorker) EnsureDocuments(ctx context.Context, identifiers []string, 
 
 	// Delegate to existing EnsureMarketData implementation
 	return w.EnsureMarketData(ctx, tickers, options.CacheHours, options.ForceRefresh)
+}
+
+// -----------------------------------------------------------------------------
+// DocumentProvider Implementation - Worker-to-Worker Communication Pattern
+// -----------------------------------------------------------------------------
+
+// GetDocument implements interfaces.DocumentProvider.
+// Ensures market data exists for a single ticker and returns the document result.
+func (w *DataWorker) GetDocument(ctx context.Context, identifier string, opts ...interfaces.DocumentOption) (*interfaces.DocumentResult, error) {
+	options := interfaces.ApplyDocumentOptions(opts...)
+
+	ticker := common.ParseTicker(identifier)
+	if ticker.Code == "" {
+		return &interfaces.DocumentResult{
+			Identifier: identifier,
+			Error:      fmt.Errorf("invalid ticker identifier: %s", identifier),
+		}, fmt.Errorf("invalid ticker identifier: %s", identifier)
+	}
+
+	sourceType := "market_data"
+	sourceID := ticker.SourceID("market_data")
+
+	result := &interfaces.DocumentResult{
+		Identifier: identifier,
+	}
+
+	// Check for cached document if not forcing refresh
+	if !options.ForceRefresh && options.CacheHours > 0 {
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && existingDoc != nil && existingDoc.LastSynced != nil {
+			if time.Since(*existingDoc.LastSynced) < time.Duration(options.CacheHours)*time.Hour {
+				w.logger.Debug().
+					Str("ticker", ticker.String()).
+					Str("doc_id", existingDoc.ID).
+					Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+					Msg("GetDocument: using cached market data document")
+
+				result.DocumentID = existingDoc.ID
+				result.Tags = existingDoc.Tags
+				result.Fresh = true
+				result.Created = false
+				return result, nil
+			}
+		}
+	}
+
+	// Cache miss or stale - fetch and create document
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Bool("force_refresh", options.ForceRefresh).
+		Msg("GetDocument: fetching fresh market data")
+
+	// Default period for historical data
+	period := "Y3"
+
+	marketData, err := w.fetchMarketData(ctx, ticker, period)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to fetch market data: %w", err)
+		return result, result.Error
+	}
+
+	// Calculate technical indicators
+	w.calculateMarketTechnicals(marketData)
+
+	// Create and save document
+	doc := w.createMarketDocument(ctx, marketData, nil, options.ManagerID, options.OutputTags)
+
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		result.Error = fmt.Errorf("failed to save document: %w", err)
+		return result, result.Error
+	}
+
+	result.DocumentID = doc.ID
+	result.Tags = doc.Tags
+	result.Fresh = false
+	result.Created = true
+
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Str("doc_id", doc.ID).
+		Msg("GetDocument: created fresh market data document")
+
+	return result, nil
+}
+
+// GetDocuments implements interfaces.DocumentProvider.
+// Ensures market data exists for multiple tickers and returns the results.
+// Processing continues even if individual tickers fail.
+func (w *DataWorker) GetDocuments(ctx context.Context, identifiers []string, opts ...interfaces.DocumentOption) ([]*interfaces.DocumentResult, error) {
+	results := make([]*interfaces.DocumentResult, len(identifiers))
+	var lastErr error
+	successCount := 0
+
+	for i, id := range identifiers {
+		result, err := w.GetDocument(ctx, id, opts...)
+		results[i] = result
+		if err != nil {
+			lastErr = err
+			w.logger.Warn().
+				Err(err).
+				Str("identifier", id).
+				Msg("GetDocuments: failed to provision document")
+		} else {
+			successCount++
+		}
+	}
+
+	w.logger.Debug().
+		Int("total", len(identifiers)).
+		Int("success", successCount).
+		Msg("GetDocuments: completed batch provisioning")
+
+	// Return error only if ALL identifiers failed
+	if successCount == 0 && lastErr != nil {
+		return results, fmt.Errorf("all identifiers failed, last error: %w", lastErr)
+	}
+
+	return results, nil
 }
 
 // ValidateConfig validates step configuration

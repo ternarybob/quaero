@@ -1,12 +1,12 @@
 // =============================================================================
-// Navexa Portfolio Worker Integration Tests
+// Portfolio Worker Integration Tests
 // =============================================================================
-// Tests the navexa_portfolio and navexa_portfolio_review workers:
-// 1. navexa_portfolio: Fetches portfolio by name with all holdings
-// 2. navexa_portfolio_review: Generates LLM-powered portfolio review
+// Tests the portfolio_fetch and portfolio_review workers:
+// 1. portfolio_fetch: Fetches portfolio by name with all holdings
+// 2. portfolio_review: Generates LLM-powered portfolio review
 //
-// EXECUTION ORDER: Tests run sequentially. If navexa_portfolio fails,
-// navexa_portfolio_review is skipped to avoid cascading failures.
+// EXECUTION ORDER: Tests run sequentially. If portfolio_fetch fails,
+// portfolio_review is skipped to avoid cascading failures.
 //
 // IMPORTANT: Requires valid navexa_api_key in KV storage.
 // LLM API key required for portfolio review test.
@@ -32,7 +32,7 @@ import (
 // =============================================================================
 
 // TestNavexaPortfolioWorkflow runs both portfolio tests sequentially.
-// If the first test (navexa_portfolio) fails, the second test is skipped.
+// If the first test (portfolio_fetch) fails, the second test is skipped.
 func TestNavexaPortfolioWorkflow(t *testing.T) {
 	// Shared state between subtests
 	var portfolioTestPassed bool
@@ -62,7 +62,7 @@ func TestNavexaPortfolioWorkflow(t *testing.T) {
 	// Run portfolio review test only if first test passed
 	t.Run("2_NavexaPortfolioReview", func(t *testing.T) {
 		if !portfolioTestPassed {
-			t.Skip("Skipping portfolio review test because navexa_portfolio test failed")
+			t.Skip("Skipping portfolio review test because portfolio_fetch test failed")
 		}
 		runNavexaPortfolioReviewTest(t, env, helper, portfolioID, portfolioName)
 	})
@@ -72,7 +72,7 @@ func TestNavexaPortfolioWorkflow(t *testing.T) {
 // Individual Test Functions
 // =============================================================================
 
-// runNavexaPortfolioTest tests the navexa_portfolio worker
+// runNavexaPortfolioTest tests the portfolio_fetch worker
 // Returns: success flag, portfolio ID, portfolio name
 func runNavexaPortfolioTest(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, apiKey string) (bool, int, string) {
 	timingData := common.NewTestTimingData("NavexaPortfolio")
@@ -117,23 +117,23 @@ func runNavexaPortfolioTest(t *testing.T, env *common.TestEnvironment, helper *c
 
 	// Step 2: Save schema definition
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Saving schema definition", time.Now().Format(time.RFC3339)))
-	SaveSchemaDefinition(t, resultsDir, NavexaPortfolioSchema, "navexa_portfolio")
+	SaveSchemaDefinition(t, resultsDir, NavexaPortfolioSchema, "portfolio_fetch")
 
 	// Step 3: Create job definition for portfolio fetch
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 3: Creating job definition", time.Now().Format(time.RFC3339)))
-	defID := fmt.Sprintf("test-navexa-portfolio-%d", time.Now().UnixNano())
+	defID := fmt.Sprintf("test-portfolio-fetch-%d", time.Now().UnixNano())
 
 	body := map[string]interface{}{
 		"id":          defID,
-		"name":        "Navexa Portfolio Worker Test",
-		"description": "Test navexa_portfolio worker",
-		"type":        "navexa_portfolio",
+		"name":        "Portfolio Fetch Worker Test",
+		"description": "Test portfolio_fetch worker",
+		"type":        "portfolio_fetch",
 		"enabled":     true,
-		"tags":        []string{"worker-test", "navexa", "portfolio"},
+		"tags":        []string{"worker-test", "portfolio"},
 		"steps": []map[string]interface{}{
 			{
 				"name": "get-portfolio",
-				"type": "navexa_portfolio",
+				"type": "portfolio_fetch",
 				"config": map[string]interface{}{
 					"name": "smsf", // Search for portfolio containing "smsf"
 				},
@@ -172,7 +172,7 @@ func runNavexaPortfolioTest(t *testing.T, env *common.TestEnvironment, helper *c
 	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
-	t.Logf("Executed navexa_portfolio job: %s", jobID)
+	t.Logf("Executed portfolio_fetch job: %s", jobID)
 	timingData.AddStepTiming("job_trigger", time.Since(stepStart).Seconds())
 
 	// Step 5: Wait for completion
@@ -187,13 +187,13 @@ func runNavexaPortfolioTest(t *testing.T, env *common.TestEnvironment, helper *c
 
 	// Step 6: Validate document was created
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 6: Validating document creation", time.Now().Format(time.RFC3339)))
-	metadata, contentMarkdown := SaveNavexaWorkerOutput(t, helper, resultsDir, "navexa-portfolio")
+	metadata, contentMarkdown := SaveNavexaWorkerOutput(t, helper, resultsDir, "portfolio-fetch")
 
 	// Step 7: Validate document structure
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 7: Validating document structure", time.Now().Format(time.RFC3339)))
 
 	// Verify content has expected structure
-	require.Contains(t, contentMarkdown, "# Navexa Portfolio", "FAIL: Document must have portfolio header")
+	require.Contains(t, contentMarkdown, "# Portfolio", "FAIL: Document must have portfolio header")
 	require.Contains(t, contentMarkdown, "## Holdings", "FAIL: Document must have holdings section")
 	require.Greater(t, len(contentMarkdown), 200, "FAIL: Document must have substantial content (>200 chars), got %d", len(contentMarkdown))
 	t.Logf("PASS: Content has expected structure and %d characters", len(contentMarkdown))
@@ -232,10 +232,10 @@ func runNavexaPortfolioTest(t *testing.T, env *common.TestEnvironment, helper *c
 	return true, resultPortfolioID, resultPortfolioName
 }
 
-// runNavexaPortfolioReviewTest tests the navexa_portfolio_review worker
+// runNavexaPortfolioReviewTest tests the portfolio_review worker
 // Uses a two-step pipeline:
-// Step 1: navexa_portfolio - fetches portfolio document with holdings (with document caching)
-// Step 2: navexa_portfolio_review - consumes the document via filter_tags and generates LLM review
+// Step 1: portfolio_fetch - fetches portfolio document with holdings (with document caching)
+// Step 2: portfolio_review - consumes the document via filter_tags and generates LLM review
 func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, helper *common.HTTPTestHelper, portfolioID int, portfolioName string) {
 	timingData := common.NewTestTimingData("NavexaPortfolioReview")
 
@@ -251,28 +251,28 @@ func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, hel
 
 	// Step 1: Save schema definition
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Saving schema definition", time.Now().Format(time.RFC3339)))
-	SaveSchemaDefinition(t, resultsDir, NavexaPortfolioReviewSchema, "navexa_portfolio_review")
+	SaveSchemaDefinition(t, resultsDir, NavexaPortfolioReviewSchema, "portfolio_review")
 
 	// Step 2: Create job definition for two-step portfolio review pipeline
-	// Step 1: navexa_portfolio generates the portfolio document with caching
-	// Step 2: navexa_portfolio_review consumes the document via filter_tags
+	// Step 1: portfolio_fetch generates the portfolio document with caching
+	// Step 2: portfolio_review consumes the document via filter_tags
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Creating two-step job definition", time.Now().Format(time.RFC3339)))
-	defID := fmt.Sprintf("test-navexa-portfolio-review-%d", time.Now().UnixNano())
+	defID := fmt.Sprintf("test-portfolio-review-%d", time.Now().UnixNano())
 
 	// Create unique tag for this test run to link step 1 output to step 2 input
 	pipelineTag := fmt.Sprintf("review-input-%d", time.Now().UnixNano())
 
 	body := map[string]interface{}{
 		"id":          defID,
-		"name":        "Navexa Portfolio Review Worker Test",
+		"name":        "Portfolio Review Worker Test",
 		"description": "Test two-step portfolio review pipeline: fetch portfolio with caching, then generate LLM review",
-		"type":        "navexa_portfolio_review",
+		"type":        "portfolio_review",
 		"enabled":     true,
-		"tags":        []string{"worker-test", "navexa", "portfolio-review"},
+		"tags":        []string{"worker-test", "portfolio-review"},
 		"steps": []map[string]interface{}{
 			{
 				"name": "fetch-portfolio",
-				"type": "navexa_portfolio",
+				"type": "portfolio_fetch",
 				"config": map[string]interface{}{
 					"name":          "smsf",                                         // Search for portfolio containing "smsf"
 					"cache_hours":   24,                                             // Use cached document if fresh within 24 hours
@@ -282,7 +282,7 @@ func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, hel
 			},
 			{
 				"name": "generate-review",
-				"type": "navexa_portfolio_review",
+				"type": "portfolio_review",
 				"config": map[string]interface{}{
 					"filter_tags": []string{pipelineTag}, // Find document from step 1
 					"model":       "gemini",              // Use Gemini for faster/cheaper tests
@@ -322,7 +322,7 @@ func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, hel
 	require.NoError(t, helper.ParseJSONResponse(execResp, &execResult))
 	jobID := execResult["job_id"].(string)
 	testLog = append(testLog, fmt.Sprintf("[%s] Job started: %s", time.Now().Format(time.RFC3339), jobID))
-	t.Logf("Executed navexa_portfolio_review job: %s", jobID)
+	t.Logf("Executed portfolio_review job: %s", jobID)
 	timingData.AddStepTiming("job_trigger", time.Since(stepStart).Seconds())
 
 	// Step 4: Wait for completion (longer timeout since LLM is involved)
@@ -355,7 +355,7 @@ func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, hel
 	require.NotNil(t, metadata, "FAIL: Metadata must not be nil")
 	t.Logf("PASS: Metadata has %d fields", len(metadata))
 
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with navexa-portfolio-review tag", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document created with portfolio-review tag", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Document has substantial portfolio review content (%d chars)", time.Now().Format(time.RFC3339), len(contentMarkdown)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Result files (output.md, output.json, schema.json, job_definition.json) exist", time.Now().Format(time.RFC3339)))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: NavexaPortfolioReview test completed successfully", time.Now().Format(time.RFC3339)))
@@ -379,7 +379,7 @@ func runNavexaPortfolioReviewTest(t *testing.T, env *common.TestEnvironment, hel
 // Standalone Tests (for individual test runs)
 // =============================================================================
 
-// TestWorkerNavexaPortfolio tests the navexa_portfolio worker independently
+// TestWorkerNavexaPortfolio tests the portfolio_fetch worker independently
 func TestWorkerNavexaPortfolio(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	if err != nil {
@@ -398,7 +398,7 @@ func TestWorkerNavexaPortfolio(t *testing.T) {
 	require.True(t, success, "FAIL: NavexaPortfolio test must pass")
 }
 
-// TestWorkerNavexaPortfolioReview tests the navexa_portfolio_review worker independently
+// TestWorkerNavexaPortfolioReview tests the portfolio_review worker independently
 // Note: This test finds the portfolio directly, not depending on NavexaPortfolio test
 func TestWorkerNavexaPortfolioReview(t *testing.T) {
 	// Initialize timing data

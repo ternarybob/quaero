@@ -114,6 +114,7 @@ type AnnouncementOutputItem struct {
 	Headline        string `json:"headline"`
 	Type            string `json:"type"`
 	Link            string `json:"link"`
+	DocumentKey     string `json:"document_key,omitempty"` // Required for PDF download worker
 	PriceSensitive  bool   `json:"price_sensitive"`
 	Relevance       string `json:"relevance"`
 	RelevanceReason string `json:"relevance_reason,omitempty"`
@@ -140,8 +141,9 @@ type AnnouncementsWorker struct {
 	documentProvisioner interfaces.DocumentProvisioner // For worker-to-worker communication pattern
 }
 
-// Compile-time assertion
+// Compile-time assertions
 var _ interfaces.DefinitionWorker = (*AnnouncementsWorker)(nil)
+var _ interfaces.DocumentProvider = (*AnnouncementsWorker)(nil)
 
 // NewAnnouncementsWorker creates a new announcements worker for data collection.
 // The documentProvisioner parameter enables worker-to-worker communication for price data.
@@ -257,9 +259,22 @@ func (w *AnnouncementsWorker) Init(ctx context.Context, step models.JobStep, job
 
 // CreateJobs executes the announcement fetching for all tickers
 func (w *AnnouncementsWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
-	codes, ok := initResult.Metadata["asx_codes"].([]string)
-	if !ok || len(codes) == 0 {
-		return "", fmt.Errorf("no ASX codes in init result")
+	// Get ASX codes from initResult (when called via standard step execution)
+	// or extract from step config (when called inline from DataCollectionWorker)
+	var codes []string
+	if initResult != nil && initResult.Metadata != nil {
+		if c, ok := initResult.Metadata["asx_codes"].([]string); ok {
+			codes = c
+		}
+	}
+
+	// Fall back to extracting from step config for inline calls
+	if len(codes) == 0 {
+		codes = w.extractASXCodes(step.Config, jobDef)
+	}
+
+	if len(codes) == 0 {
+		return "", fmt.Errorf("no ASX codes in init result or step config")
 	}
 
 	// Get manager_id for document isolation across pipeline steps
@@ -453,6 +468,7 @@ func (w *AnnouncementsWorker) createDocument(ctx context.Context, anns []RawAnno
 			Headline:        ann.Headline,
 			Type:            ann.Type,
 			Link:            ann.PDFURL,
+			DocumentKey:     ann.DocumentKey,
 			PriceSensitive:  ann.PriceSensitive,
 			Relevance:       ann.RelevanceCategory,
 			RelevanceReason: ann.RelevanceReason,
@@ -1027,4 +1043,138 @@ func (w *AnnouncementsWorker) calculateAnnouncementPriceImpact(annDate time.Time
 	_ = annDateStr // suppress unused warning
 
 	return dayOf, day10, retention, volumeMult
+}
+
+// -----------------------------------------------------------------------------
+// DocumentProvider Implementation - Worker-to-Worker Communication Pattern
+// -----------------------------------------------------------------------------
+
+// GetDocument ensures an announcement document exists for a single ticker.
+// This implements the DocumentProvider interface for worker-to-worker communication.
+//
+// Pattern:
+//   - If document exists and is fresh (within CacheHours), returns existing document ID
+//   - If document is missing or stale, fetches and saves new document
+//   - Returns document ID only - caller retrieves content via DocumentStorage
+func (w *AnnouncementsWorker) GetDocument(ctx context.Context, identifier string, opts ...interfaces.DocumentOption) (*interfaces.DocumentResult, error) {
+	options := interfaces.ApplyDocumentOptions(opts...)
+
+	ticker := common.ParseTicker(identifier)
+	if ticker.Code == "" {
+		return &interfaces.DocumentResult{
+			Identifier: identifier,
+			Error:      fmt.Errorf("invalid ticker identifier: %s", identifier),
+		}, fmt.Errorf("invalid ticker identifier: %s", identifier)
+	}
+
+	sourceType := "announcement"
+	sourceID := fmt.Sprintf("%s:%s:announcement", ticker.Exchange, ticker.Code)
+
+	result := &interfaces.DocumentResult{
+		Identifier: identifier,
+	}
+
+	// Check for cached document if not forcing refresh
+	if !options.ForceRefresh && options.CacheHours > 0 {
+		existingDoc, err := w.documentStorage.GetDocumentBySource(sourceType, sourceID)
+		if err == nil && existingDoc != nil && existingDoc.LastSynced != nil {
+			if time.Since(*existingDoc.LastSynced) < time.Duration(options.CacheHours)*time.Hour {
+				w.logger.Debug().
+					Str("ticker", ticker.String()).
+					Str("doc_id", existingDoc.ID).
+					Str("last_synced", existingDoc.LastSynced.Format("2006-01-02 15:04")).
+					Msg("GetDocument: using cached announcement document")
+
+				result.DocumentID = existingDoc.ID
+				result.Tags = existingDoc.Tags
+				result.Fresh = true
+				result.Created = false
+				return result, nil
+			}
+		}
+	}
+
+	// Cache miss or stale - fetch and create document
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Bool("force_refresh", options.ForceRefresh).
+		Msg("GetDocument: fetching fresh announcement data")
+
+	// Create a minimal step and jobDef for processOneTicker
+	period := "Y3" // Default 3 years of announcements
+	cacheHours := options.CacheHours
+	if cacheHours == 0 {
+		cacheHours = 24
+	}
+
+	// Fetch announcements
+	anns, err := w.fetchAnnouncements(ctx, ticker.Code, period, 1000)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to fetch announcements: %w", err)
+		return result, result.Error
+	}
+
+	if len(anns) == 0 {
+		w.logger.Info().Str("ticker", ticker.String()).Msg("GetDocument: no announcements found")
+		// Return empty result - no document created
+		return result, nil
+	}
+
+	// Create announcement document with classification
+	debug := workerutil.NewWorkerDebug(models.WorkerTypeMarketAnnouncements.String(), w.debugEnabled)
+	debug.SetTicker(ticker.String())
+	doc := w.createDocument(ctx, anns, ticker.Code, nil, options.OutputTags, debug, options.ManagerID)
+
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
+		result.Error = fmt.Errorf("failed to save document: %w", err)
+		return result, result.Error
+	}
+
+	result.DocumentID = doc.ID
+	result.Tags = doc.Tags
+	result.Fresh = false
+	result.Created = true
+
+	w.logger.Debug().
+		Str("ticker", ticker.String()).
+		Str("doc_id", doc.ID).
+		Int("announcement_count", len(anns)).
+		Msg("GetDocument: created fresh announcement document")
+
+	return result, nil
+}
+
+// GetDocuments ensures announcement documents exist for multiple tickers.
+// This implements the DocumentProvider interface for worker-to-worker communication.
+// Processing continues even if individual tickers fail.
+func (w *AnnouncementsWorker) GetDocuments(ctx context.Context, identifiers []string, opts ...interfaces.DocumentOption) ([]*interfaces.DocumentResult, error) {
+	results := make([]*interfaces.DocumentResult, len(identifiers))
+	var lastErr error
+	successCount := 0
+
+	for i, id := range identifiers {
+		result, err := w.GetDocument(ctx, id, opts...)
+		results[i] = result
+		if err != nil {
+			lastErr = err
+			w.logger.Warn().
+				Err(err).
+				Str("identifier", id).
+				Msg("GetDocuments: failed to provision document")
+		} else {
+			successCount++
+		}
+	}
+
+	w.logger.Debug().
+		Int("total", len(identifiers)).
+		Int("success", successCount).
+		Msg("GetDocuments: completed batch provisioning")
+
+	// Return error only if ALL identifiers failed
+	if successCount == 0 && lastErr != nil {
+		return results, fmt.Errorf("all identifiers failed, last error: %w", lastErr)
+	}
+
+	return results, nil
 }
