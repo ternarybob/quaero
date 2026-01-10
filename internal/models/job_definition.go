@@ -57,8 +57,10 @@ const (
 	JobDefinitionTypeMarketData             JobDefinitionType = "market_data"              // Price data, technicals, indices via EODHD
 	JobDefinitionTypeMarketDataCollection   JobDefinitionType = "market_data_collection"   // Deterministic market data collection
 	JobDefinitionTypeNavexaPortfolios       JobDefinitionType = "navexa_portfolios"        // Fetch all Navexa portfolios for the user
+	JobDefinitionTypeNavexaPortfolio        JobDefinitionType = "navexa_portfolio"         // Fetch specific portfolio by name with holdings
 	JobDefinitionTypeNavexaHoldings         JobDefinitionType = "navexa_holdings"          // Fetch holdings for a Navexa portfolio
 	JobDefinitionTypeNavexaPerformance      JobDefinitionType = "navexa_performance"       // Fetch P/L performance for a Navexa portfolio
+	JobDefinitionTypeNavexaPortfolioReview  JobDefinitionType = "navexa_portfolio_review"  // LLM-generated portfolio review from holdings
 	JobDefinitionTypeManager                JobDefinitionType = "manager"                  // Multi-step orchestrated job (manager job with child steps)
 )
 
@@ -82,8 +84,8 @@ func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 		JobDefinitionTypeMarketMacro, JobDefinitionTypeMarketCompetitor, JobDefinitionTypeMarketSignal,
 		JobDefinitionTypeMarketPortfolio, JobDefinitionTypeMarketAssessor, JobDefinitionTypeMarketNews,
 		JobDefinitionTypeMarketData, JobDefinitionTypeMarketDataCollection,
-		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
-		JobDefinitionTypeManager:
+		JobDefinitionTypeNavexaPortfolios, JobDefinitionTypeNavexaPortfolio, JobDefinitionTypeNavexaHoldings, JobDefinitionTypeNavexaPerformance,
+		JobDefinitionTypeNavexaPortfolioReview, JobDefinitionTypeManager:
 		return true
 	default:
 		return false
@@ -228,7 +230,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Type can be derived from steps, so only validate if explicitly set
 	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, manager, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data, market_data_collection)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search, local_dir, code_map, job_template, orchestrator, manager, market_announcements, market_fundamentals, market_director_interest, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_news, market_data, market_data_collection, navexa_portfolios, navexa_portfolio, navexa_holdings, navexa_performance, navexa_portfolio_review)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -327,7 +329,7 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, market_announcements, market_data, market_news, market_director_interest, market_fundamentals, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_data_collection, navexa_portfolios, navexa_holdings, navexa_performance, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, local_dir, code_map, summary, analyze_build, classify, dependency_graph, aggregate_summary, email, market_announcements, market_data, market_news, market_director_interest, market_fundamentals, market_macro, market_competitor, market_signal, market_portfolio, market_assessor, market_data_collection, navexa_portfolios, navexa_portfolio, navexa_holdings, navexa_performance, navexa_portfolio_review, test_job_generator, email_watcher, job_template, orchestrator)", step.Type)
 	}
 
 	// Validate error strategy if provided

@@ -603,14 +603,8 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		return nil, fmt.Errorf("failed to create test log file: %w", err)
 	}
 
-	// Create output.md file for full test output
-	outputPath := filepath.Join(resultsDir, "output.md")
-	outputFile, err := os.Create(outputPath)
-	if err != nil {
-		logFile.Close()
-		testLogFile.Close()
-		return nil, fmt.Errorf("failed to create output.md file: %w", err)
-	}
+	// NOTE: output.md is NOT created here - tests create it explicitly via saveWorkerOutput()
+	// This avoids empty output.md files in workflow tests that use subdirectories
 
 	// Determine config file path for copying to bin/
 	configFilePath := "../config/test-config.toml" // Default
@@ -623,7 +617,7 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		ResultsDir:     resultsDir,
 		LogFile:        logFile,
 		TestLog:        testLogFile,
-		OutputFile:     outputFile,
+		OutputFile:     nil, // Tests create output.md explicitly when needed
 		Port:           config.Service.Port,
 		ConfigFilePath: configFilePath,
 		EnvVars:        make(map[string]string), // Initialize empty map
@@ -671,8 +665,8 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		fmt.Fprintf(logFile, "Environment variable loading disabled (includeEnv=false)\n")
 	}
 
-	// Initialize output capture
-	env.outputCapture = NewOutputCapture(testLogFile, outputFile)
+	// Initialize output capture (outputFile is nil - tests create output.md explicitly)
+	env.outputCapture = NewOutputCapture(testLogFile, nil)
 	env.outputCapture.Start()
 
 	// Write TestMain output to test log

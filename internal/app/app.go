@@ -1024,6 +1024,19 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(navexaPortfoliosWorker)
 	a.Logger.Debug().Str("step_type", navexaPortfoliosWorker.GetType().String()).Msg("Navexa Portfolios worker registered")
 
+	// Register Navexa Portfolio worker (fetches specific portfolio by name with holdings)
+	// SearchService is required for document caching/freshness checking
+	navexaPortfolioWorker := navexaworkers.NewPortfolioWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.SearchService, // For document caching with freshness checking
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(navexaPortfolioWorker)
+	a.Logger.Debug().Str("step_type", navexaPortfolioWorker.GetType().String()).Msg("Navexa Portfolio worker registered")
+
 	// Register Navexa Holdings worker (fetches holdings for a specific portfolio)
 	navexaHoldingsWorker := navexaworkers.NewHoldingsWorker(
 		a.StorageManager.DocumentStorage(),
@@ -1045,6 +1058,21 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(navexaPerformanceWorker)
 	a.Logger.Debug().Str("step_type", navexaPerformanceWorker.GetType().String()).Msg("Navexa Performance worker registered")
+
+	// Register Navexa Portfolio Review worker (LLM-generated portfolio review from portfolio documents)
+	// SearchService is required for filter_tags document lookup
+	// Consumes documents via filter_tags or direct document ID (generic design)
+	navexaPortfolioReviewWorker := navexaworkers.NewPortfolioReviewWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.SearchService, // For filter_tags document lookup
+		a.Logger,
+		jobMgr,
+		a.ProviderFactory,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(navexaPortfolioReviewWorker)
+	a.Logger.Debug().Str("step_type", navexaPortfolioReviewWorker.GetType().String()).Msg("Navexa Portfolio Review worker registered")
 
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory

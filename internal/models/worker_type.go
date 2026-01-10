@@ -50,9 +50,11 @@ const (
 	WorkerTypeOutputFormatter        WorkerType = "output_formatter"         // Format output documents for email delivery
 
 	// Navexa portfolio workers
-	WorkerTypeNavexaPortfolios  WorkerType = "navexa_portfolios"  // Fetch all Navexa portfolios for the user
-	WorkerTypeNavexaHoldings    WorkerType = "navexa_holdings"    // Fetch holdings for a Navexa portfolio
-	WorkerTypeNavexaPerformance WorkerType = "navexa_performance" // Fetch P/L performance for a Navexa portfolio
+	WorkerTypeNavexaPortfolios      WorkerType = "navexa_portfolios"       // Fetch all Navexa portfolios for the user
+	WorkerTypeNavexaPortfolio       WorkerType = "navexa_portfolio"        // Fetch specific portfolio by name with holdings
+	WorkerTypeNavexaHoldings        WorkerType = "navexa_holdings"         // Fetch holdings for a Navexa portfolio
+	WorkerTypeNavexaPerformance     WorkerType = "navexa_performance"      // Fetch P/L performance for a Navexa portfolio
+	WorkerTypeNavexaPortfolioReview WorkerType = "navexa_portfolio_review" // LLM-generated portfolio review from holdings
 
 	// Testing workers
 	WorkerTypeTestJobGenerator WorkerType = "test_job_generator" // Generates logs with random errors
@@ -89,7 +91,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
 		WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
-		WorkerTypeNavexaPortfolios, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance,
+		WorkerTypeNavexaPortfolios, WorkerTypeNavexaPortfolio, WorkerTypeNavexaHoldings, WorkerTypeNavexaPerformance, WorkerTypeNavexaPortfolioReview,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
 		WorkerTypeRatingBFS, WorkerTypeRatingCDS, WorkerTypeRatingNFR, WorkerTypeRatingPPS,
 		WorkerTypeRatingVRS, WorkerTypeRatingOB, WorkerTypeRatingComposite:
@@ -138,8 +140,10 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeSignalAnalysis,
 		WorkerTypeOutputFormatter,
 		WorkerTypeNavexaPortfolios,
+		WorkerTypeNavexaPortfolio,
 		WorkerTypeNavexaHoldings,
 		WorkerTypeNavexaPerformance,
+		WorkerTypeNavexaPortfolioReview,
 		WorkerTypeTestJobGenerator,
 		WorkerTypeEmailWatcher,
 		WorkerTypeJobTemplate,
