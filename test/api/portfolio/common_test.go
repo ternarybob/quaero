@@ -1,6 +1,7 @@
 // -----------------------------------------------------------------------
 // Common test infrastructure for Portfolio worker tests
-// Provides shared helpers for API validation, output assertions, and test setup
+// Provides Navexa-specific helpers and schema definitions
+// Generic infrastructure moved to test/common package
 // -----------------------------------------------------------------------
 
 package portfolio
@@ -27,19 +28,11 @@ import (
 const NavexaDefaultBaseURL = "https://api.navexa.com.au"
 
 // =============================================================================
-// Schema Definitions
+// Schema Definitions (Navexa-specific)
 // =============================================================================
 
-// WorkerSchema defines the expected output schema for a worker
-type WorkerSchema struct {
-	RequiredFields []string            // Fields that must be present
-	OptionalFields []string            // Fields that may be present
-	FieldTypes     map[string]string   // Expected types: "string", "number", "array", "object", "boolean"
-	ArraySchemas   map[string][]string // For array fields, required fields within each element
-}
-
 // NavexaPortfolioReviewSchema for navexa_portfolio_review worker
-var NavexaPortfolioReviewSchema = WorkerSchema{
+var NavexaPortfolioReviewSchema = common.WorkerSchema{
 	RequiredFields: []string{"portfolio_id", "portfolio_name"},
 	OptionalFields: []string{"holdings_count", "total_value", "review_date", "model_used"},
 	FieldTypes: map[string]string{
@@ -54,7 +47,7 @@ var NavexaPortfolioReviewSchema = WorkerSchema{
 
 // NavexaPortfolioSchema for navexa_portfolio worker
 // Holdings come from performance API with quantity, avgBuyPrice, currentValue, holdingWeight
-var NavexaPortfolioSchema = WorkerSchema{
+var NavexaPortfolioSchema = common.WorkerSchema{
 	RequiredFields: []string{"portfolio", "holdings"},
 	OptionalFields: []string{"holding_count", "fetched_at"},
 	FieldTypes: map[string]string{
@@ -69,7 +62,7 @@ var NavexaPortfolioSchema = WorkerSchema{
 }
 
 // =============================================================================
-// API Key and Configuration Helpers
+// API Key and Configuration Helpers (Navexa-specific)
 // =============================================================================
 
 // GetNavexaBaseURL retrieves the Navexa API base URL from the KV store
@@ -132,7 +125,7 @@ func GetNavexaAPIKey(t *testing.T, helper *common.HTTPTestHelper) string {
 }
 
 // =============================================================================
-// API Validation Helpers
+// API Validation Helpers (Navexa-specific)
 // =============================================================================
 
 // FetchAndValidateNavexaAPI makes a direct HTTP call to Navexa API and validates JSON response
@@ -182,20 +175,7 @@ func FetchAndValidateNavexaAPI(t *testing.T, resultsDir, baseURL, apiKey string)
 }
 
 // =============================================================================
-// Test Logging Helpers
-// =============================================================================
-
-// WriteTestLog writes test progress to test.log file
-func WriteTestLog(t *testing.T, resultsDir string, entries []string) {
-	logPath := filepath.Join(resultsDir, "test.log")
-	content := strings.Join(entries, "\n") + "\n"
-	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
-		t.Logf("Warning: failed to write test.log: %v", err)
-	}
-}
-
-// =============================================================================
-// Output Save Helpers
+// Output Save Helpers (Navexa-specific)
 // =============================================================================
 
 // SaveNavexaWorkerOutput saves worker document output to results directory
@@ -298,201 +278,7 @@ func SavePortfolioReviewWorkerOutput(t *testing.T, helper *common.HTTPTestHelper
 }
 
 // =============================================================================
-// Job Execution Helpers
-// =============================================================================
-
-// WaitForJobCompletion polls job status until completion or timeout
-func WaitForJobCompletion(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) string {
-	deadline := time.Now().Add(timeout)
-	pollInterval := 1 * time.Second
-
-	for time.Now().Before(deadline) {
-		resp, err := helper.GET("/api/jobs/" + jobID)
-		if err != nil {
-			t.Logf("Warning: Failed to get job status: %v", err)
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		var job struct {
-			Status string `json:"status"`
-		}
-		if err := helper.ParseJSONResponse(resp, &job); err != nil {
-			resp.Body.Close()
-			time.Sleep(pollInterval)
-			continue
-		}
-		resp.Body.Close()
-
-		// Check for terminal states
-		switch job.Status {
-		case "completed", "failed", "cancelled":
-			t.Logf("Job %s reached terminal state: %s", jobID, job.Status)
-			return job.Status
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	t.Logf("Job %s timed out after %v", jobID, timeout)
-	return "timeout"
-}
-
-// WaitForJobCompletionWithMonitoring polls job status and collects error logs
-func WaitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) (string, []map[string]interface{}) {
-	deadline := time.Now().Add(timeout)
-	pollInterval := 2 * time.Second
-	var errorLogs []map[string]interface{}
-
-	for time.Now().Before(deadline) {
-		resp, err := helper.GET("/api/jobs/" + jobID)
-		if err != nil {
-			t.Logf("Warning: Failed to get job status: %v", err)
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		var job struct {
-			Status string `json:"status"`
-		}
-		if err := helper.ParseJSONResponse(resp, &job); err != nil {
-			resp.Body.Close()
-			time.Sleep(pollInterval)
-			continue
-		}
-		resp.Body.Close()
-
-		// Check job logs for errors
-		logsResp, err := helper.GET("/api/jobs/" + jobID + "/logs?level=error&limit=50")
-		if err == nil {
-			var logsResult struct {
-				Logs []map[string]interface{} `json:"logs"`
-			}
-			if helper.ParseJSONResponse(logsResp, &logsResult) == nil {
-				errorLogs = logsResult.Logs
-			}
-			logsResp.Body.Close()
-		}
-
-		// Check for terminal states
-		switch job.Status {
-		case "completed", "failed", "cancelled":
-			t.Logf("Job %s reached terminal state: %s", jobID, job.Status)
-			return job.Status, errorLogs
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	t.Logf("Job %s timed out after %v", jobID, timeout)
-	return "timeout", errorLogs
-}
-
-// =============================================================================
-// Environment Helpers
-// =============================================================================
-
-// SetupFreshEnvironment creates a fresh test environment with clean database
-func SetupFreshEnvironment(t *testing.T) *common.TestEnvironment {
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Skipf("Failed to setup test environment: %v", err)
-		return nil
-	}
-	return env
-}
-
-// AssertNoServiceErrors checks service log for errors
-func AssertNoServiceErrors(t *testing.T, env *common.TestEnvironment) {
-	common.AssertNoErrorsInServiceLog(t, env)
-}
-
-// =============================================================================
-// Result File Assertions
-// =============================================================================
-
-// AssertResultFilesExist validates that result files exist with content
-// This function FAILS the test if output files are missing or empty
-func AssertResultFilesExist(t *testing.T, resultsDir string) {
-	if resultsDir == "" {
-		t.Fatal("FAIL: Results directory not available - cannot validate output files")
-		return
-	}
-
-	// Check output.md exists and has content - FATAL if missing or empty
-	mdPath := filepath.Join(resultsDir, "output.md")
-	info, err := os.Stat(mdPath)
-	require.NoError(t, err, "FAIL: output.md must exist at %s", mdPath)
-	require.Greater(t, info.Size(), int64(0), "FAIL: output.md must not be empty")
-	t.Logf("PASS: output.md exists (%d bytes)", info.Size())
-
-	// Check output.json exists and has content - FATAL if missing or empty
-	jsonPath := filepath.Join(resultsDir, "output.json")
-	jsonInfo, jsonErr := os.Stat(jsonPath)
-	require.NoError(t, jsonErr, "FAIL: output.json must exist at %s", jsonPath)
-	require.Greater(t, jsonInfo.Size(), int64(0), "FAIL: output.json must not be empty")
-	t.Logf("PASS: output.json exists (%d bytes)", jsonInfo.Size())
-
-	// Check job_definition.json exists (informational)
-	defPath := filepath.Join(resultsDir, "job_definition.json")
-	if defInfo, defErr := os.Stat(defPath); defErr == nil {
-		t.Logf("PASS: job_definition.json exists (%d bytes)", defInfo.Size())
-	} else {
-		t.Logf("INFO: job_definition.json not found (optional)")
-	}
-
-	// Check schema.json exists (informational)
-	schemaPath := filepath.Join(resultsDir, "schema.json")
-	if schemaInfo, schemaErr := os.Stat(schemaPath); schemaErr == nil {
-		t.Logf("PASS: schema.json exists (%d bytes)", schemaInfo.Size())
-	} else {
-		t.Logf("INFO: schema.json not found (optional)")
-	}
-}
-
-// SaveSchemaDefinition saves the schema definition to results directory
-func SaveSchemaDefinition(t *testing.T, resultsDir string, schema WorkerSchema, schemaName string) {
-	if resultsDir == "" {
-		t.Logf("Warning: results directory not available for schema save")
-		return
-	}
-
-	// Convert schema to JSON-serializable format
-	schemaDoc := map[string]interface{}{
-		"schema_name":     schemaName,
-		"required_fields": schema.RequiredFields,
-		"optional_fields": schema.OptionalFields,
-		"field_types":     schema.FieldTypes,
-		"array_schemas":   schema.ArraySchemas,
-	}
-
-	schemaPath := filepath.Join(resultsDir, "schema.json")
-	data, err := json.MarshalIndent(schemaDoc, "", "  ")
-	require.NoError(t, err, "FAIL: Failed to marshal schema definition")
-
-	err = os.WriteFile(schemaPath, data, 0644)
-	require.NoError(t, err, "FAIL: Failed to write schema.json to %s", schemaPath)
-	t.Logf("Saved schema.json to: %s (%d bytes)", schemaPath, len(data))
-}
-
-// SaveJobDefinition saves job definition to results directory
-func SaveJobDefinition(t *testing.T, resultsDir string, definition map[string]interface{}) {
-	if resultsDir == "" {
-		t.Logf("Warning: results directory not available for job definition save")
-		return
-	}
-
-	defPath := filepath.Join(resultsDir, "job_definition.json")
-	data, err := json.MarshalIndent(definition, "", "  ")
-	require.NoError(t, err, "FAIL: Failed to marshal job definition")
-
-	err = os.WriteFile(defPath, data, 0644)
-	require.NoError(t, err, "FAIL: Failed to write job_definition.json to %s", defPath)
-	t.Logf("Saved job_definition.json to: %s (%d bytes)", defPath, len(data))
-}
-
-// =============================================================================
-// Job Definition and Document Helpers
+// Job Execution Helpers (internal)
 // =============================================================================
 
 // executeJobDefinition executes a job definition and returns the job ID
@@ -591,4 +377,56 @@ func getChildJobs(t *testing.T, helper *common.HTTPTestHelper, parentJobID strin
 	}
 
 	return childJobs
+}
+
+// =============================================================================
+// Local Helper Aliases (for backward compatibility in test files)
+// =============================================================================
+
+// WaitForJobCompletion polls job status until completion or timeout
+// Delegates to common.WaitForJobCompletion
+func WaitForJobCompletion(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) string {
+	return common.WaitForJobCompletion(t, helper, jobID, timeout)
+}
+
+// WaitForJobCompletionWithMonitoring polls job status and collects error logs
+// Delegates to common.WaitForJobCompletionWithMonitoring
+func WaitForJobCompletionWithMonitoring(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) (string, []map[string]interface{}) {
+	return common.WaitForJobCompletionWithMonitoring(t, helper, jobID, timeout)
+}
+
+// SaveSchemaDefinition saves the schema definition to results directory
+// Delegates to common.SaveSchemaDefinitionToDir
+func SaveSchemaDefinition(t *testing.T, resultsDir string, schema common.WorkerSchema, schemaName string) {
+	common.SaveSchemaDefinitionToDir(t, resultsDir, schema, schemaName)
+}
+
+// SaveJobDefinition saves job definition to results directory
+// Delegates to common.SaveJobDefinitionToDir
+func SaveJobDefinition(t *testing.T, resultsDir string, definition map[string]interface{}) {
+	common.SaveJobDefinitionToDir(t, resultsDir, definition)
+}
+
+// AssertResultFilesExist validates that result files exist with content
+// Delegates to common.AssertResultFilesExistInDir
+func AssertResultFilesExist(t *testing.T, resultsDir string) {
+	common.AssertResultFilesExistInDir(t, resultsDir, 0)
+}
+
+// SetupFreshEnvironment creates a fresh test environment with clean database
+// Delegates to common.SetupFreshEnvironment
+func SetupFreshEnvironment(t *testing.T) *common.TestEnvironment {
+	return common.SetupFreshEnvironment(t)
+}
+
+// AssertNoServiceErrors checks service log for errors
+// Delegates to common.AssertNoErrorsInServiceLog
+func AssertNoServiceErrors(t *testing.T, env *common.TestEnvironment) {
+	common.AssertNoErrorsInServiceLog(t, env)
+}
+
+// WriteTestLog writes test progress to test.log file
+// Delegates to common.WriteTestLog
+func WriteTestLog(t *testing.T, resultsDir string, entries []string) {
+	common.WriteTestLog(t, resultsDir, entries)
 }

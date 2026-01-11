@@ -434,17 +434,73 @@ document.addEventListener('alpine:init', () => {
         executingJobIds: new Set(), // Track in-flight job execution requests
         reloadingJobIds: new Set(), // Track in-flight job reload requests
         reloadingAll: false, // Track global reload state
+        expandedJobIds: new Set(), // Track which job definitions are expanded
+        jobActiveTabs: {}, // Track active tab per job: { jobId: 'content' | 'json' }
 
         init() {
             window.debugLog('JobDefinitionsManagement', 'Initializing component');
             this.loadJobDefinitions();
             this.resetCurrentJobDefinition();
+            this.loadJobIdsFromUrl(); // Restore expanded jobs from URL
 
             // Listen for global reload event from page-level button
             window.addEventListener('jobs-reload-all', () => {
                 window.debugLog('JobDefinitionsManagement', 'Received jobs-reload-all event');
                 this.confirmReloadAll();
             });
+        },
+
+        // Check if a job is expanded
+        isJobExpanded(jobId) {
+            return this.expandedJobIds.has(jobId);
+        },
+
+        // Toggle job detail expansion
+        toggleJobDetail(jobId) {
+            if (this.expandedJobIds.has(jobId)) {
+                this.expandedJobIds.delete(jobId);
+                delete this.jobActiveTabs[jobId];
+            } else {
+                this.expandedJobIds.add(jobId);
+                // Set default tab to 'content'
+                this.jobActiveTabs[jobId] = 'content';
+            }
+            this.updateJobIdsUrl();
+        },
+
+        // Get active tab for a job
+        getActiveTab(jobId) {
+            return this.jobActiveTabs[jobId] || 'content';
+        },
+
+        // Set active tab for a job
+        setActiveTab(jobId, tab) {
+            this.jobActiveTabs[jobId] = tab;
+        },
+
+        // Update URL with currently expanded job IDs
+        updateJobIdsUrl() {
+            const url = new URL(window.location);
+            if (this.expandedJobIds.size > 0) {
+                url.searchParams.set('job_ids', Array.from(this.expandedJobIds).join(','));
+            } else {
+                url.searchParams.delete('job_ids');
+            }
+            window.history.replaceState({}, '', url);
+        },
+
+        // Load expanded job IDs from URL
+        loadJobIdsFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const jobIdsParam = urlParams.get('job_ids');
+            if (jobIdsParam) {
+                const jobIds = jobIdsParam.split(',').filter(id => id.trim());
+                jobIds.forEach(id => {
+                    this.expandedJobIds.add(id.trim());
+                    this.jobActiveTabs[id.trim()] = 'content'; // Set default tab
+                });
+                window.debugLog('JobDefinitionsManagement', 'Restored expanded jobs from URL:', jobIds);
+            }
         },
 
         isJobExecuting(jobDefId) {

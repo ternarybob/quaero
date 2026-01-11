@@ -18,12 +18,43 @@ $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
 $projectRoot = Split-Path -Parent $scriptDir
 
+# --- Logging Setup ---
+$logDir = "$scriptDir/logs"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir | Out-Null
+}
+$logFile = "$logDir/deploy-$(Get-Date -Format 'yyyy-MM-dd-HH-mm-ss').log"
+
+# Function to limit log files to most recent 10
+function Limit-DeployLogFiles {
+    param(
+        [string]$LogDirectory,
+        [int]$MaxLogs = 10
+    )
+
+    $logFiles = Get-ChildItem -Path $LogDirectory -Filter "deploy-*.log" | Sort-Object CreationTime -Descending
+
+    if (@($logFiles).Count -gt $MaxLogs) {
+        $filesToDelete = $logFiles | Select-Object -Skip $MaxLogs
+        foreach ($file in $filesToDelete) {
+            Remove-Item -Path $file.FullName -Force
+            Write-Host "Removed old log file: $($file.Name)" -ForegroundColor Gray
+        }
+    }
+}
+
+# Limit old log files before starting transcript
+Limit-DeployLogFiles -LogDirectory $logDir -MaxLogs 10
+
+Start-Transcript -Path $logFile -Append
+
 Write-Host "ternarybob (parent) -> quaero" -ForegroundColor Magenta
 Write-Host "Quaero Docker Deployment" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
 
-# Show help
+# Show help (no logging needed)
 if ($Help) {
+    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     Write-Host ""
     Write-Host "Usage: .\deploy.ps1 [-Status] [-Logs] [-Stop] [-Rebuild] [-Help]"
     Write-Host ""
@@ -40,11 +71,13 @@ if ($Help) {
 if ($Status) {
     Write-Host "`nDocker Status:" -ForegroundColor Cyan
     docker ps --filter "name=quaero" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     exit 0
 }
 
-# Show logs
+# Show logs (no logging needed - interactive)
 if ($Logs) {
+    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" logs -f
     exit 0
 }
@@ -54,11 +87,30 @@ if ($Stop) {
     Write-Host "Stopping Docker containers..." -ForegroundColor Yellow
     docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" down
     Write-Host "Stopped" -ForegroundColor Green
+    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     exit 0
 }
 
+try {
+
 # Default action: Rebuild (stop, build, deploy)
 Write-Host "Preparing Docker build..." -ForegroundColor Yellow
+
+# Stop existing container and clean up Docker resources
+Write-Host "Stopping existing containers..." -ForegroundColor Yellow
+docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" down -v 2>$null
+
+Write-Host "Pruning Docker resources..." -ForegroundColor Yellow
+docker container prune -f 2>$null
+docker image prune -f 2>$null
+docker volume prune -f 2>$null
+
+# Remove old quaero image to force fresh build
+$oldImage = docker images -q quaero:latest 2>$null
+if ($oldImage) {
+    Write-Host "Removing old quaero:latest image..." -ForegroundColor Yellow
+    docker rmi quaero:latest -f 2>$null
+}
 
 # Paths
 $commonConfig = "$projectRoot\deployments\common"
@@ -91,12 +143,18 @@ if (Test-Path "$dockerConfig\email.toml") { Copy-Item "$dockerConfig\email.toml"
 if (Test-Path "$dockerConfig\variables.toml") { Copy-Item "$dockerConfig\variables.toml" "$staging\config\" }
 if (Test-Path "$dockerConfig\.env") { Copy-Item "$dockerConfig\.env" "$staging\config\" }
 
-# Stage job-definitions
-Write-Host "  Staging job-definitions..." -ForegroundColor Gray
-$jobDefs = Get-ChildItem "$commonConfig\job-definitions\*.toml" -ErrorAction SilentlyContinue
-if ($jobDefs) { $jobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" } }
-$dockerJobDefs = Get-ChildItem "$dockerConfig\job-definitions\*.toml" -ErrorAction SilentlyContinue
-if ($dockerJobDefs) { $dockerJobDefs | ForEach-Object { Copy-Item $_.FullName "$staging\job-definitions\" -Force } }
+# Stage job-definitions (Docker uses ONLY job-definitions-docker, not common)
+Write-Host "  Staging job-definitions from: $commonConfig\job-definitions-docker\" -ForegroundColor Gray
+$dockerJobDefs = Get-ChildItem "$commonConfig\job-definitions-docker\*.toml" -ErrorAction SilentlyContinue
+if ($dockerJobDefs) {
+    Write-Host "  Found $($dockerJobDefs.Count) job definition(s):" -ForegroundColor Gray
+    $dockerJobDefs | ForEach-Object {
+        Write-Host "    - $($_.Name)" -ForegroundColor Cyan
+        Copy-Item $_.FullName "$staging\job-definitions\"
+    }
+} else {
+    Write-Host "  WARNING: No job definitions found in job-definitions-docker!" -ForegroundColor Yellow
+}
 
 # Stage templates
 Write-Host "  Staging templates..." -ForegroundColor Gray
@@ -138,9 +196,10 @@ if (-not $gitCommit) { $gitCommit = "unknown" }
 Write-Host "Building Docker image..." -ForegroundColor Yellow
 Write-Host "  Version: $version, Build: $build, Commit: $gitCommit" -ForegroundColor Gray
 
-# Build Docker image
+# Build Docker image (--no-cache ensures staged configs are always picked up)
 Push-Location $projectRoot
 docker build `
+    --no-cache `
     --build-arg VERSION=$version `
     --build-arg BUILD=$build `
     --build-arg GIT_COMMIT=$gitCommit `
@@ -159,22 +218,25 @@ if ($buildResult -ne 0) {
 }
 Write-Host "Docker image built" -ForegroundColor Green
 
-# Check if container is running and stop it
-$running = docker ps --filter "name=quaero" --format "{{.Names}}" 2>$null
-if ($running) {
-    Write-Host "Stopping existing container..." -ForegroundColor Yellow
-    docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" down
-}
-
 # Start container
 Write-Host "Starting Docker container..." -ForegroundColor Yellow
 docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" up -d
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "`nDeployment complete!" -ForegroundColor Green
-    Write-Host "Access at: http://localhost:8080" -ForegroundColor Cyan
+    Write-Host "Access at: http://localhost:9000" -ForegroundColor Cyan
     docker compose -f "$projectRoot\deployments\docker\docker-compose.yml" ps
 } else {
     Write-Host "Failed to start container" -ForegroundColor Red
+    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     exit 1
+}
+
+} finally {
+    # Ensure transcript is stopped in all cases
+    try {
+        Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        # Silently ignore errors from Stop-Transcript
+    }
 }

@@ -1,0 +1,120 @@
+# Stock Analysis - Navexa Portfolio Source (Docker)
+# =========================================================================
+# Docker-specific configuration: Runs daily at 8am
+#
+# Analyzes stocks from Navexa portfolio holdings using hybrid workflow.
+#
+# WORKFLOW:
+# 1. Navexa Portfolio: Fetch portfolio with holdings from Navexa API
+# 2. Data Collection: Deterministic stock data fetching
+# 3. Stock Analysis: AI analysis using embedded template
+# 4. Portfolio Review: AI-generated portfolio review
+# 5. Email Report: Send analysis results
+#
+# TEMPLATES (embedded):
+# - internal/templates/stock-analysis.toml (Step 3)
+# OUTPUT TAG: stock-analysis
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "stock-analysis-navexa"
+name = "Stock Analysis (Navexa Portfolio)"
+type = "orchestrator"
+description = "AI-powered stock analysis using Navexa portfolio holdings"
+tags = ["stocks", "analysis", "navexa", "portfolio", "hybrid"]
+schedule = "0 8 * * *"  # Daily at 8am
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "5.0"
+created = "2026-01-02"
+updated = "2026-01-11"
+purpose = "Navexa portfolio stock analysis with hybrid workflow and portfolio review"
+
+# =========================================================================
+# User Configuration
+# =========================================================================
+
+[config]
+# Portfolio name to analyze (from Navexa)
+portfolio_name = "SMSF"
+
+# Benchmark for comparison
+benchmarks = [{ code = "XJO", name = "S&P/ASX 200" }]
+
+# =========================================================================
+# Step 1: Navexa Portfolio
+# =========================================================================
+# Fetches portfolio with holdings from Navexa API using portfolio name
+# Creates documents tagged with ['navexa-portfolio', '<portfolio_name>']
+
+[step.navexa_portfolio]
+type = "navexa_portfolio"
+description = "Fetch Navexa portfolio with holdings"
+on_error = "fail"
+name = "SMSF"
+output_tags = ["collect_data"]                       # next step name
+
+# =========================================================================
+# Step 2: Data Collection (Deterministic)
+# =========================================================================
+# Collects stock data for tickers from navexa-portfolio documents
+# Creates documents tagged ['stock-data-collected', '<ticker>']
+
+[step.collect_data]
+type = "market_data_collection"
+description = "Collect stock data for Navexa holdings"
+depends = "navexa_portfolio"
+on_error = "fail"
+# input_tags defaults to ["collect_data"] (step name)
+output_tags = ["analyze"] # next step name
+
+# =========================================================================
+# Step 3: Stock Analysis (AI)
+# =========================================================================
+# Analyzes collected data using embedded stock-analysis template
+# Creates documents tagged ['stock-analysis']
+
+[step.analyze]
+type = "summary"
+description = "Analyze collected stock data"
+depends = "collect_data"
+on_error = "fail"
+template = "stock-analysis"
+# input_tags defaults to ["analyze"] (step name)
+output_tags = ["portfolio_review"] # next step name
+
+# =========================================================================
+# Step 4: Portfolio Review (AI)
+# =========================================================================
+# Generates AI-powered portfolio review from portfolio and analysis documents
+
+[step.portfolio_review]
+type = "portfolio_review"
+description = "Generate AI portfolio review"
+depends = "analyze"
+on_error = "fail"
+# input_tags defaults to ["portfolio_review"] (step name)
+output_tags = ["email_report"] # next step name
+
+# =========================================================================
+# Step 5: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email Navexa portfolio analysis report"
+depends = "portfolio_review"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Navexa Portfolio Analysis - AI-Powered Report"
+# input_tags defaults to ["email_report"] (step name)
