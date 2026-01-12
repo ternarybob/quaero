@@ -1,0 +1,168 @@
+# Stock Deep Dive Analysis Template
+# Type: prompt (for SummaryWorker)
+#
+# Comprehensive stock analysis following Kneppy Invest Business Rating framework.
+# Produces structured output with explicit data availability indicators.
+# This is the SINGLE SOURCE OF TRUTH for deep dive analysis prompts.
+# To customize, create deployments/common/templates/stock-deep-dive.toml
+
+type = "prompt"
+
+prompt = """
+Perform a comprehensive deep dive analysis of the stock based on all collected data.
+
+CRITICAL REQUIREMENTS:
+1. For EVERY metric, you MUST report the ACTUAL VALUE from the data
+2. If data is not available, mark it explicitly as "DATA_UNAVAILABLE"
+3. NEVER fabricate or assume values - only use what's in the collected data
+4. You MUST complete the Improvements section at the end
+
+=== PART 1: QUANTITATIVE FACT-BASED MEASURES ===
+
+For each metric below, assess against the Kneppy Standard:
+
+### 1. CAPITAL EFFICIENCY (The Compounding Engine)
+- **Metric:** Return on Invested Capital (ROIC)
+- **Kneppy Standard:** Consistently > 15%
+- **Current Value:** [Extract return_on_equity from fundamentals as proxy, or mark DATA_UNAVAILABLE]
+- **5-Year Trend:** [Calculate from annual data if available, or mark DATA_UNAVAILABLE]
+- **Pass/Fail:** [Based on standard]
+- **Notes:** [Include context about ROIC vs WACC if computable]
+
+### 2. SHARE ALLOCATION & DILUTION CONTROL
+- **Metric:** Outstanding Shares History
+- **Kneppy Standard:** Flat or decreasing share count; opportunistic buybacks
+- **3-Year CAGR of Shares:** [Calculate from shares_outstanding history if available, or DATA_UNAVAILABLE]
+- **Recent Capital Raises:** [From announcements with "PLACEMENT", "SPP", "RIGHTS" keywords]
+- **Pass/Fail:** [Based on standard]
+- **Notes:** [Include dilution events from announcements]
+
+### 3. FINANCIAL ROBUSTNESS
+- **Metric:** Net Debt to EBITDA
+- **Kneppy Standard:** < 2.0x (preferably zero net debt)
+- **Current Ratio:** [Calculate from total_liabilities, cash, EBITDA in financials, or DATA_UNAVAILABLE]
+- **Cash Position:** [From fundamentals]
+- **Pass/Fail:** [Based on standard]
+- **Notes:** [Include debt trend and runway assessment]
+
+### 4. CASH FLOW REALITY
+- **Metric:** Free Cash Flow to Net Income Conversion
+- **Kneppy Standard:** > 90% conversion
+- **Current Conversion:** [Calculate FCF/NetIncome from financials, or DATA_UNAVAILABLE]
+- **Operating Cash Flow:** [From fundamentals]
+- **Pass/Fail:** [Based on standard]
+- **Notes:** [Quality of earnings assessment]
+
+=== PART 2: QUALITATIVE & HUMAN LAYER ===
+
+### 5. MANAGEMENT ALIGNMENT & SKIN IN THE GAME
+- **Insider Ownership:** [From fundamentals percent_insiders, or DATA_UNAVAILABLE]
+- **Institutional Ownership:** [From fundamentals percent_institutions, or DATA_UNAVAILABLE]
+- **Recent Insider Trading:** [From director interest in announcements, or DATA_UNAVAILABLE]
+- **Assessment:** [HIGH/MEDIUM/LOW alignment based on ownership levels]
+
+### 6. COMPETITIVE MOAT
+- **Source of Advantage:** [Identify: Brand / Switching Costs / Network Effect / Low Cost / None]
+- **Competitors Identified:** [From competitor analysis - list codes and rationale]
+- **Gross Margin:** [From fundamentals gross_margin or profit_margin]
+- **Operating Margin:** [From fundamentals operating_margin]
+- **Margin Trend:** [From annual data if available]
+- **Assessment:** [STRONG/MODERATE/WEAK/NONE moat]
+
+=== PART 3: MARKET POSITION & TECHNICALS ===
+
+### 7. PRICE ACTION ANALYSIS
+- **Current Price:** [From market data last_price]
+- **vs SMA20:** [Calculate % above/below]
+- **vs SMA50:** [Calculate % above/below]
+- **vs SMA200:** [Calculate % above/below]
+- **RSI14:** [From market data] - [Overbought >70 / Neutral 30-70 / Oversold <30]
+- **Support Level:** [From market data]
+- **Resistance Level:** [From market data]
+- **Trend Signal:** [From market data - BULLISH/BEARISH/NEUTRAL]
+
+### 8. ANNOUNCEMENT SIGNAL:NOISE RATIO
+- **Total Announcements:** [From announcements summary total_count]
+- **High Relevance Count:** [From announcements summary high_relevance_count]
+- **Signal:Noise Ratio:** [From announcements summary signal_to_noise_ratio]
+- **Recent Material Announcements:** [List top 3-5 HIGH relevance announcements with dates]
+- **Key Catalysts Identified:** [Yes/No with specific details]
+- **Signal Quality:** [HIGH/MEDIUM/LOW]
+
+=== PART 4: VALUATION vs PROJECTIONS ===
+
+### 9. CURRENT VALUATION
+- **P/E Ratio:** [From fundamentals pe_ratio, or DATA_UNAVAILABLE]
+- **Forward P/E:** [From fundamentals forward_pe, or DATA_UNAVAILABLE]
+- **EV/EBITDA:** [From fundamentals ev_to_ebitda, or DATA_UNAVAILABLE]
+- **Price/Book:** [From fundamentals price_to_book, or DATA_UNAVAILABLE]
+- **Analyst Target Mean:** [From fundamentals target_mean]
+- **Upside to Target:** [Calculate % from current price to target_mean]
+
+### 10. PROJECTION CONFIDENCE
+- **Revenue CAGR 3Y:** [From fundamentals revenue_cagr_3y, or DATA_UNAVAILABLE]
+- **Revenue CAGR 5Y:** [From fundamentals revenue_cagr_5y, or DATA_UNAVAILABLE]
+- **Analyst Coverage:** [From fundamentals analyst_count] analysts
+- **Recommendation:** [From fundamentals recommendation_key]
+- **Projection Reliability:** [HIGH/MEDIUM/LOW based on data completeness and analyst coverage]
+
+=== FINAL SCORECARD ===
+
+| Pillar | Metric | Value | Standard | Pass/Fail | Trend | Notes |
+|--------|--------|-------|----------|-----------|-------|-------|
+| Capital Efficiency | ROIC (ROE proxy) | | >15% | | | |
+| Share Allocation | Shares CAGR | | <=0% | | | |
+| Balance Sheet | Net Debt/EBITDA | | <2x | | | |
+| Cash Flow | FCF Conversion | | >90% | | | |
+| Alignment | Insider % | | HIGH preferred | | | |
+| Moat | Competitive Position | | | | | |
+
+**Data Completeness Score:** [X/6 pillars with sufficient data]
+
+=== OVERALL RATING ===
+
+- **Quality Grade:** [A/B/C/D/F]
+  - A: Excellent - Passes 5-6 pillars with strong data
+  - B: Good - Passes 4-5 pillars with adequate data
+  - C: Average - Passes 3-4 pillars or has significant data gaps
+  - D: Weak - Passes 1-2 pillars or major concerns
+  - F: Speculative - Fails most pillars or insufficient data
+
+- **Investment Recommendation:** [ACCUMULATE/HOLD/REDUCE/AVOID]
+  - Only A/B grades should receive ACCUMULATE
+
+- **Conviction Level:** [1-10]
+  - 10: Complete data, clear thesis, strong fundamentals
+  - 7-9: Good data, reasonable confidence
+  - 4-6: Some data gaps, moderate confidence
+  - 1-3: Significant data gaps, low confidence
+
+- **Reasoning:** [2-3 sentences explaining the grade and recommendation]
+
+=== IMPROVEMENTS NEEDED ===
+
+CRITICAL: You MUST complete this section. This is REQUIRED for every analysis.
+
+### 1. Data Gaps Identified
+List EACH metric that was marked DATA_UNAVAILABLE and its impact:
+- [Metric 1]: [Impact on analysis]
+- [Metric 2]: [Impact on analysis]
+- ...
+
+### 2. Recommended Additional Sources
+What specific data sources could fill the gaps:
+- Annual Report PDF: [Would provide X, Y, Z]
+- Investor Presentations: [Would provide X, Y, Z]
+- Industry Data: [Would provide X, Y, Z]
+- Other: [Specify]
+
+### 3. Analysis Confidence
+- **Data Completeness:** [X]% - [Brief explanation]
+- **Confidence Level:** [HIGH/MEDIUM/LOW]
+- **Key Uncertainty:** [The single biggest unknown affecting this analysis]
+
+### 4. Next Steps for Better Analysis
+- [Specific action 1]
+- [Specific action 2]
+- [Specific action 3]
+"""

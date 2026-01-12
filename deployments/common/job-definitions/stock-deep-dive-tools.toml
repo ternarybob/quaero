@@ -1,0 +1,251 @@
+# Stock Deep Dive Analysis - Orchestrator with Tool Calling
+# =========================================================================
+# Comprehensive stock analysis using LLM orchestration with dynamic tool calling.
+# The LLM plans and executes data collection and analysis using available tools.
+#
+# WORKFLOW:
+# 1. LLM Planner: Reads goal and available tools, creates execution plan
+# 2. Tool Execution: Calls workers (fundamentals, announcements, market data, competitors)
+# 3. Analysis: Deep dive analysis using Kneppy Invest framework
+# 4. Review: LLM reviews results and determines goal completion
+# 5. Email Report: Send deep dive analysis report
+#
+# KEY FEATURES:
+# - Dynamic planning via LLM (not fixed step sequence)
+# - Tool calling pattern (LLM decides which workers to invoke)
+# - Kneppy Invest Business Rating framework assessment
+# - Explicit marking of unavailable data (DATA_UNAVAILABLE)
+# - Improvements section listing data gaps and recommendations
+#
+# TICKERS: GNP, EXR, SRL (configurable via variables)
+# OUTPUT TAG: stock-deep-dive-report
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "stock-deep-dive-tools"
+name = "Stock Deep Dive Analysis (Tools)"
+type = "orchestrator"
+description = "AI-orchestrated stock analysis with tool calling using Kneppy Invest framework"
+tags = ["stocks", "deep-dive", "analysis", "kneppy", "orchestrator", "tools"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-11"
+updated = "2026-01-11"
+purpose = "Deep dive stock analysis with LLM tool-calling orchestration"
+framework = "Kneppy Invest Business Rating - Capital Efficiency, Share Allocation, Financial Robustness, Cash Flow Reality, Management Alignment, Competitive Moat"
+comparison = "Unlike stock-deep-dive.toml which uses fixed steps, this version uses LLM to dynamically plan and execute tools"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+# Target stocks for deep dive analysis
+# Stocks are analyzed individually with comprehensive Kneppy framework
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:EXR" },
+    { ticker = "ASX:SRL" },
+]
+
+# =========================================================================
+# Orchestrator Step - LLM Plans and Executes Tools
+# =========================================================================
+# The orchestrator dynamically decides:
+# - Which tools to call
+# - In what order (respecting dependencies)
+# - With what parameters
+#
+# Available tools:
+# - fetch_fundamentals (market_fundamentals worker)
+# - fetch_announcements (market_announcements worker)
+# - fetch_market_data (market_data worker)
+# - analyze_competitors (market_competitor worker)
+# - analyze_summary (summary worker)
+
+[step.orchestrate_analysis]
+type = "orchestrator"
+description = "AI-powered deep dive analysis with dynamic planning"
+on_error = "fail"
+thinking_level = "HIGH"
+model_preference = "auto"
+output_tags = ["stock-deep-dive-report"]
+
+# Available tools - workers exposed to the orchestrator as callable tools
+# NOTE: Documents created by tools are tagged with output_tags + lowercase ticker code
+# Example: fetch_fundamentals for ASX:GNP creates doc tagged ["deep_dive_data", "gnp"]
+available_tools = [
+    { name = "fetch_fundamentals", description = "Fetch comprehensive stock fundamentals including financials, valuation metrics, analyst coverage, and historical data. Creates document tagged with ['deep_dive_data', '<ticker-lowercase>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: period (string) - Y1, Y2, Y3, Y5 (default Y3). Provides: PE ratio, EV/EBITDA, margins, shares outstanding, insider ownership, revenue/profit history, analyst targets.", worker = "market_fundamentals", output_tags = ["deep_dive_data"] },
+    { name = "fetch_announcements", description = "Fetch and classify official ASX company announcements with price sensitivity flags and signal:noise analysis. Creates document tagged with ['deep_dive_data', '<ticker-lowercase>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: period (string) - M1, M3, M6, Y1 (default Y1), limit (int) - max announcements. Provides: announcements with relevance classification, price sensitivity flags, signal-to-noise ratio.", worker = "market_announcements", output_tags = ["deep_dive_data"] },
+    { name = "fetch_market_data", description = "Fetch price history and calculate technical indicators. Creates document tagged with ['deep_dive_data', '<ticker-lowercase>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2 (default Y2). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance levels, trend signal.", worker = "market_data", output_tags = ["deep_dive_data"] },
+    { name = "analyze_competitors", description = "Identify ASX-listed competitors using LLM analysis of company fundamentals. Creates document tagged with ['deep_dive_data', '<ticker-lowercase>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). Provides: list of competitor ASX codes with rationale for competitive moat assessment.", worker = "market_competitor", api_key = "{google_gemini_api_key}", output_tags = ["deep_dive_data"] },
+    { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents using the Kneppy framework template. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. Use filter_tags=['deep_dive_data', '<ticker-lowercase>'] to get all data for a stock. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for comprehensive analysis). The prompt should reference the Kneppy Invest framework pillars.", worker = "summary" },
+]
+
+# Natural language goal - the LLM will plan how to achieve this
+goal = """
+Perform a comprehensive deep dive analysis of all ASX stocks in the variables list using the Kneppy Invest Business Rating framework.
+
+=== DOCUMENT TAGGING (IMPORTANT) ===
+
+All data collection tools tag documents with:
+- ["deep_dive_data", "<ticker-lowercase>"] (e.g., ["deep_dive_data", "gnp"])
+
+When using analyze_summary, filter with: filter_tags=["deep_dive_data", "<ticker-lowercase>"]
+Example for GNP: filter_tags=["deep_dive_data", "gnp"]
+
+=== PHASE 1: DATA COLLECTION (for EACH stock) ===
+
+For EACH ticker in the variables list, collect all required data:
+
+1. FUNDAMENTALS: Fetch comprehensive fundamentals
+   - Use fetch_fundamentals with period: Y3 for 3-year historical data
+   - Creates document tagged with ["deep_dive_data", "<ticker-lowercase>"]
+   - Provides: PE ratio, EV/EBITDA, margins, shares outstanding, insider ownership,
+     revenue history, profit margins, analyst targets
+
+2. ANNOUNCEMENTS: Fetch 1-year of ASX announcements
+   - Use fetch_announcements with period: Y1
+   - Creates document tagged with ["deep_dive_data", "<ticker-lowercase>"]
+   - Provides: classified announcements with signal:noise ratio
+
+3. MARKET DATA: Fetch price history and technicals
+   - Use fetch_market_data with period: Y2
+   - Creates document tagged with ["deep_dive_data", "<ticker-lowercase>"]
+   - Provides: price, SMAs, RSI14, support/resistance, trend signal
+
+4. COMPETITOR ANALYSIS: Identify ASX-listed competitors
+   - Use analyze_competitors for each ticker
+   - Creates document tagged with ["deep_dive_data", "<ticker-lowercase>"]
+   - Provides: competitor codes for moat assessment
+
+=== PHASE 2: DEEP DIVE ANALYSIS ===
+
+After collecting data for EACH stock, perform comprehensive analysis:
+
+5. KNEPPY FRAMEWORK ANALYSIS
+   For each stock, use analyze_summary with HIGH thinking_level.
+   IMPORTANT: Use filter_tags=["deep_dive_data", "<ticker-lowercase>"] to get all data for that stock.
+   Example for GNP: filter_tags=["deep_dive_data", "gnp"]
+
+   The analysis MUST cover all SIX PILLARS of the Kneppy Invest Business Rating:
+
+   QUANTITATIVE PILLARS (Fact-Based):
+   1. CAPITAL EFFICIENCY (The Compounding Engine)
+      - ROIC consistently > 15%
+      - 5-year trend analysis
+      - ROIC vs WACC spread
+
+   2. SHARE ALLOCATION & DILUTION CONTROL
+      - Outstanding shares flat or decreasing
+      - Opportunistic buybacks
+      - No value-destructive capital raises
+
+   3. FINANCIAL ROBUSTNESS
+      - Net Debt/EBITDA < 2.0x (preferably zero)
+      - Strong cash position
+      - Adequate runway
+
+   4. CASH FLOW REALITY
+      - FCF/Net Income conversion > 90%
+      - Quality of earnings
+      - Working capital trends
+
+   QUALITATIVE PILLARS (Human Layer):
+   5. MANAGEMENT ALIGNMENT & SKIN IN THE GAME
+      - Insider ownership levels
+      - Recent insider trading patterns
+      - Institutional backing
+
+   6. COMPETITIVE MOAT
+      - Source of advantage (Brand/Switching/Network/Cost/None)
+      - Margin sustainability
+      - Competitor positioning
+
+   CRITICAL REQUIREMENTS FOR ANALYSIS:
+   - For EVERY metric, report the ACTUAL VALUE from collected data
+   - If data is not available, mark it explicitly as "DATA_UNAVAILABLE"
+   - NEVER fabricate or assume values
+   - Complete the Improvements section identifying data gaps
+
+=== PHASE 3: SYNTHESIS ===
+
+6. FINAL SCORECARD
+   Create a consolidated report for each stock including:
+   - Scorecard table with all 6 pillars
+   - Data Completeness Score (X/6 pillars)
+   - Quality Grade (A/B/C/D/F)
+   - Investment Recommendation (ACCUMULATE/HOLD/REDUCE/AVOID)
+   - Conviction Level (1-10)
+   - Reasoning (2-3 sentences)
+
+7. IMPROVEMENTS SECTION (REQUIRED)
+   - List ALL metrics marked DATA_UNAVAILABLE
+   - Impact of each data gap on analysis
+   - Recommended additional sources
+   - Next steps for better analysis
+
+=== OUTPUT REQUIREMENTS ===
+
+FINAL OUTPUT MUST INCLUDE:
+- Individual stock deep dive reports with all Kneppy pillars
+- Final scorecard with Quality Grade for each stock
+- Clear marking of data gaps with DATA_UNAVAILABLE
+- Improvements section with specific recommendations
+- Summary table: Ticker | Quality Grade | Recommendation | Conviction | Data Completeness
+
+If data collection fails for any stock:
+- Note the failure explicitly
+- Continue with remaining stocks
+- Include failure in final summary
+"""
+
+# =========================================================================
+# Format Output Step - Prepare PDF Attachments
+# =========================================================================
+# Prepares output documents for email delivery with PDF attachments
+# Collects documents tagged with orchestrator output_tags
+# Creates formatted document with email instructions
+
+[step.format_output]
+type = "output_formatter"
+description = "Format deep dive reports as PDF attachments"
+depends = "orchestrate_analysis"
+on_error = "fail"
+input_tags = ["stock-deep-dive-report"]
+output_tags = ["email_report"]
+title = "Stock Deep Dive Analysis - Kneppy Framework"
+format = "pdf"
+attachment = true
+style = "body"
+
+# =========================================================================
+# Email Step - Send consolidated report
+# =========================================================================
+# Sends the deep dive analysis via email with PDF attachments
+# Reads from output_formatter document
+
+[step.email_report]
+type = "email"
+description = "Email deep dive analysis report with PDF attachment"
+depends = "format_output"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Deep Dive Analysis (Tools) - Kneppy Framework Report"
+# input_tags defaults to ["email_report"] (step name) - matches format_output output_tags
+
+# Error reporting configuration
+on_error_subject = "Stock Deep Dive Analysis - An Error Occurred"
+include_logs_on_error = true

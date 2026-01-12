@@ -457,6 +457,11 @@ func (w *SummaryWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	documents, _ := initResult.Metadata["documents"].([]*models.Document)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 
+	// Get the manager ID for document isolation
+	// This ensures documents are tagged with the orchestrator's job ID,
+	// enabling downstream steps (like format_output) to find them
+	managerID := workerutil.GetManagerID(ctx, w.jobMgr, stepID)
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("originator", "worker").
@@ -669,7 +674,8 @@ The following is a critique of your previous draft. You must address EVERY issue
 	}
 
 	// Create summary document with validation metadata
-	doc, err := w.createDocument(ctx, summaryContent, prompt, documents, &jobDef, stepID, stepConfig, validationResult)
+	// Use managerID (not stepID) so document can be found by downstream steps in the pipeline
+	doc, err := w.createDocument(ctx, summaryContent, prompt, documents, &jobDef, managerID, stepConfig, validationResult)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -1416,6 +1422,14 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 		title = fmt.Sprintf("Summary: %s", jobDef.Name)
 	}
 
+	// Build Jobs array - include parentJobID for document isolation
+	// This enables downstream steps (like format_output) to find documents
+	// from the same pipeline execution using JobID filter
+	var jobs []string
+	if parentJobID != "" {
+		jobs = []string{parentJobID}
+	}
+
 	doc := &models.Document{
 		ID:              "doc_" + uuid.New().String(),
 		SourceType:      "summary",
@@ -1425,6 +1439,7 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 		DetailLevel:     models.DetailLevelFull,
 		Metadata:        metadata,
 		Tags:            tags,
+		Jobs:            jobs,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 		LastSynced:      &now,

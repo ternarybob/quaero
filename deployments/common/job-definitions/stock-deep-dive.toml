@@ -1,0 +1,178 @@
+# Stock Deep Dive Analysis
+# =========================================================================
+# Comprehensive stock analysis combining fundamentals, announcements,
+# technicals, and competitor analysis with Kneppy Invest framework.
+#
+# WORKFLOW:
+# 1. Data Collection: Fetch fundamentals, announcements, market data
+# 2. Competitor Analysis: Identify ASX-listed competitors via LLM
+# 3. Deep Dive Analysis: AI analysis per Kneppy framework with data gaps
+# 4. Format Output: Convert reports to PDF attachments
+# 5. Email Report: Send deep dive analysis report with PDF attachments
+#
+# KEY FEATURES:
+# - Kneppy Invest Business Rating framework assessment
+# - Explicit marking of unavailable data (DATA_UNAVAILABLE)
+# - Improvements section listing data gaps and recommendations
+# - Comprehensive analysis covering quantitative and qualitative factors
+#
+# TICKERS: GNP, EXR, SRL (configurable via variables)
+# TEMPLATE: internal/templates/stock-deep-dive.toml
+# OUTPUT TAG: stock-deep-dive
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "stock-deep-dive"
+name = "Stock Deep Dive Analysis"
+type = "orchestrator"
+description = "Comprehensive stock analysis with Kneppy Invest Business Rating framework"
+tags = ["stocks", "deep-dive", "analysis", "kneppy", "email"]
+schedule = ""
+timeout = "3h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-11"
+updated = "2026-01-11"
+purpose = "Deep dive stock analysis following Kneppy Invest Business Rating framework"
+framework = "Kneppy Invest Business Rating - Capital Efficiency, Share Allocation, Financial Robustness, Cash Flow Reality, Management Alignment, Competitive Moat"
+
+# =========================================================================
+# User Configuration - Ticker List
+# =========================================================================
+
+[config]
+# Target stocks for deep dive analysis
+# Stocks are analyzed individually with comprehensive Kneppy framework
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:EXR" },
+    { ticker = "ASX:SRL" },
+]
+
+# =========================================================================
+# Step 1: Fetch Fundamentals
+# =========================================================================
+# Fetches comprehensive stock data using EODHD (financials, valuation, etc.)
+# Creates documents tagged with output_tags + ticker
+# Provides: PE ratio, EV/EBITDA, margins, shares outstanding, insider ownership
+
+[step.fetch_fundamentals]
+type = "market_fundamentals"
+description = "Fetch stock fundamentals including financials, valuation, and analyst coverage"
+on_error = "continue"
+period = "Y3"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 2: Fetch Announcements
+# =========================================================================
+# Fetches and classifies company announcements with signal:noise analysis
+# Creates documents tagged with output_tags + ticker
+# Provides: Price-sensitive announcements, relevance classification, signal rating
+
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch and classify company announcements"
+on_error = "continue"
+period = "Y1"
+limit = 500
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 3: Fetch Market Data
+# =========================================================================
+# Fetches price history and calculates technical indicators
+# Creates documents tagged with output_tags + ticker
+# Provides: SMA20/50/200, RSI14, support/resistance, trend signal
+
+[step.fetch_market_data]
+type = "market_data"
+description = "Fetch price history and calculate technicals"
+on_error = "continue"
+period = "Y2"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 4: Analyze Competitors
+# =========================================================================
+# Identifies ASX-listed competitors using Gemini LLM
+# Creates documents tagged with output_tags + ticker
+# Provides: Competitor codes with rationale for competitive moat assessment
+
+[step.analyze_competitors]
+type = "market_competitor"
+description = "Identify ASX-listed competitors"
+depends = "fetch_fundamentals"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 5: Deep Dive Analysis
+# =========================================================================
+# AI analysis using Kneppy framework template
+# Uses all collected data to produce comprehensive assessment
+# OUTPUT INCLUDES:
+# - Quantitative measures (ROIC, Share Allocation, Debt, Cash Flow)
+# - Qualitative assessment (Management Alignment, Competitive Moat)
+# - Market technicals and announcement analysis
+# - Valuation vs projections
+# - Final scorecard with Quality Grade (A/B/C/D/F)
+# - IMPROVEMENTS section with data gaps and recommendations
+
+[step.deep_dive_analysis]
+type = "summary"
+description = "Comprehensive deep dive analysis per Kneppy framework"
+depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors"
+on_error = "fail"
+template = "stock-deep-dive"
+filter_tags = ["deep_dive_data"]
+output_tags = ["format_output"]
+
+# =========================================================================
+# Step 6: Format Output
+# =========================================================================
+# Prepares output documents for email delivery with PDF attachments
+# Collects documents from deep_dive_analysis step
+# Creates formatted document with email instructions
+
+[step.format_output]
+type = "output_formatter"
+description = "Format deep dive reports as PDF attachments"
+depends = "deep_dive_analysis"
+on_error = "fail"
+# input_tags defaults to ["format_output"] (step name) - matches deep_dive_analysis output_tags
+output_tags = ["email_report"]
+title = "Stock Deep Dive Analysis - Kneppy Framework"
+format = "pdf"
+attachment = true
+style = "body"
+
+# =========================================================================
+# Step 7: Email Report
+# =========================================================================
+# Sends deep dive analysis via email with PDF attachments
+# Reads from output_formatter document
+
+[step.email_report]
+type = "email"
+description = "Email deep dive analysis report with PDF attachment"
+depends = "format_output"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Deep Dive Analysis - Kneppy Framework Report"
+# input_tags defaults to ["email_report"] (step name) - matches format_output output_tags
+
+# Error reporting configuration
+on_error_subject = "Stock Deep Dive Analysis - An Error Occurred"
+include_logs_on_error = true

@@ -1,0 +1,137 @@
+# Stock Deep Dive Analysis - Test Version
+# =========================================================================
+# Test version of stock-deep-dive.toml with reduced scope for faster testing.
+# Uses step-based orchestrator workflow (NOT tool-calling).
+#
+# WORKFLOW:
+# 1. Data Collection: Fetch fundamentals, announcements, market data
+# 2. Competitor Analysis: Identify ASX-listed competitors via LLM
+# 3. Deep Dive Analysis: AI analysis per Kneppy framework with data gaps
+# 4. Format Output: Convert reports to PDF attachments
+# 5. Email Report: Send deep dive analysis report with PDF attachments
+#
+# PRODUCTION: deployments/common/job-definitions/stock-deep-dive.toml
+# =========================================================================
+
+# =========================================================================
+# Job Definition
+# =========================================================================
+id = "stock-deep-dive-test"
+name = "Stock Deep Dive Analysis (Test)"
+type = "orchestrator"
+description = "Test: Comprehensive stock analysis with Kneppy Invest Business Rating framework"
+tags = ["stocks", "deep-dive", "analysis", "kneppy", "email", "test"]
+schedule = ""
+timeout = "1h"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-12"
+purpose = "Test version of stock-deep-dive for integration testing"
+framework = "Kneppy Invest Business Rating"
+
+# =========================================================================
+# User Configuration - Single Ticker for Testing
+# =========================================================================
+
+[config]
+# Single ticker for faster test execution
+variables = [
+    { ticker = "ASX:GNP" },
+]
+
+# =========================================================================
+# Step 1: Fetch Fundamentals
+# =========================================================================
+
+[step.fetch_fundamentals]
+type = "market_fundamentals"
+description = "Fetch stock fundamentals including financials, valuation, and analyst coverage"
+on_error = "continue"
+period = "Y3"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 2: Fetch Announcements
+# =========================================================================
+
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch and classify company announcements"
+on_error = "continue"
+period = "Y1"
+limit = 500
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 3: Fetch Market Data
+# =========================================================================
+
+[step.fetch_market_data]
+type = "market_data"
+description = "Fetch price history and calculate technicals"
+on_error = "continue"
+period = "Y2"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 4: Analyze Competitors
+# =========================================================================
+
+[step.analyze_competitors]
+type = "market_competitor"
+description = "Identify ASX-listed competitors"
+depends = "fetch_fundamentals"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 5: Deep Dive Analysis
+# =========================================================================
+
+[step.deep_dive_analysis]
+type = "summary"
+description = "Comprehensive deep dive analysis per Kneppy framework"
+depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors"
+on_error = "fail"
+template = "stock-deep-dive"
+filter_tags = ["deep_dive_data"]
+output_tags = ["format_output"]
+
+# =========================================================================
+# Step 6: Format Output
+# =========================================================================
+
+[step.format_output]
+type = "output_formatter"
+description = "Format deep dive reports as PDF attachments"
+depends = "deep_dive_analysis"
+on_error = "fail"
+output_tags = ["email_report"]
+title = "Stock Deep Dive Analysis (Test) - Kneppy Framework"
+format = "pdf"
+attachment = true
+style = "body"
+
+# =========================================================================
+# Step 7: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email deep dive analysis report with PDF attachment"
+depends = "format_output"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Deep Dive Analysis (Test) - Kneppy Framework Report"
+
+on_error_subject = "Stock Deep Dive Analysis (Test) - An Error Occurred"
+include_logs_on_error = true

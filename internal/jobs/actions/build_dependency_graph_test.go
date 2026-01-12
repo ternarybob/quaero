@@ -75,6 +75,16 @@ func (m *MockKeyValueStorage) DeleteAll(ctx context.Context) error {
 	return nil
 }
 
+func (m *MockKeyValueStorage) ListByPrefix(ctx context.Context, prefix string) ([]interfaces.KeyValuePair, error) {
+	pairs := make([]interfaces.KeyValuePair, 0)
+	for k, v := range m.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			pairs = append(pairs, interfaces.KeyValuePair{Key: k, Value: v})
+		}
+	}
+	return pairs, nil
+}
+
 func TestBuildDependencyGraphAction_NormalizePath(t *testing.T) {
 	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)

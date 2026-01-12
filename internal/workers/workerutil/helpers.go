@@ -55,9 +55,16 @@ func GetManagerID(ctx context.Context, jobMgr JobGetter, stepID string) string {
 		return *jobState.ManagerID
 	}
 
-	// Fallback: check metadata for manager_id
+	// Check metadata for manager_id
 	if jobState.Metadata != nil {
 		if managerID, ok := jobState.Metadata["manager_id"].(string); ok && managerID != "" {
+			return managerID
+		}
+	}
+
+	// Check config for manager_id (tool jobs created by orchestrator store it here)
+	if jobState.Config != nil {
+		if managerID, ok := jobState.Config["manager_id"].(string); ok && managerID != "" {
 			return managerID
 		}
 	}

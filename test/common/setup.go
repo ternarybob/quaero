@@ -1623,6 +1623,7 @@ func (env *TestEnvironment) LoadEnvVariablesIntoKVStore() error {
 // LoadTestJobDefinitions loads job definition files for tests
 // Accepts variadic list of job definition file paths (relative to test/ui or test/api directory)
 // Example: env.LoadTestJobDefinitions("../config/test-agent-job.toml")
+// Note: PathPrefix is automatically applied for subdirectory tests (e.g., test/api/portfolio)
 func (env *TestEnvironment) LoadTestJobDefinitions(jobDefPaths ...string) error {
 	if len(jobDefPaths) == 0 {
 		// No job definitions to load
@@ -1633,7 +1634,9 @@ func (env *TestEnvironment) LoadTestJobDefinitions(jobDefPaths ...string) error 
 
 	// Load each job definition file
 	for _, configPath := range jobDefPaths {
-		absPath, err := filepath.Abs(configPath)
+		// Apply PathPrefix for subdirectory tests (e.g., test/api/portfolio needs "../" prefix)
+		adjustedPath := env.Config.PathPrefix + configPath
+		absPath, err := filepath.Abs(adjustedPath)
 		if err != nil {
 			return fmt.Errorf("failed to resolve path for job definition %s: %w", configPath, err)
 		}

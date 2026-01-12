@@ -436,6 +436,9 @@ func AssertInvestabilityScore(t *testing.T, score interface{}, gatePassed bool) 
 // Local Helper Aliases (for backward compatibility in test files)
 // =============================================================================
 
+// WorkerSchema is an alias for common.WorkerSchema
+type WorkerSchema = common.WorkerSchema
+
 // ValidateSchema validates metadata against a schema definition
 // Delegates to common.ValidateSchema
 func ValidateSchema(t *testing.T, metadata map[string]interface{}, schema common.WorkerSchema) bool {
