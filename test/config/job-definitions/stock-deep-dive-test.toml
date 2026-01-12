@@ -93,20 +93,32 @@ api_key = "{google_gemini_api_key}"
 output_tags = ["deep_dive_data"]
 
 # =========================================================================
-# Step 5: Deep Dive Analysis
+# Step 5: Extract Annual Report Data
+# =========================================================================
+
+[step.fetch_annual_report]
+type = "market_annual_report"
+description = "Extract structured data from annual report PDFs (ROIC, WACC, debt facilities)"
+depends = "fetch_announcements"
+on_error = "continue"
+max_reports = 1
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 6: Deep Dive Analysis
 # =========================================================================
 
 [step.deep_dive_analysis]
 type = "summary"
 description = "Comprehensive deep dive analysis per Kneppy framework"
-depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors"
+depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors,fetch_annual_report"
 on_error = "fail"
 template = "stock-deep-dive"
 filter_tags = ["deep_dive_data"]
 output_tags = ["format_output"]
 
 # =========================================================================
-# Step 6: Format Output
+# Step 7: Format Output
 # =========================================================================
 
 [step.format_output]
@@ -121,7 +133,7 @@ attachment = true
 style = "body"
 
 # =========================================================================
-# Step 7: Email Report
+# Step 8: Email Report
 # =========================================================================
 
 [step.email_report]

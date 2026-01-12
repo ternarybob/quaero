@@ -47,6 +47,7 @@ const (
 	WorkerTypeMarketDataCollection       WorkerType = "market_data_collection"       // Deterministic market data collection
 	WorkerTypeMarketConsolidate          WorkerType = "market_consolidate"           // Consolidate tagged documents (no AI)
 	WorkerTypeMarketAnnouncementDownload WorkerType = "market_announcement_download" // Download PDFs from filtered announcements
+	WorkerTypeMarketAnnualReport         WorkerType = "market_annual_report"         // Extract structured data from annual report PDFs
 	WorkerTypeSignalAnalysis             WorkerType = "signal_analysis"              // Announcement signal classification and scoring
 	WorkerTypeOutputFormatter            WorkerType = "output_formatter"             // Format output documents for email delivery
 
@@ -95,7 +96,7 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeMarketDirectorInterest, WorkerTypeMarketFundamentals, WorkerTypeMarketMacro,
 		WorkerTypeMarketCompetitor, WorkerTypeMarketSignal, WorkerTypeMarketPortfolio,
 		WorkerTypeMarketAssessor, WorkerTypeMarketDataCollection, WorkerTypeMarketConsolidate,
-		WorkerTypeMarketAnnouncementDownload, WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
+		WorkerTypeMarketAnnouncementDownload, WorkerTypeMarketAnnualReport, WorkerTypeSignalAnalysis, WorkerTypeOutputFormatter,
 		WorkerTypePortfolio, WorkerTypePortfolioList, WorkerTypePortfolioFetch, WorkerTypePortfolioHoldings, WorkerTypePortfolioPerformance, WorkerTypePortfolioReview,
 		WorkerTypeNavexaPortfolio,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
@@ -144,6 +145,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeMarketDataCollection,
 		WorkerTypeMarketConsolidate,
 		WorkerTypeMarketAnnouncementDownload,
+		WorkerTypeMarketAnnualReport,
 		WorkerTypeSignalAnalysis,
 		WorkerTypeOutputFormatter,
 		WorkerTypePortfolio,

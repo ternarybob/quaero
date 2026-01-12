@@ -241,8 +241,72 @@ type StockCollectorData struct {
 	// Period performance (calculated)
 	PeriodPerformance []PeriodPerformanceEntry `json:"period_performance,omitempty"`
 
+	// Financial Health Summary (Step 2: calculated metrics for Kneppy pillars)
+	LatestCash        int64   `json:"latest_cash"`         // Most recent cash balance
+	LatestTotalDebt   int64   `json:"latest_total_debt"`   // Short + Long term debt
+	LatestNetDebt     int64   `json:"latest_net_debt"`     // TotalDebt - Cash
+	NetDebtToEBITDA   float64 `json:"net_debt_to_ebitda"`  // Key leverage ratio
+	LatestOperatingCF int64   `json:"latest_operating_cf"` // Most recent operating CF
+	LatestFreeCF      int64   `json:"latest_free_cf"`      // Most recent FCF
+	FCFConversion     float64 `json:"fcf_conversion"`      // FCF/NetIncome ratio (%)
+	FCFToRevenue      float64 `json:"fcf_to_revenue"`      // FCF margin (%)
+	GrossMargin       float64 `json:"gross_margin"`        // Latest gross margin (%)
+
+	// Share Dilution Tracking (Step 3: historical shares analysis)
+	SharesCAGR3Y    float64              `json:"shares_cagr_3y"`    // 3-year share count CAGR
+	SharesGrowthYoY float64              `json:"shares_growth_yoy"` // Year-over-year change
+	SharesHistory   []SharesHistoryEntry `json:"shares_history,omitempty"`
+
+	// Analyst Estimates (v2: enhanced forward-looking data)
+	AnalystEstimates *AnalystEstimatesData `json:"analyst_estimates,omitempty"`
+
 	// Metadata
 	LastUpdated time.Time `json:"last_updated"`
+}
+
+// AnalystEstimatesData holds forward-looking analyst estimate data from EODHD Earnings.Trend
+type AnalystEstimatesData struct {
+	// EPS Estimates
+	EPSCurrentYear  float64 `json:"eps_current_year"`  // EPSEstimateCurrentYear from Highlights
+	EPSNextYear     float64 `json:"eps_next_year"`     // EPSEstimateNextYear from Highlights
+	EPSCurrentQtr   float64 `json:"eps_current_qtr"`   // EPSEstimateCurrentQuarter from Highlights
+	EPSNextQtr      float64 `json:"eps_next_qtr"`      // EPSEstimateNextQuarter from Highlights
+	EPSEstimateAvg  float64 `json:"eps_estimate_avg"`  // Current year consensus
+	EPSEstimateLow  float64 `json:"eps_estimate_low"`  // Low estimate
+	EPSEstimateHigh float64 `json:"eps_estimate_high"` // High estimate
+
+	// Revenue Estimates
+	RevenueEstimateAvg  float64 `json:"revenue_estimate_avg"`  // Consensus revenue estimate
+	RevenueEstimateLow  float64 `json:"revenue_estimate_low"`  // Low estimate
+	RevenueEstimateHigh float64 `json:"revenue_estimate_high"` // High estimate
+
+	// Analyst Coverage
+	EarningsAnalystCount int `json:"earnings_analyst_count"` // Number of analysts covering EPS
+	RevenueAnalystCount  int `json:"revenue_analyst_count"`  // Number of analysts covering revenue
+
+	// EPS Estimate Trends (momentum indicators)
+	EPSTrendCurrent   float64 `json:"eps_trend_current"`    // Current estimate
+	EPSTrend7DaysAgo  float64 `json:"eps_trend_7d_ago"`     // Estimate 7 days ago
+	EPSTrend30DaysAgo float64 `json:"eps_trend_30d_ago"`    // Estimate 30 days ago
+	EPSTrend60DaysAgo float64 `json:"eps_trend_60d_ago"`    // Estimate 60 days ago
+	EPSTrend90DaysAgo float64 `json:"eps_trend_90d_ago"`    // Estimate 90 days ago
+	EPSTrendChange30D float64 `json:"eps_trend_change_30d"` // % change in estimates over 30 days
+
+	// EPS Revisions (analyst sentiment)
+	RevisionsUp7Days    int `json:"revisions_up_7d"`    // Upward revisions last 7 days
+	RevisionsUp30Days   int `json:"revisions_up_30d"`   // Upward revisions last 30 days
+	RevisionsDown30Days int `json:"revisions_down_30d"` // Downward revisions last 30 days
+
+	// Coverage Quality Assessment
+	CoverageQuality string `json:"coverage_quality"` // "HIGH" (5+), "LOW" (1-4), "NONE" (0)
+	EstimatePeriod  string `json:"estimate_period"`  // Period these estimates apply to (e.g., "0y", "+1y")
+}
+
+// SharesHistoryEntry tracks historical shares outstanding (Step 3)
+type SharesHistoryEntry struct {
+	Date              string  `json:"date"`
+	SharesOutstanding int64   `json:"shares_outstanding"`
+	ChangePercent     float64 `json:"change_percent,omitempty"`
 }
 
 // EarningsEntry holds earnings data for a single period
@@ -280,6 +344,14 @@ type FinancialPeriodEntry struct {
 	FreeCF          int64   `json:"free_cash_flow,omitempty"`
 	GrossMargin     float64 `json:"gross_margin"`
 	NetMargin       float64 `json:"net_margin"`
+
+	// Balance Sheet - Debt/Cash Components (Step 1: Enhanced data extraction)
+	CashAndEquivalents int64 `json:"cash_and_equivalents,omitempty"`
+	ShortTermDebt      int64 `json:"short_term_debt,omitempty"`
+	LongTermDebt       int64 `json:"long_term_debt,omitempty"`
+	TotalDebt          int64 `json:"total_debt,omitempty"`
+	NetDebt            int64 `json:"net_debt,omitempty"`
+	SharesOutstanding  int64 `json:"shares_outstanding,omitempty"`
 }
 
 // OHLCVEntry represents a single day's price data
@@ -312,6 +384,8 @@ func init() {
 	gob.Register([]EarningsEntry{})
 	gob.Register([]UpgradeDowngradeEntry{})
 	gob.Register([]FinancialPeriodEntry{})
+	gob.Register([]SharesHistoryEntry{})
+	gob.Register(&AnalystEstimatesData{})
 }
 
 // eodhdEODData represents a single EOD record from EODHD
@@ -484,15 +558,25 @@ type eodhdEarningsHistory struct {
 // eodhdEarningsTrend uses interface{} for numeric fields because EODHD API returns
 // these as strings (e.g., "-0.0401") instead of numbers
 type eodhdEarningsTrend struct {
-	Date                 string      `json:"date"`
-	Period               string      `json:"period"`
-	Growth               interface{} `json:"growth"`
-	EarningsEstimateAvg  interface{} `json:"earningsEstimateAvg"`
-	EarningsEstimateLow  interface{} `json:"earningsEstimateLow"`
-	EarningsEstimateHigh interface{} `json:"earningsEstimateHigh"`
-	RevenueEstimateAvg   interface{} `json:"revenueEstimateAvg"`
-	RevenueEstimateLow   interface{} `json:"revenueEstimateLow"`
-	RevenueEstimateHigh  interface{} `json:"revenueEstimateHigh"`
+	Date                             string      `json:"date"`
+	Period                           string      `json:"period"`
+	Growth                           interface{} `json:"growth"`
+	EarningsEstimateAvg              interface{} `json:"earningsEstimateAvg"`
+	EarningsEstimateLow              interface{} `json:"earningsEstimateLow"`
+	EarningsEstimateHigh             interface{} `json:"earningsEstimateHigh"`
+	EarningsEstimateNumberOfAnalysts interface{} `json:"earningsEstimateNumberOfAnalysts"`
+	RevenueEstimateAvg               interface{} `json:"revenueEstimateAvg"`
+	RevenueEstimateLow               interface{} `json:"revenueEstimateLow"`
+	RevenueEstimateHigh              interface{} `json:"revenueEstimateHigh"`
+	RevenueEstimateNumberOfAnalysts  interface{} `json:"revenueEstimateNumberOfAnalysts"`
+	EPSTrendCurrent                  interface{} `json:"epsTrendCurrent"`
+	EPSTrend7DaysAgo                 interface{} `json:"epsTrend7daysAgo"`
+	EPSTrend30DaysAgo                interface{} `json:"epsTrend30daysAgo"`
+	EPSTrend60DaysAgo                interface{} `json:"epsTrend60daysAgo"`
+	EPSTrend90DaysAgo                interface{} `json:"epsTrend90daysAgo"`
+	EPSRevisionsUpLast7Days          interface{} `json:"epsRevisionsUpLast7days"`
+	EPSRevisionsUpLast30Days         interface{} `json:"epsRevisionsUpLast30days"`
+	EPSRevisionsDownLast30Days       interface{} `json:"epsRevisionsDownLast30days"`
 }
 
 type eodhdEarningsAnnual struct {
@@ -1111,6 +1195,9 @@ func (w *FundamentalsWorker) fetchEODHDFundamentals(ctx context.Context, apiKey,
 		count++
 	}
 
+	// Extract analyst estimates (v2: enhanced forward-looking data)
+	data.AnalystEstimates = w.extractAnalystEstimates(&fundResp)
+
 	// Parse financial statements
 	w.parseEODHDFinancials(fundResp.Financials, data)
 
@@ -1189,6 +1276,18 @@ func (w *FundamentalsWorker) parseEODHDFinancials(financials eodhdFinancials, da
 		entry.TotalLiab = extractNumber(balanceData, "totalLiab")
 		entry.TotalEquity = extractNumber(balanceData, "totalStockholderEquity")
 
+		// Balance sheet - debt and cash components (Step 1: Enhanced data extraction)
+		entry.CashAndEquivalents = extractNumber(balanceData, "cash")
+		if entry.CashAndEquivalents == 0 {
+			// Fallback to cashAndShortTermInvestments if cash not available
+			entry.CashAndEquivalents = extractNumber(balanceData, "cashAndShortTermInvestments")
+		}
+		entry.ShortTermDebt = extractNumber(balanceData, "shortTermDebt")
+		entry.LongTermDebt = extractNumber(balanceData, "longTermDebt")
+		entry.TotalDebt = entry.ShortTermDebt + entry.LongTermDebt
+		entry.NetDebt = entry.TotalDebt - entry.CashAndEquivalents
+		entry.SharesOutstanding = extractNumber(balanceData, "commonStockSharesOutstanding")
+
 		// Cash flow
 		entry.OperatingCF = extractNumber(cashflowData, "totalCashFromOperatingActivities")
 		entry.FreeCF = extractNumber(cashflowData, "freeCashFlow")
@@ -1246,6 +1345,233 @@ func (w *FundamentalsWorker) parseEODHDFinancials(financials eodhdFinancials, da
 			data.ProfitGrowthYoY = float64(currentIncome-prevIncome) / float64(prevIncome) * 100
 		}
 	}
+
+	// Step 2: Calculate financial health metrics from latest annual data
+	w.calculateFinancialHealthMetrics(data)
+
+	// Step 3: Calculate shares dilution tracking
+	w.calculateSharesDilution(data)
+}
+
+// calculateFinancialHealthMetrics calculates summary-level financial health metrics
+// from the latest annual data. These metrics support the Kneppy framework pillars:
+// - Financial Robustness (Net Debt/EBITDA)
+// - Cash Flow Reality (FCF Conversion)
+func (w *FundamentalsWorker) calculateFinancialHealthMetrics(data *StockCollectorData) {
+	if len(data.AnnualData) == 0 {
+		return
+	}
+	latest := data.AnnualData[0]
+
+	// Cash and Debt from balance sheet
+	data.LatestCash = latest.CashAndEquivalents
+	data.LatestTotalDebt = latest.TotalDebt
+	data.LatestNetDebt = latest.NetDebt
+
+	// Net Debt / EBITDA (key leverage ratio for Financial Robustness pillar)
+	// Target: <2.0x is healthy
+	if latest.EBITDA > 0 {
+		data.NetDebtToEBITDA = float64(latest.NetDebt) / float64(latest.EBITDA)
+	}
+
+	// Cash Flow Metrics
+	data.LatestOperatingCF = latest.OperatingCF
+	data.LatestFreeCF = latest.FreeCF
+
+	// FCF Conversion = FCF / Net Income (Cash Flow Reality pillar)
+	// Target: >90% indicates high-quality earnings
+	if latest.NetIncome > 0 {
+		data.FCFConversion = float64(latest.FreeCF) / float64(latest.NetIncome) * 100
+	} else if latest.NetIncome < 0 && latest.FreeCF > 0 {
+		// Company is loss-making but generating positive FCF - still report it
+		data.FCFConversion = 0 // Cannot calculate meaningful ratio with negative denominator
+	}
+
+	// FCF to Revenue (FCF Margin)
+	if latest.TotalRevenue > 0 {
+		data.FCFToRevenue = float64(latest.FreeCF) / float64(latest.TotalRevenue) * 100
+	}
+
+	// Gross Margin from latest annual data
+	if latest.GrossMargin > 0 {
+		data.GrossMargin = latest.GrossMargin
+	}
+}
+
+// calculateSharesDilution calculates share dilution metrics from historical balance sheet data.
+// This supports the Share Allocation pillar of the Kneppy framework.
+// Target: <=0% CAGR (no dilution or buybacks)
+func (w *FundamentalsWorker) calculateSharesDilution(data *StockCollectorData) {
+	if len(data.AnnualData) == 0 {
+		return
+	}
+
+	// Build shares history from annual data
+	var sharesHistory []SharesHistoryEntry
+	for _, annual := range data.AnnualData {
+		if annual.SharesOutstanding > 0 {
+			sharesHistory = append(sharesHistory, SharesHistoryEntry{
+				Date:              annual.EndDate,
+				SharesOutstanding: annual.SharesOutstanding,
+			})
+		}
+	}
+
+	// Calculate year-over-year change percentages
+	for i := 0; i < len(sharesHistory)-1; i++ {
+		current := sharesHistory[i].SharesOutstanding
+		previous := sharesHistory[i+1].SharesOutstanding
+		if previous > 0 {
+			sharesHistory[i].ChangePercent = (float64(current) - float64(previous)) / float64(previous) * 100
+		}
+	}
+
+	data.SharesHistory = sharesHistory
+
+	// Calculate 3-year CAGR if we have enough data
+	if len(sharesHistory) >= 4 { // Need at least 4 data points for 3-year CAGR
+		latestShares := float64(sharesHistory[0].SharesOutstanding)
+		threeYearsAgoShares := float64(sharesHistory[3].SharesOutstanding)
+		if threeYearsAgoShares > 0 && latestShares > 0 {
+			data.SharesCAGR3Y = (math.Pow(latestShares/threeYearsAgoShares, 1.0/3.0) - 1) * 100
+		}
+	}
+
+	// YoY change (most recent vs prior year)
+	if len(sharesHistory) >= 2 {
+		latest := float64(sharesHistory[0].SharesOutstanding)
+		previous := float64(sharesHistory[1].SharesOutstanding)
+		if previous > 0 {
+			data.SharesGrowthYoY = ((latest - previous) / previous) * 100
+		}
+	}
+}
+
+// extractAnalystEstimates extracts forward-looking analyst estimates from EODHD fundamentals
+// This provides data for the v2 analyst coverage enhancement
+func (w *FundamentalsWorker) extractAnalystEstimates(fundResp *eodhdFundamentalsResponse) *AnalystEstimatesData {
+	est := &AnalystEstimatesData{}
+
+	// Helper to convert interface{} to float64
+	toFloat64 := func(v interface{}) float64 {
+		if v == nil {
+			return 0
+		}
+		switch val := v.(type) {
+		case float64:
+			return val
+		case int64:
+			return float64(val)
+		case int:
+			return float64(val)
+		case string:
+			if val == "" || val == "None" || val == "null" {
+				return 0
+			}
+			f, err := strconv.ParseFloat(val, 64)
+			if err != nil {
+				return 0
+			}
+			return f
+		default:
+			return 0
+		}
+	}
+
+	// Helper to convert interface{} to int
+	toInt := func(v interface{}) int {
+		if v == nil {
+			return 0
+		}
+		switch val := v.(type) {
+		case float64:
+			return int(val)
+		case int64:
+			return int(val)
+		case int:
+			return val
+		case string:
+			if val == "" || val == "None" || val == "null" {
+				return 0
+			}
+			i, err := strconv.Atoi(val)
+			if err != nil {
+				f, err := strconv.ParseFloat(val, 64)
+				if err != nil {
+					return 0
+				}
+				return int(f)
+			}
+			return i
+		default:
+			return 0
+		}
+	}
+
+	// From Highlights: EPS estimates
+	est.EPSCurrentYear = fundResp.Highlights.EPSEstimateCurrentYear
+	est.EPSNextYear = fundResp.Highlights.EPSEstimateNextYear
+	est.EPSCurrentQtr = fundResp.Highlights.EPSEstimateCurrentQuarter
+	est.EPSNextQtr = fundResp.Highlights.EPSEstimateNextQuarter
+
+	// From Earnings.Trend: detailed estimates and revisions
+	// Find the current year ("0y") period for estimates
+	for _, trend := range fundResp.Earnings.Trend {
+		if trend.Period == "0y" {
+			est.EPSEstimateAvg = toFloat64(trend.EarningsEstimateAvg)
+			est.EPSEstimateLow = toFloat64(trend.EarningsEstimateLow)
+			est.EPSEstimateHigh = toFloat64(trend.EarningsEstimateHigh)
+			est.EarningsAnalystCount = toInt(trend.EarningsEstimateNumberOfAnalysts)
+
+			est.RevenueEstimateAvg = toFloat64(trend.RevenueEstimateAvg)
+			est.RevenueEstimateLow = toFloat64(trend.RevenueEstimateLow)
+			est.RevenueEstimateHigh = toFloat64(trend.RevenueEstimateHigh)
+			est.RevenueAnalystCount = toInt(trend.RevenueEstimateNumberOfAnalysts)
+
+			// EPS trend data (estimate momentum)
+			est.EPSTrendCurrent = toFloat64(trend.EPSTrendCurrent)
+			est.EPSTrend7DaysAgo = toFloat64(trend.EPSTrend7DaysAgo)
+			est.EPSTrend30DaysAgo = toFloat64(trend.EPSTrend30DaysAgo)
+			est.EPSTrend60DaysAgo = toFloat64(trend.EPSTrend60DaysAgo)
+			est.EPSTrend90DaysAgo = toFloat64(trend.EPSTrend90DaysAgo)
+
+			// Calculate 30-day trend change
+			if est.EPSTrend30DaysAgo != 0 && est.EPSTrendCurrent != 0 {
+				est.EPSTrendChange30D = ((est.EPSTrendCurrent - est.EPSTrend30DaysAgo) / math.Abs(est.EPSTrend30DaysAgo)) * 100
+			}
+
+			// Revision counts
+			est.RevisionsUp7Days = toInt(trend.EPSRevisionsUpLast7Days)
+			est.RevisionsUp30Days = toInt(trend.EPSRevisionsUpLast30Days)
+			est.RevisionsDown30Days = toInt(trend.EPSRevisionsDownLast30Days)
+
+			est.EstimatePeriod = "0y"
+			break
+		}
+	}
+
+	// Determine coverage quality
+	maxAnalysts := est.EarningsAnalystCount
+	if est.RevenueAnalystCount > maxAnalysts {
+		maxAnalysts = est.RevenueAnalystCount
+	}
+
+	switch {
+	case maxAnalysts >= 5:
+		est.CoverageQuality = "HIGH"
+	case maxAnalysts >= 1:
+		est.CoverageQuality = "LOW"
+	default:
+		est.CoverageQuality = "NONE"
+	}
+
+	// Only return if there's meaningful data
+	if est.EPSCurrentYear == 0 && est.EPSNextYear == 0 && est.EarningsAnalystCount == 0 && est.RevenueAnalystCount == 0 {
+		// Still return with coverage quality NONE to indicate no data
+		est.CoverageQuality = "NONE"
+	}
+
+	return est
 }
 
 // fetchEODHDHistoricalPrices fetches historical OHLCV data from EODHD
@@ -1636,6 +1962,9 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 		content.WriteString(fmt.Sprintf("| Controversy Level | %d |\n\n", data.ESGControversy))
 	}
 
+	// Step 4: Financial Health Section (Kneppy Framework: Financial Robustness Pillar)
+	w.writeFinancialHealthSection(&content, data)
+
 	// Profitability Section
 	content.WriteString("## Profitability\n\n")
 	content.WriteString("| Metric | Value |\n")
@@ -1704,6 +2033,9 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 	content.WriteString(fmt.Sprintf("| Hold | %d |\n", data.Hold))
 	content.WriteString(fmt.Sprintf("| Sell | %d |\n", data.Sell))
 	content.WriteString(fmt.Sprintf("| Strong Sell | %d |\n\n", data.StrongSell))
+
+	// Enhanced Analyst Estimates (v2)
+	w.writeAnalystEstimatesSection(&content, data)
 
 	// Financial Growth Section
 	content.WriteString("## Financial Growth\n\n")
@@ -1853,6 +2185,29 @@ func (w *FundamentalsWorker) createDocument(ctx context.Context, data *StockColl
 	if len(data.PeriodPerformance) > 0 {
 		metadata["period_performance"] = data.PeriodPerformance
 	}
+	if len(data.SharesHistory) > 0 {
+		metadata["shares_history"] = data.SharesHistory
+	}
+
+	// Step 5: Add Financial Health metrics to metadata
+	metadata["latest_cash"] = data.LatestCash
+	metadata["latest_total_debt"] = data.LatestTotalDebt
+	metadata["latest_net_debt"] = data.LatestNetDebt
+	metadata["net_debt_to_ebitda"] = data.NetDebtToEBITDA
+	metadata["latest_operating_cf"] = data.LatestOperatingCF
+	metadata["latest_free_cf"] = data.LatestFreeCF
+	metadata["fcf_conversion"] = data.FCFConversion
+	metadata["fcf_to_revenue"] = data.FCFToRevenue
+	metadata["shares_cagr_3y"] = data.SharesCAGR3Y
+	metadata["shares_growth_yoy"] = data.SharesGrowthYoY
+
+	// v2: Add analyst estimates to metadata
+	if data.AnalystEstimates != nil {
+		metadata["analyst_estimates"] = data.AnalystEstimates
+	}
+
+	// Step 5: Add data completeness tracking for Kneppy framework pillars
+	metadata["data_completeness"] = w.buildDataCompletenessMetadata(data)
 
 	// Generate document ID early so it can be included in debug info
 	docID := "doc_" + uuid.New().String()
@@ -2148,4 +2503,383 @@ func (w *FundamentalsWorker) writeFinancialPerformanceTable(content *strings.Bui
 		}
 	}
 	content.WriteString("\n\n")
+}
+
+// writeFinancialHealthSection writes the Financial Health section to the document.
+// This section provides data for Kneppy framework pillars:
+// - Financial Robustness (Net Debt/EBITDA)
+// - Cash Flow Reality (FCF Conversion)
+// - Share Allocation (Share Dilution)
+func (w *FundamentalsWorker) writeFinancialHealthSection(content *strings.Builder, data *StockCollectorData) {
+	// Only write if we have relevant data
+	hasDebtData := data.LatestCash > 0 || data.LatestTotalDebt > 0
+	hasCashFlowData := data.LatestOperatingCF != 0 || data.LatestFreeCF != 0
+	hasSharesData := len(data.SharesHistory) > 0 || data.SharesOutstanding > 0
+
+	if !hasDebtData && !hasCashFlowData && !hasSharesData {
+		return
+	}
+
+	content.WriteString("## Financial Health (Kneppy Framework)\n\n")
+
+	// Debt & Liquidity Section (Financial Robustness Pillar)
+	if hasDebtData {
+		content.WriteString("### Debt & Liquidity\n\n")
+		content.WriteString("| Metric | Value | Notes |\n")
+		content.WriteString("|--------|-------|-------|\n")
+
+		// Cash position
+		content.WriteString(fmt.Sprintf("| Cash & Equivalents | $%s | Latest annual balance |\n", w.formatLargeNumber(data.LatestCash)))
+
+		// Total Debt
+		content.WriteString(fmt.Sprintf("| Total Debt | $%s | Short + Long term debt |\n", w.formatLargeNumber(data.LatestTotalDebt)))
+
+		// Net Debt
+		netDebtStr := w.formatLargeNumber(data.LatestNetDebt)
+		if data.LatestNetDebt < 0 {
+			netDebtStr = fmt.Sprintf("($%s)", w.formatLargeNumber(-data.LatestNetDebt))
+			content.WriteString(fmt.Sprintf("| Net Debt | %s | **Net Cash Position** |\n", netDebtStr))
+		} else {
+			content.WriteString(fmt.Sprintf("| Net Debt | $%s | Debt minus Cash |\n", netDebtStr))
+		}
+
+		// Net Debt/EBITDA with pass/fail indicator
+		if data.NetDebtToEBITDA != 0 {
+			status := "PASS"
+			notes := "Target: <2.0x"
+			if data.NetDebtToEBITDA > 2.0 {
+				status = "WATCH"
+				notes = "Above 2.0x threshold"
+			} else if data.NetDebtToEBITDA > 3.0 {
+				status = "FAIL"
+				notes = "High leverage"
+			} else if data.NetDebtToEBITDA < 0 {
+				status = "PASS"
+				notes = "Net cash position"
+			}
+			content.WriteString(fmt.Sprintf("| Net Debt/EBITDA | %.2fx | %s - %s |\n", data.NetDebtToEBITDA, status, notes))
+		} else {
+			content.WriteString("| Net Debt/EBITDA | N/A | EBITDA not available |\n")
+		}
+		content.WriteString("\n")
+	}
+
+	// Cash Flow Quality Section (Cash Flow Reality Pillar)
+	if hasCashFlowData {
+		content.WriteString("### Cash Flow Quality\n\n")
+		content.WriteString("| Metric | Value | Notes |\n")
+		content.WriteString("|--------|-------|-------|\n")
+
+		// Operating Cash Flow
+		ocfStr := w.formatLargeNumber(data.LatestOperatingCF)
+		if data.LatestOperatingCF < 0 {
+			ocfStr = fmt.Sprintf("($%s)", w.formatLargeNumber(-data.LatestOperatingCF))
+		} else {
+			ocfStr = fmt.Sprintf("$%s", ocfStr)
+		}
+		content.WriteString(fmt.Sprintf("| Operating Cash Flow | %s | Latest annual |\n", ocfStr))
+
+		// Free Cash Flow
+		fcfStr := w.formatLargeNumber(data.LatestFreeCF)
+		if data.LatestFreeCF < 0 {
+			fcfStr = fmt.Sprintf("($%s)", w.formatLargeNumber(-data.LatestFreeCF))
+		} else {
+			fcfStr = fmt.Sprintf("$%s", fcfStr)
+		}
+		content.WriteString(fmt.Sprintf("| Free Cash Flow | %s | OCF minus CapEx |\n", fcfStr))
+
+		// FCF Conversion with pass/fail indicator
+		if data.FCFConversion != 0 {
+			status := "PASS"
+			notes := "Target: >90%"
+			if data.FCFConversion < 90 && data.FCFConversion >= 70 {
+				status = "WATCH"
+				notes = "Below 90% threshold"
+			} else if data.FCFConversion < 70 {
+				status = "FAIL"
+				notes = "Poor earnings quality"
+			} else if data.FCFConversion > 150 {
+				notes = "Excellent conversion"
+			}
+			content.WriteString(fmt.Sprintf("| FCF Conversion | %.1f%% | %s - %s |\n", data.FCFConversion, status, notes))
+		} else {
+			content.WriteString("| FCF Conversion | N/A | Net Income <= 0 |\n")
+		}
+
+		// FCF Margin
+		if data.FCFToRevenue != 0 {
+			content.WriteString(fmt.Sprintf("| FCF Margin | %.1f%% | FCF/Revenue |\n", data.FCFToRevenue))
+		}
+		content.WriteString("\n")
+	}
+
+	// Share Dilution Control Section (Share Allocation Pillar)
+	if hasSharesData {
+		content.WriteString("### Share Dilution Control\n\n")
+		content.WriteString("| Metric | Value | Notes |\n")
+		content.WriteString("|--------|-------|-------|\n")
+
+		// Current Shares Outstanding
+		if data.SharesOutstanding > 0 {
+			content.WriteString(fmt.Sprintf("| Current Shares | %s | Latest outstanding |\n", w.formatLargeNumber(data.SharesOutstanding)))
+		}
+
+		// Shares 3Y CAGR with pass/fail indicator
+		if data.SharesCAGR3Y != 0 || len(data.SharesHistory) >= 4 {
+			status := "PASS"
+			notes := "Target: <=0% (no dilution)"
+			if data.SharesCAGR3Y > 0 && data.SharesCAGR3Y <= 2 {
+				status = "WATCH"
+				notes = "Minor dilution"
+			} else if data.SharesCAGR3Y > 2 {
+				status = "FAIL"
+				notes = "Significant dilution"
+			} else if data.SharesCAGR3Y < 0 {
+				notes = "Buybacks reducing shares"
+			}
+			content.WriteString(fmt.Sprintf("| Shares 3Y CAGR | %.2f%% | %s - %s |\n", data.SharesCAGR3Y, status, notes))
+		}
+
+		// YoY Share Change
+		if data.SharesGrowthYoY != 0 || len(data.SharesHistory) >= 2 {
+			yoySign := ""
+			if data.SharesGrowthYoY > 0 {
+				yoySign = "+"
+			}
+			content.WriteString(fmt.Sprintf("| Shares YoY Change | %s%.2f%% | vs prior year |\n", yoySign, data.SharesGrowthYoY))
+		}
+
+		// Share History Summary
+		if len(data.SharesHistory) > 0 {
+			content.WriteString(fmt.Sprintf("| Historical Data | %d years | Available for analysis |\n", len(data.SharesHistory)))
+		}
+		content.WriteString("\n")
+	}
+}
+
+// writeAnalystEstimatesSection writes the enhanced analyst estimates section (v2)
+func (w *FundamentalsWorker) writeAnalystEstimatesSection(content *strings.Builder, data *StockCollectorData) {
+	if data.AnalystEstimates == nil {
+		return
+	}
+
+	est := data.AnalystEstimates
+
+	// Only write if there's meaningful data
+	hasEPSEstimates := est.EPSCurrentYear != 0 || est.EPSNextYear != 0
+	hasRevenueEstimates := est.RevenueEstimateAvg != 0
+	hasCoverage := est.EarningsAnalystCount > 0 || est.RevenueAnalystCount > 0
+
+	if !hasEPSEstimates && !hasRevenueEstimates && !hasCoverage {
+		// Write a note about no coverage
+		content.WriteString("### Forward Estimates\n\n")
+		content.WriteString("*No analyst coverage available for this stock.*\n\n")
+		return
+	}
+
+	content.WriteString("### Forward Estimates\n\n")
+	content.WriteString(fmt.Sprintf("**Coverage Quality:** %s\n\n", est.CoverageQuality))
+
+	// EPS Estimates Table
+	if hasEPSEstimates {
+		content.WriteString("#### EPS Estimates\n\n")
+		content.WriteString("| Period | Estimate | Notes |\n")
+		content.WriteString("|--------|----------|-------|\n")
+		if est.EPSCurrentYear != 0 {
+			content.WriteString(fmt.Sprintf("| Current Year | $%.4f | FY estimate |\n", est.EPSCurrentYear))
+		}
+		if est.EPSNextYear != 0 {
+			content.WriteString(fmt.Sprintf("| Next Year | $%.4f | FY+1 estimate |\n", est.EPSNextYear))
+		}
+		if est.EPSCurrentQtr != 0 {
+			content.WriteString(fmt.Sprintf("| Current Quarter | $%.4f | Q estimate |\n", est.EPSCurrentQtr))
+		}
+		if est.EPSEstimateAvg != 0 && est.EPSEstimateLow != 0 && est.EPSEstimateHigh != 0 {
+			content.WriteString(fmt.Sprintf("| Consensus Range | $%.4f - $%.4f | Avg: $%.4f |\n",
+				est.EPSEstimateLow, est.EPSEstimateHigh, est.EPSEstimateAvg))
+		}
+		if est.EarningsAnalystCount > 0 {
+			content.WriteString(fmt.Sprintf("| Analyst Count | %d | EPS coverage |\n", est.EarningsAnalystCount))
+		}
+		content.WriteString("\n")
+	}
+
+	// Revenue Estimates
+	if hasRevenueEstimates {
+		content.WriteString("#### Revenue Estimates\n\n")
+		content.WriteString("| Metric | Value |\n")
+		content.WriteString("|--------|-------|\n")
+		content.WriteString(fmt.Sprintf("| Consensus Avg | $%s |\n", w.formatLargeNumber(int64(est.RevenueEstimateAvg))))
+		if est.RevenueEstimateLow != 0 && est.RevenueEstimateHigh != 0 {
+			content.WriteString(fmt.Sprintf("| Range | $%s - $%s |\n",
+				w.formatLargeNumber(int64(est.RevenueEstimateLow)),
+				w.formatLargeNumber(int64(est.RevenueEstimateHigh))))
+		}
+		if est.RevenueAnalystCount > 0 {
+			content.WriteString(fmt.Sprintf("| Analyst Count | %d |\n", est.RevenueAnalystCount))
+		}
+		content.WriteString("\n")
+	}
+
+	// EPS Trend/Momentum (only if we have meaningful trend data)
+	hasTrendData := est.EPSTrendCurrent != 0 && est.EPSTrend30DaysAgo != 0
+	if hasTrendData {
+		content.WriteString("#### Estimate Momentum\n\n")
+		content.WriteString("| Period | EPS Estimate | Change |\n")
+		content.WriteString("|--------|-------------|--------|\n")
+		content.WriteString(fmt.Sprintf("| Current | $%.4f | - |\n", est.EPSTrendCurrent))
+		if est.EPSTrend7DaysAgo != 0 {
+			change7d := ((est.EPSTrendCurrent - est.EPSTrend7DaysAgo) / math.Abs(est.EPSTrend7DaysAgo)) * 100
+			sign := ""
+			if change7d > 0 {
+				sign = "+"
+			}
+			content.WriteString(fmt.Sprintf("| 7 Days Ago | $%.4f | %s%.1f%% |\n", est.EPSTrend7DaysAgo, sign, change7d))
+		}
+		if est.EPSTrend30DaysAgo != 0 {
+			sign := ""
+			if est.EPSTrendChange30D > 0 {
+				sign = "+"
+			}
+			content.WriteString(fmt.Sprintf("| 30 Days Ago | $%.4f | %s%.1f%% |\n", est.EPSTrend30DaysAgo, sign, est.EPSTrendChange30D))
+		}
+		if est.EPSTrend90DaysAgo != 0 {
+			change90d := ((est.EPSTrendCurrent - est.EPSTrend90DaysAgo) / math.Abs(est.EPSTrend90DaysAgo)) * 100
+			sign := ""
+			if change90d > 0 {
+				sign = "+"
+			}
+			content.WriteString(fmt.Sprintf("| 90 Days Ago | $%.4f | %s%.1f%% |\n", est.EPSTrend90DaysAgo, sign, change90d))
+		}
+		content.WriteString("\n")
+	}
+
+	// Revision Activity
+	hasRevisions := est.RevisionsUp30Days > 0 || est.RevisionsDown30Days > 0
+	if hasRevisions {
+		content.WriteString("#### Revision Activity (Last 30 Days)\n\n")
+		content.WriteString("| Direction | Count |\n")
+		content.WriteString("|-----------|-------|\n")
+		content.WriteString(fmt.Sprintf("| Upward Revisions | %d |\n", est.RevisionsUp30Days))
+		content.WriteString(fmt.Sprintf("| Downward Revisions | %d |\n", est.RevisionsDown30Days))
+		net := est.RevisionsUp30Days - est.RevisionsDown30Days
+		sentiment := "Neutral"
+		if net > 0 {
+			sentiment = "Positive"
+		} else if net < 0 {
+			sentiment = "Negative"
+		}
+		content.WriteString(fmt.Sprintf("| Net Sentiment | %s (%+d) |\n", sentiment, net))
+		content.WriteString("\n")
+	}
+}
+
+// buildDataCompletenessMetadata creates metadata tracking data availability for each Kneppy framework pillar.
+// This enables downstream consumers to understand data completeness without re-parsing.
+func (w *FundamentalsWorker) buildDataCompletenessMetadata(data *StockCollectorData) map[string]interface{} {
+	pillars := make(map[string]interface{})
+	var availablePillars, totalPillars int
+	var missingMetrics []string
+
+	// 1. Capital Efficiency (ROIC/ROE)
+	capitalEfficiencyAvailable := data.ReturnOnEquity > 0 || data.ReturnOnAssets > 0
+	pillars["capital_efficiency"] = map[string]interface{}{
+		"available": capitalEfficiencyAvailable,
+		"metric":    "ROE/ROA",
+		"value":     data.ReturnOnEquity,
+		"threshold": ">15%",
+	}
+	totalPillars++
+	if capitalEfficiencyAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "capital_efficiency (ROE/ROA)")
+	}
+
+	// 2. Share Allocation (Dilution Control)
+	shareAllocationAvailable := data.SharesCAGR3Y != 0 || len(data.SharesHistory) >= 2 || data.SharesOutstanding > 0
+	pillars["share_allocation"] = map[string]interface{}{
+		"available": shareAllocationAvailable,
+		"metric":    "Shares CAGR 3Y",
+		"value":     data.SharesCAGR3Y,
+		"threshold": "<=0%",
+	}
+	totalPillars++
+	if shareAllocationAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "share_allocation (Shares CAGR)")
+	}
+
+	// 3. Financial Robustness (Net Debt/EBITDA)
+	financialRobustnessAvailable := data.NetDebtToEBITDA != 0 || (data.LatestNetDebt != 0 && len(data.AnnualData) > 0 && data.AnnualData[0].EBITDA > 0)
+	pillars["financial_robustness"] = map[string]interface{}{
+		"available": financialRobustnessAvailable,
+		"metric":    "Net Debt/EBITDA",
+		"value":     data.NetDebtToEBITDA,
+		"threshold": "<2.0x",
+	}
+	totalPillars++
+	if financialRobustnessAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "financial_robustness (Net Debt/EBITDA)")
+	}
+
+	// 4. Cash Flow Reality (FCF Conversion)
+	cashFlowRealityAvailable := data.FCFConversion != 0 || (data.LatestFreeCF != 0 && len(data.AnnualData) > 0 && data.AnnualData[0].NetIncome > 0)
+	pillars["cash_flow_reality"] = map[string]interface{}{
+		"available": cashFlowRealityAvailable,
+		"metric":    "FCF Conversion",
+		"value":     data.FCFConversion,
+		"threshold": ">90%",
+	}
+	totalPillars++
+	if cashFlowRealityAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "cash_flow_reality (FCF Conversion)")
+	}
+
+	// 5. Management Alignment (Insider Ownership)
+	managementAlignmentAvailable := data.PercentInsiders > 0
+	pillars["management_alignment"] = map[string]interface{}{
+		"available": managementAlignmentAvailable,
+		"metric":    "Insider %",
+		"value":     data.PercentInsiders,
+		"threshold": "HIGH (subjective)",
+	}
+	totalPillars++
+	if managementAlignmentAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "management_alignment (Insider %)")
+	}
+
+	// 6. Competitive Moat (Margins)
+	competitiveMoatAvailable := data.GrossMargin > 0 || data.OperatingMargin > 0
+	pillars["competitive_moat"] = map[string]interface{}{
+		"available": competitiveMoatAvailable,
+		"metric":    "Operating Margin",
+		"value":     data.OperatingMargin,
+		"threshold": "Sector dependent",
+	}
+	totalPillars++
+	if competitiveMoatAvailable {
+		availablePillars++
+	} else {
+		missingMetrics = append(missingMetrics, "competitive_moat (Margins)")
+	}
+
+	// Calculate completeness score
+	completenessScore := float64(availablePillars) / float64(totalPillars) * 100
+
+	return map[string]interface{}{
+		"pillars":            pillars,
+		"available_pillars":  availablePillars,
+		"total_pillars":      totalPillars,
+		"completeness_score": fmt.Sprintf("%.0f%%", completenessScore),
+		"completeness_ratio": fmt.Sprintf("%d/%d", availablePillars, totalPillars),
+		"missing_metrics":    missingMetrics,
+	}
 }

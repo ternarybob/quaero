@@ -25,25 +25,29 @@ For each metric below, assess against the Kneppy Standard:
 - **Metric:** Return on Invested Capital (ROIC)
 - **Kneppy Standard:** Consistently > 15%
 - **Current Value:** [Extract return_on_equity from fundamentals as proxy, or mark DATA_UNAVAILABLE]
+- **ROIC Reported (Annual Report):** [From annual_report roic_reported if available, or DATA_UNAVAILABLE]
 - **5-Year Trend:** [Calculate from annual data if available, or mark DATA_UNAVAILABLE]
 - **Pass/Fail:** [Based on standard]
-- **Notes:** [Include context about ROIC vs WACC if computable]
+- **ROIC vs WACC:** [If WACC disclosed in annual_report, calculate spread; otherwise DATA_UNAVAILABLE]
+- **Notes:** [Include context about value creation spread]
 
 ### 2. SHARE ALLOCATION & DILUTION CONTROL
 - **Metric:** Outstanding Shares History
 - **Kneppy Standard:** Flat or decreasing share count; opportunistic buybacks
 - **3-Year CAGR of Shares:** [Calculate from shares_outstanding history if available, or DATA_UNAVAILABLE]
 - **Recent Capital Raises:** [From announcements with "PLACEMENT", "SPP", "RIGHTS" keywords]
+- **Capital Raise Details (Annual Report):** [From annual_report capital_raises - type, amount, purpose]
 - **Pass/Fail:** [Based on standard]
-- **Notes:** [Include dilution events from announcements]
+- **Notes:** [Include dilution events and whether capital was deployed for value-accretive purposes]
 
 ### 3. FINANCIAL ROBUSTNESS
 - **Metric:** Net Debt to EBITDA
 - **Kneppy Standard:** < 2.0x (preferably zero net debt)
 - **Current Ratio:** [Calculate from total_liabilities, cash, EBITDA in financials, or DATA_UNAVAILABLE]
 - **Cash Position:** [From fundamentals]
+- **Debt Facility Details (Annual Report):** [From annual_report debt_facilities - name, limit, drawn, maturity, interest_rate]
 - **Pass/Fail:** [Based on standard]
-- **Notes:** [Include debt trend and runway assessment]
+- **Notes:** [Include debt trend, facility headroom, maturity profile, and runway assessment]
 
 ### 4. CASH FLOW REALITY
 - **Metric:** Free Cash Flow to Net Income Conversion
@@ -96,15 +100,21 @@ For each metric below, assess against the Kneppy Standard:
 - **Forward P/E:** [From fundamentals forward_pe, or DATA_UNAVAILABLE]
 - **EV/EBITDA:** [From fundamentals ev_to_ebitda, or DATA_UNAVAILABLE]
 - **Price/Book:** [From fundamentals price_to_book, or DATA_UNAVAILABLE]
-- **Analyst Target Mean:** [From fundamentals target_mean]
-- **Upside to Target:** [Calculate % from current price to target_mean]
+- **Analyst Target Mean:** [From fundamentals target_mean, or DATA_UNAVAILABLE if $0.00]
+- **Upside to Target:** [Calculate % from current price to target_mean, or DATA_UNAVAILABLE]
+- **Management Guidance (Annual Report):** [From annual_report revenue_guidance/ebitda_guidance if available]
 
 ### 10. PROJECTION CONFIDENCE
 - **Revenue CAGR 3Y:** [From fundamentals revenue_cagr_3y, or DATA_UNAVAILABLE]
 - **Revenue CAGR 5Y:** [From fundamentals revenue_cagr_5y, or DATA_UNAVAILABLE]
 - **Analyst Coverage:** [From fundamentals analyst_count] analysts
+- **Coverage Quality:** [From fundamentals analyst_estimates.coverage_quality - HIGH (>=5 analysts), LOW (1-4), NONE (0)]
+- **EPS Estimate Current Year:** [From fundamentals analyst_estimates.eps_current_year, or DATA_UNAVAILABLE]
+- **EPS Estimate Next Year:** [From fundamentals analyst_estimates.eps_next_year, or DATA_UNAVAILABLE]
+- **Revenue Estimate Avg:** [From fundamentals analyst_estimates.revenue_estimate_avg, or DATA_UNAVAILABLE]
+- **Estimate Momentum (30d):** [From fundamentals analyst_estimates.revisions_up_30d vs revisions_down_30d]
 - **Recommendation:** [From fundamentals recommendation_key]
-- **Projection Reliability:** [HIGH/MEDIUM/LOW based on data completeness and analyst coverage]
+- **Projection Reliability:** [HIGH/MEDIUM/LOW based on coverage_quality and data completeness]
 
 === FINAL SCORECARD ===
 
@@ -149,19 +159,23 @@ List EACH metric that was marked DATA_UNAVAILABLE and its impact:
 - [Metric 2]: [Impact on analysis]
 - ...
 
-### 2. Recommended Additional Sources
-What specific data sources could fill the gaps:
-- Annual Report PDF: [Would provide X, Y, Z]
+### 2. Data Sources Used
+List which supplementary sources provided data:
+- **Annual Report Data:** [List metrics obtained: ROIC reported, WACC disclosed, debt facilities, capital raise purposes, management guidance]
+- **Analyst Estimates:** [Coverage quality (HIGH/LOW/NONE), EPS/revenue estimates if available]
+
+### 3. Recommended Additional Sources
+What specific data sources could fill remaining gaps:
 - Investor Presentations: [Would provide X, Y, Z]
 - Industry Data: [Would provide X, Y, Z]
 - Other: [Specify]
 
-### 3. Analysis Confidence
+### 4. Analysis Confidence
 - **Data Completeness:** [X]% - [Brief explanation]
 - **Confidence Level:** [HIGH/MEDIUM/LOW]
 - **Key Uncertainty:** [The single biggest unknown affecting this analysis]
 
-### 4. Next Steps for Better Analysis
+### 5. Next Steps for Better Analysis
 - [Specific action 1]
 - [Specific action 2]
 - [Specific action 3]

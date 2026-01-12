@@ -15,6 +15,7 @@ available_tools = [
     { name = "fetch_announcements", description = "Fetch and classify official ASX company announcements with price sensitivity flags and signal:noise analysis. Creates document tagged with ['announcements', '<ticker>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: period (string) - M1, M3, M6, Y1 (default Y1), limit (int) - max announcements. Provides: announcements with relevance classification, price sensitivity flags, signal-to-noise ratio.", worker = "market_announcements" },
     { name = "fetch_market_data", description = "Fetch price history and calculate technical indicators. Creates document tagged with ['market-data', '<ticker>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: period (string) - M1, M3, M6, Y1, Y2 (default Y2). Provides: current price, OHLCV history, SMA20/50/200, RSI14, support/resistance levels, trend signal.", worker = "market_data" },
     { name = "analyze_competitors", description = "Identify ASX-listed competitors using LLM analysis of company fundamentals. Creates document tagged with ['competitors', '<ticker>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). Provides: list of competitor ASX codes with rationale for competitive moat assessment.", worker = "market_competitor" },
+    { name = "fetch_annual_report", description = "Extract structured financial data from annual report PDFs (ROIC, WACC, debt facilities, management guidance). Creates document tagged with ['annual-report', '<ticker>']. REQUIRED params: ticker (string, e.g. 'ASX:GNP'). OPTIONAL: max_reports (int) - number of reports to process (default 1). Provides: ROIC reported, WACC disclosed, debt facility details, capital raise purposes, segment data.", worker = "market_annual_report" },
     { name = "analyze_summary", description = "Generate deep LLM-based analysis from collected documents using the Kneppy framework template. REQUIRED params: prompt (string) - detailed analysis instructions, filter_tags (array) - tags to filter documents. OPTIONAL: thinking_level (string) - LOW or HIGH (use HIGH for comprehensive analysis). The prompt should reference the Kneppy Invest framework pillars.", worker = "summary" },
 ]
 
@@ -29,7 +30,7 @@ For EACH ticker in the variables list, collect all required data:
    - Use fetch_fundamentals with period: Y3 for 3-year historical data
    - Creates document tagged with ['fundamentals', '<ticker>']
    - Provides: PE ratio, EV/EBITDA, margins, shares outstanding, insider ownership,
-     revenue history, profit margins, analyst targets
+     revenue history, profit margins, analyst targets, analyst estimates
 
 2. ANNOUNCEMENTS: Fetch 1-year of ASX announcements
    - Use fetch_announcements with period: Y1
@@ -46,11 +47,17 @@ For EACH ticker in the variables list, collect all required data:
    - Creates document tagged with ['competitors', '<ticker>']
    - Provides: competitor codes for moat assessment
 
+5. ANNUAL REPORT DATA: Extract structured data from annual reports
+   - Use fetch_annual_report for each ticker
+   - Creates document tagged with ['annual-report', '<ticker>']
+   - Provides: ROIC reported, WACC disclosed, debt facility details,
+     capital raise purposes, management guidance, segment data
+
 === PHASE 2: DEEP DIVE ANALYSIS ===
 
 After collecting data for EACH stock, perform comprehensive analysis:
 
-5. KNEPPY FRAMEWORK ANALYSIS
+6. KNEPPY FRAMEWORK ANALYSIS
    For each stock, use analyze_summary with HIGH thinking_level and filter by ['fundamentals', '<ticker>'] plus other relevant tags.
 
    The analysis MUST cover all SIX PILLARS of the Kneppy Invest Business Rating:
@@ -95,7 +102,7 @@ After collecting data for EACH stock, perform comprehensive analysis:
 
 === PHASE 3: SYNTHESIS ===
 
-6. FINAL SCORECARD
+7. FINAL SCORECARD
    Create a consolidated report for each stock including:
    - Scorecard table with all 6 pillars
    - Data Completeness Score (X/6 pillars)
@@ -104,7 +111,7 @@ After collecting data for EACH stock, perform comprehensive analysis:
    - Conviction Level (1-10)
    - Reasoning (2-3 sentences)
 
-7. IMPROVEMENTS SECTION (REQUIRED)
+8. IMPROVEMENTS SECTION (REQUIRED)
    - List ALL metrics marked DATA_UNAVAILABLE
    - Impact of each data gap on analysis
    - Recommended additional sources

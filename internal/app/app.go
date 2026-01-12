@@ -40,6 +40,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mailer"
 	"github.com/ternarybob/quaero/internal/services/mcp"
+	"github.com/ternarybob/quaero/internal/services/pdf"
 	"github.com/ternarybob/quaero/internal/services/places"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
@@ -949,6 +950,22 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(marketAnnouncementDownloadWorker)
 	a.Logger.Debug().Str("step_type", marketAnnouncementDownloadWorker.GetType().String()).Msg("Market Announcement Download worker registered")
+
+	// Register Market Annual Report worker (extracts structured data from annual report PDFs)
+	// Creates PDF extractor service for text extraction
+	pdfExtractor := pdf.NewExtractor(a.StorageManager.KeyValueStorage(), a.Logger)
+	marketAnnualReportWorker := marketworkers.NewAnnualReportWorker(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.StorageManager.KeyValueStorage(),
+		pdfExtractor,
+		a.ProviderFactory,
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(marketAnnualReportWorker)
+	a.Logger.Debug().Str("step_type", marketAnnualReportWorker.GetType().String()).Msg("Market Annual Report worker registered")
 
 	// Register Market News worker (multi-exchange via EODHD, delegates to MarketAnnouncementsWorker for ASX tickers)
 	// API key is resolved at runtime from KV store

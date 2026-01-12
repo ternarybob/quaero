@@ -53,9 +53,10 @@ framework = "Kneppy Invest Business Rating - Capital Efficiency, Share Allocatio
 # Target stocks for deep dive analysis
 # Stocks are analyzed individually with comprehensive Kneppy framework
 variables = [
+    { ticker = "ASX:CGS" },
     { ticker = "ASX:GNP" },
-    { ticker = "ASX:EXR" },
-    { ticker = "ASX:SRL" },
+    # { ticker = "ASX:EXR" },
+    # { ticker = "ASX:SRL" },
 ]
 
 # =========================================================================
@@ -117,7 +118,23 @@ api_key = "{google_gemini_api_key}"
 output_tags = ["deep_dive_data"]
 
 # =========================================================================
-# Step 5: Deep Dive Analysis
+# Step 5: Extract Annual Report Data
+# =========================================================================
+# Extracts structured financial data from annual report PDFs
+# Creates documents tagged with output_tags + ticker
+# Provides: ROIC reported, WACC disclosed, debt facility details,
+#           capital raise purposes, management guidance, segment data
+
+[step.fetch_annual_report]
+type = "market_annual_report"
+description = "Extract structured data from annual report PDFs (ROIC, WACC, debt facilities)"
+depends = "fetch_announcements"
+on_error = "continue"
+max_reports = 1
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 6: Deep Dive Analysis
 # =========================================================================
 # AI analysis using Kneppy framework template
 # Uses all collected data to produce comprehensive assessment
@@ -132,14 +149,14 @@ output_tags = ["deep_dive_data"]
 [step.deep_dive_analysis]
 type = "summary"
 description = "Comprehensive deep dive analysis per Kneppy framework"
-depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors"
+depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors,fetch_annual_report"
 on_error = "fail"
 template = "stock-deep-dive"
 filter_tags = ["deep_dive_data"]
 output_tags = ["format_output"]
 
 # =========================================================================
-# Step 6: Format Output
+# Step 7: Format Output
 # =========================================================================
 # Prepares output documents for email delivery with PDF attachments
 # Collects documents from deep_dive_analysis step
@@ -158,7 +175,7 @@ attachment = true
 style = "body"
 
 # =========================================================================
-# Step 7: Email Report
+# Step 8: Email Report
 # =========================================================================
 # Sends deep dive analysis via email with PDF attachments
 # Reads from output_formatter document
