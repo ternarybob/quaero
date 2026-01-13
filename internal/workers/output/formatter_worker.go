@@ -1,7 +1,10 @@
 // -----------------------------------------------------------------------
 // FormatterWorker - Prepares output documents for email delivery
-// Creates a single markdown document with email instructions and content
-// Supports variable substitution and ticker-based document collection
+// Creates markdown documents with email instructions and content.
+// Supports variable substitution and ticker-based document collection.
+//
+// When multi_document=true, creates separate documents per ticker for
+// individual PDF attachments in the email.
 // -----------------------------------------------------------------------
 
 package output
@@ -207,6 +210,13 @@ func (w *FormatterWorker) processDocuments(
 		order = strings.ToLower(o)
 	}
 
+	// Extract multi_document option (default: false for backward compatibility)
+	// When true, creates separate output document per ticker for individual PDF attachments
+	multiDocument := false
+	if md, ok := stepConfig["multi_document"].(bool); ok {
+		multiDocument = md
+	}
+
 	w.logger.Info().
 		Str("phase", "run").
 		Str("step_name", step.Name).
@@ -216,6 +226,7 @@ func (w *FormatterWorker) processDocuments(
 		Bool("attachment", attachment).
 		Str("style", style).
 		Str("order", order).
+		Bool("multi_document", multiDocument).
 		Str("job_id", managerID).
 		Msg("Starting output formatting")
 
@@ -296,8 +307,14 @@ func (w *FormatterWorker) processDocuments(
 		})
 	}
 
-	// Build the output document with email instructions
-	doc := w.buildOutputDocument(docsWithTickers, title, format, attachment, style, baseURL, inputTags, outputTags, managerID, order)
+	// Multi-document mode: create separate output document per ticker
+	// This enables the email worker to create individual PDF attachments per stock
+	if multiDocument && attachment {
+		return w.processMultiDocumentMode(ctx, stepID, docsWithTickers, title, format, style, baseURL, inputTags, outputTags, managerID, order)
+	}
+
+	// Single document mode (default): merge all content into one document
+	doc := w.buildOutputDocument(docsWithTickers, title, format, attachment, style, baseURL, inputTags, outputTags, managerID, order, "")
 
 	// Save the output document
 	if err := w.documentStorage.SaveDocument(doc); err != nil {
@@ -330,8 +347,85 @@ func (w *FormatterWorker) processDocuments(
 	return "", nil
 }
 
+// processMultiDocumentMode creates separate output documents for each ticker.
+// This enables the email worker to create individual PDF attachments per stock.
+func (w *FormatterWorker) processMultiDocumentMode(
+	ctx context.Context,
+	stepID string,
+	docsWithTickers []docWithTickerLocal,
+	title, format, style, baseURL string,
+	inputTags, outputTags []string,
+	managerID, order string,
+) (string, error) {
+	// Group documents by ticker
+	tickerGroups := w.groupDocsByTicker(docsWithTickers)
+
+	if len(tickerGroups) == 0 {
+		return "", fmt.Errorf("no documents with ticker tags found for multi-document mode")
+	}
+
+	var createdDocs []string
+	var tickers []string
+
+	// Create a separate output document for each ticker
+	for ticker, docs := range tickerGroups {
+		// Build ticker-specific title
+		tickerTitle := fmt.Sprintf("%s - ASX:%s", title, strings.ToUpper(ticker))
+
+		// Build output document for this ticker
+		doc := w.buildOutputDocument(docs, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, ticker)
+
+		// Save the output document
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
+			w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to save output document for ticker")
+			continue
+		}
+
+		createdDocs = append(createdDocs, doc.ID)
+		tickers = append(tickers, strings.ToUpper(ticker))
+
+		w.logger.Info().
+			Str("doc_id", doc.ID).
+			Str("ticker", ticker).
+			Int("source_count", len(docs)).
+			Msg("Created ticker-specific output document")
+	}
+
+	w.logger.Info().
+		Int("document_count", len(createdDocs)).
+		Strs("tickers", tickers).
+		Str("format", format).
+		Str("style", style).
+		Msg("Multi-document output completed")
+
+	if w.jobMgr != nil {
+		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf(
+			"Created %d output documents for tickers: %v (format=%s, multi_document=true)",
+			len(createdDocs), tickers, format,
+		))
+	}
+
+	return "", nil
+}
+
+// groupDocsByTicker groups documents by their ticker tag.
+// Documents without a ticker tag are grouped under "unknown".
+func (w *FormatterWorker) groupDocsByTicker(docs []docWithTickerLocal) map[string][]docWithTickerLocal {
+	groups := make(map[string][]docWithTickerLocal)
+	for _, dwt := range docs {
+		ticker := strings.ToLower(dwt.ticker)
+		if ticker == "" {
+			ticker = "unknown"
+		}
+		groups[ticker] = append(groups[ticker], dwt)
+	}
+	return groups
+}
+
 // buildOutputDocument creates the output document with email instructions.
 // Generates both markdown and HTML content for email worker priority selection.
+// When ticker is provided (non-empty), adds the ticker tag to the output document
+// for identification by the email worker when creating per-ticker PDF attachments.
 func (w *FormatterWorker) buildOutputDocument(
 	docsWithTickers []docWithTickerLocal,
 	title, format string,
@@ -340,6 +434,7 @@ func (w *FormatterWorker) buildOutputDocument(
 	inputTags, outputTags []string,
 	managerID string,
 	order string,
+	ticker string, // optional: ticker code for multi-document mode
 ) *models.Document {
 	var sb strings.Builder
 
@@ -400,12 +495,37 @@ func (w *FormatterWorker) buildOutputDocument(
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
 	finalTags := append(outputTags, dateTag, "email-output")
 
-	// Extract tickers
-	var tickers []string
+	// Add ticker tag if provided (multi-document mode)
+	// This allows the email worker to identify per-ticker documents
+	if ticker != "" {
+		finalTags = append(finalTags, strings.ToLower(ticker))
+	}
+
+	// Extract tickers from documents
+	var tickersList []string
 	for _, dwt := range docsWithTickers {
 		if dwt.ticker != "" {
-			tickers = append(tickers, dwt.ticker)
+			tickersList = append(tickersList, dwt.ticker)
 		}
+	}
+
+	// Build metadata
+	metadata := map[string]interface{}{
+		"source_count": len(docsWithTickers),
+		"source_tags":  inputTags,
+		"tickers":      tickersList,
+		"format":       format,
+		"attachment":   attachment,
+		"style":        style,
+		"order":        order,
+		"format_date":  time.Now().Format(time.RFC3339),
+		"email_ready":  true,
+	}
+
+	// Add ticker to metadata if provided (for easy extraction by email worker)
+	if ticker != "" {
+		metadata["ticker"] = strings.ToUpper(ticker)
+		metadata["multi_document"] = true
 	}
 
 	return &models.Document{
@@ -418,17 +538,7 @@ func (w *FormatterWorker) buildOutputDocument(
 		SourceType:      "output_formatter",
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
-		Metadata: map[string]interface{}{
-			"source_count": len(docsWithTickers),
-			"source_tags":  inputTags,
-			"tickers":      tickers,
-			"format":       format,
-			"attachment":   attachment,
-			"style":        style,
-			"order":        order,
-			"format_date":  time.Now().Format(time.RFC3339),
-			"email_ready":  true,
-		},
+		Metadata:        metadata,
 	}
 }
 

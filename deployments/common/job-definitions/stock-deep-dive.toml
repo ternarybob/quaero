@@ -160,11 +160,11 @@ output_tags = ["format_output"]
 # =========================================================================
 # Prepares output documents for email delivery with PDF attachments
 # Collects documents from deep_dive_analysis step
-# Creates formatted document with email instructions
+# Creates separate PDF per ticker when multi_document = true
 
 [step.format_output]
 type = "output_formatter"
-description = "Format deep dive reports as PDF attachments"
+description = "Format deep dive reports as separate PDF attachments per ticker"
 depends = "deep_dive_analysis"
 on_error = "fail"
 # input_tags defaults to ["format_output"] (step name) - matches deep_dive_analysis output_tags
@@ -173,6 +173,7 @@ title = "Stock Deep Dive Analysis - Kneppy Framework"
 format = "pdf"
 attachment = true
 style = "body"
+multi_document = true  # Creates separate PDF per ticker
 
 # =========================================================================
 # Step 8: Email Report

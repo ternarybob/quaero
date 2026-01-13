@@ -1,0 +1,130 @@
+# Stock Deep Dive Analysis - Multiple Attachments Test
+# =========================================================================
+# Tests that multi_document mode creates separate PDF attachments per ticker.
+# This test verifies the email worker receives multiple documents to attach.
+#
+# EXPECTED BEHAVIOR:
+# - 2 stocks configured (CGS, GNP)
+# - format_output creates 2 documents (one per ticker) with multi_document=true
+# - email_report receives 2 attachments
+#
+# Based on: deployments/common/job-definitions/stock-deep-dive.toml
+# =========================================================================
+
+id = "stock-deep-dive-multi-attach-test"
+name = "Stock Deep Dive Multi-Attachment Test"
+type = "orchestrator"
+description = "Test multi_document mode with multiple PDF attachments"
+tags = ["stocks", "deep-dive", "analysis", "multi-attachment", "test"]
+schedule = ""
+timeout = "30m"
+enabled = true
+auto_start = false
+
+[meta]
+author = "Test"
+version = "1.0"
+created = "2026-01-13"
+purpose = "Verify multi_document mode creates separate attachments per ticker"
+
+# =========================================================================
+# User Configuration - 2 Tickers for multi-attachment test
+# =========================================================================
+
+[config]
+variables = [
+    { ticker = "ASX:CGS" },
+    { ticker = "ASX:GNP" },
+]
+
+# =========================================================================
+# Step 1: Fetch Fundamentals
+# =========================================================================
+
+[step.fetch_fundamentals]
+type = "market_fundamentals"
+description = "Fetch stock fundamentals"
+on_error = "continue"
+period = "Y3"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 2: Fetch Announcements
+# =========================================================================
+
+[step.fetch_announcements]
+type = "market_announcements"
+description = "Fetch company announcements"
+on_error = "continue"
+period = "Y1"
+limit = 50
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 3: Fetch Market Data
+# =========================================================================
+
+[step.fetch_market_data]
+type = "market_data"
+description = "Fetch price history and technicals"
+on_error = "continue"
+period = "Y2"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 4: Analyze Competitors
+# =========================================================================
+
+[step.analyze_competitors]
+type = "market_competitor"
+description = "Identify ASX-listed competitors"
+depends = "fetch_fundamentals"
+on_error = "continue"
+api_key = "{google_gemini_api_key}"
+output_tags = ["deep_dive_data"]
+
+# =========================================================================
+# Step 5: Deep Dive Analysis
+# =========================================================================
+
+[step.deep_dive_analysis]
+type = "summary"
+description = "Comprehensive deep dive analysis per Kneppy framework"
+depends = "fetch_fundamentals,fetch_announcements,fetch_market_data,analyze_competitors"
+on_error = "fail"
+template = "stock-deep-dive"
+filter_tags = ["deep_dive_data"]
+output_tags = ["format_output"]
+
+# =========================================================================
+# Step 6: Format Output - MULTI-DOCUMENT MODE
+# =========================================================================
+# This is the key step - multi_document=true creates separate docs per ticker
+
+[step.format_output]
+type = "output_formatter"
+description = "Format deep dive reports as separate PDF attachments per ticker"
+depends = "deep_dive_analysis"
+on_error = "fail"
+output_tags = ["email_report"]
+title = "Stock Deep Dive Analysis - Kneppy Framework"
+format = "pdf"
+attachment = true
+style = "body"
+multi_document = true
+
+# =========================================================================
+# Step 7: Email Report
+# =========================================================================
+
+[step.email_report]
+type = "email"
+description = "Email deep dive analysis with multiple PDF attachments"
+depends = "format_output"
+always_run = true
+on_error = "fail"
+to = "bobmcallan@gmail.com"
+subject = "Stock Deep Dive Analysis - Multi-Attachment Test"
+
+on_error_subject = "Stock Deep Dive Analysis - An Error Occurred"
+include_logs_on_error = true

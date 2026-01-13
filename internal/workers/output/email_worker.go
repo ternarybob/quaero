@@ -191,7 +191,20 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		}
 
 		bodyResult.sourceDoc = formatterInstr.sourceDoc
-		bodyResult.attachments = w.loadDocumentsForAttachment(ctx, formatterInstr.documentIDs)
+
+		// Load attachments based on mode:
+		// - Multi-document mode: each source document becomes an attachment (per-ticker PDFs)
+		// - Single document mode: load documents by IDs from frontmatter
+		if formatterInstr.multiDocument && len(formatterInstr.sourceDocs) > 0 {
+			// Multi-document mode: use source documents directly as attachments
+			bodyResult.attachments = formatterInstr.sourceDocs
+			w.logger.Info().
+				Int("attachment_count", len(formatterInstr.sourceDocs)).
+				Msg("Using multi-document mode: each source document becomes a separate attachment")
+		} else {
+			// Single document mode: load documents by IDs from frontmatter
+			bodyResult.attachments = w.loadDocumentsForAttachment(ctx, formatterInstr.documentIDs)
+		}
 	} else {
 		// Fallback to traditional body resolution
 		bodyResult = w.resolveBodyWithSource(ctx, stepConfig, managerID)
@@ -371,7 +384,8 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 				continue
 			}
 
-			filename := sanitizeAttachmentFilename(doc.Title) + ext
+			// Generate filename - prefer ticker-based name for multi-document mode
+			filename := w.generateAttachmentFilename(doc, ext)
 			attachments = append(attachments, mailer.Attachment{
 				Filename:    filename,
 				ContentType: contentType,
@@ -2148,21 +2162,27 @@ func renderPDFTable(pdf *fpdf.Fpdf, rows [][]string) {
 
 // outputFormatterInstructions holds parsed instructions from output_formatter document
 type outputFormatterInstructions struct {
-	found        bool
-	format       string   // inline | pdf | html | markdown
-	attachment   bool     // whether to attach documents
-	style        string   // proforma | body
-	baseURL      string   // base URL for links
-	documentIDs  []string // document IDs to attach
-	docCount     int      // number of documents
-	sourceDoc    *models.Document
-	bodyMarkdown string // the body content after frontmatter
-	bodyHTML     string // pre-rendered HTML from ContentHTML field (takes priority)
+	found         bool
+	format        string   // inline | pdf | html | markdown
+	attachment    bool     // whether to attach documents
+	style         string   // proforma | body
+	baseURL       string   // base URL for links
+	documentIDs   []string // document IDs to attach
+	docCount      int      // number of documents
+	sourceDoc     *models.Document
+	bodyMarkdown  string             // the body content after frontmatter
+	bodyHTML      string             // pre-rendered HTML from ContentHTML field (takes priority)
+	multiDocument bool               // true when multiple per-ticker documents exist
+	sourceDocs    []*models.Document // all output_formatter documents (for multi-document mode)
 }
 
-// parseOutputFormatterDocument looks for an output_formatter document and parses its instructions.
+// parseOutputFormatterDocument looks for output_formatter documents and parses their instructions.
 // Uses input_tags from step config, defaulting to [stepName] if not specified.
 // managerID is used to filter documents by Jobs array, ensuring only documents from the current pipeline are included.
+//
+// Multi-document mode detection:
+// - When multiple output_formatter documents exist (one per ticker), sets multiDocument=true
+// - In multi-document mode, each document becomes a separate attachment (not via frontmatter document_ids)
 func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConfig map[string]interface{}, stepName, managerID string) outputFormatterInstructions {
 	result := outputFormatterInstructions{
 		format:     "inline",
@@ -2176,13 +2196,14 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 
 	w.logger.Debug().
 		Strs("input_tags", inputTags).
-		Msg("Searching for output_formatter document")
+		Msg("Searching for output_formatter document(s)")
 
-	// Look for documents with specified input tags (created by output_formatter)
+	// Look for ALL documents with specified input tags (created by output_formatter)
 	// JobID filter ensures we only get documents from this pipeline execution
+	// Use higher limit to support multi-document mode (one per ticker)
 	opts := interfaces.SearchOptions{
 		Tags:     inputTags,
-		Limit:    1,
+		Limit:    100,
 		OrderBy:  "created_at",
 		OrderDir: "desc",
 		JobID:    managerID,
@@ -2196,14 +2217,45 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 		return result
 	}
 
-	doc, err := w.documentStorage.GetDocument(results[0].ID)
-	if err != nil || doc == nil {
-		w.logger.Debug().Str("doc_id", results[0].ID).Msg("Failed to load output_formatter document")
+	// Load all documents
+	var docs []*models.Document
+	for _, searchResult := range results {
+		doc, err := w.documentStorage.GetDocument(searchResult.ID)
+		if err != nil || doc == nil {
+			w.logger.Debug().Str("doc_id", searchResult.ID).Msg("Failed to load output_formatter document")
+			continue
+		}
+		docs = append(docs, doc)
+	}
+
+	if len(docs) == 0 {
+		w.logger.Debug().Msg("No output_formatter documents could be loaded")
 		return result
 	}
 
 	result.found = true
-	result.sourceDoc = doc
+	result.sourceDoc = docs[0]
+	result.sourceDocs = docs
+
+	// Check if this is multi-document mode (one document per ticker)
+	// Multi-document mode is indicated by the "multi_document" metadata field
+	if len(docs) > 1 {
+		// Check first document's metadata for multi_document flag
+		if docs[0].Metadata != nil {
+			if multiDoc, ok := docs[0].Metadata["multi_document"].(bool); ok && multiDoc {
+				result.multiDocument = true
+				result.attachment = true // Multi-document implies attachment mode
+				result.format = "pdf"    // Default to PDF for multi-document
+
+				w.logger.Info().
+					Int("document_count", len(docs)).
+					Msg("Detected multi-document mode with per-ticker documents")
+			}
+		}
+	}
+
+	// Parse first document for instructions (all documents share same format/attachment settings)
+	doc := docs[0]
 
 	// Capture pre-rendered HTML if available (takes priority over markdown conversion)
 	if doc.ContentHTML != "" {
@@ -2274,6 +2326,8 @@ func (w *EmailWorker) parseOutputFormatterDocument(ctx context.Context, stepConf
 		Str("style", result.style).
 		Int("doc_count", result.docCount).
 		Int("doc_ids", len(result.documentIDs)).
+		Bool("multi_document", result.multiDocument).
+		Int("source_docs", len(result.sourceDocs)).
 		Msg("Parsed output_formatter instructions")
 
 	return result
@@ -2364,4 +2418,24 @@ func getInputTagsWithDefault(config map[string]interface{}, stepName string) []s
 	}
 
 	return nil
+}
+
+// generateAttachmentFilename creates a filename for email attachments.
+// For multi-document mode documents (with ticker in metadata), generates ticker-based names
+// like "ASX-CGS-Deep-Dive.pdf". Otherwise falls back to sanitized document title.
+func (w *EmailWorker) generateAttachmentFilename(doc *models.Document, ext string) string {
+	if doc == nil {
+		return "document" + ext
+	}
+
+	// Check for ticker in metadata (set by output_formatter in multi-document mode)
+	if doc.Metadata != nil {
+		if ticker, ok := doc.Metadata["ticker"].(string); ok && ticker != "" {
+			// Generate ticker-based filename: ASX-XXX-Deep-Dive.pdf
+			return fmt.Sprintf("ASX-%s-Deep-Dive%s", strings.ToUpper(ticker), ext)
+		}
+	}
+
+	// Fallback to sanitized document title
+	return sanitizeAttachmentFilename(doc.Title) + ext
 }

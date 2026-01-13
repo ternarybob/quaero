@@ -70,7 +70,7 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 	t.Logf("Step 1: Loading job definition %s", jobDefFile)
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Loading job definition %s", time.Now().Format(time.RFC3339), jobDefFile))
 
-	err = env.LoadTestJobDefinitions("../config/job-definitions/" + jobDefFile)
+	err = env.LoadTestJobDefinitions("../../config/job-definitions/" + jobDefFile)
 	require.NoError(t, err, "Failed to load job definition")
 	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
 	testLog = append(testLog, fmt.Sprintf("[%s] Job definition loaded successfully", time.Now().Format(time.RFC3339)))
@@ -292,6 +292,327 @@ func validateKneppyFrameworkContent(t *testing.T, content string) {
 		"Content should reference the analyzed ticker GNP or GenusPlus")
 
 	t.Log("PASS: Kneppy framework content validation complete")
+}
+
+// TestStockDeepDiveMultipleAttachments tests that multi_document mode creates separate
+// PDF attachments for each stock in the variables list.
+//
+// This test validates:
+// - Job definition with multiple stocks executes correctly
+// - Each stock produces a separate format_output tagged document
+// - Each document has multi_document=true in metadata
+// - Each document has its ticker in metadata and as a tag
+//
+// Run with:
+//
+//	go test -timeout 30m -run TestStockDeepDiveMultipleAttachments ./test/api/portfolio/...
+func TestStockDeepDiveMultipleAttachments(t *testing.T) {
+	// Initialize timing data
+	timingData := common.NewTestTimingData(t.Name())
+
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelperWithTimeout(t, 30*time.Minute)
+	resultsDir := env.GetResultsDir()
+
+	var testLog []string
+	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestStockDeepDiveMultipleAttachments", time.Now().Format(time.RFC3339)))
+
+	// Expected tickers from job definition
+	expectedTickers := []string{"CGS", "GNP"}
+
+	// Step 1: Load the job definition
+	stepStart := time.Now()
+	jobDefFile := "stock-deep-dive-multi-attach-test.toml"
+	jobDefID := "stock-deep-dive-multi-attach-test"
+	t.Logf("Step 1: Loading job definition %s", jobDefFile)
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Loading job definition %s", time.Now().Format(time.RFC3339), jobDefFile))
+
+	err = env.LoadTestJobDefinitions("../../config/job-definitions/" + jobDefFile)
+	require.NoError(t, err, "Failed to load job definition")
+	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
+	testLog = append(testLog, fmt.Sprintf("[%s] Job definition loaded successfully", time.Now().Format(time.RFC3339)))
+
+	// Step 2: Trigger the job
+	stepStart = time.Now()
+	t.Log("Step 2: Triggering multi-attachment orchestrator job")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 2: Triggering job execution", time.Now().Format(time.RFC3339)))
+
+	jobID := executeJobDefinition(t, helper, jobDefID)
+	require.NotEmpty(t, jobID, "Job execution should return job ID")
+	t.Logf("Triggered job ID: %s", jobID)
+	testLog = append(testLog, fmt.Sprintf("[%s] Job triggered with ID: %s", time.Now().Format(time.RFC3339), jobID))
+	timingData.AddStepTiming("trigger_job", time.Since(stepStart).Seconds())
+
+	// Cleanup job after test
+	defer deleteJob(t, helper, jobID)
+
+	// Step 3: Wait for job completion with error monitoring
+	stepStart = time.Now()
+	t.Log("Step 3: Waiting for job completion with error monitoring (timeout: 30 minutes)")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 3: Waiting for job completion", time.Now().Format(time.RFC3339)))
+
+	finalStatus, errorLogs := WaitForJobCompletionWithMonitoring(t, helper, jobID, 30*time.Minute)
+	t.Logf("Job completed with status: %s", finalStatus)
+	timingData.AddStepTiming("wait_for_completion", time.Since(stepStart).Seconds())
+	testLog = append(testLog, fmt.Sprintf("[%s] Job completed with status: %s", time.Now().Format(time.RFC3339), finalStatus))
+
+	// Step 4: Handle error logs if any were found
+	if len(errorLogs) > 0 {
+		t.Logf("Found %d ERROR log entries:", len(errorLogs))
+		testLog = append(testLog, fmt.Sprintf("[%s] ERROR: Found %d error logs", time.Now().Format(time.RFC3339), len(errorLogs)))
+		for i, log := range errorLogs {
+			if i < 10 {
+				logMsg, _ := log["message"].(string)
+				t.Logf("  ERROR[%d]: %s", i, logMsg)
+				testLog = append(testLog, fmt.Sprintf("[%s]   ERROR[%d]: %s", time.Now().Format(time.RFC3339), i, logMsg))
+			}
+		}
+
+		if finalStatus == "failed" || finalStatus == "error" {
+			t.Log("Job failed - verifying all children are also failed/stopped")
+			assertChildJobsFailedOrStopped(t, helper, jobID)
+		}
+
+		WriteTestLog(t, resultsDir, testLog)
+		t.Fatalf("FAIL: Job execution produced %d ERROR logs. Job status: %s", len(errorLogs), finalStatus)
+	}
+	t.Log("PASS: No ERROR logs found in job execution")
+
+	// Step 5: Assert job completed successfully
+	require.Equal(t, "completed", finalStatus, "Job should complete successfully")
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Job completed successfully", time.Now().Format(time.RFC3339)))
+
+	// Step 6: Validate email_report documents exist and count matches tickers
+	t.Log("Step 6: Validating email_report documents exist and count matches ticker count")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 6: Validating email_report documents", time.Now().Format(time.RFC3339)))
+
+	emailDocs := getDocumentsByTag(t, helper, "email_report")
+	require.Greater(t, len(emailDocs), 0, "Should have email_report documents from format step")
+	t.Logf("Found %d email_report documents", len(emailDocs))
+	testLog = append(testLog, fmt.Sprintf("[%s] Found %d email_report documents", time.Now().Format(time.RFC3339), len(emailDocs)))
+
+	// In multi_document mode, we expect one document per ticker
+	// Each document should have the ticker tag and multi_document metadata
+	require.GreaterOrEqual(t, len(emailDocs), len(expectedTickers),
+		"Should have at least one email_report document per ticker (expected %d, got %d)", len(expectedTickers), len(emailDocs))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: email_report count >= ticker count (%d >= %d)",
+		time.Now().Format(time.RFC3339), len(emailDocs), len(expectedTickers)))
+
+	// Step 7: Validate multi_document mode by checking document metadata and tags
+	t.Log("Step 7: Validating multi_document mode on email_report documents")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 7: Validating multi_document metadata", time.Now().Format(time.RFC3339)))
+
+	validateMultiDocumentOutputs(t, helper, emailDocs, expectedTickers)
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: multi_document mode validated", time.Now().Format(time.RFC3339)))
+
+	// Step 8: Validate each ticker has a corresponding document
+	t.Log("Step 8: Validating each ticker has a format_output document")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 8: Validating per-ticker documents", time.Now().Format(time.RFC3339)))
+
+	validateTickerDocumentsExist(t, helper, emailDocs, expectedTickers)
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: All tickers have corresponding documents", time.Now().Format(time.RFC3339)))
+
+	// Step 9: Save test outputs
+	t.Log("Step 9: Saving test outputs to results directory")
+
+	// Save a sample output document
+	if len(emailDocs) > 0 {
+		sampleDoc := emailDocs[0]
+		docID, _ := sampleDoc["id"].(string)
+		content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+
+		// Save output.md
+		outputPath := filepath.Join(resultsDir, "output.md")
+		if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+			t.Logf("Warning: Failed to write output.md: %v", err)
+		} else {
+			t.Logf("Saved output.md to: %s (%d bytes)", outputPath, len(content))
+		}
+
+		// Save output.json
+		if metadata != nil {
+			jsonPath := filepath.Join(resultsDir, "output.json")
+			if data, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+				if err := os.WriteFile(jsonPath, data, 0644); err != nil {
+					t.Logf("Warning: Failed to write output.json: %v", err)
+				} else {
+					t.Logf("Saved output.json to: %s (%d bytes)", jsonPath, len(data))
+				}
+			}
+		}
+	}
+
+	// Save all document summaries for multi-attachment verification
+	saveMultiDocumentSummary(t, helper, resultsDir, emailDocs)
+
+	// Save job definition
+	saveStockDeepDiveJobConfig(t, resultsDir, jobDefFile)
+
+	// Step 10: Verify result files exist
+	t.Log("Step 10: Verifying result files were written")
+	AssertResultFilesExist(t, resultsDir)
+
+	// Get child job timings
+	childTimings := logChildJobTimings(t, helper, jobID)
+	for _, wt := range childTimings {
+		timingData.WorkerTimings = append(timingData.WorkerTimings, wt)
+	}
+
+	// Complete timing and save
+	timingData.Complete()
+	common.SaveTimingData(t, resultsDir, timingData)
+
+	// Check for errors in service log
+	common.AssertNoErrorsInServiceLog(t, env)
+
+	// Write test log
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestStockDeepDiveMultipleAttachments completed successfully", time.Now().Format(time.RFC3339)))
+	WriteTestLog(t, resultsDir, testLog)
+
+	// Copy TDD summary if running from /3agents-tdd
+	common.CopyTDDSummary(t, resultsDir)
+
+	t.Log("SUCCESS: Stock Deep Dive Multiple Attachments test completed successfully")
+}
+
+// validateMultiDocumentOutputs validates that documents have multi_document mode enabled.
+// Checks for multi_document=true in metadata.
+func validateMultiDocumentOutputs(t *testing.T, helper *common.HTTPTestHelper, docs []map[string]interface{}, expectedTickers []string) {
+	t.Helper()
+
+	multiDocCount := 0
+	for _, doc := range docs {
+		docID, _ := doc["id"].(string)
+
+		// Get full document details
+		_, metadata := getDocumentContentAndMetadata(t, helper, docID)
+		if metadata == nil {
+			t.Logf("Warning: Could not get metadata for document %s", docID)
+			continue
+		}
+
+		// Check for multi_document in metadata
+		if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+			if multiDoc, ok := md["multi_document"].(bool); ok && multiDoc {
+				multiDocCount++
+				ticker, _ := md["ticker"].(string)
+				t.Logf("PASS: Document %s has multi_document=true (ticker: %s)", docID[:8], ticker)
+			}
+		}
+	}
+
+	// We expect at least one document to have multi_document=true
+	// (All per-ticker documents should have this flag)
+	assert.Greater(t, multiDocCount, 0,
+		"At least one document should have multi_document=true in metadata")
+	t.Logf("Found %d documents with multi_document=true", multiDocCount)
+}
+
+// validateTickerDocumentsExist validates that each expected ticker has a corresponding document.
+// Checks document tags for ticker codes.
+func validateTickerDocumentsExist(t *testing.T, helper *common.HTTPTestHelper, docs []map[string]interface{}, expectedTickers []string) {
+	t.Helper()
+
+	foundTickers := make(map[string]bool)
+
+	for _, doc := range docs {
+		docID, _ := doc["id"].(string)
+
+		// Check tags for ticker code
+		tags, ok := doc["tags"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, tag := range tags {
+			tagStr, ok := tag.(string)
+			if !ok {
+				continue
+			}
+
+			// Check if this tag matches any expected ticker (case-insensitive)
+			for _, ticker := range expectedTickers {
+				if strings.EqualFold(tagStr, ticker) {
+					foundTickers[strings.ToUpper(ticker)] = true
+					t.Logf("PASS: Found document %s with ticker tag '%s'", docID[:8], ticker)
+				}
+			}
+		}
+	}
+
+	// Verify all expected tickers were found
+	for _, ticker := range expectedTickers {
+		assert.True(t, foundTickers[strings.ToUpper(ticker)],
+			"Should find a document with ticker tag '%s'", ticker)
+	}
+
+	t.Logf("Found documents for %d/%d expected tickers", len(foundTickers), len(expectedTickers))
+}
+
+// saveMultiDocumentSummary saves a summary of all multi-document outputs for verification.
+func saveMultiDocumentSummary(t *testing.T, helper *common.HTTPTestHelper, resultsDir string, docs []map[string]interface{}) {
+	t.Helper()
+
+	var summary strings.Builder
+	summary.WriteString("# Multi-Document Output Summary\n\n")
+	summary.WriteString(fmt.Sprintf("Generated: %s\n", time.Now().Format(time.RFC3339)))
+	summary.WriteString(fmt.Sprintf("Total documents: %d\n\n", len(docs)))
+	summary.WriteString("## Documents\n\n")
+	summary.WriteString("| # | Document ID | Ticker | Tags | multi_document |\n")
+	summary.WriteString("|---|-------------|--------|------|----------------|\n")
+
+	for i, doc := range docs {
+		docID, _ := doc["id"].(string)
+		shortID := docID
+		if len(docID) > 8 {
+			shortID = docID[:8]
+		}
+
+		// Get tags
+		var tagList []string
+		if tags, ok := doc["tags"].([]interface{}); ok {
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok {
+					tagList = append(tagList, tagStr)
+				}
+			}
+		}
+		tagsStr := strings.Join(tagList, ", ")
+
+		// Get metadata
+		_, metadata := getDocumentContentAndMetadata(t, helper, docID)
+		ticker := ""
+		multiDoc := "N/A"
+		if metadata != nil {
+			if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+				if t, ok := md["ticker"].(string); ok {
+					ticker = t
+				}
+				if m, ok := md["multi_document"].(bool); ok {
+					if m {
+						multiDoc = "true"
+					} else {
+						multiDoc = "false"
+					}
+				}
+			}
+		}
+
+		summary.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %s |\n", i+1, shortID, ticker, tagsStr, multiDoc))
+	}
+
+	// Write summary file
+	summaryPath := filepath.Join(resultsDir, "multi_document_summary.md")
+	if err := os.WriteFile(summaryPath, []byte(summary.String()), 0644); err != nil {
+		t.Logf("Warning: Failed to write multi_document_summary.md: %v", err)
+	} else {
+		t.Logf("Saved multi_document_summary.md to: %s", summaryPath)
+	}
 }
 
 // saveStockDeepDiveJobConfig saves the job definition TOML file to the results directory

@@ -223,11 +223,11 @@ If data collection fails for any stock:
 # =========================================================================
 # Prepares output documents for email delivery with PDF attachments
 # Collects documents tagged with orchestrator output_tags
-# Creates formatted document with email instructions
+# Creates separate PDF per ticker when multi_document = true
 
 [step.format_output]
 type = "output_formatter"
-description = "Format deep dive reports as PDF attachments"
+description = "Format deep dive reports as separate PDF attachments per ticker"
 depends = "orchestrate_analysis"
 on_error = "fail"
 input_tags = ["stock-deep-dive-report"]
@@ -236,6 +236,7 @@ title = "Stock Deep Dive Analysis - Kneppy Framework"
 format = "pdf"
 attachment = true
 style = "body"
+multi_document = true  # Creates separate PDF per ticker
 
 # =========================================================================
 # Email Step - Send consolidated report

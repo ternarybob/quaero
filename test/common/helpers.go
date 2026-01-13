@@ -327,7 +327,7 @@ func GetTestResultsDir(prefix, testName string) string {
 	if fileBase != "" {
 		// Use file-based naming: {file_base}_{timestamp}
 		dirName := fmt.Sprintf("%s_%s", fileBase, timestamp)
-		return filepath.Join("..", "results", "api", dirName)
+		return filepath.Join("..", "..", "results", "api", dirName)
 	}
 
 	// Fallback to old behavior if file detection fails
@@ -343,7 +343,7 @@ func GetTestResultsDir(prefix, testName string) string {
 	}
 
 	dirName := fmt.Sprintf("%s-%s-%s", prefix, timestamp, sanitized)
-	return filepath.Join("..", "results", "api", dirName)
+	return filepath.Join("..", "..", "results", "api", dirName)
 }
 
 // getTestFileBaseNameFromStack walks up the call stack to find the *_test.go file
