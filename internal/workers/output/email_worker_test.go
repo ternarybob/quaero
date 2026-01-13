@@ -118,3 +118,86 @@ func TestSourceDocInfoCategories(t *testing.T) {
 	assert.Contains(t, sourceTypes, "stock-recommendation", "Should include stock-recommendation")
 	assert.Contains(t, sourceTypes, "asx-announcement-summary", "Should include asx-announcement-summary")
 }
+
+func TestStripMarkdownFrontmatter(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "No frontmatter",
+			input:    "# Hello World\n\nThis is content.",
+			expected: "# Hello World\n\nThis is content.",
+		},
+		{
+			name: "With frontmatter",
+			input: `---
+format: pdf
+attachment: true
+style: body
+---
+
+# Report Title
+
+This is the actual content.`,
+			expected: `# Report Title
+
+This is the actual content.`,
+		},
+		{
+			name: "Frontmatter with comments",
+			input: `---
+# Email Instructions (parsed by email worker)
+format: pdf
+attachment: true
+---
+
+# Analysis
+
+Content here.`,
+			expected: `# Analysis
+
+Content here.`,
+		},
+		{
+			name: "Frontmatter with document_ids",
+			input: `---
+format: pdf
+attachment: true
+document_ids:
+  - doc123
+  - doc456
+---
+
+# Multi-Doc Report
+
+The analysis content.`,
+			expected: `# Multi-Doc Report
+
+The analysis content.`,
+		},
+		{
+			name:     "Only opening frontmatter",
+			input:    "---\nformat: pdf\nNo closing frontmatter",
+			expected: "---\nformat: pdf\nNo closing frontmatter",
+		},
+		{
+			name:     "Empty content",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Frontmatter without newline prefix",
+			input:    "Not frontmatter\n---\nformat: pdf\n---\nContent",
+			expected: "Not frontmatter\n---\nformat: pdf\n---\nContent",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripMarkdownFrontmatter(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

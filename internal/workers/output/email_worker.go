@@ -354,12 +354,25 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 				continue
 			}
 
+			// Get the content to convert - strip frontmatter for output_formatter documents
+			// Output formatter documents include email instructions in frontmatter that
+			// should not appear in PDF/HTML attachments
+			markdownContent := doc.ContentMarkdown
+			if doc.SourceType == "output_formatter" {
+				markdownContent = stripMarkdownFrontmatter(markdownContent)
+				w.logger.Debug().
+					Str("doc_id", doc.ID).
+					Int("original_len", len(doc.ContentMarkdown)).
+					Int("stripped_len", len(markdownContent)).
+					Msg("Stripped frontmatter from output_formatter document for attachment")
+			}
+
 			var content []byte
 			var contentType, ext string
 
 			switch attachmentFormat {
 			case "pdf":
-				pdfBytes, err := convertMarkdownToPDF(doc.ContentMarkdown, doc.Title)
+				pdfBytes, err := convertMarkdownToPDF(markdownContent, doc.Title)
 				if err != nil {
 					w.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to convert document to PDF, skipping attachment")
 					continue
@@ -369,13 +382,13 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 				ext = ".pdf"
 
 			case "html":
-				htmlContent := w.convertMarkdownToHTML(doc.ContentMarkdown)
+				htmlContent := w.convertMarkdownToHTML(markdownContent)
 				content = []byte(htmlContent)
 				contentType = "text/html; charset=utf-8"
 				ext = ".html"
 
 			case "markdown":
-				content = []byte(doc.ContentMarkdown)
+				content = []byte(markdownContent)
 				contentType = "text/markdown; charset=utf-8"
 				ext = ".md"
 
@@ -2345,6 +2358,27 @@ func (w *EmailWorker) loadDocumentsForAttachment(ctx context.Context, docIDs []s
 		docs = append(docs, doc)
 	}
 	return docs
+}
+
+// stripMarkdownFrontmatter removes YAML frontmatter from markdown content.
+// Frontmatter is delimited by --- at the start and end of the content.
+// Returns the content after the frontmatter, or the original content if no frontmatter found.
+// This is used when generating PDF attachments from output_formatter documents,
+// which include email instructions in the frontmatter that should not appear in the PDF.
+func stripMarkdownFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---\n") {
+		return content
+	}
+
+	// Find the end of frontmatter (---\n after the opening ---)
+	endIdx := strings.Index(content[4:], "\n---\n")
+	if endIdx == -1 {
+		// No closing frontmatter delimiter found
+		return content
+	}
+
+	// Return content after the frontmatter, trimmed
+	return strings.TrimSpace(content[4+endIdx+5:])
 }
 
 // selectDocumentContent selects content from a document based on the requested content type.

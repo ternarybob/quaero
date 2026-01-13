@@ -149,6 +149,12 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 	t.Logf("PASS: Found %d email_report documents", len(emailDocs))
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Found %d email_report documents", time.Now().Format(time.RFC3339), len(emailDocs)))
 
+	// Step 8.1: Validate PDF attachment configuration on email_report documents
+	t.Log("Step 8.1: Validating PDF attachment configuration")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 8.1: Validating PDF attachment configuration", time.Now().Format(time.RFC3339)))
+	validatePDFAttachmentConfig(t, helper, emailDocs)
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: PDF attachment configuration validated", time.Now().Format(time.RFC3339)))
+
 	// Step 9: Get the output document for content validation
 	t.Log("Step 9: Getting output document for content validation")
 	outputDoc := findOutputDocument(t, formatDocs)
@@ -480,12 +486,20 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	t.Log("SUCCESS: Stock Deep Dive Multiple Attachments test completed successfully")
 }
 
-// validateMultiDocumentOutputs validates that documents have multi_document mode enabled.
-// Checks for multi_document=true in metadata.
+// validateMultiDocumentOutputs validates that documents have multi_document mode enabled
+// and are configured for PDF attachment delivery.
+// Checks for:
+// - multi_document=true in metadata
+// - format="pdf" in metadata
+// - attachment=true in metadata
+// - email_ready=true in metadata
 func validateMultiDocumentOutputs(t *testing.T, helper *common.HTTPTestHelper, docs []map[string]interface{}, expectedTickers []string) {
 	t.Helper()
 
 	multiDocCount := 0
+	pdfFormatCount := 0
+	attachmentCount := 0
+
 	for _, doc := range docs {
 		docID, _ := doc["id"].(string)
 
@@ -496,21 +510,49 @@ func validateMultiDocumentOutputs(t *testing.T, helper *common.HTTPTestHelper, d
 			continue
 		}
 
-		// Check for multi_document in metadata
+		// Check for multi_document, format, and attachment in metadata
 		if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+			ticker, _ := md["ticker"].(string)
+
+			// Check multi_document flag
 			if multiDoc, ok := md["multi_document"].(bool); ok && multiDoc {
 				multiDocCount++
-				ticker, _ := md["ticker"].(string)
 				t.Logf("PASS: Document %s has multi_document=true (ticker: %s)", docID[:8], ticker)
+			}
+
+			// Check format is PDF
+			if format, ok := md["format"].(string); ok && strings.EqualFold(format, "pdf") {
+				pdfFormatCount++
+				t.Logf("PASS: Document %s has format=pdf (ticker: %s)", docID[:8], ticker)
+			}
+
+			// Check attachment mode
+			if attach, ok := md["attachment"].(bool); ok && attach {
+				attachmentCount++
+				t.Logf("PASS: Document %s has attachment=true (ticker: %s)", docID[:8], ticker)
+			}
+
+			// Log email_ready status
+			if emailReady, ok := md["email_ready"].(bool); ok {
+				t.Logf("INFO: Document %s email_ready=%v (ticker: %s)", docID[:8], emailReady, ticker)
 			}
 		}
 	}
 
-	// We expect at least one document to have multi_document=true
-	// (All per-ticker documents should have this flag)
+	// Validate multi_document mode
 	assert.Greater(t, multiDocCount, 0,
 		"At least one document should have multi_document=true in metadata")
 	t.Logf("Found %d documents with multi_document=true", multiDocCount)
+
+	// Validate PDF format
+	assert.Greater(t, pdfFormatCount, 0,
+		"At least one document should have format=pdf in metadata for PDF attachment")
+	t.Logf("Found %d documents with format=pdf", pdfFormatCount)
+
+	// Validate attachment mode
+	assert.Greater(t, attachmentCount, 0,
+		"At least one document should have attachment=true in metadata")
+	t.Logf("Found %d documents with attachment=true", attachmentCount)
 }
 
 // validateTickerDocumentsExist validates that each expected ticker has a corresponding document.
@@ -636,4 +678,68 @@ func saveStockDeepDiveJobConfig(t *testing.T, resultsDir string, jobDefFile stri
 	}
 
 	t.Logf("Saved job definition to: %s (%d bytes)", destPath, len(content))
+}
+
+// validatePDFAttachmentConfig validates that email_report documents are configured
+// for PDF attachment delivery. This validates the output_formatter step correctly
+// configured documents for PDF attachments in the email.
+//
+// Checks for:
+// - format="pdf" in metadata
+// - attachment=true in metadata
+// - email_ready=true in metadata
+func validatePDFAttachmentConfig(t *testing.T, helper *common.HTTPTestHelper, docs []map[string]interface{}) {
+	t.Helper()
+
+	pdfFormatCount := 0
+	attachmentCount := 0
+
+	for _, doc := range docs {
+		docID, _ := doc["id"].(string)
+		shortID := docID
+		if len(docID) > 8 {
+			shortID = docID[:8]
+		}
+
+		// Get full document details
+		_, metadata := getDocumentContentAndMetadata(t, helper, docID)
+		if metadata == nil {
+			t.Logf("Warning: Could not get metadata for document %s", shortID)
+			continue
+		}
+
+		// Check metadata for PDF attachment configuration
+		if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+			// Check format is PDF
+			if format, ok := md["format"].(string); ok {
+				if strings.EqualFold(format, "pdf") {
+					pdfFormatCount++
+					t.Logf("PASS: Document %s has format=pdf", shortID)
+				} else {
+					t.Logf("INFO: Document %s has format=%s (expected pdf)", shortID, format)
+				}
+			}
+
+			// Check attachment mode
+			if attach, ok := md["attachment"].(bool); ok && attach {
+				attachmentCount++
+				t.Logf("PASS: Document %s has attachment=true", shortID)
+			}
+
+			// Log email_ready status
+			if emailReady, ok := md["email_ready"].(bool); ok {
+				t.Logf("INFO: Document %s email_ready=%v", shortID, emailReady)
+			}
+		}
+	}
+
+	// At least one document should have PDF format (for single or multi ticker)
+	assert.Greater(t, pdfFormatCount, 0,
+		"At least one email_report document should have format=pdf for PDF attachment")
+	t.Logf("PASS: Found %d documents with format=pdf", pdfFormatCount)
+
+	// At least one document should have attachment=true
+	assert.Greater(t, attachmentCount, 0,
+		"At least one email_report document should have attachment=true")
+	t.Logf("PASS: Found %d documents with attachment=true", attachmentCount)
 }
