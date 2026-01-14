@@ -310,7 +310,12 @@ func (w *FormatterWorker) processDocuments(
 	// Multi-document mode: create separate output document per ticker
 	// This enables the email worker to create individual PDF attachments per stock
 	if multiDocument && attachment {
-		return w.processMultiDocumentMode(ctx, stepID, docsWithTickers, title, format, style, baseURL, inputTags, outputTags, managerID, order)
+		// Pass the config tickers to enable per-ticker output when input is a combined document
+		var configTickerCodes []string
+		for ticker := range tickerSet {
+			configTickerCodes = append(configTickerCodes, ticker)
+		}
+		return w.processMultiDocumentMode(ctx, stepID, docsWithTickers, title, format, style, baseURL, inputTags, outputTags, managerID, order, configTickerCodes)
 	}
 
 	// Single document mode (default): merge all content into one document
@@ -349,6 +354,14 @@ func (w *FormatterWorker) processDocuments(
 
 // processMultiDocumentMode creates separate output documents for each ticker.
 // This enables the email worker to create individual PDF attachments per stock.
+//
+// When input documents are already grouped by ticker (have individual ticker tags),
+// it creates one output document per ticker group.
+//
+// When input is a single combined document (e.g., from summary worker), it creates
+// one output document per ticker defined in configTickers, duplicating the combined
+// content to each ticker's document. This enables multi_document mode to work with
+// upstream workers that produce combined output.
 func (w *FormatterWorker) processMultiDocumentMode(
 	ctx context.Context,
 	stepID string,
@@ -356,39 +369,79 @@ func (w *FormatterWorker) processMultiDocumentMode(
 	title, format, style, baseURL string,
 	inputTags, outputTags []string,
 	managerID, order string,
+	configTickers []string,
 ) (string, error) {
 	// Group documents by ticker
 	tickerGroups := w.groupDocsByTicker(docsWithTickers)
 
-	if len(tickerGroups) == 0 {
+	// Check if we have a single combined document but multiple tickers in config
+	// This happens when upstream worker (e.g., summary) creates one document with all ticker analysis
+	usingConfigTickers := false
+	if len(tickerGroups) <= 1 && len(configTickers) > 1 {
+		w.logger.Info().
+			Int("document_groups", len(tickerGroups)).
+			Int("config_tickers", len(configTickers)).
+			Msg("Single combined document detected, creating per-ticker outputs from config tickers")
+		usingConfigTickers = true
+	}
+
+	if len(tickerGroups) == 0 && len(configTickers) == 0 {
 		return "", fmt.Errorf("no documents with ticker tags found for multi-document mode")
 	}
 
 	var createdDocs []string
 	var tickers []string
 
-	// Create a separate output document for each ticker
-	for ticker, docs := range tickerGroups {
-		// Build ticker-specific title
-		tickerTitle := fmt.Sprintf("%s - ASX:%s", title, strings.ToUpper(ticker))
+	if usingConfigTickers {
+		// Create a separate output document for each ticker from config
+		// Use all input documents for each ticker (they contain combined analysis)
+		for _, ticker := range configTickers {
+			tickerCode := strings.ToLower(ticker)
+			// Build ticker-specific title
+			tickerTitle := fmt.Sprintf("%s - ASX:%s", title, strings.ToUpper(tickerCode))
 
-		// Build output document for this ticker
-		doc := w.buildOutputDocument(docs, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, ticker)
+			// Build output document for this ticker using all input documents
+			doc := w.buildOutputDocument(docsWithTickers, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, tickerCode)
 
-		// Save the output document
-		if err := w.documentStorage.SaveDocument(doc); err != nil {
-			w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to save output document for ticker")
-			continue
+			// Save the output document
+			if err := w.documentStorage.SaveDocument(doc); err != nil {
+				w.logger.Error().Err(err).Str("ticker", tickerCode).Msg("Failed to save output document for ticker")
+				continue
+			}
+
+			createdDocs = append(createdDocs, doc.ID)
+			tickers = append(tickers, strings.ToUpper(tickerCode))
+
+			w.logger.Info().
+				Str("doc_id", doc.ID).
+				Str("ticker", tickerCode).
+				Int("source_count", len(docsWithTickers)).
+				Msg("Created ticker-specific output document from config ticker")
 		}
+	} else {
+		// Create a separate output document for each ticker group
+		for ticker, docs := range tickerGroups {
+			// Build ticker-specific title
+			tickerTitle := fmt.Sprintf("%s - ASX:%s", title, strings.ToUpper(ticker))
 
-		createdDocs = append(createdDocs, doc.ID)
-		tickers = append(tickers, strings.ToUpper(ticker))
+			// Build output document for this ticker
+			doc := w.buildOutputDocument(docs, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, ticker)
 
-		w.logger.Info().
-			Str("doc_id", doc.ID).
-			Str("ticker", ticker).
-			Int("source_count", len(docs)).
-			Msg("Created ticker-specific output document")
+			// Save the output document
+			if err := w.documentStorage.SaveDocument(doc); err != nil {
+				w.logger.Error().Err(err).Str("ticker", ticker).Msg("Failed to save output document for ticker")
+				continue
+			}
+
+			createdDocs = append(createdDocs, doc.ID)
+			tickers = append(tickers, strings.ToUpper(ticker))
+
+			w.logger.Info().
+				Str("doc_id", doc.ID).
+				Str("ticker", ticker).
+				Int("source_count", len(docs)).
+				Msg("Created ticker-specific output document")
+		}
 	}
 
 	w.logger.Info().
@@ -396,6 +449,7 @@ func (w *FormatterWorker) processMultiDocumentMode(
 		Strs("tickers", tickers).
 		Str("format", format).
 		Str("style", style).
+		Bool("used_config_tickers", usingConfigTickers).
 		Msg("Multi-document output completed")
 
 	if w.jobMgr != nil {

@@ -140,7 +140,12 @@ func FetchAndValidateNavexaAPI(t *testing.T, resultsDir, baseURL, apiKey string)
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)

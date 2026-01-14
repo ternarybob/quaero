@@ -1,6 +1,18 @@
-# 3agents - Adversarial Multi-Agent Workflow
+---
+name: 3agents
+description: Adversarial multi-agent loop - CORRECTNESS over SPEED. Output captured to files to prevent context overflow.
+allowed-tools:
+  - Read
+  - Edit
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - Task
+  - TodoWrite
+---
 
-**Execute:** $ARGUMENTS
+Execute: $ARGUMENTS
 
 ## EXECUTION MODE
 ```
@@ -16,17 +28,17 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## SETUP (MANDATORY - DO FIRST)
-
+## SETUP
 ```bash
-WORKDIR=".codebuff/workdir/$(date +%Y-%m-%d-%H%M)-$(echo "$ARGUMENTS" | tr ' ' '-' | cut -c1-40)"
+WORKDIR=".opencode/workdir/$(date +%Y-%m-%d-%H%M)-$(echo "$ARGUMENTS" | tr ' ' '-' | cut -c1-40)"
 mkdir -p "$WORKDIR"
 mkdir -p "$WORKDIR/logs"
 echo "Workdir: $WORKDIR"
 ```
 
-## FUNDAMENTAL RULES
+## RULES
 
+### Absolutes
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ • CORRECTNESS over SPEED                                        │
@@ -35,7 +47,7 @@ echo "Workdir: $WORKDIR"
 │ • BACKWARD COMPATIBILITY NOT REQUIRED - break if needed         │
 │ • CLEANUP IS MANDATORY - remove dead/redundant code             │
 │ • STEPS ARE MANDATORY - no implementation without step docs     │
-│ • SUMMARY IS MANDATORY - task incomplete without summary.md     │
+│ • SUMMARY IS MANDATORY - task incomplete without $WORKDIR/summary.md │
 │ • NO STOPPING - execute all phases without user prompts         │
 │ • OUTPUT CAPTURE IS MANDATORY - all command output to log files │
 └─────────────────────────────────────────────────────────────────┘
@@ -49,9 +61,11 @@ echo "Workdir: $WORKDIR"
 │ • ALL build output → $WORKDIR/logs/build_*.log                  │
 │ • ALL test output → $WORKDIR/logs/test_*.log                    │
 │ • ALL lint output → $WORKDIR/logs/lint_*.log                    │
-│ • See ONLY pass/fail + last 30 lines on failure                 │
+│ • Agent sees ONLY pass/fail + last 30 lines on failure          │
 │ • NEVER let full command output into context                    │
 │ • Reference log files by path, don't paste contents             │
+│                                                                 │
+│ This prevents context overflow during long-running operations.  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -66,26 +80,147 @@ echo "Workdir: $WORKDIR"
 
 ---
 
-## SKILLS (Read before applicable work)
+## QUAERO CODEBASE RULES
 
-| Skill | Path | When |
-|-------|------|------|
-| Refactoring | `.codebuff/skills/refactoring/SKILL.md` | ALL changes |
-| Go | `.codebuff/skills/go/SKILL.md` | Go code changes |
-| Frontend | `.codebuff/skills/frontend/SKILL.md` | Frontend changes |
-| Adversarial | `.codebuff/skills/adversarial-workflow/SKILL.md` | This workflow |
+### OS Detection (MANDATORY before any shell command)
+
+| Indicator | OS | Shell |
+|-----------|-----|-------|
+| `C:\...` or `D:\...` | Windows | PowerShell |
+| `/home/...` or `/Users/...` | Unix/Linux/macOS | Bash |
+| `/mnt/c/...` | WSL | Bash |
+
+### Build & Test (WITH OUTPUT CAPTURE)
+
+**Unix/Linux/macOS:**
+```bash
+# Build - capture to file
+BUILD_LOG="$WORKDIR/logs/build_step${STEP}.log"
+./scripts/build.sh > "$BUILD_LOG" 2>&1
+BUILD_RESULT=$?
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo "✗ BUILD FAILED"
+    tail -30 "$BUILD_LOG"
+else
+    echo "✓ BUILD PASSED"
+fi
+
+# Test - capture to file
+TEST_LOG="$WORKDIR/logs/test_step${STEP}.log"
+go test -v ./test/... > "$TEST_LOG" 2>&1
+TEST_RESULT=$?
+if [ $TEST_RESULT -ne 0 ]; then
+    echo "✗ TESTS FAILED"
+    tail -30 "$TEST_LOG"
+else
+    echo "✓ TESTS PASSED"
+fi
+```
+
+**Windows:**
+```powershell
+# Build - capture to file
+$BUILD_LOG = "$WORKDIR/logs/build_step${STEP}.log"
+.\scripts\build.ps1 > $BUILD_LOG 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "✗ BUILD FAILED"
+    Get-Content $BUILD_LOG -Tail 30
+} else {
+    Write-Host "✓ BUILD PASSED"
+}
+```
+
+**WSL:**
+```bash
+# Same as Unix/Linux/macOS
+BUILD_LOG="$WORKDIR/logs/build_step${STEP}.log"
+./scripts/build.sh > "$BUILD_LOG" 2>&1
+# ... see Unix block above for full pattern
+```
+
+### Architecture
+
+```
+cmd/quaero/           → Entry point, CLI
+internal/app/         → DI & orchestration (composition root)
+internal/server/      → HTTP server & routing
+internal/handlers/    → HTTP/WebSocket handlers
+internal/services/    → Business logic (stateful, WITH receivers)
+internal/common/      → Utilities (stateless, NO receivers)
+internal/jobs/
+  ├── manager/        → StepManager implementations
+  ├── worker/         → JobWorker implementations
+  └── monitor/        → JobMonitor implementations
+internal/storage/     → BadgerDB persistence
+internal/interfaces/  → All interface definitions
+```
+
+### Architecture Docs (read before applicable work)
+
+| Doc | Path |
+|-----|------|
+| Manager/Worker | `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` |
+| Test | `docs/TEST_ARCHITECTURE.md` |
+
+### Go Rules
+
+**Logging (github.com/ternarybob/arbor):**
+```go
+logger.Info().Str("field", value).Msg("Message")
+logger.Error().Err(err).Msg("Error occurred")
+```
+
+**Error handling:**
+```go
+if err != nil {
+    return fmt.Errorf("context: %w", err)
+}
+```
+
+**Structure:**
+- `internal/common/` — Stateless functions ONLY (no receivers)
+- `internal/services/` — Stateful services (WITH receivers)
+
+### Forbidden
+
+```go
+fmt.Println("message")           // ❌ Use logger
+log.Printf("message")            // ❌ Use logger
+_ = someFunction()               // ❌ Handle all errors
+// TODO: fix later               // ❌ No deferred TODOs
+func (c *Config) Method() {}     // ❌ No receivers in common/
+```
+
+### Config Parity
+
+Changes to `./bin` MUST mirror to `./deployments/common` + `./test/config`
+
+### Frontend
+
+Alpine.js + Bulma CSS. No React/Vue/SPA/HTMX.
 
 ---
 
-## AGENT ROLES
+## AGENTS (Task Tool Configuration)
 
-| Agent | Role | Codebuff Agent | Stance |
-|-------|------|----------------|--------|
-| ARCHITECT | Requirements → step docs | `thinker` + `file-picker` | Thorough |
-| WORKER | Implements steps | `editor` | Follow spec exactly |
-| VALIDATOR | Reviews against requirements | `code-reviewer` | **HOSTILE - default REJECT** |
-| FINAL VALIDATOR | Reviews ALL changes together | `code-reviewer` | **HOSTILE - catches cross-step issues** |
-| DOCUMENTARIAN | Updates `docs/architecture` | `editor` | Accurate |
+Use the `Task` tool with `subagent_type` parameter.
+
+| Agent | Role | Stance | Task Config |
+|-------|------|--------|-------------|
+| ARCHITECT | Requirements → step docs | Thorough | `subagent_type: general` |
+| WORKER | Implements steps | Follow spec exactly | `subagent_type: general` |
+| VALIDATOR | Reviews against requirements | **HOSTILE - default REJECT** | `subagent_type: general` |
+| FINAL VALIDATOR | Reviews ALL changes together | **HOSTILE - catches cross-step issues** | `subagent_type: general` |
+| DOCUMENTARIAN | Updates `docs/architecture` | Accurate | `subagent_type: general` |
+
+### Parallel Step Execution
+For independent steps, launch multiple Task agents in parallel using `run_in_background: true` (if supported) or sequential execution:
+```
+Task(subagent_type: general)
+  → Step 1 implementation
+Task(subagent_type: general)
+  → Step 2 implementation (if no deps on Step 1)
+```
 
 ---
 
@@ -93,43 +228,25 @@ echo "Workdir: $WORKDIR"
 
 ### PHASE 0: ARCHITECT
 
-**Use agents:** `thinker` for planning, `file-picker` for finding files, `code-searcher` for patterns
+**Use Task tool with Plan agent:** `Task(subagent_type: general)` (Prompt: "Act as Architect...")
 
-**Steps:**
-1. Spawn `file-picker` agents (2-5 in parallel) to find relevant files
-2. Read architecture docs: `docs/architecture/*.md`
-3. Read applicable skills from `.codebuff/skills/`
-4. Analyze existing patterns in target directories using `code-searcher`
-5. Spawn `thinker` to analyze requirements and plan implementation
+1. Read: `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`
+2. For market worker tests: Read `.opencode/skills/test-architecture/SKILL.md` (MANDATORY)
+3. Analyze existing patterns in target directories (use `subagent_type: explore` for codebase exploration)
+4. Extract requirements → `$WORKDIR/requirements.md`
+5. Create step docs → `$WORKDIR/step_N.md` for each step
 
-**Create artifacts:**
-```bash
-# Write requirements
-cat > "$WORKDIR/requirements.md" << 'EOF'
-# Requirements
-## REQ-1: <requirement>
-## REQ-2: <requirement>
-...
-EOF
-
-# Write step docs (one per step)
-cat > "$WORKDIR/step_1.md" << 'EOF'
-# Step 1: <title>
-## Deps: [none | step_1, step_2]  # Enables parallelization
+**Step doc template (`$WORKDIR/step_N.md`):**
+```markdown
+# Step N: <title>
+## Deps: [none | step_1, step_2]  # REQUIRED - enables parallelization
 ## Requirements: REQ-1, REQ-2
 ## Approach: <files, changes, patterns>
 ## Cleanup: <functions/code to remove>
 ## Acceptance: AC-1, AC-2
-EOF
-
-# Write architect analysis
-cat > "$WORKDIR/architect-analysis.md" << 'EOF'
-# Architect Analysis
-## Patterns Found
-## Decisions Made
-## Cleanup Candidates
-EOF
 ```
+
+5. Write `$WORKDIR/architect-analysis.md` (patterns, decisions, cleanup candidates)
 
 **→ IMMEDIATELY proceed to PHASE 1 (no confirmation)**
 
@@ -139,14 +256,14 @@ EOF
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ FOR EACH STEP:                                                  │
+│ FOR EACH STEP (parallel if independent using Task tool):        │
 │                                                                 │
-│   WORKER: Spawn `editor` agent                                  │
+│   WORKER: Task(subagent_type: general)                          │
 │      → Implement → $WORKDIR/step_N_impl.md                      │
 │      ↓                                                          │
 │   BUILD CHECK (output to $WORKDIR/logs/build_stepN_iterM.log)   │
 │      ↓                                                          │
-│   VALIDATOR: Spawn `code-reviewer` agent                        │
+│   VALIDATOR: Task(subagent_type: general)                       │
 │      → Review → $WORKDIR/step_N_valid.md                        │
 │      ↓                                                          │
 │   PASS → next step    REJECT → iterate (max 5)                  │
@@ -156,7 +273,6 @@ EOF
 ```
 
 **WORKER must:**
-- Read step doc before implementing
 - Follow step doc exactly
 - Apply codebase rules (logging, error handling, structure)
 - Perform cleanup listed in step doc
@@ -168,19 +284,10 @@ STEP=N
 ITER=M
 BUILD_LOG="$WORKDIR/logs/build_step${STEP}_iter${ITER}.log"
 
-# OS Detection
-if [[ "$PWD" == /mnt/c/* ]]; then
-    # WSL - use PowerShell for Go
-    powershell.exe -Command "cd C:\path; .\scripts\build.ps1" > "$BUILD_LOG" 2>&1
-elif [[ -f ./scripts/build.sh ]]; then
-    # Unix/Linux/macOS
-    ./scripts/build.sh > "$BUILD_LOG" 2>&1
-else
-    # Windows
-    powershell.exe -Command ".\scripts\build.ps1" > "$BUILD_LOG" 2>&1
-fi
-
+# Run build with full capture
+./scripts/build.sh > "$BUILD_LOG" 2>&1
 BUILD_RESULT=$?
+
 if [ $BUILD_RESULT -ne 0 ]; then
     echo "✗ BUILD FAILED - Step $STEP Iteration $ITER"
     echo "Log: $BUILD_LOG"
@@ -192,12 +299,24 @@ else
 fi
 ```
 
-**VALIDATOR must (spawn `code-reviewer` with HOSTILE stance):**
+**Error extraction helper:**
+```bash
+# Extract compilation errors from build log
+extract_build_errors() {
+    local LOG_FILE=$1
+    echo "--- Build Error Summary ---"
+    grep -E "error:|undefined:|cannot|invalid" "$LOG_FILE" | head -20
+    echo "--- End Summary ---"
+    echo "Full log: $LOG_FILE"
+}
+```
+
+**VALIDATOR must:**
 - Default REJECT until proven correct
 - Verify requirements with code line references
 - Verify cleanup performed (no dead code left)
 - Check codebase rule compliance
-- Verify build passed
+- Verify build passed (check log exists and result)
 
 **VALIDATOR auto-REJECT:**
 - Build fails
@@ -205,28 +324,6 @@ fi
 - Old function alongside replacement
 - Codebase rule violations
 - Requirements not traceable to code
-
-**Write implementation notes:**
-```bash
-cat > "$WORKDIR/step_${STEP}_impl.md" << 'EOF'
-# Step N Implementation
-## Files Changed
-## Key Decisions
-## Cleanup Performed
-EOF
-```
-
-**Write validation results:**
-```bash
-cat > "$WORKDIR/step_${STEP}_valid.md" << 'EOF'
-# Step N Validation
-## Requirements Check
-| REQ | Status | Code Reference |
-## Cleanup Check
-## Build Status
-## Verdict: PASS/REJECT
-EOF
-```
 
 **→ IMMEDIATELY proceed to next step or PHASE 4 (no confirmation)**
 
@@ -244,9 +341,6 @@ EOF
 │ • Verify no dead code across ALL changes                        │
 │ • Verify consistent patterns across ALL changes                 │
 │ • Full build + test pass (with output capture)                  │
-│                                                                 │
-│ Spawn `code-reviewer` with prompt:                              │
-│ "Review ALL changes for final validation. Be HOSTILE."          │
 │                                                                 │
 │ REJECT → Back to relevant step for fix                          │
 │ PASS → PHASE 5                                                  │
@@ -316,16 +410,54 @@ fi
 
 ### PHASE 6: DOCUMENTARIAN
 
-Spawn `editor` agent to update `docs/architecture/*.md` to reflect changes.
-
-Write `$WORKDIR/architecture-updates.md`:
-```markdown
-# Architecture Updates
-## Files Updated
-## Changes Made
-```
+Update `docs/architecture/*.md` to reflect changes.
+Write `$WORKDIR/architecture-updates.md`.
 
 **→ TASK COMPLETE - output final summary only**
+
+---
+
+## CONTEXT MANAGEMENT
+
+### Automatic Context Optimization
+- Output truncation: Commands should truncate to ~30K chars with file path reference
+- Background agents: Use `run_in_background: true` to isolate agent context (if supported)
+
+### Recovery Protocol
+If context issues occur:
+1. Read `$WORKDIR/*.md` artifacts to resume state
+2. Use `TaskOutput(task_id)` to retrieve background agent results (if supported)
+3. If needed: `/clear` and restart from last completed phase
+
+---
+
+## OUTPUT CAPTURE QUICK REFERENCE
+
+```bash
+# CORRECT: Build output to file, summary to Agent
+./scripts/build.sh > "$WORKDIR/logs/build.log" 2>&1
+if [ $? -ne 0 ]; then tail -30 "$WORKDIR/logs/build.log"; fi
+
+# CORRECT: Test output to file, summary to Agent
+go test -v ./... > "$WORKDIR/logs/test.log" 2>&1
+if [ $? -ne 0 ]; then tail -30 "$WORKDIR/logs/test.log"; fi
+
+# CORRECT: Extract specific errors from log
+grep -E "error:|FAIL" "$WORKDIR/logs/build.log" | head -20
+
+# CORRECT: Check test results
+grep "^--- FAIL:" "$WORKDIR/logs/test.log"
+
+# WRONG: Direct output to Agent (will overflow context)
+./scripts/build.sh
+go test -v ./...
+
+# WRONG: Cat entire log file
+cat "$WORKDIR/logs/build.log"
+
+# WRONG: Read large sections of log
+tail -500 "$WORKDIR/logs/test.log"
+```
 
 ---
 
@@ -398,7 +530,7 @@ Write `$WORKDIR/architecture-updates.md`:
 ## INVOKE
 ```
 /3agents implement feature X for component Y
-# → .codebuff/workdir/2024-12-17-1430-implement-feature-X-for-componen/
+# → .opencode/workdir/2024-12-17-1430-implement-feature-X-for-componen/
 #    ├── requirements.md
 #    ├── architect-analysis.md
 #    ├── step_1.md, step_1_impl.md, step_1_valid.md

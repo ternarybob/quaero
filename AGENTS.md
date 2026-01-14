@@ -10,7 +10,7 @@ Quaero codebase rules for AI agents. Workflow defined in `.claude/commands/3agen
 |-----------|-----|-------|
 | `C:\...` or `D:\...` | Windows | PowerShell |
 | `/home/...` or `/Users/...` | Unix/Linux/macOS | Bash |
-| `/mnt/c/...` | WSL | Bash (but `powershell.exe` for Go) |
+| `/mnt/c/...` | WSL | Bash |
 
 ## BUILD & TEST
 
@@ -18,7 +18,7 @@ Quaero codebase rules for AI agents. Workflow defined in `.claude/commands/3agen
 |----|-------|------|
 | Windows | `.\scripts\build.ps1` | `go test -v ./test/...` |
 | Linux/macOS | `./scripts/build.sh` | `go test -v ./test/...` |
-| WSL | `powershell.exe -Command "cd C:\path; .\scripts\build.ps1"` | `powershell.exe -Command "cd C:\path; go test -v ./test/..."` |
+| WSL | `./scripts/build.sh` | `go test -v ./test/...` |
 
 **Flags:** `-Deploy` (deploy to bin/), `-Run` (deploy + start service)
 

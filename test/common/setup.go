@@ -1703,7 +1703,12 @@ func (h *HTTPTestHelper) Logf(format string, args ...interface{}) {
 func (env *TestEnvironment) NewHTTPTestHelper(t *testing.T) *HTTPTestHelper {
 	return &HTTPTestHelper{
 		BaseURL: env.GetBaseURL(),
-		Client:  &http.Client{Timeout: 60 * time.Second},
+		Client: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
+		},
 		T:       t,
 		TestLog: env.TestLog,
 	}
@@ -1713,7 +1718,12 @@ func (env *TestEnvironment) NewHTTPTestHelper(t *testing.T) *HTTPTestHelper {
 func (env *TestEnvironment) NewHTTPTestHelperWithTimeout(t *testing.T, timeout time.Duration) *HTTPTestHelper {
 	return &HTTPTestHelper{
 		BaseURL: env.GetBaseURL(),
-		Client:  &http.Client{Timeout: timeout},
+		Client: &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
+		},
 		T:       t,
 		TestLog: env.TestLog,
 	}

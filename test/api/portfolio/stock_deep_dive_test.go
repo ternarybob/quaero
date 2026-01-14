@@ -70,7 +70,7 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 	t.Logf("Step 1: Loading job definition %s", jobDefFile)
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Loading job definition %s", time.Now().Format(time.RFC3339), jobDefFile))
 
-	err = env.LoadTestJobDefinitions("../../config/job-definitions/" + jobDefFile)
+	err = env.LoadTestJobDefinitions("../config/job-definitions/" + jobDefFile)
 	require.NoError(t, err, "Failed to load job definition")
 	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
 	testLog = append(testLog, fmt.Sprintf("[%s] Job definition loaded successfully", time.Now().Format(time.RFC3339)))
@@ -270,7 +270,7 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	t.Logf("Step 1: Loading job definition %s", jobDefFile)
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 1: Loading job definition %s", time.Now().Format(time.RFC3339), jobDefFile))
 
-	err = env.LoadTestJobDefinitions("../../config/job-definitions/" + jobDefFile)
+	err = env.LoadTestJobDefinitions("../config/job-definitions/" + jobDefFile)
 	require.NoError(t, err, "Failed to load job definition")
 
 	// MANDATORY: Save job definition BEFORE execution per test-architecture skill
@@ -605,7 +605,9 @@ func saveStockDeepDiveJobConfig(t *testing.T, resultsDir string, jobDefFile stri
 	}
 
 	// Job definitions are in test/config/job-definitions/
-	jobDefPath := filepath.Join("..", "config", "job-definitions", jobDefFile)
+	// go test runs from test package directory (test/api/portfolio/),
+	// so path is ../../config/job-definitions/ (same as LoadTestJobDefinitions uses ../config/...)
+	jobDefPath := filepath.Join("..", "..", "config", "job-definitions", jobDefFile)
 	content, err := os.ReadFile(jobDefPath)
 	if err != nil {
 		t.Logf("Warning: Failed to read job definition %s: %v", jobDefFile, err)
