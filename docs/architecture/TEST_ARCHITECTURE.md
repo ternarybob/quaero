@@ -184,9 +184,85 @@ func TestMyAPI(t *testing.T) {
 - `test/api/jobs_test.go` - Job API tests
 - `test/api/health_check_test.go` - Simple endpoint tests
 
+## Portfolio Worker Tests (`test/api/portfolio/`)
+
+**MANDATORY:** Read `.claude/skills/test-architecture/SKILL.md` before creating or modifying portfolio worker tests.
+
+Portfolio worker tests follow the same patterns as market worker tests with shared infrastructure in `common_test.go`.
+
+### Required Output Files
+
+Every portfolio worker test MUST produce these files in the results directory:
+
+| File | Purpose | Function to Call |
+|------|---------|------------------|
+| `job_definition.json` or `job_definition.toml` | Job config for reproducibility | `SaveJobDefinition()` or manual write |
+| `output.md` | Worker-generated content | `SaveWorkerOutput()` or document content |
+| `output.json` | Document metadata | `SaveWorkerOutput()` or metadata extraction |
+| `test.log` | Test execution logs | `WriteTestLog()` |
+| `service.log` | Service output logs | Automatic via TestEnvironment |
+| `timing_data.json` | Execution timing | `common.SaveTimingData()` |
+
+### Core Infrastructure
+
+```go
+package portfolio
+
+import (
+    "testing"
+    "time"
+    "github.com/ternarybob/quaero/test/common"
+)
+
+func TestPortfolioWorkerExample(t *testing.T) {
+    // MANDATORY: Fresh environment per test
+    env, err := common.SetupTestEnvironment(t.Name())
+    if err != nil {
+        t.Skipf("Failed to setup test environment: %v", err)
+    }
+    defer env.Cleanup()
+
+    helper := env.NewHTTPTestHelperWithTimeout(t, 30*time.Minute)
+    resultsDir := env.GetResultsDir()
+
+    // Load job definition
+    err = env.LoadTestJobDefinitions("../../config/job-definitions/example.toml")
+    require.NoError(t, err)
+
+    // Execute job
+    jobID := executeJobDefinition(t, helper, "example-job-id")
+
+    // Wait for completion with error monitoring
+    finalStatus, errorLogs := WaitForJobCompletionWithMonitoring(t, helper, jobID, 30*time.Minute)
+
+    // Validate outputs
+    // ... assertions ...
+
+    // MANDATORY: Save test outputs
+    // ... save output.md, output.json, etc.
+
+    // MANDATORY: Validate result files exist
+    AssertResultFilesExist(t, resultsDir)
+
+    // MANDATORY: Check for service errors
+    common.AssertNoErrorsInServiceLog(t, env)
+}
+```
+
+### Orchestrator Test Patterns
+
+Portfolio tests that execute orchestrator jobs (step-based workflows) should:
+
+1. Load job definition TOML file via `env.LoadTestJobDefinitions()`
+2. Execute via `executeJobDefinition(t, helper, jobDefID)`
+3. Wait with error monitoring via `WaitForJobCompletionWithMonitoring()`
+4. Validate output documents by tag
+5. Save outputs to results directory
+6. Assert result files exist
+
 ## Market Worker Tests (`test/api/market_workers/`)
 
-**MANDATORY:** Read `.claude/skills/market-worker-test/SKILL.md` before creating or modifying market worker tests.
+**MANDATORY:** Read `.claude/skills/test-architecture/SKILL.md` before creating or modifying market worker tests.
 
 Market worker tests follow a specific pattern with shared infrastructure in `common_test.go`.
 
@@ -522,7 +598,7 @@ For UI tests specifically:
 
 ## See Also
 
-- `.claude/skills/market-worker-test/SKILL.md` - Market worker test patterns (MANDATORY)
+- `.claude/skills/test-architecture/SKILL.md` - API test patterns for market workers and portfolio tests (MANDATORY)
 - `.claude/skills/monitoring/SKILL.md` - Detailed UI testing patterns
 - `.claude/skills/go/SKILL.md` - Go code patterns
 - `docs/architecture/ARCHITECTURE.md` - System architecture

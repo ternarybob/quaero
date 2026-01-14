@@ -396,6 +396,85 @@ else
 fi
 ````
 
+**Step 4.1.5: Validate test result outputs (for API tests) - MANDATORY**
+
+For tests in `test/api/market_workers/` or `test/api/portfolio/`, verify test outputs per `.claude/skills/test-architecture/SKILL.md`:
+
+**CRITICAL:** Missing test outputs is a TDD FAILURE. Tests MUST produce outputs on ALL exit paths.
+
+````bash
+# Find the most recent results directory for this test
+TEST_NAME=$(basename "$TEST_FILE" "_test.go")
+RESULTS_PATTERN="test/results/api/*${TEST_NAME}*"
+LATEST_RESULTS=$(ls -td $RESULTS_PATTERN 2>/dev/null | head -1)
+
+if [ -n "$LATEST_RESULTS" ] && [ -d "$LATEST_RESULTS" ]; then
+    echo "=== Validating Test Result Outputs (MANDATORY) ==="
+    echo "Results dir: $LATEST_RESULTS"
+
+    # Check required files per TEST_ARCHITECTURE.md
+    REQUIRED_FILES=("output.md" "output.json" "test.log" "service.log")
+    MISSING_FILES=0
+    EMPTY_FILES=0
+
+    for file in "${REQUIRED_FILES[@]}"; do
+        if [ -f "$LATEST_RESULTS/$file" ]; then
+            SIZE=$(stat -f%z "$LATEST_RESULTS/$file" 2>/dev/null || stat -c%s "$LATEST_RESULTS/$file" 2>/dev/null)
+            if [ "$SIZE" -gt 0 ]; then
+                echo "✓ $file exists ($SIZE bytes)"
+            else
+                echo "✗ $file is EMPTY - FAIL"
+                EMPTY_FILES=$((EMPTY_FILES + 1))
+            fi
+        else
+            echo "✗ $file MISSING - FAIL"
+            MISSING_FILES=$((MISSING_FILES + 1))
+        fi
+    done
+
+    # Check for job definition (json or toml)
+    if [ -f "$LATEST_RESULTS/job_definition.json" ] || [ -f "$LATEST_RESULTS/job_definition.toml" ]; then
+        echo "✓ job_definition exists"
+    else
+        echo "✗ job_definition MISSING (expected .json or .toml) - FAIL"
+        MISSING_FILES=$((MISSING_FILES + 1))
+    fi
+
+    TOTAL_ISSUES=$((MISSING_FILES + EMPTY_FILES))
+    if [ $TOTAL_ISSUES -gt 0 ]; then
+        echo ""
+        echo "┌─────────────────────────────────────────────────────────────────┐"
+        echo "│ ✗ TEST OUTPUT VALIDATION FAILED                                 │"
+        echo "│                                                                 │"
+        echo "│ Missing files: $MISSING_FILES                                          │"
+        echo "│ Empty files: $EMPTY_FILES                                              │"
+        echo "│                                                                 │"
+        echo "│ REQUIRED ACTION:                                                │"
+        echo "│ 1. Test MUST use TestOutputGuard pattern                        │"
+        echo "│ 2. Output files MUST be saved unconditionally                   │"
+        echo "│ 3. See: .claude/skills/test-architecture/SKILL.md               │"
+        echo "│                                                                 │"
+        echo "│ This is a TDD FAILURE - tests must produce valid outputs.       │"
+        echo "└─────────────────────────────────────────────────────────────────┘"
+
+        # Write output validation failure to workdir
+        echo "## Test Output Validation: FAILED" >> "$WORKDIR/test_issues.md"
+        echo "" >> "$WORKDIR/test_issues.md"
+        echo "Missing files: $MISSING_FILES" >> "$WORKDIR/test_issues.md"
+        echo "Empty files: $EMPTY_FILES" >> "$WORKDIR/test_issues.md"
+        echo "" >> "$WORKDIR/test_issues.md"
+        echo "### Required Fix" >> "$WORKDIR/test_issues.md"
+        echo "Test must use TestOutputGuard pattern per .claude/skills/test-architecture/SKILL.md" >> "$WORKDIR/test_issues.md"
+    else
+        echo ""
+        echo "✓ All required test output files present and non-empty"
+    fi
+else
+    echo "No results directory found matching pattern: $RESULTS_PATTERN"
+    echo "This may be expected for unit tests that don't produce result directories."
+fi
+````
+
 **Step 4.2: MUST write `$WORKDIR/summary.md`:**
 ````markdown
 # TDD Summary

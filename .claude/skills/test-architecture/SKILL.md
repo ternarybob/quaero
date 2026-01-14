@@ -1,26 +1,96 @@
-# Market Worker Test Skill
+# API Test Architecture Skill
 
-**Scope:** Tests in `test/api/market_workers/`
+**Scope:** Tests in `test/api/market_workers/` and `test/api/portfolio/`
 
-**Reference Implementation:** `test/api/market_workers/announcements_test.go`
+**Reference Implementations:**
+- `test/api/market_workers/announcements_test.go` - Market worker pattern
+- `test/api/portfolio/stock_deep_dive_test.go` - Portfolio orchestrator pattern
 
 ## When to Use
 
 This skill MUST be followed when:
 - Creating new tests in `test/api/market_workers/`
-- Modifying existing market worker tests
+- Creating new tests in `test/api/portfolio/`
+- Modifying existing market worker or portfolio tests
 - Creating tests that execute job pipelines with output validation
 
 ## Required Output Files
 
-Every market worker test MUST produce these files in the results directory:
+Every API test (market worker or portfolio) MUST produce these files in the results directory:
 
-| File | Function to Call |
-|------|------------------|
-| `job_definition.json` | `SaveJobDefinition(t, env, body)` |
-| `schema.json` | `SaveSchemaDefinition(t, env, Schema, "Name")` |
-| `output.md` | `SaveWorkerOutput(t, env, helper, tags, ticker)` |
-| `output.json` | `SaveWorkerOutput(t, env, helper, tags, ticker)` |
+| File | Purpose | Function to Call | Required |
+|------|---------|------------------|----------|
+| `job_definition.json` | Job config for reproducibility | `SaveJobDefinition(t, env, body)` | YES |
+| `output.md` | Worker-generated content (document content_markdown) | `SaveWorkerOutput(t, env, helper, tags, ticker)` | YES |
+| `output.json` | Document metadata | `SaveWorkerOutput(t, env, helper, tags, ticker)` | YES |
+| `schema.json` | Schema definition used for validation | `SaveSchemaDefinition(t, env, Schema, "Name")` | IF validating schema |
+| `test.log` | Test execution logs | `WriteTestLog(t, resultsDir, entries)` | YES |
+| `service.log` | Service output logs | Automatic via TestEnvironment | YES |
+| `timing_data.json` | Execution timing data | `common.SaveTimingData(t, resultsDir, timing)` | RECOMMENDED |
+
+### Portfolio-Specific Files
+
+For portfolio tests using TOML job definitions:
+
+| File | Purpose | Function to Call |
+|------|---------|------------------|
+| `job_definition.toml` | Original TOML job config | Manual copy from config directory |
+| `multi_document_summary.md` | Summary of multi-document outputs | `saveMultiDocumentSummary()` |
+
+## MANDATORY: TestOutputGuard Pattern (ENFORCED)
+
+**CRITICAL:** Every API test MUST use `TestOutputGuard` to guarantee outputs are saved on ALL exit paths.
+
+```go
+func TestMyWorker(t *testing.T) {
+    // 1. Environment setup
+    env := common.SetupFreshEnvironment(t)
+    if env == nil {
+        return
+    }
+    defer env.Cleanup()
+
+    resultsDir := env.GetResultsDir()
+
+    // 2. MANDATORY: Create guard EARLY and defer Close
+    guard := common.NewPortfolioTestOutputGuard(t, resultsDir)  // or NewMarketWorkerTestOutputGuard
+    defer guard.Close()
+
+    guard.LogWithTimestamp("Test started: TestMyWorker")
+
+    // 3. Save job definition BEFORE execution
+    SaveJobDefinition(t, resultsDir, body)
+    guard.LogWithTimestamp("Job definition saved")
+
+    // ... test logic ...
+
+    // 4. Save outputs UNCONDITIONALLY after job completes
+    // Even if subsequent assertions fail, outputs are saved
+    SaveWorkerOutput(t, env, helper, outputTags, ticker)
+    guard.MarkOutputSaved()
+    guard.LogWithTimestamp("Outputs saved")
+
+    // 5. Validate outputs at end
+    common.RequireTestOutputs(t, resultsDir)  // Fails test if outputs missing
+}
+```
+
+### Guard Types
+
+| Guard | Use When | Config |
+|-------|----------|--------|
+| `NewPortfolioTestOutputGuard(t, resultsDir)` | Portfolio/orchestrator tests | Requires output.md, output.json, job_definition, test.log, service.log |
+| `NewMarketWorkerTestOutputGuard(t, resultsDir)` | Market worker tests | Same as portfolio + schema.json |
+| `NewTestOutputGuard(t, resultsDir, config)` | Custom requirements | Use `DefaultTestOutputConfig()` as base |
+
+### Why Guard Pattern is MANDATORY
+
+The guard pattern solves the recurring problem of missing test outputs:
+
+1. **defer guard.Close()** - Ensures test.log is written even on panic/failure
+2. **guard.LogWithTimestamp()** - Accumulates log entries that are written at the end
+3. **guard.MarkOutputSaved()** - Tracks whether outputs were saved
+4. **Close() validates** - Logs warnings if outputs are missing (doesn't fail - test may have already failed)
 
 ## Mandatory Function Calls
 
@@ -254,6 +324,45 @@ func TestWorkerNameMulti(t *testing.T) {
 
 ## Anti-Patterns (AUTO-FAIL)
 
+### Test Structure Anti-Patterns
+
+```go
+// ❌ WRONG: No TestOutputGuard - outputs may not be saved on failure
+func TestMyWorker(t *testing.T) {
+    env := SetupFreshEnvironment(t)
+    defer env.Cleanup()
+    // Missing guard! If test panics, no test.log is written
+}
+
+// ✓ CORRECT: TestOutputGuard ensures outputs on all exit paths
+func TestMyWorker(t *testing.T) {
+    env := SetupFreshEnvironment(t)
+    defer env.Cleanup()
+    guard := common.NewPortfolioTestOutputGuard(t, env.GetResultsDir())
+    defer guard.Close()
+}
+
+// ❌ WRONG: Conditional output save - outputs missing on failure
+if len(docs) > 0 {
+    SaveWorkerOutput(t, env, helper, tags, ticker)
+}
+
+// ✓ CORRECT: Unconditional output save with require assertion
+require.Greater(t, len(docs), 0, "Must have documents")
+SaveWorkerOutput(t, env, helper, tags, ticker)
+
+// ❌ WRONG: Saving outputs AFTER validation (may never execute)
+validateAllTheThings(t, docs)  // If this fails, outputs not saved!
+SaveWorkerOutput(t, env, helper, tags, ticker)
+
+// ✓ CORRECT: Save outputs BEFORE detailed validation
+SaveWorkerOutput(t, env, helper, tags, ticker)
+guard.MarkOutputSaved()
+validateAllTheThings(t, docs)  // Outputs already saved if this fails
+```
+
+### Job Definition Anti-Patterns
+
 ```go
 // ❌ Missing SaveJobDefinition
 jobID, _ := CreateAndExecuteJob(t, helper, body)
@@ -279,13 +388,46 @@ t.Log("PASS: test completed")
 
 ## Checklist
 
-When creating or reviewing market worker tests:
+When creating or reviewing API tests (market workers or portfolio):
 
+### Test Structure (MANDATORY)
+- [ ] `TestOutputGuard` created EARLY in test
+- [ ] `defer guard.Close()` called immediately after guard creation
+- [ ] `guard.LogWithTimestamp()` used for test progress logging
+- [ ] `guard.MarkOutputSaved()` called after saving outputs
+
+### Required Output Validation
 - [ ] `SaveJobDefinition(t, env, body)` called BEFORE `CreateAndExecuteJob`
 - [ ] `SaveSchemaDefinition(t, env, Schema, "Name")` called IF using schema validation
-- [ ] `SaveWorkerOutput(t, env, helper, tags, ticker)` called AFTER job completion
-- [ ] `AssertResultFilesExist(t, env, 1)` called AT END
+- [ ] `SaveWorkerOutput(t, env, helper, tags, ticker)` called AFTER job completion (UNCONDITIONALLY)
+- [ ] `RequireTestOutputs(t, resultsDir)` OR `AssertResultFilesExist(t, env, 1)` called AT END
 - [ ] `AssertNoServiceErrors(t, env)` called AT END
+
+### Job Configuration
 - [ ] Job uses `config.variables` pattern for tickers
 - [ ] Step names use underscores (e.g., `format_output`, `email_report`)
 - [ ] Tags include `"worker-test"` for identification
+
+### Result Files Verification
+After test completion, verify these files exist in `test/results/api/{test_name}/`:
+- [ ] `output.md` - Contains worker-generated content, NOT empty
+- [ ] `output.json` - Contains document metadata, NOT empty
+- [ ] `job_definition.json` OR `job_definition.toml` - Job configuration
+- [ ] `test.log` - Test execution logs (guard ensures this is always written)
+- [ ] `service.log` - Service output
+
+### Output Validation Functions
+
+| Function | When to Use |
+|----------|-------------|
+| `RequireTestOutputs(t, resultsDir)` | Strict validation - fails test if outputs missing |
+| `RequirePortfolioTestOutputs(t, resultsDir)` | Portfolio tests with timing requirements |
+| `RequireMarketWorkerTestOutputs(t, resultsDir)` | Market worker tests with schema requirements |
+| `AssertTestOutputs(t, resultsDir, config)` | Custom validation with specific config |
+
+## See Also
+
+- `docs/architecture/TEST_ARCHITECTURE.md` - Full test architecture documentation
+- `test/common/result_helpers.go` - Output save and validation helpers
+- `test/api/market_workers/common_test.go` - Market worker helper functions
+- `test/api/portfolio/common_test.go` - Portfolio helper functions

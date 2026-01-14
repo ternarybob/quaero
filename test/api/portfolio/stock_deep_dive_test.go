@@ -225,81 +225,6 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 	t.Log("SUCCESS: Stock Deep Dive Workflow test completed successfully")
 }
 
-// validateKneppyFrameworkContent validates that the content contains Kneppy framework analysis
-func validateKneppyFrameworkContent(t *testing.T, content string) {
-	t.Helper()
-
-	// Check for placeholder text
-	placeholderTexts := []string{
-		"Job completed. No content was specified for this email.",
-		"No content was specified",
-		"email body is empty",
-	}
-	for _, placeholder := range placeholderTexts {
-		assert.NotContains(t, content, placeholder,
-			"Content should not contain placeholder text: %s", placeholder)
-	}
-	t.Log("PASS: Content is not a placeholder")
-
-	// Check for prompt text (shouldn't be in output)
-	promptIndicators := []string{
-		"=== PHASE 1: DATA COLLECTION ===",
-		"=== DOCUMENT TAGGING (IMPORTANT) ===",
-		"CRITICAL REQUIREMENTS FOR ANALYSIS",
-	}
-	for _, indicator := range promptIndicators {
-		assert.NotContains(t, content, indicator,
-			"Content should not contain prompt text: %s", indicator)
-	}
-	t.Log("PASS: Content is not the AI prompt")
-
-	// Check for Kneppy framework content (required)
-	contentLower := strings.ToLower(content)
-
-	// Kneppy framework pillars
-	kneppyPillars := []string{
-		"capital efficiency",
-		"share allocation",
-		"financial robustness",
-		"cash flow",
-		"management",
-		"moat",
-	}
-	foundPillars := 0
-	for _, pillar := range kneppyPillars {
-		if strings.Contains(contentLower, pillar) {
-			foundPillars++
-			t.Logf("PASS: Found Kneppy pillar '%s' in content", pillar)
-		}
-	}
-	assert.GreaterOrEqual(t, foundPillars, 3,
-		"Content should contain at least 3 Kneppy framework pillars (found %d)", foundPillars)
-
-	// Check for quality/rating terms
-	ratingTerms := []string{
-		"quality", "grade", "rating", "recommendation",
-		"roic", "ebitda", "debt",
-	}
-	foundRating := false
-	for _, term := range ratingTerms {
-		if strings.Contains(contentLower, term) {
-			foundRating = true
-			t.Logf("PASS: Found rating term '%s' in content", term)
-			break
-		}
-	}
-	assert.True(t, foundRating, "Content should contain quality/rating terms")
-
-	// Check for markdown structure (headers)
-	assert.Contains(t, content, "#", "Deep dive must contain markdown headers")
-
-	// Check for the ticker
-	assert.True(t, strings.Contains(content, "GNP") || strings.Contains(contentLower, "genusplus"),
-		"Content should reference the analyzed ticker GNP or GenusPlus")
-
-	t.Log("PASS: Kneppy framework content validation complete")
-}
-
 // TestStockDeepDiveMultipleAttachments tests that multi_document mode creates separate
 // PDF attachments for each stock in the variables list.
 //
@@ -325,13 +250,20 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	helper := env.NewHTTPTestHelperWithTimeout(t, 30*time.Minute)
 	resultsDir := env.GetResultsDir()
 
+	// Initialize test log - will be written on every exit path
 	var testLog []string
 	testLog = append(testLog, fmt.Sprintf("[%s] Test started: TestStockDeepDiveMultipleAttachments", time.Now().Format(time.RFC3339)))
+	testLog = append(testLog, fmt.Sprintf("[%s] Results directory: %s", time.Now().Format(time.RFC3339), resultsDir))
+
+	// Ensure test log is written on all exit paths
+	defer func() {
+		WriteTestLog(t, resultsDir, testLog)
+	}()
 
 	// Expected tickers from job definition
 	expectedTickers := []string{"CGS", "GNP"}
 
-	// Step 1: Load the job definition
+	// Step 1: Load the job definition and save it BEFORE execution
 	stepStart := time.Now()
 	jobDefFile := "stock-deep-dive-multi-attach-test.toml"
 	jobDefID := "stock-deep-dive-multi-attach-test"
@@ -340,6 +272,11 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 
 	err = env.LoadTestJobDefinitions("../../config/job-definitions/" + jobDefFile)
 	require.NoError(t, err, "Failed to load job definition")
+
+	// MANDATORY: Save job definition BEFORE execution per test-architecture skill
+	saveStockDeepDiveJobConfig(t, resultsDir, jobDefFile)
+	testLog = append(testLog, fmt.Sprintf("[%s] Saved job_definition.toml to results", time.Now().Format(time.RFC3339)))
+
 	timingData.AddStepTiming("load_job_definition", time.Since(stepStart).Seconds())
 	testLog = append(testLog, fmt.Sprintf("[%s] Job definition loaded successfully", time.Now().Format(time.RFC3339)))
 
@@ -384,7 +321,7 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 			assertChildJobsFailedOrStopped(t, helper, jobID)
 		}
 
-		WriteTestLog(t, resultsDir, testLog)
+		// Test log will be written by defer at end of function
 		t.Fatalf("FAIL: Job execution produced %d ERROR logs. Job status: %s", len(errorLogs), finalStatus)
 	}
 	t.Log("PASS: No ERROR logs found in job execution")
@@ -423,45 +360,50 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	validateTickerDocumentsExist(t, helper, emailDocs, expectedTickers)
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: All tickers have corresponding documents", time.Now().Format(time.RFC3339)))
 
-	// Step 9: Save test outputs
+	// Step 9: Save test outputs (MANDATORY per test-architecture skill)
 	t.Log("Step 9: Saving test outputs to results directory")
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 9: Saving test outputs", time.Now().Format(time.RFC3339)))
 
-	// Save a sample output document
-	if len(emailDocs) > 0 {
-		sampleDoc := emailDocs[0]
-		docID, _ := sampleDoc["id"].(string)
-		content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+	// MANDATORY: Save output.md and output.json from first email_report document
+	// This ensures outputs are saved even if subsequent validations fail
+	require.Greater(t, len(emailDocs), 0, "Must have at least one email_report document to save outputs")
 
-		// Save output.md
-		outputPath := filepath.Join(resultsDir, "output.md")
-		if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
-			t.Logf("Warning: Failed to write output.md: %v", err)
-		} else {
-			t.Logf("Saved output.md to: %s (%d bytes)", outputPath, len(content))
-		}
+	sampleDoc := emailDocs[0]
+	docID, _ := sampleDoc["id"].(string)
+	content, metadata := getDocumentContentAndMetadata(t, helper, docID)
 
-		// Save output.json
-		if metadata != nil {
-			jsonPath := filepath.Join(resultsDir, "output.json")
-			if data, err := json.MarshalIndent(metadata, "", "  "); err == nil {
-				if err := os.WriteFile(jsonPath, data, 0644); err != nil {
-					t.Logf("Warning: Failed to write output.json: %v", err)
-				} else {
-					t.Logf("Saved output.json to: %s (%d bytes)", jsonPath, len(data))
-				}
-			}
-		}
-	}
+	// Save output.md - FAIL if content is empty
+	outputPath := filepath.Join(resultsDir, "output.md")
+	require.NotEmpty(t, content, "Document content must not be empty for output.md")
+	err = os.WriteFile(outputPath, []byte(content), 0644)
+	require.NoError(t, err, "Failed to write output.md")
+	t.Logf("Saved output.md to: %s (%d bytes)", outputPath, len(content))
+	testLog = append(testLog, fmt.Sprintf("[%s] Saved output.md (%d bytes)", time.Now().Format(time.RFC3339), len(content)))
+
+	// Save output.json - FAIL if metadata is nil
+	require.NotNil(t, metadata, "Document metadata must not be nil for output.json")
+	jsonPath := filepath.Join(resultsDir, "output.json")
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	require.NoError(t, err, "Failed to marshal metadata to JSON")
+	err = os.WriteFile(jsonPath, data, 0644)
+	require.NoError(t, err, "Failed to write output.json")
+	t.Logf("Saved output.json to: %s (%d bytes)", jsonPath, len(data))
+	testLog = append(testLog, fmt.Sprintf("[%s] Saved output.json (%d bytes)", time.Now().Format(time.RFC3339), len(data)))
 
 	// Save all document summaries for multi-attachment verification
 	saveMultiDocumentSummary(t, helper, resultsDir, emailDocs)
+	testLog = append(testLog, fmt.Sprintf("[%s] Saved multi_document_summary.md", time.Now().Format(time.RFC3339)))
 
-	// Save job definition
-	saveStockDeepDiveJobConfig(t, resultsDir, jobDefFile)
+	// Note: job_definition.toml was saved earlier in Step 1
 
-	// Step 10: Verify result files exist
+	// Step 10: Verify result files exist using unified validation
 	t.Log("Step 10: Verifying result files were written")
-	AssertResultFilesExist(t, resultsDir)
+	testLog = append(testLog, fmt.Sprintf("[%s] Step 10: Verifying result files", time.Now().Format(time.RFC3339)))
+
+	// Use portfolio test output config (requires timing_data.json)
+	config := common.PortfolioTestOutputConfig()
+	config.RequireTimingData = false // Timing data saved after this check
+	common.AssertTestOutputs(t, resultsDir, config)
 
 	// Get child job timings
 	childTimings := logChildJobTimings(t, helper, jobID)
@@ -476,9 +418,8 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	// Check for errors in service log
 	common.AssertNoErrorsInServiceLog(t, env)
 
-	// Write test log
+	// Append final success entry to test log (will be written by defer)
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: TestStockDeepDiveMultipleAttachments completed successfully", time.Now().Format(time.RFC3339)))
-	WriteTestLog(t, resultsDir, testLog)
 
 	// Copy TDD summary if running from /3agents-tdd
 	common.CopyTDDSummary(t, resultsDir)
@@ -742,4 +683,79 @@ func validatePDFAttachmentConfig(t *testing.T, helper *common.HTTPTestHelper, do
 	assert.Greater(t, attachmentCount, 0,
 		"At least one email_report document should have attachment=true")
 	t.Logf("PASS: Found %d documents with attachment=true", attachmentCount)
+}
+
+// validateKneppyFrameworkContent validates that the content contains Kneppy framework analysis
+func validateKneppyFrameworkContent(t *testing.T, content string) {
+	t.Helper()
+
+	// Check for placeholder text
+	placeholderTexts := []string{
+		"Job completed. No content was specified for this email.",
+		"No content was specified",
+		"email body is empty",
+	}
+	for _, placeholder := range placeholderTexts {
+		assert.NotContains(t, content, placeholder,
+			"Content should not contain placeholder text: %s", placeholder)
+	}
+	t.Log("PASS: Content is not a placeholder")
+
+	// Check for prompt text (shouldn't be in output)
+	promptIndicators := []string{
+		"=== PHASE 1: DATA COLLECTION ===",
+		"=== DOCUMENT TAGGING (IMPORTANT) ===",
+		"CRITICAL REQUIREMENTS FOR ANALYSIS",
+	}
+	for _, indicator := range promptIndicators {
+		assert.NotContains(t, content, indicator,
+			"Content should not contain prompt text: %s", indicator)
+	}
+	t.Log("PASS: Content is not the AI prompt")
+
+	// Check for Kneppy framework content (required)
+	contentLower := strings.ToLower(content)
+
+	// Kneppy framework pillars
+	kneppyPillars := []string{
+		"capital efficiency",
+		"share allocation",
+		"financial robustness",
+		"cash flow",
+		"management",
+		"moat",
+	}
+	foundPillars := 0
+	for _, pillar := range kneppyPillars {
+		if strings.Contains(contentLower, pillar) {
+			foundPillars++
+			t.Logf("PASS: Found Kneppy pillar '%s' in content", pillar)
+		}
+	}
+	assert.GreaterOrEqual(t, foundPillars, 3,
+		"Content should contain at least 3 Kneppy framework pillars (found %d)", foundPillars)
+
+	// Check for quality/rating terms
+	ratingTerms := []string{
+		"quality", "grade", "rating", "recommendation",
+		"roic", "ebitda", "debt",
+	}
+	foundRating := false
+	for _, term := range ratingTerms {
+		if strings.Contains(contentLower, term) {
+			foundRating = true
+			t.Logf("PASS: Found rating term '%s' in content", term)
+			break
+		}
+	}
+	assert.True(t, foundRating, "Content should contain quality/rating terms")
+
+	// Check for markdown structure (headers)
+	assert.Contains(t, content, "#", "Deep dive must contain markdown headers")
+
+	// Check for the ticker
+	assert.True(t, strings.Contains(content, "GNP") || strings.Contains(contentLower, "genusplus"),
+		"Content should reference the analyzed ticker GNP or GenusPlus")
+
+	t.Log("PASS: Kneppy framework content validation complete")
 }
