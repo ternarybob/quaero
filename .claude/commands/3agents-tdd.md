@@ -577,6 +577,7 @@ but the full workdir copy above includes all artifacts (tdd_state.md, test_issue
 | **Add backward compatibility** | FAILURE |
 | **Keep deprecated types/APIs** | FAILURE |
 | **Skip writing summary.md** | FAILURE |
+| **Write files to root directory (must use $WORKDIR)** | FAILURE |
 | **Let full test output into context** | FAILURE |
 | **Paste log file contents (>30 lines)** | FAILURE |
 
@@ -713,7 +714,7 @@ if currentStatus != expectedStatus {
 | `logs/build_*.log` | Build verifications | Phase 3 | **YES** |
 | `logs/final_run.log` | Final test suite | Phase 4 | **YES** |
 
-**Task is NOT complete until `summary.md` exists in workdir.**
+**Task is NOT complete until `summary.md` exists in `$WORKDIR`. (NOT in root)**
 
 ## OUTPUT CAPTURE QUICK REFERENCE
 

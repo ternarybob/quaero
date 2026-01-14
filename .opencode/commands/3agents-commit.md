@@ -1,3 +1,11 @@
+---
+name: 3agents-commit
+description: Git commit and push with auto-formatting and convention enforcement.
+allowed-tools:
+  - Bash
+  - Task
+---
+
 **INSTRUCTION:** Use the Task tool with `general-purpose` subagent for commit and push operations.
 
 **CRITICAL RULES:**

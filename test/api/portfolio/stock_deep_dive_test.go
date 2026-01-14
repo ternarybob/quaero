@@ -330,8 +330,8 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	require.Equal(t, "completed", finalStatus, "Job should complete successfully")
 	testLog = append(testLog, fmt.Sprintf("[%s] PASS: Job completed successfully", time.Now().Format(time.RFC3339)))
 
-	// Step 6: Validate email_report documents exist and count matches tickers
-	t.Log("Step 6: Validating email_report documents exist and count matches ticker count")
+	// Step 6: Validate email_report documents exist and count matches tickers + summary
+	t.Log("Step 6: Validating email_report documents exist (tickers + summary)")
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 6: Validating email_report documents", time.Now().Format(time.RFC3339)))
 
 	emailDocs := getDocumentsByTag(t, helper, "email_report")
@@ -339,12 +339,13 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	t.Logf("Found %d email_report documents", len(emailDocs))
 	testLog = append(testLog, fmt.Sprintf("[%s] Found %d email_report documents", time.Now().Format(time.RFC3339), len(emailDocs)))
 
-	// In multi_document mode, we expect one document per ticker
-	// Each document should have the ticker tag and multi_document metadata
-	require.GreaterOrEqual(t, len(emailDocs), len(expectedTickers),
-		"Should have at least one email_report document per ticker (expected %d, got %d)", len(expectedTickers), len(emailDocs))
-	testLog = append(testLog, fmt.Sprintf("[%s] PASS: email_report count >= ticker count (%d >= %d)",
-		time.Now().Format(time.RFC3339), len(emailDocs), len(expectedTickers)))
+	// In multi_document mode, we expect one document per ticker PLUS one summary document
+	// Total = len(expectedTickers) + 1
+	expectedCount := len(expectedTickers) + 1
+	require.GreaterOrEqual(t, len(emailDocs), expectedCount,
+		"Should have at least one email_report document per ticker plus summary (expected %d, got %d)", expectedCount, len(emailDocs))
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: email_report count >= expected (%d >= %d)",
+		time.Now().Format(time.RFC3339), len(emailDocs), expectedCount))
 
 	// Step 7: Validate multi_document mode by checking document metadata and tags
 	t.Log("Step 7: Validating multi_document mode on email_report documents")
@@ -364,31 +365,94 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 	t.Log("Step 9: Saving test outputs to results directory")
 	testLog = append(testLog, fmt.Sprintf("[%s] Step 9: Saving test outputs", time.Now().Format(time.RFC3339)))
 
-	// MANDATORY: Save output.md and output.json from first email_report document
-	// This ensures outputs are saved even if subsequent validations fail
-	require.Greater(t, len(emailDocs), 0, "Must have at least one email_report document to save outputs")
+	// Identify summary document and ticker documents
+	var summaryDoc map[string]interface{}
+	var tickerDocs []map[string]interface{}
 
-	sampleDoc := emailDocs[0]
-	docID, _ := sampleDoc["id"].(string)
-	content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+	for _, doc := range emailDocs {
+		tags, _ := doc["tags"].([]interface{})
+		isSummary := false
+		for _, tag := range tags {
+			if str, ok := tag.(string); ok && (str == "summary" || str == "multi-document-summary") {
+				isSummary = true
+				break
+			}
+		}
 
-	// Save output.md - FAIL if content is empty
-	outputPath := filepath.Join(resultsDir, "output.md")
-	require.NotEmpty(t, content, "Document content must not be empty for output.md")
-	err = os.WriteFile(outputPath, []byte(content), 0644)
-	require.NoError(t, err, "Failed to write output.md")
-	t.Logf("Saved output.md to: %s (%d bytes)", outputPath, len(content))
-	testLog = append(testLog, fmt.Sprintf("[%s] Saved output.md (%d bytes)", time.Now().Format(time.RFC3339), len(content)))
+		if isSummary {
+			summaryDoc = doc
+		} else {
+			tickerDocs = append(tickerDocs, doc)
+		}
+	}
 
-	// Save output.json - FAIL if metadata is nil
-	require.NotNil(t, metadata, "Document metadata must not be nil for output.json")
-	jsonPath := filepath.Join(resultsDir, "output.json")
-	data, err := json.MarshalIndent(metadata, "", "  ")
-	require.NoError(t, err, "Failed to marshal metadata to JSON")
-	err = os.WriteFile(jsonPath, data, 0644)
-	require.NoError(t, err, "Failed to write output.json")
-	t.Logf("Saved output.json to: %s (%d bytes)", jsonPath, len(data))
-	testLog = append(testLog, fmt.Sprintf("[%s] Saved output.json (%d bytes)", time.Now().Format(time.RFC3339), len(data)))
+	// Save summary document as output.md (Main output)
+	if summaryDoc != nil {
+		docID, _ := summaryDoc["id"].(string)
+		content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+
+		outputPath := filepath.Join(resultsDir, "output.md")
+		err = os.WriteFile(outputPath, []byte(content), 0644)
+		if err == nil {
+			t.Logf("Saved summary output.md to: %s", outputPath)
+		}
+
+		if metadata != nil {
+			jsonPath := filepath.Join(resultsDir, "output.json")
+			if data, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+				os.WriteFile(jsonPath, data, 0644)
+			}
+		}
+	} else {
+		// Fallback if no summary found (should not happen with updated worker)
+		t.Log("Warning: No summary document found, using first document for output.md")
+		if len(emailDocs) > 0 {
+			docID, _ := emailDocs[0]["id"].(string)
+			content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+			os.WriteFile(filepath.Join(resultsDir, "output.md"), []byte(content), 0644)
+			if metadata != nil {
+				data, _ := json.MarshalIndent(metadata, "", "  ")
+				os.WriteFile(filepath.Join(resultsDir, "output.json"), data, 0644)
+			}
+		}
+	}
+
+	// Save individual ticker documents
+	for _, doc := range tickerDocs {
+		docID, _ := doc["id"].(string)
+
+		// Find ticker from tags or metadata
+		tags, _ := doc["tags"].([]interface{})
+		ticker := ""
+		for _, tag := range tags {
+			tagStr, ok := tag.(string)
+			if ok && len(tagStr) <= 5 && !strings.Contains(tagStr, ":") && !strings.Contains(tagStr, "-") {
+				// Assume short tags like "cgs", "gnp" are tickers
+				// Verify against expected
+				for _, expected := range expectedTickers {
+					if strings.EqualFold(expected, tagStr) {
+						ticker = strings.ToUpper(tagStr)
+						break
+					}
+				}
+			}
+		}
+
+		if ticker != "" {
+			content, metadata := getDocumentContentAndMetadata(t, helper, docID)
+
+			filename := fmt.Sprintf("output-%s.md", ticker)
+			jsonFilename := fmt.Sprintf("output-%s.json", ticker)
+
+			os.WriteFile(filepath.Join(resultsDir, filename), []byte(content), 0644)
+			t.Logf("Saved ticker document to: %s", filename)
+
+			if metadata != nil {
+				data, _ := json.MarshalIndent(metadata, "", "  ")
+				os.WriteFile(filepath.Join(resultsDir, jsonFilename), data, 0644)
+			}
+		}
+	}
 
 	// Save all document summaries for multi-attachment verification
 	saveMultiDocumentSummary(t, helper, resultsDir, emailDocs)

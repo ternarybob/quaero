@@ -11,11 +11,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
-	"github.com/go-pdf/fpdf"
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -35,6 +33,7 @@ type EmailWorker struct {
 	mailerService   *mailer.Service
 	documentStorage interfaces.DocumentStorage
 	searchService   interfaces.SearchService
+	pdfService      interfaces.PDFService
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	serverHost      string
@@ -49,6 +48,7 @@ func NewEmailWorker(
 	mailerService *mailer.Service,
 	documentStorage interfaces.DocumentStorage,
 	searchService interfaces.SearchService,
+	pdfService interfaces.PDFService,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	serverHost string,
@@ -58,6 +58,7 @@ func NewEmailWorker(
 		mailerService:   mailerService,
 		documentStorage: documentStorage,
 		searchService:   searchService,
+		pdfService:      pdfService,
 		logger:          logger,
 		jobMgr:          jobMgr,
 		serverHost:      serverHost,
@@ -372,7 +373,7 @@ func (w *EmailWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 
 			switch attachmentFormat {
 			case "pdf":
-				pdfBytes, err := convertMarkdownToPDF(markdownContent, doc.Title)
+				pdfBytes, err := w.pdfService.ConvertMarkdownToPDF(markdownContent, doc.Title)
 				if err != nil {
 					w.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to convert document to PDF, skipping attachment")
 					continue
@@ -1964,213 +1965,6 @@ func sanitizeAttachmentFilename(title string) string {
 	}
 
 	return safe
-}
-
-// convertMarkdownToPDF converts markdown content to a PDF byte slice
-// Returns the PDF bytes or an error if conversion fails
-func convertMarkdownToPDF(markdown, title string) ([]byte, error) {
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(15, 15, 15)
-	pdf.SetAutoPageBreak(true, 15)
-	pdf.AddPage()
-
-	// Set title
-	pdf.SetFont("Arial", "B", 16)
-	if title != "" {
-		pdf.MultiCell(0, 8, title, "", "L", false)
-		pdf.Ln(5)
-	}
-
-	// Process markdown line by line
-	lines := strings.Split(markdown, "\n")
-	inCodeBlock := false
-	inTable := false
-	tableRows := [][]string{}
-
-	for _, line := range lines {
-		// Handle code blocks
-		if strings.HasPrefix(line, "```") {
-			inCodeBlock = !inCodeBlock
-			if inCodeBlock {
-				pdf.SetFont("Courier", "", 9)
-				pdf.SetFillColor(245, 245, 245)
-			} else {
-				pdf.SetFont("Arial", "", 11)
-				pdf.Ln(3)
-			}
-			continue
-		}
-
-		if inCodeBlock {
-			// Render code line
-			pdf.SetX(20)
-			pdf.MultiCell(0, 5, line, "", "L", true)
-			continue
-		}
-
-		// Handle tables
-		if strings.HasPrefix(line, "|") {
-			// Skip separator lines
-			if regexp.MustCompile(`^\|[\s\-:|]+\|$`).MatchString(line) {
-				continue
-			}
-
-			if !inTable {
-				inTable = true
-				tableRows = [][]string{}
-			}
-
-			// Parse table row
-			cells := strings.Split(line, "|")
-			var row []string
-			for _, cell := range cells {
-				cell = strings.TrimSpace(cell)
-				if cell != "" {
-					row = append(row, cell)
-				}
-			}
-			if len(row) > 0 {
-				tableRows = append(tableRows, row)
-			}
-			continue
-		} else if inTable {
-			// End of table, render it
-			renderPDFTable(pdf, tableRows)
-			inTable = false
-			tableRows = nil
-		}
-
-		// Handle headings
-		if strings.HasPrefix(line, "# ") {
-			pdf.Ln(5)
-			pdf.SetFont("Arial", "B", 14)
-			pdf.MultiCell(0, 7, strings.TrimPrefix(line, "# "), "", "L", false)
-			pdf.Ln(3)
-			pdf.SetFont("Arial", "", 11)
-			continue
-		}
-		if strings.HasPrefix(line, "## ") {
-			pdf.Ln(4)
-			pdf.SetFont("Arial", "B", 13)
-			pdf.MultiCell(0, 6, strings.TrimPrefix(line, "## "), "", "L", false)
-			pdf.Ln(2)
-			pdf.SetFont("Arial", "", 11)
-			continue
-		}
-		if strings.HasPrefix(line, "### ") {
-			pdf.Ln(3)
-			pdf.SetFont("Arial", "B", 12)
-			pdf.MultiCell(0, 6, strings.TrimPrefix(line, "### "), "", "L", false)
-			pdf.Ln(2)
-			pdf.SetFont("Arial", "", 11)
-			continue
-		}
-
-		// Handle bullet points
-		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
-			pdf.SetFont("Arial", "", 11)
-			pdf.SetX(20)
-			bullet := "\x95 " // bullet character
-			pdf.MultiCell(0, 5, bullet+strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* "), "", "L", false)
-			continue
-		}
-
-		// Handle numbered lists
-		if matched, _ := regexp.MatchString(`^\d+\.\s`, line); matched {
-			pdf.SetFont("Arial", "", 11)
-			pdf.SetX(20)
-			pdf.MultiCell(0, 5, line, "", "L", false)
-			continue
-		}
-
-		// Handle horizontal rules
-		if line == "---" || line == "***" || line == "___" {
-			pdf.Ln(3)
-			pdf.Line(15, pdf.GetY(), 195, pdf.GetY())
-			pdf.Ln(3)
-			continue
-		}
-
-		// Handle bold text by stripping markers (fpdf doesn't support inline formatting easily)
-		line = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(line, "$1")
-		line = regexp.MustCompile(`__([^_]+)__`).ReplaceAllString(line, "$1")
-
-		// Handle italic
-		line = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(line, "$1")
-		line = regexp.MustCompile(`_([^_]+)_`).ReplaceAllString(line, "$1")
-
-		// Handle links - extract text only
-		line = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`).ReplaceAllString(line, "$1")
-
-		// Strip HTML tags (like <span style="...">)
-		line = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(line, "")
-
-		// Empty lines
-		if strings.TrimSpace(line) == "" {
-			pdf.Ln(3)
-			continue
-		}
-
-		// Regular paragraph
-		pdf.SetFont("Arial", "", 11)
-		pdf.MultiCell(0, 5, line, "", "L", false)
-	}
-
-	// Render any remaining table
-	if inTable && len(tableRows) > 0 {
-		renderPDFTable(pdf, tableRows)
-	}
-
-	// Get PDF bytes
-	var buf bytes.Buffer
-	err := pdf.Output(&buf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate PDF: %w", err)
-	}
-
-	return buf.Bytes(), nil
-}
-
-// renderPDFTable renders a table in the PDF
-func renderPDFTable(pdf *fpdf.Fpdf, rows [][]string) {
-	if len(rows) == 0 {
-		return
-	}
-
-	// Calculate column widths based on content
-	pageWidth := 180.0 // A4 width minus margins
-	numCols := len(rows[0])
-	if numCols == 0 {
-		return
-	}
-	colWidth := pageWidth / float64(numCols)
-
-	pdf.SetFont("Arial", "", 10)
-
-	for i, row := range rows {
-		// Header row in bold
-		if i == 0 {
-			pdf.SetFont("Arial", "B", 10)
-			pdf.SetFillColor(230, 230, 230)
-		} else {
-			pdf.SetFont("Arial", "", 10)
-			pdf.SetFillColor(255, 255, 255)
-		}
-
-		for j, cell := range row {
-			if j < numCols {
-				// Truncate long cells
-				if len(cell) > 50 {
-					cell = cell[:47] + "..."
-				}
-				pdf.CellFormat(colWidth, 6, cell, "1", 0, "L", i == 0, 0, "")
-			}
-		}
-		pdf.Ln(-1)
-	}
-
-	pdf.Ln(3)
-	pdf.SetFont("Arial", "", 11)
 }
 
 // outputFormatterInstructions holds parsed instructions from output_formatter document

@@ -501,6 +501,7 @@ tail -500 "$WORKDIR/logs/test.log"
 | Cat entire log files | VIOLATION |
 | Run commands without output capture | VIOLATION |
 | Skip writing summary.md | VIOLATION |
+| Write files to root directory (must use $WORKDIR) | VIOLATION |
 | Leave dead code | VIOLATION |
 
 ## ALLOWED ACTIONS

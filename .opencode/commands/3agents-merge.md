@@ -1,9 +1,17 @@
+---
+name: 3agents-merge
+description: Git commit, update main, merge, and push.
+allowed-tools:
+  - Bash
+  - Task
+---
+
 **INSTRUCTION:** Use the Task tool with `general-purpose` subagent for commit, push, and merge operations.
 
-**PREREQUISITE:** Follow `/commit` command workflow first, then proceed with merge.
+**PREREQUISITE:** Follow `/3agents-commit` command workflow first, then proceed with merge.
 
 **CRITICAL RULES:**
-- Inherit all rules from `/commit` command
+- Inherit all rules from `/3agents-commit` command
 - **AUTO-CONFIRM**: Proceed with all git operations without prompting user
 - Handle merge conflicts by reporting them clearly
 
@@ -11,10 +19,10 @@
 
 1. **Check Current Branch**
    - `git branch --show-current`
-   - **If `main`**: Run `/commit` only, skip merge workflow, exit
+   - **If `main`**: Run `/3agents-commit` only, skip merge workflow, exit
 
 2. **Execute Commit**
-   - Run full `/commit` workflow (stage, format, commit, push)
+   - Run full `/3agents-commit` workflow (stage, format, commit, push)
 
 3. **Update Main**
    - `git checkout main`

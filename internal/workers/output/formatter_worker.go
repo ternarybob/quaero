@@ -450,16 +450,108 @@ func (w *FormatterWorker) processMultiDocumentMode(
 		Str("format", format).
 		Str("style", style).
 		Bool("used_config_tickers", usingConfigTickers).
-		Msg("Multi-document output completed")
+		Msg("Multi-document output: created per-ticker documents")
+
+	// Create a summary document that acts as the "main" document for the email worker
+	// This document will be the email body and will list the per-ticker documents as attachments
+	summaryDoc := w.buildSummaryDocument(title, tickers, createdDocs, format, style, baseURL, inputTags, outputTags, managerID)
+	if err := w.documentStorage.SaveDocument(summaryDoc); err != nil {
+		return "", fmt.Errorf("failed to save summary document: %w", err)
+	}
+
+	w.logger.Info().
+		Str("doc_id", summaryDoc.ID).
+		Msg("Multi-document output: created summary document")
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf(
-			"Created %d output documents for tickers: %v (format=%s, multi_document=true)",
-			len(createdDocs), tickers, format,
+			"Created %d output documents and 1 summary document for tickers: %v",
+			len(createdDocs), tickers,
 		))
 	}
 
 	return "", nil
+}
+
+// buildSummaryDocument creates a summary document for multi-document mode.
+// This document serves as the email body and lists the attachment IDs.
+func (w *FormatterWorker) buildSummaryDocument(
+	title string,
+	tickers []string,
+	attachmentIDs []string,
+	format, style, baseURL string,
+	inputTags, outputTags []string,
+	managerID string,
+) *models.Document {
+	var sb strings.Builder
+
+	// Email instructions section (YAML-like frontmatter)
+	sb.WriteString("---\n")
+	sb.WriteString("# Email Instructions (parsed by email worker)\n")
+	sb.WriteString(fmt.Sprintf("format: %s\n", format))
+	sb.WriteString("attachment: true\n") // Always true for summary doc to ensure attachments are processed
+	sb.WriteString(fmt.Sprintf("style: %s\n", style))
+	sb.WriteString(fmt.Sprintf("base_url: %s\n", baseURL))
+	sb.WriteString(fmt.Sprintf("document_count: %d\n", len(attachmentIDs)))
+
+	// List document IDs for attachment
+	if len(attachmentIDs) > 0 {
+		sb.WriteString("document_ids:\n")
+		for _, id := range attachmentIDs {
+			sb.WriteString(fmt.Sprintf("  - %s\n", id))
+		}
+	}
+	sb.WriteString("---\n\n")
+
+	// Build content for the email body
+	var contentMarkdown strings.Builder
+	contentMarkdown.WriteString(fmt.Sprintf("# %s\n\n", title))
+	contentMarkdown.WriteString(fmt.Sprintf("**Generated**: %s\n\n", time.Now().Format("2 January 2006 3:04 PM MST")))
+
+	if len(tickers) > 0 {
+		contentMarkdown.WriteString("Please find attached the analysis reports for the following tickers:\n\n")
+		for _, ticker := range tickers {
+			contentMarkdown.WriteString(fmt.Sprintf("- **%s**\n", ticker))
+		}
+	} else {
+		contentMarkdown.WriteString("Please find attached the analysis reports.\n")
+	}
+
+	// Add content to full document
+	sb.WriteString(contentMarkdown.String())
+
+	// Convert markdown content to HTML
+	htmlContent := w.convertMarkdownToHTML(contentMarkdown.String())
+
+	// Build tags
+	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
+	finalTags := append(outputTags, dateTag, "email-output", "summary", "multi-document-summary")
+
+	// Build metadata
+	metadata := map[string]interface{}{
+		"source_count":   len(attachmentIDs),
+		"attachment_ids": attachmentIDs,
+		"tickers":        tickers,
+		"format":         format,
+		"attachment":     true,
+		"style":          style,
+		"format_date":    time.Now().Format(time.RFC3339),
+		"email_ready":    true,
+		"multi_document": true, // Mark as multi-document parent
+	}
+
+	return &models.Document{
+		ID:              uuid.New().String(),
+		Title:           title + " - Summary",
+		ContentMarkdown: sb.String(),
+		ContentHTML:     htmlContent,
+		Tags:            finalTags,
+		Jobs:            []string{managerID},
+		SourceType:      "output_formatter",
+		CreatedAt:       time.Now().Add(1 * time.Second), // Ensure it's created after the attachments
+		UpdatedAt:       time.Now().Add(1 * time.Second),
+		Metadata:        metadata,
+	}
 }
 
 // groupDocsByTicker groups documents by their ticker tag.

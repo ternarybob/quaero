@@ -108,6 +108,9 @@ type App struct {
 	// Transform service
 	TransformService *transform.Service
 
+	// PDF service
+	PDFService interfaces.PDFService
+
 	// Places service
 	PlacesService interfaces.PlacesService
 
@@ -710,6 +713,10 @@ func (a *App) initServices() error {
 	a.TransformService = transform.NewService(a.Logger)
 	a.Logger.Debug().Msg("Transform service initialized")
 
+	// 6.8.0. Initialize PDF service
+	a.PDFService = pdf.NewService(a.Logger)
+	a.Logger.Debug().Msg("PDF service initialized")
+
 	// 6.8.1. Initialize Places service (Google Places API integration)
 	a.PlacesService = places.NewService(
 		&a.Config.PlacesAPI,
@@ -1196,6 +1203,7 @@ func (a *App) initServices() error {
 		a.MailerService,
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
+		a.PDFService,
 		a.Logger,
 		jobMgr,
 		a.Config.Server.Host,
