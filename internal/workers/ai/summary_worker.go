@@ -283,6 +283,7 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 
 	// Extract required_tickers (optional - for validating all stocks are in output)
 	// This is passed from the orchestrator for terminal analyze_summary steps
+	// If not explicitly set, auto-extract from jobDef.Config["variables"] for step-based orchestration
 	var requiredTickers []string
 	if tickers, ok := stepConfig["required_tickers"].([]interface{}); ok {
 		for _, t := range tickers {
@@ -295,6 +296,24 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 			if t != "" {
 				requiredTickers = append(requiredTickers, strings.ToUpper(t))
 			}
+		}
+	}
+
+	// Auto-extract tickers from job-level variables if required_tickers not explicitly set
+	// This enables ticker validation for step-based orchestrator pipelines
+	if len(requiredTickers) == 0 && jobDef.Config != nil {
+		tickers := workerutil.CollectTickersWithJobDef(nil, jobDef)
+		for _, t := range tickers {
+			if t.Code != "" {
+				requiredTickers = append(requiredTickers, strings.ToUpper(t.Code))
+			}
+		}
+		if len(requiredTickers) > 0 {
+			w.logger.Debug().
+				Str("phase", "init").
+				Str("step_name", step.Name).
+				Strs("auto_extracted_tickers", requiredTickers).
+				Msg("Auto-extracted required_tickers from job variables for validation")
 		}
 	}
 
@@ -1339,6 +1358,29 @@ func (w *SummaryWorker) createDocument(ctx context.Context, summaryContent, prom
 		w.logger.Debug().
 			Strs("cache_tags", cacheTags).
 			Msg("Applied cache tags to document")
+	}
+
+	// Propagate ticker tags from source documents
+	// This enables downstream steps (format_output, email_report) to identify the stock
+	tickerSet := make(map[string]bool)
+	for _, doc := range documents {
+		for _, tag := range doc.Tags {
+			// Check for ticker: prefix format
+			if strings.HasPrefix(tag, "ticker:") {
+				ticker := strings.TrimPrefix(tag, "ticker:")
+				tickerSet[strings.ToLower(ticker)] = true
+			} else if isTickerTag(tag) {
+				// Short lowercase tags that look like tickers (2-5 chars, not system tags)
+				tickerSet[tag] = true
+			}
+		}
+	}
+	// Add unique ticker tags
+	for ticker := range tickerSet {
+		tags = append(tags, ticker)
+		w.logger.Debug().
+			Str("ticker_tag", ticker).
+			Msg("Propagated ticker tag from source documents")
 	}
 
 	w.logger.Info().
@@ -3337,4 +3379,51 @@ func orderMarkdownKeys(keys []string) []string {
 		}
 	}
 	return result
+}
+
+// isTickerTag checks if a tag looks like a stock ticker (2-5 lowercase letters)
+// Excludes known system tags that might match the pattern
+func isTickerTag(tag string) bool {
+	// Must be 2-5 characters
+	if len(tag) < 2 || len(tag) > 5 {
+		return false
+	}
+
+	// Must be lowercase
+	if tag != strings.ToLower(tag) {
+		return false
+	}
+
+	// Must be all letters
+	for _, c := range tag {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+
+	// Exclude known system tags
+	systemTags := map[string]bool{
+		"date":    true,
+		"email":   true,
+		"smsf":    true,
+		"job":     true,
+		"summary": true,
+		"stock":   true,
+		"asx":     true,
+		"test":    true,
+		"deep":    true,
+		"dive":    true,
+		"data":    true,
+		"format":  true,
+		"output":  true,
+		"report":  true,
+		"market":  true,
+		"pdf":     true,
+		"html":    true,
+		"body":    true,
+		"kneppy":  true,
+		"stocks":  true,
+	}
+
+	return !systemTags[tag]
 }

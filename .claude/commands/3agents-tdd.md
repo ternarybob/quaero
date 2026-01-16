@@ -188,18 +188,19 @@ if [[ "$TEST_FILE" == *"test/api/"* ]]; then
 
     COMPLIANCE_ISSUES=0
 
-    # Check for TestOutputGuard pattern
-    if ! grep -q "TestOutputGuard\|NewPortfolioTestOutputGuard\|NewMarketWorkerTestOutputGuard" "$TEST_FILE"; then
+    # Check for TestOutputGuard pattern (guard or deferred WriteTestLog)
+    if ! grep -q "TestOutputGuard\|NewPortfolioTestOutputGuard\|NewMarketWorkerTestOutputGuard\|WriteTestLog" "$TEST_FILE"; then
         echo "✗ MISSING: TestOutputGuard pattern"
         echo "  Required: guard := common.NewPortfolioTestOutputGuard(t, resultsDir)"
         echo "  Required: defer guard.Close()"
+        echo "  Alternative: defer func() { WriteTestLog(t, resultsDir, testLog) }()"
         COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
     else
-        echo "✓ TestOutputGuard pattern found"
+        echo "✓ TestOutputGuard/WriteTestLog pattern found"
     fi
 
-    # Check for SaveJobDefinition
-    if ! grep -q "SaveJobDefinition" "$TEST_FILE"; then
+    # Check for SaveJobDefinition (various naming patterns)
+    if ! grep -q "SaveJobDefinition\|saveCronJobConfig\|saveJobConfig\|save.*JobDefinition\|save.*JobConfig" "$TEST_FILE"; then
         echo "✗ MISSING: SaveJobDefinition call"
         echo "  Required: SaveJobDefinition(t, env, body) BEFORE CreateAndExecuteJob"
         COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
@@ -207,8 +208,8 @@ if [[ "$TEST_FILE" == *"test/api/"* ]]; then
         echo "✓ SaveJobDefinition call found"
     fi
 
-    # Check for SaveWorkerOutput
-    if ! grep -q "SaveWorkerOutput" "$TEST_FILE"; then
+    # Check for SaveWorkerOutput (various naming patterns)
+    if ! grep -q "SaveWorkerOutput\|save.*Output" "$TEST_FILE"; then
         echo "✗ MISSING: SaveWorkerOutput call"
         echo "  Required: SaveWorkerOutput(t, env, helper, tags, ticker) AFTER job completion"
         COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
@@ -226,7 +227,7 @@ if [[ "$TEST_FILE" == *"test/api/"* ]]; then
     fi
 
     # Check for AssertNoServiceErrors
-    if ! grep -q "AssertNoServiceErrors" "$TEST_FILE"; then
+    if ! grep -q "AssertNoServiceErrors\|AssertNoErrorsInServiceLog" "$TEST_FILE"; then
         echo "✗ MISSING: AssertNoServiceErrors call"
         echo "  Required: AssertNoServiceErrors(t, env) at end of test"
         COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))

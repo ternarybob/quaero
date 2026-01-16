@@ -1,8 +1,21 @@
 # API Test Architecture Skill
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ⚠️  MANDATORY SKILL - ENFORCED BY /3agents AND /3agents-tdd     │
+│                                                                 │
+│ This is NOT optional guidance. Tests that don't comply:         │
+│ • Will be REJECTED by /3agents VALIDATOR                        │
+│ • Will be BLOCKED by /3agents-tdd before execution              │
+│                                                                 │
+│ DO NOT write API tests from scratch.                            │
+│ COPY from reference implementation and modify.                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 **Scope:** ALL tests in `test/api/*` (any subdirectory or directly in test/api/)
 
-**Reference Implementations:**
+**Reference Implementations (USE AS TEMPLATE):**
 - `test/api/market_workers/announcements_test.go` - Market worker pattern
 - `test/api/portfolio/stock_deep_dive_test.go` - Portfolio orchestrator pattern
 
@@ -17,6 +30,67 @@ This applies to ALL test/api/ tests including:
 - `test/api/market_workers/*`
 - `test/api/portfolio/*`
 - `test/api/*_test.go` (tests directly in test/api/)
+
+## Enforcement
+
+| Command | Enforcement Point | Action on Non-Compliance |
+|---------|------------------|--------------------------|
+| `/3agents` | VALIDATOR phase | REJECT - must fix before approval |
+| `/3agents-tdd` | PHASE 1 gate | BLOCK - cannot proceed to test execution |
+
+**If you're reading this because your test was rejected:** Copy the structure from a reference implementation. Don't improvise.
+
+## Quick Start - Copy This Boilerplate
+
+```go
+func TestYourTestName(t *testing.T) {
+	// 1. Environment setup
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Skipf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	resultsDir := env.GetResultsDir()
+
+	// 2. Test log for guard pattern
+	var testLog []string
+	testLog = append(testLog, fmt.Sprintf("[%s] Test started: %s", time.Now().Format(time.RFC3339), t.Name()))
+
+	// 3. Ensure test log is written on ALL exit paths (guard pattern)
+	defer func() {
+		WriteTestLog(t, resultsDir, testLog)
+	}()
+
+	// 4. MANDATORY: Save job definition BEFORE execution
+	// For TOML: saveJobConfig(t, resultsDir, "your-job-def.toml")
+	// For JSON: SaveJobDefinition(t, env, body)
+
+	// ... your test logic here ...
+
+	// 5. MANDATORY: Save outputs AFTER job completion (unconditionally)
+	// SaveWorkerOutput(t, env, helper, outputTags, ticker)
+	// OR manually save output.md and output.json
+
+	// 6. MANDATORY: Verify result files exist
+	AssertResultFilesExist(t, resultsDir)
+	// OR: common.RequireTestOutputs(t, resultsDir)
+
+	// 7. MANDATORY: Check for service errors
+	common.AssertNoErrorsInServiceLog(t, env)
+
+	testLog = append(testLog, fmt.Sprintf("[%s] PASS: %s completed", time.Now().Format(time.RFC3339), t.Name()))
+}
+```
+
+**Compliance Checklist (all must be present):**
+- [ ] `resultsDir := env.GetResultsDir()`
+- [ ] `defer WriteTestLog()` or `defer guard.Close()`
+- [ ] `SaveJobDefinition()` or `saveJobConfig()` BEFORE job runs
+- [ ] `SaveWorkerOutput()` or manual output saves AFTER job completes
+- [ ] `AssertResultFilesExist()` or `RequireTestOutputs()`
+- [ ] `AssertNoServiceErrors()` or `AssertNoErrorsInServiceLog()`
 
 ## Required Output Files
 

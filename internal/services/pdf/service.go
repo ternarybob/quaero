@@ -3,6 +3,7 @@ package pdf
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/go-pdf/fpdf"
 	"github.com/ternarybob/arbor"
@@ -37,21 +38,21 @@ func (s *Service) ConvertMarkdownToPDF(markdown, title string) ([]byte, error) {
 		Str("title", title).
 		Msg("Converting markdown to PDF")
 
+	// Strip YAML frontmatter if present (e.g., email instructions)
+	markdown = stripFrontmatter(markdown)
+
 	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(15, 15, 15)
-	pdf.SetAutoPageBreak(true, 15)
+	pdf.SetMargins(10, 10, 10)
+	pdf.SetAutoPageBreak(true, 10)
 	pdf.AddPage()
 
-	// Default font
-	pdf.SetFont("Arial", "", 11)
+	// Default font (reduced from 11pt to 9pt)
+	pdf.SetFont("Arial", "", 9)
 
-	// Set title
-	if title != "" {
-		pdf.SetFont("Arial", "B", 16)
-		pdf.MultiCell(0, 8, title, "", "L", false)
-		pdf.Ln(5)
-		pdf.SetFont("Arial", "", 11)
-	}
+	// Note: Title is expected to be in the markdown content as H1 heading.
+	// We don't add a separate title here to avoid duplication.
+	// The title parameter is kept for PDF metadata purposes (e.g., document properties).
+	_ = title // Acknowledge parameter for future PDF metadata use
 
 	// Configure goldmark
 	md := goldmark.New(
@@ -69,7 +70,7 @@ func (s *Service) ConvertMarkdownToPDF(markdown, title string) ([]byte, error) {
 		source: source,
 		logger: s.logger,
 		font:   "Arial",
-		size:   11,
+		size:   9,
 	}
 
 	if err := renderer.render(doc); err != nil {
@@ -150,21 +151,21 @@ func (r *pdfRenderer) walk(n ast.Node, entering bool) (ast.WalkStatus, error) {
 
 func (r *pdfRenderer) handleHeading(n *ast.Heading, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		r.pdf.Ln(4)
-		size := 16.0
+		r.pdf.Ln(6)
+		size := 14.0
 		switch n.Level {
 		case 1:
-			size = 16
-		case 2:
 			size = 14
-		case 3:
-			size = 13
-		default:
+		case 2:
 			size = 12
+		case 3:
+			size = 11
+		default:
+			size = 10
 		}
 		r.pdf.SetFont("Arial", "B", size)
 	} else {
-		r.pdf.Ln(4)
+		r.pdf.Ln(6)
 		// Reset
 		r.updateFont()
 	}
@@ -178,7 +179,7 @@ func (r *pdfRenderer) handleParagraph(n *ast.Paragraph, entering bool) (ast.Walk
 			// r.pdf.Ln(1)
 		}
 	} else {
-		r.pdf.Ln(5)
+		r.pdf.Ln(7)
 	}
 	return ast.WalkContinue, nil
 }
@@ -204,9 +205,11 @@ func (r *pdfRenderer) handleEmphasis(n *ast.Emphasis, entering bool) (ast.WalkSt
 func (r *pdfRenderer) handleCodeSpan(n *ast.CodeSpan, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		r.pdf.SetFont("Courier", "", 10)
-		for i := 0; i < n.Lines().Len(); i++ {
-			line := n.Lines().At(i)
-			r.pdf.Write(5, string(line.Value(r.source)))
+		// CodeSpan is an inline element - iterate through children to get text
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			if textNode, ok := c.(*ast.Text); ok {
+				r.pdf.Write(5, string(textNode.Segment.Value(r.source)))
+			}
 		}
 	} else {
 		r.updateFont() // Restore
@@ -262,6 +265,10 @@ func (r *pdfRenderer) handleList(n *ast.List, entering bool) (ast.WalkStatus, er
 
 func (r *pdfRenderer) handleListItem(n *ast.ListItem, entering bool) (ast.WalkStatus, error) {
 	if entering {
+		// Ensure we start on a new line before drawing the bullet
+		// This prevents list items from overlapping when the previous content
+		// didn't add a line break
+		r.pdf.Ln(5)
 		// Draw bullet
 		indent := float64(r.listLevel) * 5.0
 		r.pdf.SetX(15 + indent)
@@ -317,87 +324,294 @@ func (r *pdfRenderer) renderTable(rows [][]string) {
 		return
 	}
 
-	// Simple dynamic width
-	colMaxLens := make([]int, numCols)
-	totalLen := 0
+	// Use smaller font for tables to fit more content
+	fontSize := 8.0
+	lineHeight := 4.0
 
+	// Calculate column widths based on actual content widths
+	colWidths := r.calculateTableColumnWidths(rows, numCols, pageWidth, fontSize)
+
+	for i, row := range rows {
+		if i == 0 {
+			r.pdf.SetFont("Arial", "B", fontSize)
+			r.pdf.SetFillColor(230, 230, 230)
+		} else {
+			r.pdf.SetFont("Arial", "", fontSize)
+			r.pdf.SetFillColor(255, 255, 255)
+		}
+
+		// Calculate max lines needed for this row using actual string widths
+		maxLines := 1
+		for j, cell := range row {
+			if j < numCols {
+				lines := r.calculateLinesNeededWithWidth(cell, colWidths[j]-2) // -2 for padding
+				if lines > maxLines {
+					maxLines = lines
+				}
+			}
+		}
+
+		// Limit max lines to prevent huge rows
+		if maxLines > 8 {
+			maxLines = 8
+		}
+
+		rowHeight := float64(maxLines)*lineHeight + 2 // +2 for padding
+		startY := r.pdf.GetY()
+		startX := r.pdf.GetX()
+
+		// Check for page break
+		pageHeight := 297.0 - 15.0 // A4 height minus margin
+		if startY+rowHeight > pageHeight {
+			r.pdf.AddPage()
+			startY = r.pdf.GetY()
+		}
+
+		// Render each cell with word wrap
+		for j, cell := range row {
+			if j < numCols {
+				x := startX
+				for k := 0; k < j; k++ {
+					x += colWidths[k]
+				}
+
+				// Draw cell background and border
+				if i == 0 {
+					r.pdf.SetFillColor(230, 230, 230)
+					r.pdf.Rect(x, startY, colWidths[j], rowHeight, "FD")
+				} else {
+					r.pdf.Rect(x, startY, colWidths[j], rowHeight, "D")
+				}
+
+				// Render cell text with word wrap
+				r.pdf.SetXY(x+1, startY+1)
+				r.renderCellTextWithWidth(cell, colWidths[j]-2, lineHeight, maxLines)
+			}
+		}
+
+		// Move to next row
+		r.pdf.SetXY(startX, startY+rowHeight)
+	}
+
+	r.pdf.Ln(3)
+	r.updateFont()
+}
+
+// calculateTableColumnWidths calculates optimal column widths for a table
+// using actual string width measurements from the PDF library.
+func (r *pdfRenderer) calculateTableColumnWidths(rows [][]string, numCols int, pageWidth float64, fontSize float64) []float64 {
+	colWidths := make([]float64, numCols)
+
+	// Set font for measurement
+	r.pdf.SetFont("Arial", "", fontSize)
+
+	// Calculate max width needed for each column using actual string widths
 	for _, row := range rows {
 		for i, cell := range row {
 			if i < numCols {
-				l := len(cell)
-				if l > colMaxLens[i] {
-					colMaxLens[i] = l
+				// Use actual string width measurement + padding
+				cellWidth := r.pdf.GetStringWidth(cell) + 4
+				if cellWidth > colWidths[i] {
+					colWidths[i] = cellWidth
 				}
 			}
 		}
 	}
 
-	for _, l := range colMaxLens {
-		totalLen += l
+	// Also measure header widths with bold font
+	if len(rows) > 0 {
+		r.pdf.SetFont("Arial", "B", fontSize)
+		for i, cell := range rows[0] {
+			if i < numCols {
+				cellWidth := r.pdf.GetStringWidth(cell) + 4
+				if cellWidth > colWidths[i] {
+					colWidths[i] = cellWidth
+				}
+			}
+		}
+		r.pdf.SetFont("Arial", "", fontSize)
 	}
 
-	colWidths := make([]float64, numCols)
-	if totalLen == 0 {
-		// Equal distribution
-		w := pageWidth / float64(numCols)
+	// Apply min/max constraints
+	minWidth := 12.0
+	maxWidth := pageWidth / 3.0 // No column more than 1/3 of page (for tables with many columns)
+
+	for i := range colWidths {
+		if colWidths[i] < minWidth {
+			colWidths[i] = minWidth
+		}
+		if colWidths[i] > maxWidth {
+			colWidths[i] = maxWidth
+		}
+	}
+
+	// Calculate total width
+	totalWidth := 0.0
+	for _, w := range colWidths {
+		totalWidth += w
+	}
+
+	// If total exceeds page width, scale all columns proportionally
+	if totalWidth > pageWidth {
+		scale := pageWidth / totalWidth
 		for i := range colWidths {
-			colWidths[i] = w
-		}
-	} else {
-		// Proportional distribution
-		minWidth := 20.0
-
-		for i, l := range colMaxLens {
-			ratio := float64(l) / float64(totalLen)
-			w := ratio * pageWidth
-			if w < minWidth {
-				w = minWidth
+			colWidths[i] *= scale
+			// Enforce minimum width even after scaling
+			if colWidths[i] < minWidth*0.8 {
+				colWidths[i] = minWidth * 0.8
 			}
-			colWidths[i] = w
 		}
-
-		// Normalize
-		currentTotal := 0.0
-		for _, w := range colWidths {
-			currentTotal += w
+	} else if totalWidth < pageWidth*0.9 {
+		// If total is much less than page width, expand columns proportionally
+		scale := (pageWidth * 0.95) / totalWidth
+		if scale > 1.5 {
+			scale = 1.5 // Don't expand too much
 		}
-
-		scale := pageWidth / currentTotal
 		for i := range colWidths {
 			colWidths[i] *= scale
 		}
 	}
 
-	// Render
-	r.pdf.SetFont("Arial", "", 10)
+	return colWidths
+}
 
-	for i, row := range rows {
-		if i == 0 {
-			r.pdf.SetFont("Arial", "B", 10)
-			r.pdf.SetFillColor(230, 230, 230)
-		} else {
-			r.pdf.SetFont("Arial", "", 10)
-			r.pdf.SetFillColor(255, 255, 255)
-		}
+// calculateLinesNeeded estimates how many lines of text will be needed
+// Deprecated: Use calculateLinesNeededWithWidth for accurate measurement
+func (r *pdfRenderer) calculateLinesNeeded(text string, width, fontSize float64) int {
+	return r.calculateLinesNeededWithWidth(text, width)
+}
 
-		maxHeight := 6.0
-
-		for j, cell := range row {
-			if j < numCols {
-				w := colWidths[j]
-				// Basic truncation
-				maxChars := int(w / 2.0)
-				display := cell
-				if len(display) > maxChars && maxChars > 3 {
-					display = display[:maxChars-3] + "..."
-				}
-
-				r.pdf.CellFormat(w, maxHeight, display, "1", 0, "L", i == 0, 0, "")
-			}
-		}
-		r.pdf.Ln(-1)
+// calculateLinesNeededWithWidth calculates lines needed using actual string width
+func (r *pdfRenderer) calculateLinesNeededWithWidth(text string, width float64) int {
+	if text == "" || width <= 0 {
+		return 1
 	}
 
-	r.pdf.Ln(3)
-	r.updateFont()
+	// Split text into words and calculate how many lines are needed
+	words := splitIntoWords(text)
+	if len(words) == 0 {
+		return 1
+	}
+
+	lines := 1
+	currentLineWidth := 0.0
+	spaceWidth := r.pdf.GetStringWidth(" ")
+
+	for _, word := range words {
+		wordWidth := r.pdf.GetStringWidth(word)
+
+		if currentLineWidth == 0 {
+			// First word on line
+			currentLineWidth = wordWidth
+		} else if currentLineWidth+spaceWidth+wordWidth <= width {
+			// Word fits on current line
+			currentLineWidth += spaceWidth + wordWidth
+		} else {
+			// Need new line
+			lines++
+			currentLineWidth = wordWidth
+		}
+	}
+
+	return lines
+}
+
+// renderCellTextWithWidth renders text with word wrapping within a cell using actual string widths
+func (r *pdfRenderer) renderCellTextWithWidth(text string, width, lineHeight float64, maxLines int) {
+	if text == "" {
+		return
+	}
+
+	// Split text into words
+	words := splitIntoWords(text)
+	if len(words) == 0 {
+		return
+	}
+
+	// Build lines with word wrapping using actual string widths
+	var lines []string
+	currentLine := ""
+	currentWidth := 0.0
+	spaceWidth := r.pdf.GetStringWidth(" ")
+
+	for _, word := range words {
+		wordWidth := r.pdf.GetStringWidth(word)
+
+		if currentLine == "" {
+			// First word on line
+			currentLine = word
+			currentWidth = wordWidth
+		} else if currentWidth+spaceWidth+wordWidth <= width {
+			// Word fits on current line
+			currentLine += " " + word
+			currentWidth += spaceWidth + wordWidth
+		} else {
+			// Need new line
+			lines = append(lines, currentLine)
+			currentLine = word
+			currentWidth = wordWidth
+		}
+	}
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+
+	// Render lines (limited to maxLines)
+	for i := 0; i < len(lines) && i < maxLines; i++ {
+		line := lines[i]
+		// If this is the last line and there's more content, add ellipsis
+		if i == maxLines-1 && len(lines) > maxLines {
+			// Truncate and add ellipsis
+			for r.pdf.GetStringWidth(line+"...") > width && len(line) > 3 {
+				line = line[:len(line)-1]
+			}
+			line += "..."
+		}
+		r.pdf.CellFormat(width, lineHeight, line, "", 2, "L", false, 0, "")
+	}
+}
+
+// renderCellText renders text with word wrapping within a cell
+// Deprecated: Use renderCellTextWithWidth for accurate measurement
+func (r *pdfRenderer) renderCellText(text string, width, lineHeight float64, maxLines int) {
+	r.renderCellTextWithWidth(text, width, lineHeight, maxLines)
+}
+
+// splitIntoWords splits text into words for word wrapping
+func splitIntoWords(text string) []string {
+	var words []string
+	current := ""
+	for _, c := range text {
+		if c == ' ' || c == '\t' || c == '\n' {
+			if current != "" {
+				words = append(words, current)
+				current = ""
+			}
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		words = append(words, current)
+	}
+	return words
+}
+
+// stripFrontmatter removes YAML frontmatter from markdown content.
+// Frontmatter is delimited by --- at the start of the content.
+// This ensures PDF output doesn't include email instructions or other metadata.
+func stripFrontmatter(markdown string) string {
+	if !strings.HasPrefix(markdown, "---\n") {
+		return markdown
+	}
+
+	// Find the end of frontmatter (---\n after the opening ---)
+	endIdx := strings.Index(markdown[4:], "\n---\n")
+	if endIdx == -1 {
+		// No closing frontmatter delimiter found
+		return markdown
+	}
+
+	// Return content after the frontmatter, trimmed
+	return strings.TrimSpace(markdown[4+endIdx+5:])
 }

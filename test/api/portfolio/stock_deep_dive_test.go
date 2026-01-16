@@ -38,6 +38,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/services/pdf"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -184,6 +186,7 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 	}
 
 	// Save output.json
+	var title string
 	if metadata != nil {
 		jsonPath := filepath.Join(resultsDir, "output.json")
 		if data, err := json.MarshalIndent(metadata, "", "  "); err == nil {
@@ -193,7 +196,19 @@ func TestStockDeepDiveWorkflow(t *testing.T) {
 				t.Logf("Saved output.json to: %s (%d bytes)", jsonPath, len(data))
 			}
 		}
+		// Extract title from metadata for PDF
+		if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+			if t, ok := md["title"].(string); ok {
+				title = t
+			}
+		}
 	}
+	if title == "" {
+		title = "Stock Deep Dive Analysis"
+	}
+
+	// Generate and save PDF
+	generateAndSavePDF(t, resultsDir, "output.pdf", content, title)
 
 	// Save job definition
 	saveStockDeepDiveJobConfig(t, resultsDir, jobDefFile)
@@ -397,12 +412,22 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 			t.Logf("Saved summary output.md to: %s", outputPath)
 		}
 
+		// Extract title for PDF
+		summaryTitle := "Multi-Stock Analysis Summary"
 		if metadata != nil {
 			jsonPath := filepath.Join(resultsDir, "output.json")
 			if data, err := json.MarshalIndent(metadata, "", "  "); err == nil {
 				os.WriteFile(jsonPath, data, 0644)
 			}
+			if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+				if t, ok := md["title"].(string); ok && t != "" {
+					summaryTitle = t
+				}
+			}
 		}
+
+		// Generate and save PDF for summary
+		generateAndSavePDF(t, resultsDir, "output.pdf", content, summaryTitle)
 	} else {
 		// Fallback if no summary found (should not happen with updated worker)
 		t.Log("Warning: No summary document found, using first document for output.md")
@@ -410,10 +435,17 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 			docID, _ := emailDocs[0]["id"].(string)
 			content, metadata := getDocumentContentAndMetadata(t, helper, docID)
 			os.WriteFile(filepath.Join(resultsDir, "output.md"), []byte(content), 0644)
+			fallbackTitle := "Stock Analysis"
 			if metadata != nil {
 				data, _ := json.MarshalIndent(metadata, "", "  ")
 				os.WriteFile(filepath.Join(resultsDir, "output.json"), data, 0644)
+				if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+					if t, ok := md["title"].(string); ok && t != "" {
+						fallbackTitle = t
+					}
+				}
 			}
+			generateAndSavePDF(t, resultsDir, "output.pdf", content, fallbackTitle)
 		}
 	}
 
@@ -443,14 +475,25 @@ func TestStockDeepDiveMultipleAttachments(t *testing.T) {
 
 			filename := fmt.Sprintf("output-%s.md", ticker)
 			jsonFilename := fmt.Sprintf("output-%s.json", ticker)
+			pdfFilename := fmt.Sprintf("output-%s.pdf", ticker)
 
 			os.WriteFile(filepath.Join(resultsDir, filename), []byte(content), 0644)
 			t.Logf("Saved ticker document to: %s", filename)
 
+			// Extract title for PDF
+			tickerTitle := fmt.Sprintf("%s Deep Dive Analysis", ticker)
 			if metadata != nil {
 				data, _ := json.MarshalIndent(metadata, "", "  ")
 				os.WriteFile(filepath.Join(resultsDir, jsonFilename), data, 0644)
+				if md, ok := metadata["metadata"].(map[string]interface{}); ok {
+					if titleVal, ok := md["title"].(string); ok && titleVal != "" {
+						tickerTitle = titleVal
+					}
+				}
 			}
+
+			// Generate and save PDF for this ticker
+			generateAndSavePDF(t, resultsDir, pdfFilename, content, tickerTitle)
 		}
 	}
 
@@ -660,6 +703,31 @@ func saveMultiDocumentSummary(t *testing.T, helper *common.HTTPTestHelper, resul
 	} else {
 		t.Logf("Saved multi_document_summary.md to: %s", summaryPath)
 	}
+}
+
+// generateAndSavePDF generates a PDF from markdown content and saves it to the results directory
+func generateAndSavePDF(t *testing.T, resultsDir, filename, markdown, title string) {
+	t.Helper()
+
+	// Create a simple logger for the PDF service
+	logger := arbor.NewLogger()
+	pdfService := pdf.NewService(logger)
+
+	// Generate PDF
+	pdfBytes, err := pdfService.ConvertMarkdownToPDF(markdown, title)
+	if err != nil {
+		t.Logf("Warning: Failed to generate PDF for %s: %v", filename, err)
+		return
+	}
+
+	// Save PDF
+	pdfPath := filepath.Join(resultsDir, filename)
+	if err := os.WriteFile(pdfPath, pdfBytes, 0644); err != nil {
+		t.Logf("Warning: Failed to write PDF %s: %v", pdfPath, err)
+		return
+	}
+
+	t.Logf("Saved PDF to: %s (%d bytes)", pdfPath, len(pdfBytes))
 }
 
 // saveStockDeepDiveJobConfig saves the job definition TOML file to the results directory

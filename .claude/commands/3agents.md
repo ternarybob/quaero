@@ -242,6 +242,44 @@ Use `TaskOutput(task_id, block: false)` to check progress without blocking.
 5. Extract requirements → `$WORKDIR/requirements.md`
 6. Create step docs → `$WORKDIR/step_N.md` for each step
 
+#### API TEST CREATION GATE (MANDATORY for test/api/*)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ CREATING/MODIFYING TESTS IN test/api/* ?                        │
+│                                                                 │
+│ THIS IS A GATE - CANNOT PROCEED WITHOUT COMPLIANCE              │
+│                                                                 │
+│ 1. READ `.claude/skills/test-architecture/SKILL.md` FIRST       │
+│                                                                 │
+│ 2. USE REFERENCE IMPLEMENTATION AS TEMPLATE:                    │
+│    • Portfolio tests: test/api/portfolio/stock_deep_dive_test.go│
+│    • Market worker: test/api/market_workers/announcements_test.go│
+│                                                                 │
+│ 3. REQUIRED PATTERNS (copy from reference, don't improvise):    │
+│    • resultsDir := env.GetResultsDir()                          │
+│    • guard := common.NewPortfolioTestOutputGuard(t, resultsDir) │
+│    • defer guard.Close()                                        │
+│    • SaveJobDefinition() BEFORE execution                       │
+│    • SaveWorkerOutput() AFTER completion (unconditionally)      │
+│    • AssertResultFilesExist() or RequireTestOutputs()           │
+│    • AssertNoServiceErrors() or AssertNoErrorsInServiceLog()    │
+│                                                                 │
+│ 4. STEP DOC MUST INCLUDE:                                       │
+│    ```                                                          │
+│    ## Test Architecture Compliance                              │
+│    Reference: .claude/skills/test-architecture/SKILL.md         │
+│    Template: test/api/portfolio/stock_deep_dive_test.go         │
+│    Required patterns: [checklist of all 5 patterns]             │
+│    ```                                                          │
+│                                                                 │
+│ WORKER: Do NOT write test code from scratch. Copy structure     │
+│ from reference implementation and modify for your test case.    │
+│                                                                 │
+│ VALIDATOR: REJECT if ANY required pattern is missing.           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 **Step doc template (`$WORKDIR/step_N.md`):**
 ```markdown
 # Step N: <title>
@@ -346,6 +384,30 @@ extract_build_errors() {
 - Old function alongside replacement
 - Codebase rule violations
 - Requirements not traceable to code
+- **API test (test/api/*) missing ANY of these patterns:**
+  - `TestOutputGuard` or `NewPortfolioTestOutputGuard` or `NewMarketWorkerTestOutputGuard`
+  - `defer guard.Close()`
+  - `SaveJobDefinition()` call BEFORE job execution
+  - `SaveWorkerOutput()` call AFTER job completion
+  - `AssertResultFilesExist()` or `RequireTestOutputs()` or similar
+  - `AssertNoServiceErrors()` or `AssertNoErrorsInServiceLog()`
+
+**API Test Validation (MANDATORY for test/api/*):**
+```bash
+# VALIDATOR must run this check before approving ANY test in test/api/*
+TEST_FILE="path/to/test.go"
+MISSING=0
+
+grep -q "TestOutputGuard\|NewPortfolioTestOutputGuard\|NewMarketWorkerTestOutputGuard\|WriteTestLog" "$TEST_FILE" || { echo "✗ MISSING: TestOutputGuard/WriteTestLog"; MISSING=$((MISSING+1)); }
+grep -q "defer.*Close()\|defer func().*WriteTestLog" "$TEST_FILE" || { echo "✗ MISSING: defer guard.Close() or defer WriteTestLog"; MISSING=$((MISSING+1)); }
+grep -q "SaveJobDefinition\|saveCronJobConfig\|saveJobConfig\|save.*JobDefinition" "$TEST_FILE" || { echo "✗ MISSING: SaveJobDefinition"; MISSING=$((MISSING+1)); }
+grep -q "SaveWorkerOutput\|save.*Output" "$TEST_FILE" || { echo "✗ MISSING: SaveWorkerOutput"; MISSING=$((MISSING+1)); }
+grep -q "AssertResultFilesExist\|RequireTestOutputs\|RequirePortfolioTestOutputs\|RequireMarketWorkerTestOutputs" "$TEST_FILE" || { echo "✗ MISSING: Output validation"; MISSING=$((MISSING+1)); }
+grep -q "AssertNoServiceErrors\|AssertNoErrorsInServiceLog" "$TEST_FILE" || { echo "✗ MISSING: Service error check"; MISSING=$((MISSING+1)); }
+
+[ $MISSING -gt 0 ] && echo "REJECT: $MISSING required patterns missing" && exit 1
+echo "✓ API Test Architecture: COMPLIANT"
+```
 
 **→ IMMEDIATELY proceed to next step or PHASE 4 (no confirmation)**
 

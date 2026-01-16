@@ -9,13 +9,20 @@
 type = "prompt"
 
 prompt = """
-Perform a comprehensive deep dive analysis of the stock based on all collected data.
+Perform a comprehensive deep dive analysis of ALL stocks in the provided data.
 
 CRITICAL REQUIREMENTS:
-1. For EVERY metric, you MUST report the ACTUAL VALUE from the data
-2. If data is not available, mark it explicitly as "DATA_UNAVAILABLE"
-3. NEVER fabricate or assume values - only use what's in the collected data
-4. You MUST complete the Improvements section at the end
+1. You MUST analyze EVERY stock present in the data - check document titles for ticker codes
+2. For each stock, create a SEPARATE section with header: "# Stock Analysis Report: Company Name (ASX:TICKER)"
+3. For EVERY metric, you MUST report the ACTUAL VALUE from the data
+4. If data is not available, mark it explicitly as "DATA_UNAVAILABLE"
+5. NEVER fabricate or assume values - only use what's in the collected data
+6. You MUST complete the Improvements section at the end
+
+MULTI-STOCK REQUIREMENT:
+- Look for ALL tickers mentioned in the document titles and content
+- Each ticker MUST have its own complete analysis section
+- Do NOT skip any ticker - ALL stocks in the data must be analyzed
 
 === PART 1: QUANTITATIVE FACT-BASED MEASURES ===
 

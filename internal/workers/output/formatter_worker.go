@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -393,15 +394,37 @@ func (w *FormatterWorker) processMultiDocumentMode(
 	var tickers []string
 
 	if usingConfigTickers {
+		// Combined content from input documents - we need to extract per-ticker content
+		var combinedContent strings.Builder
+		for _, dwt := range docsWithTickers {
+			if dwt.doc.ContentMarkdown != "" {
+				combinedContent.WriteString(dwt.doc.ContentMarkdown)
+				combinedContent.WriteString("\n\n")
+			}
+		}
+		fullContent := combinedContent.String()
+
 		// Create a separate output document for each ticker from config
-		// Use all input documents for each ticker (they contain combined analysis)
+		// Extract only that ticker's content from the combined analysis
 		for _, ticker := range configTickers {
 			tickerCode := strings.ToLower(ticker)
-			// Build ticker-specific title
-			tickerTitle := fmt.Sprintf("%s - ASX:%s", title, strings.ToUpper(tickerCode))
+			tickerUpper := strings.ToUpper(tickerCode)
 
-			// Build output document for this ticker using all input documents
-			doc := w.buildOutputDocument(docsWithTickers, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, tickerCode)
+			// Extract ticker-specific content from combined analysis
+			tickerContent := w.extractTickerContent(fullContent, tickerUpper)
+
+			if tickerContent == "" {
+				w.logger.Warn().
+					Str("ticker", tickerUpper).
+					Msg("No ticker-specific content found in combined analysis, skipping")
+				continue
+			}
+
+			// Build ticker-specific title
+			tickerTitle := fmt.Sprintf("%s - ASX:%s", title, tickerUpper)
+
+			// Build output document for this ticker with extracted content
+			doc := w.buildOutputDocumentWithContent(tickerContent, tickerTitle, format, true, style, baseURL, inputTags, outputTags, managerID, order, tickerCode)
 
 			// Save the output document
 			if err := w.documentStorage.SaveDocument(doc); err != nil {
@@ -410,13 +433,13 @@ func (w *FormatterWorker) processMultiDocumentMode(
 			}
 
 			createdDocs = append(createdDocs, doc.ID)
-			tickers = append(tickers, strings.ToUpper(tickerCode))
+			tickers = append(tickers, tickerUpper)
 
 			w.logger.Info().
 				Str("doc_id", doc.ID).
 				Str("ticker", tickerCode).
-				Int("source_count", len(docsWithTickers)).
-				Msg("Created ticker-specific output document from config ticker")
+				Int("content_length", len(tickerContent)).
+				Msg("Created ticker-specific output document with extracted content")
 		}
 	} else {
 		// Create a separate output document for each ticker group
@@ -768,4 +791,204 @@ func (w *FormatterWorker) wrapInEmailTemplate(content string) string {
   </div>
 </body>
 </html>`
+}
+
+// extractTickerContent extracts the content section for a specific ticker from combined analysis.
+// It searches for common section header patterns that indicate the start of a ticker's analysis:
+// - "# Stock Analysis Report: {Company} (ASX:{TICKER})"
+// - "## ASX: {TICKER}" or "## ASX:{TICKER}"
+// - "# {N}. {TICKER}" (numbered sections)
+//
+// Returns the extracted content including the header, or empty string if not found.
+func (w *FormatterWorker) extractTickerContent(content, ticker string) string {
+	if content == "" || ticker == "" {
+		return ""
+	}
+
+	tickerUpper := strings.ToUpper(ticker)
+
+	// Patterns to find the start of a ticker's section
+	// Order matters - more specific patterns first
+	patterns := []string{
+		// "# Stock Analysis Report: Company Name (ASX:GNP)"
+		fmt.Sprintf(`(?i)^#\s+Stock\s+Analysis\s+Report:.*\(ASX:%s\)`, tickerUpper),
+		// "## ASX: GNP" or "## ASX:GNP"
+		fmt.Sprintf(`(?i)^##\s+ASX:\s*%s\s`, tickerUpper),
+		// "# 1. GNP" or "# 2. CGS (Company Name)"
+		fmt.Sprintf(`(?i)^#\s+\d+\.\s+%s[\s\(]`, tickerUpper),
+		// "# GNP Deep Dive" or similar
+		fmt.Sprintf(`(?i)^#\s+%s\s`, tickerUpper),
+	}
+
+	// Patterns to find the end of a section (start of next ticker or major section)
+	endPatterns := []string{
+		`(?m)^#\s+Stock\s+Analysis\s+Report:`,  // Next stock analysis report
+		`(?m)^##\s+ASX:\s*[A-Z]{2,5}\s`,        // Next ASX ticker section
+		`(?m)^#\s+\d+\.\s+[A-Z]{2,5}[\s\(]`,    // Next numbered ticker section
+		`(?m)^---\s*\n##\s+Worker\s+Debug`,     // Debug section at end
+		`(?m)^##\s+Worker\s+Debug\s+Aggregate`, // Debug section header
+	}
+
+	lines := strings.Split(content, "\n")
+	var startIdx int = -1
+	var startPattern string
+
+	// Find start of ticker section
+	for i, line := range lines {
+		for _, pattern := range patterns {
+			re := regexp.MustCompile(pattern)
+			if re.MatchString(line) {
+				startIdx = i
+				startPattern = pattern
+				w.logger.Debug().
+					Str("ticker", tickerUpper).
+					Int("line", i).
+					Str("pattern", pattern).
+					Msg("Found ticker section start")
+				break
+			}
+		}
+		if startIdx >= 0 {
+			break
+		}
+	}
+
+	if startIdx < 0 {
+		w.logger.Warn().
+			Str("ticker", tickerUpper).
+			Msg("Could not find ticker section in combined content")
+		return ""
+	}
+
+	// Find end of ticker section (start of next section or end of content)
+	endIdx := len(lines)
+
+	// Start searching for end after the start line
+	contentAfterStart := strings.Join(lines[startIdx+1:], "\n")
+
+	for _, pattern := range endPatterns {
+		re := regexp.MustCompile(pattern)
+		match := re.FindStringIndex(contentAfterStart)
+		if match != nil {
+			// Calculate actual line index
+			linesBeforeMatch := strings.Count(contentAfterStart[:match[0]], "\n")
+			candidateEndIdx := startIdx + 1 + linesBeforeMatch
+
+			// Don't match the same pattern we started with (avoid self-matching)
+			matchedLine := lines[candidateEndIdx]
+			startRe := regexp.MustCompile(startPattern)
+			if startRe.MatchString(matchedLine) {
+				continue
+			}
+
+			if candidateEndIdx < endIdx {
+				endIdx = candidateEndIdx
+				w.logger.Debug().
+					Str("ticker", tickerUpper).
+					Int("end_line", endIdx).
+					Str("pattern", pattern).
+					Msg("Found ticker section end")
+			}
+		}
+	}
+
+	// Extract the section
+	extractedLines := lines[startIdx:endIdx]
+	extracted := strings.Join(extractedLines, "\n")
+	extracted = strings.TrimSpace(extracted)
+
+	// Remove trailing horizontal rules
+	extracted = strings.TrimSuffix(extracted, "---")
+	extracted = strings.TrimSpace(extracted)
+
+	w.logger.Info().
+		Str("ticker", tickerUpper).
+		Int("start_line", startIdx).
+		Int("end_line", endIdx).
+		Int("extracted_length", len(extracted)).
+		Msg("Extracted ticker-specific content")
+
+	return extracted
+}
+
+// buildOutputDocumentWithContent creates an output document with pre-extracted content.
+// This is used when extracting ticker-specific content from a combined analysis.
+func (w *FormatterWorker) buildOutputDocumentWithContent(
+	content string,
+	title, format string,
+	attachment bool,
+	style, baseURL string,
+	inputTags, outputTags []string,
+	managerID string,
+	order string,
+	ticker string,
+) *models.Document {
+	var sb strings.Builder
+
+	// Email instructions section (YAML-like frontmatter)
+	sb.WriteString("---\n")
+	sb.WriteString("# Email Instructions (parsed by email worker)\n")
+	sb.WriteString(fmt.Sprintf("format: %s\n", format))
+	sb.WriteString(fmt.Sprintf("attachment: %t\n", attachment))
+	sb.WriteString(fmt.Sprintf("style: %s\n", style))
+	sb.WriteString(fmt.Sprintf("base_url: %s\n", baseURL))
+	sb.WriteString(fmt.Sprintf("order: %s\n", order))
+	sb.WriteString("document_count: 1\n")
+	sb.WriteString("---\n\n")
+
+	// Build content
+	var contentMarkdown strings.Builder
+	contentMarkdown.WriteString(fmt.Sprintf("# %s\n\n", title))
+	contentMarkdown.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format("2 January 2006 3:04 PM MST")))
+	contentMarkdown.WriteString(fmt.Sprintf("**Documents**: 1\n\n"))
+	contentMarkdown.WriteString("---\n\n")
+	contentMarkdown.WriteString(content)
+	contentMarkdown.WriteString("\n\n---\n\n")
+
+	// Add content to full document (frontmatter + content)
+	sb.WriteString(contentMarkdown.String())
+
+	// Convert markdown content to HTML for email priority
+	htmlContent := w.convertMarkdownToHTML(contentMarkdown.String())
+
+	// Build tags
+	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
+	finalTags := append(outputTags, dateTag, "email-output")
+
+	// Add ticker tag for multi-document mode
+	if ticker != "" {
+		finalTags = append(finalTags, strings.ToLower(ticker))
+	}
+
+	// Build metadata
+	metadata := map[string]interface{}{
+		"source_count": 1,
+		"source_tags":  inputTags,
+		"tickers":      []string{strings.ToUpper(ticker)},
+		"format":       format,
+		"attachment":   attachment,
+		"style":        style,
+		"order":        order,
+		"format_date":  time.Now().Format(time.RFC3339),
+		"email_ready":  true,
+	}
+
+	// Add ticker to metadata
+	if ticker != "" {
+		metadata["ticker"] = strings.ToUpper(ticker)
+		metadata["multi_document"] = true
+	}
+
+	return &models.Document{
+		ID:              uuid.New().String(),
+		Title:           title,
+		ContentMarkdown: sb.String(),
+		ContentHTML:     htmlContent,
+		Tags:            finalTags,
+		Jobs:            []string{managerID},
+		SourceType:      "output_formatter",
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Metadata:        metadata,
+	}
 }
