@@ -237,9 +237,10 @@ Use `TaskOutput(task_id, block: false)` to check progress without blocking.
 
 1. Read: `docs/architecture/*.md`, `docs/TEST_ARCHITECTURE.md`
 2. For market worker tests: Read `.claude/skills/market-worker-test/SKILL.md` (MANDATORY)
-3. Analyze existing patterns in target directories (use `subagent_type: Explore, model: opus` for codebase exploration)
-4. Extract requirements → `$WORKDIR/requirements.md`
-5. Create step docs → `$WORKDIR/step_N.md` for each step
+3. For ANY API tests: Read `.claude/skills/test-architecture/SKILL.md` (MANDATORY)
+4. Analyze existing patterns in target directories (use `subagent_type: Explore, model: opus` for codebase exploration)
+5. Extract requirements → `$WORKDIR/requirements.md`
+6. Create step docs → `$WORKDIR/step_N.md` for each step
 
 **Step doc template (`$WORKDIR/step_N.md`):**
 ```markdown
@@ -251,7 +252,7 @@ Use `TaskOutput(task_id, block: false)` to check progress without blocking.
 ## Acceptance: AC-1, AC-2
 ```
 
-5. Write `$WORKDIR/architect-analysis.md` (patterns, decisions, cleanup candidates)
+7. Write `$WORKDIR/architect-analysis.md` (patterns, decisions, cleanup candidates)
 
 **→ IMMEDIATELY proceed to PHASE 1 (no confirmation)**
 

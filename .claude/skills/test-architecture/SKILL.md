@@ -1,6 +1,6 @@
 # API Test Architecture Skill
 
-**Scope:** Tests in `test/api/market_workers/` and `test/api/portfolio/`
+**Scope:** ALL tests in `test/api/*` (any subdirectory or directly in test/api/)
 
 **Reference Implementations:**
 - `test/api/market_workers/announcements_test.go` - Market worker pattern
@@ -9,10 +9,14 @@
 ## When to Use
 
 This skill MUST be followed when:
-- Creating new tests in `test/api/market_workers/`
-- Creating new tests in `test/api/portfolio/`
-- Modifying existing market worker or portfolio tests
+- Creating ANY new test in `test/api/*` (any subdirectory)
+- Modifying ANY existing test in `test/api/*`
 - Creating tests that execute job pipelines with output validation
+
+This applies to ALL test/api/ tests including:
+- `test/api/market_workers/*`
+- `test/api/portfolio/*`
+- `test/api/*_test.go` (tests directly in test/api/)
 
 ## Required Output Files
 

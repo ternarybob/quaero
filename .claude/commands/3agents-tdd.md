@@ -55,6 +55,23 @@ echo "Created workdir: $WORKDIR"
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
+│ TEST ARCHITECTURE COMPLIANCE IS MANDATORY (API tests)           │
+│                                                                  │
+│ Before running ANY test in test/api/*, validate against:        │
+│ .claude/skills/test-architecture/SKILL.md                       │
+│                                                                  │
+│ REQUIRED patterns:                                               │
+│ • TestOutputGuard (defer guard.Close())                         │
+│ • SaveJobDefinition() - BEFORE execution                        │
+│ • SaveWorkerOutput() - AFTER completion (unconditionally)       │
+│ • AssertResultFilesExist() - at end                             │
+│ • AssertNoServiceErrors() - at end                              │
+│                                                                  │
+│ If test is NON-COMPLIANT → STOP and push back to user           │
+│ 3agents-tdd does NOT fix tests - user must fix via /3agents     │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
 │ BACKWARD COMPATIBILITY IS NOT REQUIRED                          │
 │                                                                  │
 │ • New code defines the CORRECT behavior                         │
@@ -155,6 +172,143 @@ Verify directory exists before continuing.
 
 **Step 1.6: For UI job tests**
 - Validate against template: `test/ui/job_definition_general_test.go`
+
+**Step 1.7: MANDATORY - Validate test architecture compliance (for API tests)**
+
+For tests in `test/api/` directories, the test code MUST be validated against `.claude/skills/test-architecture/SKILL.md` BEFORE running.
+
+**THIS IS A GATE - DO NOT PROCEED IF VALIDATION FAILS**
+
+````bash
+# Check if this is an API test
+if [[ "$TEST_FILE" == *"test/api/"* ]]; then
+    echo "=== API Test Architecture Compliance Check ==="
+    echo "Validating against: .claude/skills/test-architecture/SKILL.md"
+    echo ""
+
+    COMPLIANCE_ISSUES=0
+
+    # Check for TestOutputGuard pattern
+    if ! grep -q "TestOutputGuard\|NewPortfolioTestOutputGuard\|NewMarketWorkerTestOutputGuard" "$TEST_FILE"; then
+        echo "✗ MISSING: TestOutputGuard pattern"
+        echo "  Required: guard := common.NewPortfolioTestOutputGuard(t, resultsDir)"
+        echo "  Required: defer guard.Close()"
+        COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
+    else
+        echo "✓ TestOutputGuard pattern found"
+    fi
+
+    # Check for SaveJobDefinition
+    if ! grep -q "SaveJobDefinition" "$TEST_FILE"; then
+        echo "✗ MISSING: SaveJobDefinition call"
+        echo "  Required: SaveJobDefinition(t, env, body) BEFORE CreateAndExecuteJob"
+        COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
+    else
+        echo "✓ SaveJobDefinition call found"
+    fi
+
+    # Check for SaveWorkerOutput
+    if ! grep -q "SaveWorkerOutput" "$TEST_FILE"; then
+        echo "✗ MISSING: SaveWorkerOutput call"
+        echo "  Required: SaveWorkerOutput(t, env, helper, tags, ticker) AFTER job completion"
+        COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
+    else
+        echo "✓ SaveWorkerOutput call found"
+    fi
+
+    # Check for AssertResultFilesExist or RequireTestOutputs
+    if ! grep -q "AssertResultFilesExist\|RequireTestOutputs\|RequirePortfolioTestOutputs\|RequireMarketWorkerTestOutputs" "$TEST_FILE"; then
+        echo "✗ MISSING: Output validation call"
+        echo "  Required: AssertResultFilesExist(t, env, 1) or RequireTestOutputs(t, resultsDir)"
+        COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
+    else
+        echo "✓ Output validation call found"
+    fi
+
+    # Check for AssertNoServiceErrors
+    if ! grep -q "AssertNoServiceErrors" "$TEST_FILE"; then
+        echo "✗ MISSING: AssertNoServiceErrors call"
+        echo "  Required: AssertNoServiceErrors(t, env) at end of test"
+        COMPLIANCE_ISSUES=$((COMPLIANCE_ISSUES + 1))
+    else
+        echo "✓ AssertNoServiceErrors call found"
+    fi
+
+    # Check for guard.MarkOutputSaved
+    if ! grep -q "MarkOutputSaved" "$TEST_FILE"; then
+        echo "⚠ MISSING: guard.MarkOutputSaved() call (recommended)"
+        echo "  Recommended: guard.MarkOutputSaved() after SaveWorkerOutput"
+    fi
+
+    echo ""
+
+    if [ $COMPLIANCE_ISSUES -gt 0 ]; then
+        echo "┌─────────────────────────────────────────────────────────────────┐"
+        echo "│ ✗ TEST ARCHITECTURE COMPLIANCE FAILED                           │"
+        echo "│                                                                 │"
+        echo "│ Issues found: $COMPLIANCE_ISSUES                                        │"
+        echo "│                                                                 │"
+        echo "│ The test does NOT follow required patterns from:               │"
+        echo "│ .claude/skills/test-architecture/SKILL.md                      │"
+        echo "│                                                                 │"
+        echo "│ ACTION REQUIRED:                                                │"
+        echo "│ 1. Fix the test to include all required patterns               │"
+        echo "│ 2. Use /3agents to recreate the test properly                  │"
+        echo "│ 3. Re-run /3agents-tdd after test is compliant                 │"
+        echo "│                                                                 │"
+        echo "│ 3agents-tdd does NOT modify tests - tests are IMMUTABLE.       │"
+        echo "│ The test must be fixed by the user or /3agents first.          │"
+        echo "└─────────────────────────────────────────────────────────────────┘"
+
+        # Write compliance failure to workdir
+        cat > "$WORKDIR/compliance_failure.md" << 'COMPLIANCE_EOF'
+# Test Architecture Compliance FAILED
+
+## Test File
+`$TEST_FILE`
+
+## Skill Reference
+`.claude/skills/test-architecture/SKILL.md`
+
+## Missing Required Patterns
+
+The test is missing mandatory patterns required by the test architecture skill.
+See output above for specific missing items.
+
+## Action Required
+
+**3agents-tdd cannot proceed.** Tests are IMMUTABLE in TDD mode.
+
+Options:
+1. Use `/3agents` to recreate the test with proper architecture
+2. Manually fix the test to include required patterns
+3. Re-run `/3agents-tdd` after the test is compliant
+
+## Required Patterns (from test-architecture skill)
+
+1. **TestOutputGuard** - Ensures outputs saved on all exit paths
+2. **SaveJobDefinition** - Save job config BEFORE execution
+3. **SaveWorkerOutput** - Save output AFTER job completion (unconditionally)
+4. **AssertResultFilesExist** - Verify output files at end
+5. **AssertNoServiceErrors** - Check for service errors at end
+
+See `.claude/skills/test-architecture/SKILL.md` for full requirements.
+COMPLIANCE_EOF
+
+        echo ""
+        echo "Compliance failure documented in: $WORKDIR/compliance_failure.md"
+        echo ""
+        echo "STOPPING - Test must be fixed before TDD can proceed."
+        exit 1
+    fi
+
+    echo "✓ API Test Architecture Compliance: PASSED"
+    echo ""
+fi
+````
+
+**CRITICAL:** If compliance check fails, STOP IMMEDIATELY. Do not proceed to PHASE 2.
+The test must be fixed by the user (via /3agents or manually) before TDD can run.
 
 ### PHASE 2: BUILD TEST LIST
 ````bash
@@ -398,7 +552,7 @@ fi
 
 **Step 4.1.5: Validate test result outputs (for API tests) - MANDATORY**
 
-For tests in `test/api/market_workers/` or `test/api/portfolio/`, verify test outputs per `.claude/skills/test-architecture/SKILL.md`:
+For ALL tests in `test/api/*` (any subdirectory), verify test outputs per `.claude/skills/test-architecture/SKILL.md`:
 
 **CRITICAL:** Missing test outputs is a TDD FAILURE. Tests MUST produce outputs on ALL exit paths.
 
@@ -580,6 +734,8 @@ but the full workdir copy above includes all artifacts (tdd_state.md, test_issue
 | **Write files to root directory (must use $WORKDIR)** | FAILURE |
 | **Let full test output into context** | FAILURE |
 | **Paste log file contents (>30 lines)** | FAILURE |
+| **Run non-compliant API test** | FAILURE - must validate against test-architecture skill first |
+| **Fix test to add missing patterns** | FAILURE - tests are IMMUTABLE, push back to user |
 
 ## ALLOWED (explicitly permitted)
 

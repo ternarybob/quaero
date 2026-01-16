@@ -1,0 +1,47 @@
+# Cron Scheduler Test Job Definition
+# =========================================================================
+# Tests that jobs with cron schedules are properly registered and executed.
+# This job uses a simple crawler step that produces verifiable output.
+#
+# SCHEDULE: */5 * * * * (every 5 minutes - minimum allowed)
+# OUTPUT TAG: cron-test-output
+# =========================================================================
+
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "cron-scheduler-test"
+name = "Cron Scheduler Test"
+type = "crawler"
+description = "Tests cron scheduler job registration and execution"
+tags = ["test", "cron", "scheduler"]
+schedule = "*/5 * * * *"
+timeout = "5m"
+enabled = true
+auto_start = false
+
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-16"
+updated = "2026-01-16"
+purpose = "Integration test for cron scheduler functionality"
+
+# =========================================================================
+# Step 1: Simple Crawl (produces output)
+# =========================================================================
+# Crawls a single page to verify job execution produces documents
+
+[step.crawl]
+type = "crawler"
+description = "Crawl a single page to verify job execution"
+on_error = "fail"
+start_urls = ["https://example.com"]
+max_depth = 0
+max_pages = 1
+concurrency = 1
+follow_links = false
+output_tags = ["cron-test-output"]
