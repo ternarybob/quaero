@@ -281,6 +281,53 @@ var (
 			"classifications": {"date", "title", "classification", "metrics"},
 		},
 	}
+
+	// TickerNewsSchema for ticker_news worker
+	TickerNewsSchema = common.WorkerSchema{
+		RequiredFields: []string{"ticker", "news_count", "fetched_at"},
+		OptionalFields: []string{"eodhd_count", "web_search_count", "sentiment_summary", "exchange", "code", "period"},
+		FieldTypes: map[string]string{
+			"ticker":            "string",
+			"news_count":        "number",
+			"eodhd_count":       "number",
+			"web_search_count":  "number",
+			"fetched_at":        "string",
+			"sentiment_summary": "object",
+		},
+	}
+
+	// TickerMetadataSchema for ticker_metadata worker
+	TickerMetadataSchema = common.WorkerSchema{
+		RequiredFields: []string{"ticker", "company_name", "fetched_at"},
+		OptionalFields: []string{"industry", "sector", "location", "address", "isin", "ipo_date", "employees", "market_cap", "enterprise_value", "pe_ratio", "dividend_yield", "currency", "directors", "management", "director_count", "management_count"},
+		FieldTypes: map[string]string{
+			"ticker":           "string",
+			"company_name":     "string",
+			"industry":         "string",
+			"sector":           "string",
+			"location":         "string",
+			"fetched_at":       "string",
+			"directors":        "array",
+			"management":       "array",
+			"director_count":   "number",
+			"management_count": "number",
+			"market_cap":       "number",
+		},
+	}
+
+	// NewsletterSchema for portfolio_newsletter worker
+	NewsletterSchema = common.WorkerSchema{
+		RequiredFields: []string{"portfolio", "tickers", "generated_at"},
+		OptionalFields: []string{"ticker_count", "news_count", "metadata_count", "job_id"},
+		FieldTypes: map[string]string{
+			"portfolio":      "string",
+			"tickers":        "array",
+			"generated_at":   "string",
+			"ticker_count":   "number",
+			"news_count":     "number",
+			"metadata_count": "number",
+		},
+	}
 )
 
 // AnnouncementsRequiredSections defines the sections that must be present in announcements output

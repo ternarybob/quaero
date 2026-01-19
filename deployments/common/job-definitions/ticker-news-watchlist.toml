@@ -1,0 +1,44 @@
+# Ticker News for Watchlist
+# Fetches latest news for tickers specified in config.variables
+
+[definition]
+name = "ticker-news-watchlist"
+description = "Fetch latest news for watchlist tickers"
+tags = ["ticker-news", "watchlist"]
+timeout = 600
+
+# Example variables (override at execution):
+# [config]
+# variables = [
+#   { ticker = "ASX:GNP" },
+#   { ticker = "ASX:CGS" },
+# ]
+
+[[steps]]
+name = "fetch_news"
+worker = "ticker_news"
+[steps.config]
+period = "M1"
+cache_hours = 24
+output_tags = ["ticker-news-output"]
+
+[[steps]]
+name = "format_email"
+worker = "output_formatter"
+depends_on = ["fetch_news"]
+[steps.config]
+input_tags = ["ticker-news-output"]
+output_tags = ["email-ready"]
+format = "inline"
+style = "body"
+order = "ticker"
+title = "Watchlist News Summary"
+
+[[steps]]
+name = "send_email"
+worker = "email"
+depends_on = ["format_email"]
+[steps.config]
+input_tags = ["email-ready"]
+to = "{email_recipient}"
+subject = "Watchlist News Summary"

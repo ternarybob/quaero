@@ -1,0 +1,63 @@
+# Portfolio Newsletter
+# Generates a comprehensive newsletter with news, metadata, and AI analysis
+
+[definition]
+name = "portfolio-newsletter"
+description = "Generate portfolio newsletter with news summary"
+tags = ["newsletter", "portfolio"]
+timeout = 900
+
+# Example variables (override at execution):
+# [config]
+# variables = [
+#   { ticker = "ASX:GNP" },
+#   { ticker = "ASX:CGS" },
+# ]
+# portfolio_name = "My Portfolio"
+
+[[steps]]
+name = "fetch_news"
+worker = "ticker_news"
+[steps.config]
+period = "M1"
+cache_hours = 24
+output_tags = ["data-collection"]
+
+[[steps]]
+name = "fetch_metadata"
+worker = "ticker_metadata"
+[steps.config]
+cache_hours = 168
+output_tags = ["data-collection"]
+
+[[steps]]
+name = "generate_newsletter"
+worker = "portfolio_newsletter"
+depends_on = ["fetch_news", "fetch_metadata"]
+[steps.config]
+input_tags = ["data-collection"]
+portfolio = "{portfolio_name}"
+model = "gemini"
+output_tags = ["newsletter-output"]
+
+[[steps]]
+name = "format_email"
+worker = "output_formatter"
+depends_on = ["generate_newsletter"]
+[steps.config]
+input_tags = ["newsletter-output"]
+output_tags = ["email-ready"]
+format = "html"
+attachment = true
+attachment_format = "pdf"
+title = "Weekly Portfolio Newsletter"
+
+[[steps]]
+name = "send_email"
+worker = "email"
+depends_on = ["format_email"]
+[steps.config]
+input_tags = ["email-ready"]
+to = "{email_recipient}"
+subject = "Weekly Portfolio Newsletter"
+format = "pdf"

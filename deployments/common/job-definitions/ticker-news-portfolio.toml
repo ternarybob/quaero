@@ -1,0 +1,50 @@
+# Ticker News for Portfolio
+# Fetches latest news for portfolio holdings from Navexa
+
+[definition]
+name = "ticker-news-portfolio"
+description = "Fetch latest news for portfolio holdings"
+tags = ["ticker-news", "portfolio"]
+timeout = 600
+
+# Example config (override at execution):
+# [config]
+# portfolio_name = "My Portfolio"
+
+[[steps]]
+name = "fetch_portfolio"
+worker = "navexa_portfolio"
+[steps.config]
+portfolio_name = "{portfolio_name}"
+output_tags = ["portfolio-holdings"]
+
+[[steps]]
+name = "fetch_news"
+worker = "ticker_news"
+depends_on = ["fetch_portfolio"]
+[steps.config]
+input_tags = ["portfolio-holdings"]
+period = "M1"
+cache_hours = 24
+output_tags = ["ticker-news-output"]
+
+[[steps]]
+name = "format_email"
+worker = "output_formatter"
+depends_on = ["fetch_news"]
+[steps.config]
+input_tags = ["ticker-news-output"]
+output_tags = ["email-ready"]
+format = "inline"
+style = "body"
+order = "ticker"
+title = "Portfolio News Summary"
+
+[[steps]]
+name = "send_email"
+worker = "email"
+depends_on = ["format_email"]
+[steps.config]
+input_tags = ["email-ready"]
+to = "{email_recipient}"
+subject = "Portfolio News - {portfolio_name}"

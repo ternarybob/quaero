@@ -214,8 +214,9 @@ func (f *ProviderFactory) generateWithClaude(ctx context.Context, request *Conte
 		return nil, err
 	}
 
-	// Use default model if not specified
-	if model == "" {
+	// Use default model if not specified or if model is just the provider name
+	// "claude" alone is a provider identifier, not a valid model name
+	if model == "" || model == "claude" {
 		model = f.claudeConfig.Model
 	}
 
@@ -322,8 +323,9 @@ func (f *ProviderFactory) generateWithGemini(ctx context.Context, request *Conte
 		return nil, err
 	}
 
-	// Use default model if not specified
-	if model == "" {
+	// Use default model if not specified or if model is just the provider name
+	// "gemini" alone is a provider identifier, not a valid model name
+	if model == "" || model == "gemini" {
 		model = f.geminiConfig.Model
 	}
 

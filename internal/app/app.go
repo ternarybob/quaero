@@ -986,6 +986,31 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(marketNewsWorker)
 	a.Logger.Debug().Str("step_type", marketNewsWorker.GetType().String()).Msg("Market News worker registered")
 
+	// Register Ticker News worker (EODHD news + Gemini web search for comprehensive coverage)
+	// Fetches news from EODHD API and supplements with web search for recent news
+	tickerNewsWorker := marketworkers.NewTickerNewsWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		a.ProviderFactory,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(tickerNewsWorker)
+	a.Logger.Debug().Str("step_type", tickerNewsWorker.GetType().String()).Msg("Ticker News worker registered")
+
+	// Register Ticker Metadata worker (company profile data from EODHD fundamentals)
+	// Extracts directors, management, industry classification, and key financials
+	tickerMetadataWorker := marketworkers.NewTickerMetadataWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(tickerMetadataWorker)
+	a.Logger.Debug().Str("step_type", tickerMetadataWorker.GetType().String()).Msg("Ticker Metadata worker registered")
+
 	// Register Market Director Interest worker (director interest filings via Markit API)
 	marketDirectorInterestWorker := marketworkers.NewDirectorInterestWorker(
 		a.StorageManager.DocumentStorage(),
@@ -1124,6 +1149,20 @@ func (a *App) initServices() error {
 	)
 	a.StepManager.RegisterWorker(navexaPortfolioFetchWorker)
 	a.Logger.Debug().Str("step_type", navexaPortfolioFetchWorker.GetType().String()).Msg("Navexa Portfolio worker registered")
+
+	// Register Portfolio Newsletter worker (LLM-powered newsletter generation from collected documents)
+	// Synthesizes news and metadata documents into a comprehensive newsletter
+	portfolioNewsletterWorker := portfolioworkers.NewNewsletterWorker(
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.SearchService,
+		a.Logger,
+		jobMgr,
+		a.ProviderFactory,
+		a.Config.Jobs.Debug,
+	)
+	a.StepManager.RegisterWorker(portfolioNewsletterWorker)
+	a.Logger.Debug().Str("step_type", portfolioNewsletterWorker.GetType().String()).Msg("Portfolio Newsletter worker registered")
 
 	// Register Summary worker (synchronous execution, aggregates tagged documents)
 	// Supports multi-provider AI (Gemini, Claude) via provider factory

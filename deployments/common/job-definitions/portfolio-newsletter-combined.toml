@@ -1,0 +1,71 @@
+# Combined Portfolio Newsletter
+# Generates newsletter combining Navexa portfolio holdings with additional watchlist tickers
+
+[definition]
+name = "portfolio-newsletter-combined"
+description = "Generate newsletter combining portfolio and watchlist"
+tags = ["newsletter", "combined"]
+timeout = 900
+
+# Example config (override at execution):
+# [config]
+# portfolio_name = "My Portfolio"
+# variables = [
+#   { ticker = "ASX:GNP" },
+#   { ticker = "ASX:CGS" },
+# ]
+
+[[steps]]
+name = "fetch_portfolio"
+worker = "navexa_portfolio"
+[steps.config]
+portfolio_name = "{portfolio_name}"
+output_tags = ["portfolio-holdings"]
+
+[[steps]]
+name = "fetch_news"
+worker = "ticker_news"
+depends_on = ["fetch_portfolio"]
+[steps.config]
+input_tags = ["portfolio-holdings"]
+period = "M1"
+cache_hours = 24
+output_tags = ["data-collection"]
+
+[[steps]]
+name = "fetch_metadata"
+worker = "ticker_metadata"
+depends_on = ["fetch_portfolio"]
+[steps.config]
+input_tags = ["portfolio-holdings"]
+cache_hours = 168
+output_tags = ["data-collection"]
+
+[[steps]]
+name = "generate_newsletter"
+worker = "portfolio_newsletter"
+depends_on = ["fetch_news", "fetch_metadata"]
+[steps.config]
+input_tags = ["data-collection"]
+portfolio = "combined"
+model = "gemini"
+output_tags = ["newsletter-output"]
+
+[[steps]]
+name = "format_email"
+worker = "output_formatter"
+depends_on = ["generate_newsletter"]
+[steps.config]
+input_tags = ["newsletter-output"]
+output_tags = ["email-ready"]
+format = "html"
+title = "Combined Portfolio Newsletter"
+
+[[steps]]
+name = "send_email"
+worker = "email"
+depends_on = ["format_email"]
+[steps.config]
+input_tags = ["email-ready"]
+to = "{email_recipient}"
+subject = "Combined Portfolio Newsletter"

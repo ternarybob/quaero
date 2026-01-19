@@ -1,6 +1,8 @@
 package eodhd
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -98,37 +100,45 @@ type FundamentalsResponse struct {
 
 // GeneralInfo contains general company information.
 type GeneralInfo struct {
-	Code                  string `json:"Code"`
-	Type                  string `json:"Type"`
-	Name                  string `json:"Name"`
-	Exchange              string `json:"Exchange"`
-	CurrencyCode          string `json:"CurrencyCode"`
-	CurrencyName          string `json:"CurrencyName"`
-	CurrencySymbol        string `json:"CurrencySymbol"`
-	CountryName           string `json:"CountryName"`
-	CountryISO            string `json:"CountryISO"`
-	ISIN                  string `json:"ISIN"`
-	CUSIP                 string `json:"CUSIP"`
-	CIK                   string `json:"CIK"`
-	EmployerIDNumber      string `json:"EmployerIdNumber"`
-	FiscalYearEnd         string `json:"FiscalYearEnd"`
-	IPODate               string `json:"IPODate"`
-	InternationalDomestic string `json:"InternationalDomestic"`
-	Sector                string `json:"Sector"`
-	Industry              string `json:"Industry"`
-	GicSector             string `json:"GicSector"`
-	GicGroup              string `json:"GicGroup"`
-	GicIndustry           string `json:"GicIndustry"`
-	GicSubIndustry        string `json:"GicSubIndustry"`
-	HomeCategory          string `json:"HomeCategory"`
-	IsDelisted            bool   `json:"IsDelisted"`
-	Description           string `json:"Description"`
-	Address               string `json:"Address"`
-	Phone                 string `json:"Phone"`
-	WebURL                string `json:"WebURL"`
-	LogoURL               string `json:"LogoURL"`
-	FullTimeEmployees     int    `json:"FullTimeEmployees"`
-	UpdatedAt             string `json:"UpdatedAt"`
+	Code                  string                 `json:"Code"`
+	Type                  string                 `json:"Type"`
+	Name                  string                 `json:"Name"`
+	Exchange              string                 `json:"Exchange"`
+	CurrencyCode          string                 `json:"CurrencyCode"`
+	CurrencyName          string                 `json:"CurrencyName"`
+	CurrencySymbol        string                 `json:"CurrencySymbol"`
+	CountryName           string                 `json:"CountryName"`
+	CountryISO            string                 `json:"CountryISO"`
+	ISIN                  string                 `json:"ISIN"`
+	CUSIP                 string                 `json:"CUSIP"`
+	CIK                   string                 `json:"CIK"`
+	EmployerIDNumber      string                 `json:"EmployerIdNumber"`
+	FiscalYearEnd         string                 `json:"FiscalYearEnd"`
+	IPODate               string                 `json:"IPODate"`
+	InternationalDomestic string                 `json:"InternationalDomestic"`
+	Sector                string                 `json:"Sector"`
+	Industry              string                 `json:"Industry"`
+	GicSector             string                 `json:"GicSector"`
+	GicGroup              string                 `json:"GicGroup"`
+	GicIndustry           string                 `json:"GicIndustry"`
+	GicSubIndustry        string                 `json:"GicSubIndustry"`
+	HomeCategory          string                 `json:"HomeCategory"`
+	IsDelisted            bool                   `json:"IsDelisted"`
+	Description           string                 `json:"Description"`
+	Address               string                 `json:"Address"`
+	Phone                 string                 `json:"Phone"`
+	WebURL                string                 `json:"WebURL"`
+	LogoURL               string                 `json:"LogoURL"`
+	FullTimeEmployees     int                    `json:"FullTimeEmployees"`
+	UpdatedAt             string                 `json:"UpdatedAt"`
+	Officers              map[string]OfficerInfo `json:"Officers"`
+}
+
+// OfficerInfo represents a company officer/executive
+type OfficerInfo struct {
+	Name     string `json:"Name"`
+	Title    string `json:"Title"`
+	YearBorn string `json:"YearBorn"`
 }
 
 // Highlights contains key financial highlights.
@@ -207,9 +217,51 @@ type AnalystRatings struct {
 }
 
 // Holders contains shareholder information.
+// Uses custom unmarshaler to handle EODHD API returning empty object {} instead of empty array [].
 type Holders struct {
 	Institutions []InstitutionHolder `json:"Institutions"`
 	Funds        []FundHolder        `json:"Funds"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for Holders.
+// EODHD API sometimes returns empty object {} instead of empty array []
+// for Institutions and Funds fields when there's no data.
+func (h *Holders) UnmarshalJSON(data []byte) error {
+	// First try the standard struct unmarshaling
+	type HoldersAlias Holders
+	alias := &HoldersAlias{}
+
+	if err := json.Unmarshal(data, alias); err != nil {
+		// If standard unmarshal fails, try a more flexible approach
+		// Parse as raw map to handle empty objects
+		var raw map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(data, &raw); jsonErr != nil {
+			return fmt.Errorf("failed to unmarshal Holders: %w", err)
+		}
+
+		// Try to unmarshal Institutions, ignore if it fails (empty object case)
+		if instData, ok := raw["Institutions"]; ok {
+			var institutions []InstitutionHolder
+			if jsonErr := json.Unmarshal(instData, &institutions); jsonErr == nil {
+				h.Institutions = institutions
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		// Try to unmarshal Funds, ignore if it fails (empty object case)
+		if fundsData, ok := raw["Funds"]; ok {
+			var funds []FundHolder
+			if jsonErr := json.Unmarshal(fundsData, &funds); jsonErr == nil {
+				h.Funds = funds
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		return nil
+	}
+
+	*h = Holders(*alias)
+	return nil
 }
 
 // InstitutionHolder represents an institutional holder.

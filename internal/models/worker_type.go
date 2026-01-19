@@ -82,6 +82,11 @@ const (
 	WorkerTypeRatingVRS       WorkerType = "rating_vrs"       // Volatility Regime Stability (0-1)
 	WorkerTypeRatingOB        WorkerType = "rating_ob"        // Optionality Bonus (0, 0.5, 1)
 	WorkerTypeRatingComposite WorkerType = "rating_composite" // Composite investability rating
+
+	// Ticker news and newsletter workers
+	WorkerTypeTickerNews          WorkerType = "ticker_news"          // Aggregated news from EODHD + web search
+	WorkerTypeTickerMetadata      WorkerType = "ticker_metadata"      // Company metadata from EODHD fundamentals
+	WorkerTypePortfolioNewsletter WorkerType = "portfolio_newsletter" // LLM-synthesized portfolio newsletter
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -101,7 +106,8 @@ func (w WorkerType) IsValid() bool {
 		WorkerTypeNavexaPortfolio,
 		WorkerTypeTestJobGenerator, WorkerTypeEmailWatcher, WorkerTypeJobTemplate, WorkerTypeOrchestrator,
 		WorkerTypeRatingBFS, WorkerTypeRatingCDS, WorkerTypeRatingNFR, WorkerTypeRatingPPS,
-		WorkerTypeRatingVRS, WorkerTypeRatingOB, WorkerTypeRatingComposite:
+		WorkerTypeRatingVRS, WorkerTypeRatingOB, WorkerTypeRatingComposite,
+		WorkerTypeTickerNews, WorkerTypeTickerMetadata, WorkerTypePortfolioNewsletter:
 		return true
 	}
 	return false
@@ -166,5 +172,8 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeRatingVRS,
 		WorkerTypeRatingOB,
 		WorkerTypeRatingComposite,
+		WorkerTypeTickerNews,
+		WorkerTypeTickerMetadata,
+		WorkerTypePortfolioNewsletter,
 	}
 }

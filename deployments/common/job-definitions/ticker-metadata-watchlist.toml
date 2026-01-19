@@ -1,0 +1,22 @@
+# Ticker Metadata for Watchlist
+# Fetches company metadata for tickers specified in config.variables
+
+[definition]
+name = "ticker-metadata-watchlist"
+description = "Fetch company metadata for watchlist tickers"
+tags = ["ticker-metadata", "watchlist"]
+timeout = 300
+
+# Example variables (override at execution):
+# [config]
+# variables = [
+#   { ticker = "ASX:GNP" },
+#   { ticker = "ASX:CGS" },
+# ]
+
+[[steps]]
+name = "fetch_metadata"
+worker = "ticker_metadata"
+[steps.config]
+cache_hours = 168  # 7 days - metadata is stable
+output_tags = ["ticker-metadata-output"]

@@ -1,0 +1,28 @@
+# Ticker Metadata for Portfolio
+# Fetches company metadata for portfolio holdings from Navexa
+
+[definition]
+name = "ticker-metadata-portfolio"
+description = "Fetch company metadata for portfolio holdings"
+tags = ["ticker-metadata", "portfolio"]
+timeout = 300
+
+# Example config (override at execution):
+# [config]
+# portfolio_name = "My Portfolio"
+
+[[steps]]
+name = "fetch_portfolio"
+worker = "navexa_portfolio"
+[steps.config]
+portfolio_name = "{portfolio_name}"
+output_tags = ["portfolio-holdings"]
+
+[[steps]]
+name = "fetch_metadata"
+worker = "ticker_metadata"
+depends_on = ["fetch_portfolio"]
+[steps.config]
+input_tags = ["portfolio-holdings"]
+cache_hours = 168  # 7 days - metadata is stable
+output_tags = ["ticker-metadata-output"]
