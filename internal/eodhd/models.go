@@ -297,9 +297,51 @@ type ESGScores struct {
 }
 
 // OutstandingShares contains outstanding shares information.
+// Uses custom unmarshaler to handle EODHD API returning empty object {} instead of empty array [].
 type OutstandingShares struct {
 	Annual    []SharesEntry `json:"annual"`
 	Quarterly []SharesEntry `json:"quarterly"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for OutstandingShares.
+// EODHD API sometimes returns empty object {} instead of empty array []
+// for Annual and Quarterly fields when there's no data.
+func (o *OutstandingShares) UnmarshalJSON(data []byte) error {
+	// First try the standard struct unmarshaling
+	type OutstandingSharesAlias OutstandingShares
+	alias := &OutstandingSharesAlias{}
+
+	if err := json.Unmarshal(data, alias); err != nil {
+		// If standard unmarshal fails, try a more flexible approach
+		// Parse as raw map to handle empty objects
+		var raw map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(data, &raw); jsonErr != nil {
+			return fmt.Errorf("failed to unmarshal OutstandingShares: %w", err)
+		}
+
+		// Try to unmarshal Annual, ignore if it fails (empty object case)
+		if annualData, ok := raw["annual"]; ok {
+			var annual []SharesEntry
+			if jsonErr := json.Unmarshal(annualData, &annual); jsonErr == nil {
+				o.Annual = annual
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		// Try to unmarshal Quarterly, ignore if it fails (empty object case)
+		if quarterlyData, ok := raw["quarterly"]; ok {
+			var quarterly []SharesEntry
+			if jsonErr := json.Unmarshal(quarterlyData, &quarterly); jsonErr == nil {
+				o.Quarterly = quarterly
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		return nil
+	}
+
+	*o = OutstandingShares(*alias)
+	return nil
 }
 
 // SharesEntry represents a single entry in outstanding shares.

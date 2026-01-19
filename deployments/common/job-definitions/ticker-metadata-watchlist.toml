@@ -1,22 +1,52 @@
 # Ticker Metadata for Watchlist
+# =========================================================================
 # Fetches company metadata for tickers specified in config.variables
+#
+# WORKFLOW:
+# 1. Fetch Metadata: Get company metadata for each ticker in variables
+#
+# OUTPUT TAG: ticker-metadata-output
+# =========================================================================
 
-[definition]
-name = "ticker-metadata-watchlist"
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "ticker-metadata-watchlist"
+name = "Ticker Metadata (Watchlist)"
+type = "orchestrator"
 description = "Fetch company metadata for watchlist tickers"
 tags = ["ticker-metadata", "watchlist"]
-timeout = 300
+schedule = ""
+timeout = "5m"
+enabled = true
+auto_start = false
 
-# Example variables (override at execution):
-# [config]
-# variables = [
-#   { ticker = "ASX:GNP" },
-#   { ticker = "ASX:CGS" },
-# ]
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-20"
+updated = "2026-01-20"
+purpose = "Fetch metadata for watchlist tickers"
 
-[[steps]]
-name = "fetch_metadata"
-worker = "ticker_metadata"
-[steps.config]
-cache_hours = 168  # 7 days - metadata is stable
+# =========================================================================
+# User Configuration
+# =========================================================================
+[config]
+# Ticker list - add/remove as needed
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:CGS" },
+]
+
+# =========================================================================
+# Step 1: Fetch Metadata
+# =========================================================================
+[step.fetch_metadata]
+type = "ticker_metadata"
+description = "Fetch company metadata for watchlist tickers"
+on_error = "continue"
+cache_hours = 168
 output_tags = ["ticker-metadata-output"]

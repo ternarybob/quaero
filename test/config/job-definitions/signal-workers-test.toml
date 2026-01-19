@@ -6,7 +6,7 @@
 
 id = "signal-workers-test"
 name = "Signal Workers Integration Test"
-type = "sequential"
+type = "orchestrator"
 description = "Tests ASX stock data collection and signal computation pipeline"
 tags = ["test", "signals", "asx"]
 schedule = ""
@@ -22,24 +22,24 @@ cache_type = "none"
 # - ASX:GNP - GenusPlus Group Ltd (infrastructure)
 # - ASX:BCN - Beacon Minerals (mining)
 # - ASX:MYG - Mayfield Childcare (services)
-tickers = ["ASX:GNP", "ASX:BCN", "ASX:MYG"]
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:BCN" },
+    { ticker = "ASX:MYG" },
+]
 
 # Step 1: Collect stock data for each ticker
-[[steps]]
-name = "collect_stock_data"
+[step.collect_stock_data]
 type = "market_fundamentals"
 description = "Fetch comprehensive stock data from EODHD"
-[steps.config]
-ticker = "{ticker}"
+on_error = "continue"
 period = "Y2"
-output_tags = ["test-signals"]
+output_tags = ["compute_signals"]
 
 # Step 2: Compute signals from collected data
-[[steps]]
-name = "compute_signals"
-type = "signal_computer"
+[step.compute_signals]
+type = "signal_analysis"
 depends = "collect_stock_data"
 description = "Compute PBAS, VLI, Regime, and other signals"
-[steps.config]
-tickers = ["ASX:GNP", "ASX:BCN", "ASX:MYG"]
+on_error = "fail"
 output_tags = ["test-signals"]

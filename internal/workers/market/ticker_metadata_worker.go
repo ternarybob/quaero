@@ -26,6 +26,7 @@ import (
 type TickerMetadataWorker struct {
 	documentStorage interfaces.DocumentStorage
 	kvStorage       interfaces.KeyValueStorage
+	searchService   interfaces.SearchService
 	logger          arbor.ILogger
 	jobMgr          *queue.Manager
 	debugEnabled    bool
@@ -69,6 +70,7 @@ type OfficerEntry struct {
 func NewTickerMetadataWorker(
 	documentStorage interfaces.DocumentStorage,
 	kvStorage interfaces.KeyValueStorage,
+	searchService interfaces.SearchService,
 	logger arbor.ILogger,
 	jobMgr *queue.Manager,
 	debugEnabled bool,
@@ -76,6 +78,7 @@ func NewTickerMetadataWorker(
 	return &TickerMetadataWorker{
 		documentStorage: documentStorage,
 		kvStorage:       kvStorage,
+		searchService:   searchService,
 		logger:          logger,
 		jobMgr:          jobMgr,
 		debugEnabled:    debugEnabled,
@@ -94,8 +97,28 @@ func (w *TickerMetadataWorker) Init(ctx context.Context, step models.JobStep, jo
 		stepConfig = make(map[string]interface{})
 	}
 
-	// Collect tickers from step config and job-level variables
+	// Collect tickers from step config and job-level variables first
 	tickers := workerutil.CollectTickersWithJobDef(stepConfig, jobDef)
+
+	// If no tickers found in config, try to extract from upstream documents
+	// This enables pipeline patterns where navexa_portfolio outputs holdings
+	// that downstream steps (fetch_news, fetch_metadata) need to process
+	if len(tickers) == 0 && w.searchService != nil {
+		// Get manager_id for job isolation (use empty string for init, will be resolved later)
+		managerID := ""
+		if w.jobMgr != nil {
+			// Try to get manager_id from context or job state
+			// During Init we may not have the stepID yet, so we search without job filter
+			// and rely on input_tags for document matching
+		}
+
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Msg("No tickers in config, checking upstream documents via input_tags")
+
+		tickers = workerutil.CollectTickersFromUpstreamDocs(ctx, w.searchService, stepConfig, step.Name, managerID, w.logger)
+	}
+
 	if len(tickers) == 0 {
 		return nil, fmt.Errorf("no tickers specified - provide 'ticker', 'tickers', or config.variables")
 	}

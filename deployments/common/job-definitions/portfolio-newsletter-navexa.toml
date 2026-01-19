@@ -1,26 +1,28 @@
-# Ticker News for Portfolio
+# Combined Portfolio Newsletter
 # =========================================================================
-# Fetches latest news for portfolio holdings from Navexa
+# Generates newsletter combining Navexa portfolio holdings with additional watchlist tickers
 #
 # WORKFLOW:
 # 1. Fetch Portfolio: Get holdings from Navexa portfolio
-# 2. Fetch News: Get latest news for each holding
-# 3. Format Output: Format news for email delivery
-# 4. Send Email: Deliver news summary via email
+# 2. Fetch News: Get news for portfolio holdings
+# 3. Fetch Metadata: Get company metadata for holdings
+# 4. Generate Newsletter: AI-generated newsletter content
+# 5. Format Email: Format output for email delivery
+# 6. Send Email: Deliver newsletter via email
 #
-# OUTPUT TAG: ticker-news-output
+# OUTPUT TAG: newsletter-output
 # =========================================================================
 
 # =========================================================================
 # Job Definition (MUST be at root level before any [section])
 # =========================================================================
-id = "ticker-news-portfolio"
-name = "Ticker News (Portfolio)"
+id = "portfolio-newsletter-combined"
+name = "Portfolio Newsletter (Navexa - SMSF)"
 type = "orchestrator"
-description = "Fetch latest news for portfolio holdings"
-tags = ["ticker-news", "portfolio"]
+description = "Generate newsletter combining Navexa portfolio and watchlist"
+tags = ["newsletter", "combined", "portfolio"]
 schedule = ""
-timeout = "10m"
+timeout = "15m"
 enabled = true
 auto_start = false
 
@@ -32,13 +34,20 @@ author = "Claude Code"
 version = "1.0"
 created = "2026-01-20"
 updated = "2026-01-20"
-purpose = "Fetch news for Navexa portfolio holdings"
+purpose = "Combined newsletter from Navexa portfolio and watchlist tickers"
 
 # =========================================================================
 # User Configuration
 # =========================================================================
 [config]
-portfolio_name = "My Portfolio"
+# Portfolio name for Navexa
+portfolio_name = "SMSF"
+
+# Additional watchlist tickers (optional)
+# variables = [
+#   { ticker = "ASX:GNP" },
+#   { ticker = "ASX:CGS" },
+# ]
 
 # =========================================================================
 # Step 1: Fetch Portfolio
@@ -48,42 +57,63 @@ type = "navexa_portfolio"
 description = "Fetch portfolio holdings from Navexa"
 on_error = "fail"
 name = "{config.portfolio_name}"
-output_tags = ["fetch_news"]
+output_tags = ["fetch_news", "fetch_metadata"]
 
 # =========================================================================
 # Step 2: Fetch News
 # =========================================================================
 [step.fetch_news]
 type = "ticker_news"
-description = "Fetch latest news for portfolio holdings"
+description = "Fetch news for portfolio holdings"
 depends = "fetch_portfolio"
 on_error = "continue"
 period = "M1"
 cache_hours = 24
+output_tags = ["generate_newsletter"]
+
+# =========================================================================
+# Step 3: Fetch Metadata
+# =========================================================================
+[step.fetch_metadata]
+type = "ticker_metadata"
+description = "Fetch company metadata for holdings"
+depends = "fetch_portfolio"
+on_error = "continue"
+cache_hours = 168
+output_tags = ["generate_newsletter"]
+
+# =========================================================================
+# Step 4: Generate Newsletter
+# =========================================================================
+[step.generate_newsletter]
+type = "portfolio_newsletter"
+description = "Generate newsletter content"
+depends = "fetch_news,fetch_metadata"
+on_error = "fail"
+portfolio = "combined"
+model = "gemini"
 output_tags = ["format_email"]
 
 # =========================================================================
-# Step 3: Format Output
+# Step 5: Format Email
 # =========================================================================
 [step.format_email]
 type = "output_formatter"
-description = "Format news for email delivery"
-depends = "fetch_news"
+description = "Format newsletter for email"
+depends = "generate_newsletter"
 on_error = "fail"
-format = "inline"
-style = "body"
-order = "ticker"
-title = "Portfolio News Summary"
+format = "html"
+title = "Combined Portfolio Newsletter"
 output_tags = ["send_email"]
 
 # =========================================================================
-# Step 4: Send Email
+# Step 6: Send Email
 # =========================================================================
 [step.send_email]
 type = "email"
-description = "Send news summary via email"
+description = "Send newsletter via email"
 depends = "format_email"
 always_run = true
 on_error = "fail"
 to = "{email_recipient}"
-subject = "Portfolio News - {portfolio_name}"
+subject = "Combined Portfolio Newsletter"

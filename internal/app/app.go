@@ -988,9 +988,11 @@ func (a *App) initServices() error {
 
 	// Register Ticker News worker (EODHD news + Gemini web search for comprehensive coverage)
 	// Fetches news from EODHD API and supplements with web search for recent news
+	// SearchService enables extracting tickers from upstream documents (e.g., navexa_portfolio)
 	tickerNewsWorker := marketworkers.NewTickerNewsWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
+		a.SearchService,
 		a.Logger,
 		jobMgr,
 		a.ProviderFactory,
@@ -1001,9 +1003,11 @@ func (a *App) initServices() error {
 
 	// Register Ticker Metadata worker (company profile data from EODHD fundamentals)
 	// Extracts directors, management, industry classification, and key financials
+	// SearchService enables extracting tickers from upstream documents (e.g., navexa_portfolio)
 	tickerMetadataWorker := marketworkers.NewTickerMetadataWorker(
 		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
+		a.SearchService,
 		a.Logger,
 		jobMgr,
 		a.Config.Jobs.Debug,

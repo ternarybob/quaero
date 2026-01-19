@@ -1,44 +1,81 @@
 # Ticker News for Watchlist
+# =========================================================================
 # Fetches latest news for tickers specified in config.variables
+#
+# WORKFLOW:
+# 1. Fetch News: Get latest news for each ticker in variables
+# 2. Format Output: Format news for email delivery
+# 3. Send Email: Deliver news summary via email
+#
+# OUTPUT TAG: ticker-news-output
+# =========================================================================
 
-[definition]
-name = "ticker-news-watchlist"
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "ticker-news-watchlist"
+name = "Ticker News (Watchlist)"
+type = "orchestrator"
 description = "Fetch latest news for watchlist tickers"
 tags = ["ticker-news", "watchlist"]
-timeout = 600
+schedule = ""
+timeout = "10m"
+enabled = true
+auto_start = false
 
-# Example variables (override at execution):
-# [config]
-# variables = [
-#   { ticker = "ASX:GNP" },
-#   { ticker = "ASX:CGS" },
-# ]
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-20"
+updated = "2026-01-20"
+purpose = "Fetch news for watchlist tickers"
 
-[[steps]]
-name = "fetch_news"
-worker = "ticker_news"
-[steps.config]
+# =========================================================================
+# User Configuration
+# =========================================================================
+[config]
+# Ticker list - add/remove as needed
+variables = [
+    { ticker = "ASX:GNP" },
+    { ticker = "ASX:CGS" },
+]
+
+# =========================================================================
+# Step 1: Fetch News
+# =========================================================================
+[step.fetch_news]
+type = "ticker_news"
+description = "Fetch latest news for watchlist tickers"
+on_error = "continue"
 period = "M1"
 cache_hours = 24
-output_tags = ["ticker-news-output"]
+output_tags = ["format_email"]
 
-[[steps]]
-name = "format_email"
-worker = "output_formatter"
-depends_on = ["fetch_news"]
-[steps.config]
-input_tags = ["ticker-news-output"]
-output_tags = ["email-ready"]
+# =========================================================================
+# Step 2: Format Output
+# =========================================================================
+[step.format_email]
+type = "output_formatter"
+description = "Format news for email delivery"
+depends = "fetch_news"
+on_error = "fail"
 format = "inline"
 style = "body"
 order = "ticker"
 title = "Watchlist News Summary"
+output_tags = ["send_email"]
 
-[[steps]]
-name = "send_email"
-worker = "email"
-depends_on = ["format_email"]
-[steps.config]
-input_tags = ["email-ready"]
+# =========================================================================
+# Step 3: Send Email
+# =========================================================================
+[step.send_email]
+type = "email"
+description = "Send news summary via email"
+depends = "format_email"
+always_run = true
+on_error = "fail"
 to = "{email_recipient}"
 subject = "Watchlist News Summary"

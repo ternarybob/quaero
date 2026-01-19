@@ -23,6 +23,7 @@ func init() {
 	gob.Register([]map[string]interface{}{}) // Used for step_definitions in job metadata
 	gob.Register(map[string]float64{})       // Used by keyword extractor agent for keyword scores
 	gob.Register(map[string]string{})        // Used in document metadata (open_graph, meta, etc.)
+	gob.Register([]map[string]string{})      // Used for directors/management arrays in ticker metadata
 	gob.Register([]string{})                 // Used by agents for keyword lists
 	gob.Register(time.Time{})                // Used in document timestamps and job metadata
 	gob.Register(CrawlConfig{})              // Used in crawler job configs

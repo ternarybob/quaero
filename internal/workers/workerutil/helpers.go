@@ -311,6 +311,151 @@ func MergeOutputTags(parentOutputTags []string, subWorkerTags ...string) []strin
 	return result
 }
 
+// CollectTickersFromUpstreamDocs searches for upstream documents via input_tags and extracts tickers.
+// This enables workers to get tickers from upstream steps like navexa_portfolio which produces
+// documents with holdings data containing ticker symbols.
+//
+// Parameters:
+//   - ctx: context for the operation
+//   - searchService: for tag-based document lookup
+//   - stepConfig: step configuration map (contains input_tags)
+//   - stepName: name of the current step (used as default input_tag)
+//   - managerID: job isolation ID for document filtering
+//   - logger: for logging (can be nil)
+//
+// Returns slice of tickers extracted from upstream documents.
+// Handles navexa_portfolio documents (extracts from holdings array).
+func CollectTickersFromUpstreamDocs(
+	ctx context.Context,
+	searchService interfaces.SearchService,
+	stepConfig map[string]interface{},
+	stepName string,
+	managerID string,
+	logger arbor.ILogger,
+) []common.Ticker {
+	if searchService == nil {
+		return nil
+	}
+
+	// Get input tags for document filtering
+	inputTags := GetInputTags(stepConfig, stepName)
+	if len(inputTags) == 0 {
+		return nil
+	}
+
+	var tickers []common.Ticker
+	seen := make(map[string]bool)
+
+	addTicker := func(t common.Ticker) {
+		if t.Code != "" && !seen[t.String()] {
+			seen[t.String()] = true
+			tickers = append(tickers, t)
+		}
+	}
+
+	// Search for documents with input tags
+	searchOpts := interfaces.SearchOptions{
+		Tags:  inputTags,
+		JobID: managerID,
+		Limit: 100,
+	}
+
+	docs, err := searchService.Search(ctx, "", searchOpts)
+	if err != nil {
+		if logger != nil {
+			logger.Debug().Err(err).Strs("input_tags", inputTags).Msg("Failed to search for upstream documents")
+		}
+		return nil
+	}
+
+	if logger != nil {
+		logger.Debug().
+			Strs("input_tags", inputTags).
+			Str("manager_id", managerID).
+			Int("doc_count", len(docs)).
+			Msg("Found upstream documents for ticker extraction")
+	}
+
+	// Extract tickers from document metadata
+	for _, doc := range docs {
+		if doc.Metadata == nil {
+			continue
+		}
+
+		// Handle navexa_portfolio documents - extract from holdings array
+		if doc.SourceType == "navexa_portfolio" {
+			holdings, ok := doc.Metadata["holdings"].([]interface{})
+			if !ok {
+				// Try typed array
+				if holdingsTyped, ok := doc.Metadata["holdings"].([]map[string]interface{}); ok {
+					for _, h := range holdingsTyped {
+						ticker := extractTickerFromHolding(h)
+						addTicker(ticker)
+					}
+				}
+				continue
+			}
+			for _, h := range holdings {
+				holdingMap, ok := h.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				ticker := extractTickerFromHolding(holdingMap)
+				addTicker(ticker)
+			}
+		}
+	}
+
+	if logger != nil && len(tickers) > 0 {
+		var tickerStrs []string
+		for _, t := range tickers {
+			tickerStrs = append(tickerStrs, t.String())
+		}
+		logger.Info().
+			Strs("tickers", tickerStrs).
+			Int("count", len(tickers)).
+			Msg("Extracted tickers from upstream documents")
+	}
+
+	return tickers
+}
+
+// extractTickerFromHolding extracts a Ticker from a holding map.
+// Handles exchange and symbol fields, mapping common exchange codes.
+func extractTickerFromHolding(holding map[string]interface{}) common.Ticker {
+	symbol, _ := holding["symbol"].(string)
+	exchange, _ := holding["exchange"].(string)
+
+	if symbol == "" {
+		return common.Ticker{}
+	}
+
+	// Map common exchange codes
+	mappedExchange := mapExchangeCode(exchange)
+
+	// Build ticker string and parse
+	if mappedExchange != "" {
+		return common.ParseTicker(mappedExchange + ":" + symbol)
+	}
+	return common.ParseTicker(symbol)
+}
+
+// mapExchangeCode maps various exchange code formats to standard codes.
+func mapExchangeCode(exchange string) string {
+	switch exchange {
+	case "AU", "ASX", "AUS":
+		return "ASX"
+	case "US", "NYSE", "NASDAQ":
+		return "US"
+	case "LSE", "LON", "UK":
+		return "LSE"
+	case "TSX", "TSE", "CA":
+		return "TSX"
+	default:
+		return exchange
+	}
+}
+
 // AssociateDocumentWithJob associates an existing document with a job execution.
 // This is used when a worker reuses a cached document from a previous job.
 // It appends the job ID to the document's Jobs array (if not already present),

@@ -1,63 +1,104 @@
-# Portfolio Newsletter
-# Generates a comprehensive newsletter with news, metadata, and AI analysis
+# Portfolio Newsletter (Watchlist)
+# =========================================================================
+# Generates a comprehensive newsletter with news, metadata, and AI analysis (Watchlist)
+#
+# WORKFLOW:
+# 1. Fetch News: Get news for tickers from config.variables
+# 2. Fetch Metadata: Get company metadata for tickers
+# 3. Generate Newsletter: AI-generated newsletter content
+# 4. Format Email: Format output for email with PDF attachment
+# 5. Send Email: Deliver newsletter via email
+#
+# OUTPUT TAG: newsletter-output
+# =========================================================================
 
-[definition]
-name = "portfolio-newsletter"
-description = "Generate portfolio newsletter with news summary"
-tags = ["newsletter", "portfolio"]
-timeout = 900
+# =========================================================================
+# Job Definition (MUST be at root level before any [section])
+# =========================================================================
+id = "portfolio-newsletter"
+name = "Portfolio Newsletter (Watchlist)"
+type = "orchestrator"
+description = "Generate portfolio newsletter with news summary (Watchlist)"
+tags = ["newsletter", "watchlist"]
+schedule = ""
+timeout = "15m"
+enabled = true
+auto_start = false
 
-# Example variables (override at execution):
-# [config]
-# variables = [
-#   { ticker = "ASX:GNP" },
-#   { ticker = "ASX:CGS" },
-# ]
-# portfolio_name = "My Portfolio"
+# =========================================================================
+# META (documentation only, not parsed)
+# =========================================================================
+[meta]
+author = "Claude Code"
+version = "1.0"
+created = "2026-01-20"
+updated = "2026-01-20"
+purpose = "Generate newsletter for watchlist tickers"
 
-[[steps]]
-name = "fetch_news"
-worker = "ticker_news"
-[steps.config]
+# =========================================================================
+# User Configuration
+# =========================================================================
+[config]
+# Ticker list
+variables = [{ ticker = "ASX:GNP" }, { ticker = "ASX:CGS" }]
+portfolio_name = "Watchlist"
+
+# =========================================================================
+# Step 1: Fetch News
+# =========================================================================
+[step.fetch_news]
+type = "ticker_news"
+description = "Fetch news for portfolio tickers"
+on_error = "continue"
 period = "M1"
 cache_hours = 24
-output_tags = ["data-collection"]
+output_tags = ["generate_newsletter"]
 
-[[steps]]
-name = "fetch_metadata"
-worker = "ticker_metadata"
-[steps.config]
+# =========================================================================
+# Step 2: Fetch Metadata
+# =========================================================================
+[step.fetch_metadata]
+type = "ticker_metadata"
+description = "Fetch company metadata for tickers"
+on_error = "continue"
 cache_hours = 168
-output_tags = ["data-collection"]
+output_tags = ["generate_newsletter"]
 
-[[steps]]
-name = "generate_newsletter"
-worker = "portfolio_newsletter"
-depends_on = ["fetch_news", "fetch_metadata"]
-[steps.config]
-input_tags = ["data-collection"]
-portfolio = "{portfolio_name}"
+# =========================================================================
+# Step 3: Generate Newsletter
+# =========================================================================
+[step.generate_newsletter]
+type = "portfolio_newsletter"
+description = "Generate newsletter content"
+depends = "fetch_news,fetch_metadata"
+on_error = "fail"
+portfolio = "{config.portfolio_name}"
 model = "gemini"
-output_tags = ["newsletter-output"]
+output_tags = ["format_email"]
 
-[[steps]]
-name = "format_email"
-worker = "output_formatter"
-depends_on = ["generate_newsletter"]
-[steps.config]
-input_tags = ["newsletter-output"]
-output_tags = ["email-ready"]
+# =========================================================================
+# Step 4: Format Email
+# =========================================================================
+[step.format_email]
+type = "output_formatter"
+description = "Format newsletter for email with PDF attachment"
+depends = "generate_newsletter"
+on_error = "fail"
 format = "html"
 attachment = true
 attachment_format = "pdf"
 title = "Weekly Portfolio Newsletter"
+output_tags = ["send_email"]
 
-[[steps]]
-name = "send_email"
-worker = "email"
-depends_on = ["format_email"]
-[steps.config]
-input_tags = ["email-ready"]
+# =========================================================================
+# Step 5: Send Email
+# =========================================================================
+[step.send_email]
+type = "email"
+description = "Send newsletter via email"
+depends = "format_email"
+always_run = true
+on_error = "fail"
 to = "{email_recipient}"
 subject = "Weekly Portfolio Newsletter"
 format = "pdf"
