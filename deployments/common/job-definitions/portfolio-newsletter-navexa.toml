@@ -57,6 +57,7 @@ type = "navexa_portfolio"
 description = "Fetch portfolio holdings from Navexa"
 on_error = "fail"
 name = "{config.portfolio_name}"
+include_closed_positions = false
 output_tags = ["fetch_news", "fetch_metadata"]
 
 # =========================================================================

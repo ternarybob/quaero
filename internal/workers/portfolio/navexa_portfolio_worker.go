@@ -120,6 +120,7 @@ func (w *NavexaPortfolioWorker) Init(ctx context.Context, step models.JobStep, j
 // Config options:
 //   - cache_hours: Freshness window in hours (default: 24)
 //   - force_refresh: If true, bypasses cache and always fetches fresh data
+//   - include_closed_positions: If false (default), filters out holdings with quantity = 0
 func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	if initResult == nil {
 		var err error
@@ -142,6 +143,12 @@ func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobS
 	forceRefresh := false
 	if fr, ok := stepConfig["force_refresh"].(bool); ok {
 		forceRefresh = fr
+	}
+
+	// Extract include_closed_positions option (default: false - filter out closed positions)
+	includeClosedPositions := false
+	if icp, ok := stepConfig["include_closed_positions"].(bool); ok {
+		includeClosedPositions = icp
 	}
 
 	// Check for cached document (unless force_refresh is set)
@@ -207,8 +214,25 @@ func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobS
 		Int("holding_count", len(portfolioWithHoldings.Holdings)).
 		Msg("Navexa portfolio with holdings fetched successfully")
 
+	// Filter out closed positions (quantity = 0) unless include_closed_positions is true
+	holdings := portfolioWithHoldings.Holdings
+	filteredClosedCount := 0
+	if !includeClosedPositions {
+		holdings, filteredClosedCount = w.filterClosedPositions(portfolioWithHoldings.Holdings)
+		if filteredClosedCount > 0 {
+			w.logger.Info().
+				Int("filtered_count", filteredClosedCount).
+				Int("remaining_count", len(holdings)).
+				Msg("Filtered out closed positions (quantity = 0)")
+			if w.jobMgr != nil {
+				w.jobMgr.AddJobLog(ctx, stepID, "info",
+					fmt.Sprintf("Filtered out %d closed positions (quantity = 0), %d active holdings remaining", filteredClosedCount, len(holdings)))
+			}
+		}
+	}
+
 	// Generate markdown content
-	markdown := w.generateNavexaPortfolioMarkdown(&portfolio, portfolioWithHoldings.Holdings)
+	markdown := w.generateNavexaPortfolioMarkdown(&portfolio, holdings, filteredClosedCount)
 
 	// Build tags
 	dateTag := fmt.Sprintf("date:%s", time.Now().Format("2006-01-02"))
@@ -233,9 +257,9 @@ func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobS
 		"baseCurrencyCode": portfolio.BaseCurrencyCode,
 	}
 
-	// Build holdings data with performance metrics
-	holdingsData := make([]map[string]interface{}, len(portfolioWithHoldings.Holdings))
-	for i, h := range portfolioWithHoldings.Holdings {
+	// Build holdings data with performance metrics (using filtered holdings)
+	holdingsData := make([]map[string]interface{}, len(holdings))
+	for i, h := range holdings {
 		holdingsData[i] = map[string]interface{}{
 			"symbol":        h.Symbol,
 			"name":          h.Name,
@@ -265,10 +289,12 @@ func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobS
 		UpdatedAt:       now,
 		LastSynced:      &now,
 		Metadata: map[string]interface{}{
-			"portfolio":     portfolioData,
-			"holdings":      holdingsData,
-			"holding_count": len(portfolioWithHoldings.Holdings),
-			"fetched_at":    now.Format(time.RFC3339),
+			"portfolio":                portfolioData,
+			"holdings":                 holdingsData,
+			"holding_count":            len(holdings),
+			"fetched_at":               now.Format(time.RFC3339),
+			"include_closed_positions": includeClosedPositions,
+			"filtered_closed_count":    filteredClosedCount,
 		},
 	}
 
@@ -278,13 +304,14 @@ func (w *NavexaPortfolioWorker) CreateJobs(ctx context.Context, step models.JobS
 
 	if w.jobMgr != nil {
 		w.jobMgr.AddJobLog(ctx, stepID, "info",
-			fmt.Sprintf("Navexa portfolio document created for %s with %d holdings", portfolio.Name, len(portfolioWithHoldings.Holdings)))
+			fmt.Sprintf("Navexa portfolio document created for %s with %d holdings", portfolio.Name, len(holdings)))
 	}
 
 	w.logger.Info().
 		Int("portfolio_id", portfolio.ID).
 		Str("portfolio_name", portfolio.Name).
-		Int("holding_count", len(portfolioWithHoldings.Holdings)).
+		Int("holding_count", len(holdings)).
+		Int("filtered_closed_count", filteredClosedCount).
 		Str("document_id", doc.ID).
 		Msg("Navexa portfolio with holdings fetched and stored")
 
@@ -338,8 +365,23 @@ func (w *NavexaPortfolioWorker) getNavexaBaseURL(ctx context.Context) string {
 	return navexaDefaultBaseURL
 }
 
+// filterClosedPositions filters out holdings with quantity = 0 (closed positions).
+// Returns the filtered holdings slice and the count of filtered items.
+func (w *NavexaPortfolioWorker) filterClosedPositions(holdings []navexa.EnrichedHolding) ([]navexa.EnrichedHolding, int) {
+	filtered := make([]navexa.EnrichedHolding, 0, len(holdings))
+	closedCount := 0
+	for _, h := range holdings {
+		if h.Quantity > 0 {
+			filtered = append(filtered, h)
+		} else {
+			closedCount++
+		}
+	}
+	return filtered, closedCount
+}
+
 // generateNavexaPortfolioMarkdown creates a markdown document from the portfolio and holdings data
-func (w *NavexaPortfolioWorker) generateNavexaPortfolioMarkdown(portfolio *navexa.Portfolio, holdings []navexa.EnrichedHolding) string {
+func (w *NavexaPortfolioWorker) generateNavexaPortfolioMarkdown(portfolio *navexa.Portfolio, holdings []navexa.EnrichedHolding, filteredClosedCount int) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# Portfolio - %s\n\n", portfolio.Name))
@@ -348,7 +390,11 @@ func (w *NavexaPortfolioWorker) generateNavexaPortfolioMarkdown(portfolio *navex
 	sb.WriteString(fmt.Sprintf("- **Name**: %s\n", portfolio.Name))
 	sb.WriteString(fmt.Sprintf("- **Base Currency**: %s\n", portfolio.BaseCurrencyCode))
 	sb.WriteString(fmt.Sprintf("- **Created**: %s\n", portfolio.DateCreated))
-	sb.WriteString(fmt.Sprintf("- **Fetched**: %s\n\n", time.Now().Format("2 January 2006 3:04 PM")))
+	sb.WriteString(fmt.Sprintf("- **Fetched**: %s\n", time.Now().Format("2 January 2006 3:04 PM")))
+	if filteredClosedCount > 0 {
+		sb.WriteString(fmt.Sprintf("- **Note**: %d closed position(s) (quantity = 0) filtered out\n", filteredClosedCount))
+	}
+	sb.WriteString("\n")
 
 	// Calculate total portfolio value
 	var totalValue float64

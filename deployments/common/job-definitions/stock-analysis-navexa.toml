@@ -59,6 +59,7 @@ type = "navexa_portfolio"
 description = "Fetch Navexa portfolio with holdings"
 on_error = "fail"
 name = "SMSF"
+include_closed_positions = false
 output_tags = ["collect_data"]                       # next step name
 
 # =========================================================================

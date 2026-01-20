@@ -353,10 +353,61 @@ type SharesEntry struct {
 }
 
 // Earnings contains earnings data.
+// Uses custom unmarshaler to handle EODHD API returning empty object {} instead of empty array [].
 type Earnings struct {
 	History []EarningsHistoryEntry `json:"History"`
 	Trend   []EarningsTrendEntry   `json:"Trend"`
 	Annual  []EarningsAnnualEntry  `json:"Annual"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for Earnings.
+// EODHD API sometimes returns empty object {} instead of empty array []
+// for History, Trend, and Annual fields when there's no data.
+func (e *Earnings) UnmarshalJSON(data []byte) error {
+	// First try the standard struct unmarshaling
+	type EarningsAlias Earnings
+	alias := &EarningsAlias{}
+
+	if err := json.Unmarshal(data, alias); err != nil {
+		// If standard unmarshal fails, try a more flexible approach
+		// Parse as raw map to handle empty objects
+		var raw map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(data, &raw); jsonErr != nil {
+			return fmt.Errorf("failed to unmarshal Earnings: %w", err)
+		}
+
+		// Try to unmarshal History, ignore if it fails (empty object case)
+		if historyData, ok := raw["History"]; ok {
+			var history []EarningsHistoryEntry
+			if jsonErr := json.Unmarshal(historyData, &history); jsonErr == nil {
+				e.History = history
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		// Try to unmarshal Trend, ignore if it fails (empty object case)
+		if trendData, ok := raw["Trend"]; ok {
+			var trend []EarningsTrendEntry
+			if jsonErr := json.Unmarshal(trendData, &trend); jsonErr == nil {
+				e.Trend = trend
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		// Try to unmarshal Annual, ignore if it fails (empty object case)
+		if annualData, ok := raw["Annual"]; ok {
+			var annual []EarningsAnnualEntry
+			if jsonErr := json.Unmarshal(annualData, &annual); jsonErr == nil {
+				e.Annual = annual
+			}
+			// If unmarshal fails, it's likely an empty object - leave as nil/empty slice
+		}
+
+		return nil
+	}
+
+	*e = Earnings(*alias)
+	return nil
 }
 
 // EarningsHistoryEntry represents a single earnings history entry.
